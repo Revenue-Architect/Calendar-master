@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { loadPlannerState, savePlannerState, V4_KEY, V5_KEY, V6_KEY } from "./plannerStateStore.js";
+import { loadPlannerState, savePlannerState, V4_KEY, V5_KEY, V6_KEY, V7_KEY } from "./plannerStateStore.js";
 
 const v4State = {
   events: [{ id: "event", title: "Event", date: "2026-08-09", start: 540, dur: 60 }],
@@ -28,16 +28,16 @@ function memoryStorage(initial = {}, failKey = null) {
   };
 }
 
-test("confirmed v6 cutover removes v4 only after v6 can be read back", async () => {
+test("confirmed v7 cutover removes v4 only after v6 can be read back", async () => {
   const port = memoryStorage({ [V4_KEY]: JSON.stringify(v4State) });
   const loaded = await loadPlannerState(port);
-  assert.equal(loaded.state.schemaVersion, 6);
+  assert.equal(loaded.state.schemaVersion, 7);
   assert.equal(loaded.migrated, true);
   assert.equal(await port.get(V4_KEY), null);
-  assert.ok(await port.get(V6_KEY));
+  assert.ok(await port.get(V7_KEY));
 
-  const setIndex = port.calls.findIndex(([type, key]) => type === "set" && key === V6_KEY);
-  const confirmationIndex = port.calls.findIndex(([type, key], index) => index > setIndex && type === "get" && key === V6_KEY);
+  const setIndex = port.calls.findIndex(([type, key]) => type === "set" && key === V7_KEY);
+  const confirmationIndex = port.calls.findIndex(([type, key], index) => index > setIndex && type === "get" && key === V7_KEY);
   const removeIndex = port.calls.findIndex(([type, key]) => type === "remove" && key === V4_KEY);
   assert.ok(setIndex < confirmationIndex && confirmationIndex < removeIndex);
 });
@@ -49,7 +49,7 @@ test("a v4 notebook never lands on an intermediate v5 key", async () => {
   assert.equal(port.calls.some(([type, key]) => type === "set" && key === V5_KEY), false);
 });
 
-test("an existing v5 notebook migrates forward to v6", async () => {
+test("an existing v5 notebook migrates forward to v7", async () => {
   const seed = memoryStorage({ [V4_KEY]: JSON.stringify(v4State) });
   const { state: v5Shaped } = await loadPlannerState(seed);
   /* present the same notebook as a v5 record to exercise the v5 -> v6 path */
@@ -60,22 +60,22 @@ test("an existing v5 notebook migrates forward to v6", async () => {
 
   const port = memoryStorage({ [V5_KEY]: JSON.stringify(asV5) });
   const loaded = await loadPlannerState(port);
-  assert.equal(loaded.state.schemaVersion, 6);
+  assert.equal(loaded.state.schemaVersion, 7);
   assert.equal(await port.get(V5_KEY), null);
-  assert.ok(await port.get(V6_KEY));
+  assert.ok(await port.get(V7_KEY));
 });
 
 test("failed v6 write leaves the previous version untouched", async () => {
-  const port = memoryStorage({ [V4_KEY]: JSON.stringify(v4State) }, V6_KEY);
-  await assert.rejects(() => loadPlannerState(port), /persist migrated v6/);
+  const port = memoryStorage({ [V4_KEY]: JSON.stringify(v4State) }, V7_KEY);
+  await assert.rejects(() => loadPlannerState(port), /persist migrated v7/);
   assert.ok(await port.get(V4_KEY));
   assert.equal(port.calls.some(([type]) => type === "remove"), false);
 });
 
-test("missing state is not silently seeded and saves require valid v6", async () => {
+test("missing state is not silently seeded and saves require valid v7", async () => {
   const port = memoryStorage();
   assert.deepEqual(await loadPlannerState(port), { state: null, migrated: false });
-  await assert.rejects(() => savePlannerState(port, { schemaVersion: 5 }), /schemaVersion/);
+  await assert.rejects(() => savePlannerState(port, { schemaVersion: 6 }), /schemaVersion/);
 });
 
 test("migration carries legacy task fields onto the canonical model", async () => {

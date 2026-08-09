@@ -9,7 +9,7 @@ themes. All state is local to the device.
 ```bash
 npm install
 npm run dev      # dev server
-npm test         # Calendar, Tasks, and shared time domain tests
+npm test         # Calendar, Tasks, Notes, and shared time domain tests
 npm run build    # production bundle into dist/
 npm run preview  # serve the built bundle
 ```
@@ -18,11 +18,12 @@ npm run preview  # serve the built bundle
 
 | Path | What it is |
 | --- | --- |
-| `src/Planner.jsx` | Presentation tree and temporary Note orchestration |
+| `src/Planner.jsx` | Presentation tree |
 | `src/domains/calendar/` | Calendar timing, recurrence, commands, queries, migrations, layout, and tests |
+| `src/domains/notes/` | Note documents, blocks, links, system views, search, and tests |
 | `src/domains/tasks/` | Task model, hierarchy, dependencies, planning semantics, commands, queries, and tests |
 | `src/shared/time/` | Date, local date-time, interval, and IANA timezone primitives |
-| `src/platform/persistence/` | Validated planner-state loading, saving, and the v6 cutover |
+| `src/platform/persistence/` | Validated planner-state loading, saving, and the v7 cutover |
 | `src/storage.js` | Browser/host storage adapter and the only browser storage I/O |
 | `src/main.jsx` | Entry point: mounts `Planner` |
 | `src/index.css` | Tailwind import plus page-level resets |
@@ -34,15 +35,15 @@ typed exceptions remain provider-neutral.
 ## Storage
 
 `src/storage.js` prefers a host-provided `window.storage` when embedded and falls
-back to `localStorage`. Planner state is schema version 6 under `nbmp:state:v6`.
-On first load an older notebook is validated and migrated in memory, written to v6,
-read back and validated, and only then is the older key removed. A v4 notebook
-upgrades straight to v6 in a single confirmed write rather than stopping at v5, so
-an interrupted upgrade never strands an intermediate version on the device. There is
+back to `localStorage`. Planner state is schema version 7 under `nbmp:state:v7`.
+On first load an older notebook is validated and migrated in memory, written,
+read back and validated, and only then is the older key removed. Whatever
+version is on the device upgrades straight to v7 in a single confirmed write, so an
+interrupted upgrade never strands an intermediate version. There is
 no dual-write period, and a failed write or confirmation leaves the previous version
 untouched.
 
-Missing storage seeds a new validated v6 notebook. Malformed or failed migration
+Missing storage seeds a new validated v7 notebook. Malformed or failed migration
 does not seed over existing data. Writes reject on storage failure so Settings can
 warn the user and preserve export as a recovery path.
 
@@ -119,6 +120,15 @@ Opening an event or action shows its title, time and day centred, two figures dr
 from the item itself, and one pill per attribute. Attributes with no value are
 omitted rather than shown empty, and the view never displays a figure the app has no
 source for.
+
+## Notes
+
+A note is a document of identified blocks, not a string: task extraction and links
+reference a block id, which a text offset could not survive. Notes are daily, tied to
+an event or task, or standalone, and a day has exactly one daily note — writing on a
+day that already has one edits it. Checklist blocks can become real actions, and a
+line that has been extracted records which task it produced so it cannot spawn a
+second. Saving something unchanged does not bump the revision.
 
 ## Agenda
 

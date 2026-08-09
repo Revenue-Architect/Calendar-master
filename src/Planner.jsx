@@ -1,5 +1,22 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import * as storage from "./storage.js";
+import {
+  appendBlock as appendNoteBlock,
+  blocksToText,
+  createNote as createNoteCommand,
+  deleteNote as deleteNoteCommand,
+  getDailyNote,
+  getNotesForDate,
+  isEmptyNote,
+  markBlockExtracted,
+  migrateV6ToV7,
+  noteExcerpt,
+  removeBlock as removeNoteBlock,
+  searchNotes,
+  toggleChecklistBlock,
+  updateBlock as updateNoteBlock,
+  updateNote as updateNoteCommand,
+} from "./domains/notes/index.js";
 import { migrateV4ToV5 } from "./domains/calendar/migrations/migrateV4ToV5.js";
 import { validatePlannerStateV5 } from "./domains/calendar/migrations/validatePlannerStateV5.js";
 import {
@@ -448,7 +465,7 @@ export default function Planner() {
     (async () => {
       try {
         const loaded = await loadPlannerState(storage);
-        const state = loaded.state || migrateV5ToV6(migrateV4ToV5(seed()));
+        const state = loaded.state || migrateV6ToV7(migrateV5ToV6(migrateV4ToV5(seed())));
         if (!loaded.state) await savePlannerState(storage, state);
         if (!dead) { setDb(state); setStorageBad(false); setReady(true); }
       } catch (error) {
@@ -457,7 +474,7 @@ export default function Planner() {
            without it `ready` flips while `db` stays null and the loader never
            clears — but leave autosave off. Overwriting here would seed straight over
            data that is damaged rather than gone, and export stays the way out. */
-        if (!dead) { setDb(migrateV5ToV6(migrateV4ToV5(seed()))); setSaveBlocked(true); setStorageBad(true); setReady(true); }
+        if (!dead) { setDb(migrateV6ToV7(migrateV5ToV6(migrateV4ToV5(seed())))); setSaveBlocked(true); setStorageBad(true); setReady(true); }
       }
     })();
     return () => { dead = true; };
@@ -485,6 +502,12 @@ export default function Planner() {
   const surface = dark ? mixHex(T.card, "#FFFFFF", 0.13) : mixHex(T.card, "#000000", 0.06);
   const hourRule = dark ? mixHex(T.card, "#FFFFFF", 0.05) : mixHex(T.card, "#000000", 0.05);
   const hourBand = dark ? mixHex(T.card, "#FFFFFF", 0.022) : mixHex(T.card, "#000000", 0.018);
+  /* On small screens the actions sheet is an overlay, so the day surface reserves
+     room for it: the collapsed handle normally, the full sheet when it is open, so
+     the surface contracts instead of running underneath something opaque. The
+     breakpoint stays in CSS rather than being read from window at render time,
+     which would not survive a resize. */
+  const sheetPad = sheet ? "76dvh" : "64px";
   const clock = (db && db.clock) || "12";
   const tm = (m) => fmtTime(m, clock);
 
@@ -543,7 +566,7 @@ export default function Planner() {
   /* All task reads go through the Tasks domain. Recurring series are expanded into
      occurrences here rather than stored, so the screen never sees an exception. */
   const dayTasks = useMemo(() => (db ? getDayTasks(db, dateKey) : []), [db, dateKey]);
-  const notes = useMemo(() => (db ? db.notes.filter((n) => n.date === dateKey) : []), [db, dateKey]);
+  const notes = useMemo(() => (db ? getNotesForDate(db.notes, dateKey) : []), [db, dateKey]);
   const openCount = countOpen(dayTasks);
 
   /* §5.5 and §9.3 now decide this: a one-off task is overdue once its deadline has
@@ -1230,14 +1253,66 @@ export default function Planner() {
     else commitSave(p, "all");
   };
 
+  /* A note is a document of blocks, so the editor edits blocks. Splitting typed text
+     on blank lines is the one structural signal plain typing carries; nothing else
+     is inferred. */
+  const textToBlocks = (text, existing = []) => text
+    .split(/\n{2,}/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part, index) => ({
+      id: existing[index]?.id ?? uid(),
+      type: existing[index]?.type === "checklist" ? "checklist" : "paragraph",
+      text: part,
+      order: index,
+      ...(existing[index]?.type === "checklist" ? { done: existing[index].done } : {}),
+    }));
+
   const saveNote = (id, text) => {
     beep("click");
     mutate((d) => {
-      if (id) d.notes = d.notes.map((n) => (n.id === id ? { ...n, text } : n));
-      else d.notes = [...d.notes, { id: uid(), date: dateKey, text }];
-      return d;
+      /* §4.1. A day has one daily note, so writing on a day that already has one
+         edits it rather than making a second — two "notes for today" would make the
+         day's own note unanswerable, and the validator would reject the write. */
+      const targetId = id || getDailyNote(d.notes, dateKey)?.id || null;
+      if (targetId) {
+        const current = d.notes.find((n) => n.id === targetId);
+        return { ...d, notes: updateNoteCommand(d.notes, targetId, { blocks: textToBlocks(text, current?.blocks ?? []) }, { now: nowStamp() }).notes };
+      }
+      return {
+        ...d,
+        notes: createNoteCommand(d.notes, {
+          id: uid(),
+          kind: "daily",
+          date: dateKey,
+          blocks: textToBlocks(text),
+        }, { now: nowStamp() }).notes,
+      };
     });
     setNoteEdit(null);
+  };
+
+  const toggleNoteCheck = (noteId, blockId) => {
+    beep("tick");
+    mutate((d) => ({ ...d, notes: toggleChecklistBlock(d.notes, noteId, blockId, { now: nowStamp() }).notes }));
+  };
+  /* §7.1. Turning a line into a task is a Tasks write plus a Notes reference; the
+     block records which task it produced so the line cannot spawn a second one. */
+  const extractTask = (noteId, blockId, title) => {
+    const taskId = uid();
+    beep("commit");
+    mutate((d) => ({
+      ...d,
+      tasks: createTaskCommand(d.tasks, {
+        id: taskId,
+        title,
+        planned: { date: dateKey, startMinute: null, estimateMinutes: null },
+        category: CATS[0],
+        reward: 30,
+      }, { now: nowStamp() }).tasks,
+      notes: markBlockExtracted(d.notes, noteId, blockId, taskId, { now: nowStamp() }).notes,
+    }));
+    flash("Added to actions", null);
   };
 
   /* ─── export / import ─── */
@@ -1614,7 +1689,9 @@ export default function Planner() {
       onInspect={(id) => setInspect({ kind: "task", id })} onToggleSub={toggleSub} onAddSub={addSub} onRemoveSub={removeSub}
       onDragStart={(id, x, y) => { startGesture({ mode: "task", kind: "task", id, x, y }); setSheet(false); buzz(6); beep("lift"); }}
       onAddTask={() => { beep("click"); setComposer({ kind: "task" }); }}
-      onEditNote={(n) => { beep("click"); setNoteEdit(n || { text: "" }); }}
+      onEditNote={(n) => { beep("click"); setNoteEdit(n || { blocks: [] }); }}
+      onToggleNoteCheck={toggleNoteCheck}
+      onExtract={extractTask}
       onUnschedule={(id) => scheduleTask(id, null)}
       blockersFor={(t) => (db ? getTaskBlockers(db.tasks, parseTaskOccurrenceId(t.id).seriesId) : [])}
       onPromoteSub={promoteSub}
@@ -1623,15 +1700,22 @@ export default function Planner() {
   );
 
   return (
-    <div style={{ background: T.bg, color: T.text, fontFamily: SANS, minHeight: "100vh" }}>
+    <div className="nb-root flex flex-col" style={{ background: T.bg, color: T.text, fontFamily: SANS }}>
       <style>{`
         .nb-s::-webkit-scrollbar{width:5px;height:5px}
         .nb-s::-webkit-scrollbar-thumb{background:${T.faint}}
         .nb-s::-webkit-scrollbar-track{background:transparent}
         .nb-x::-webkit-scrollbar{display:none}
         .nb-x{-ms-overflow-style:none;scrollbar-width:none}
-        .nb-stream{height:48vh;min-height:300px}
-        @media(min-width:1024px){.nb-stream{height:auto;max-height:620px}}
+        .nb-root{min-height:100dvh}
+        /* Below the desktop breakpoint the page is exactly one viewport tall, so the
+           day surface can flex into the space that is left instead of overflowing
+           past the fold and leaving a dead gap under it. */
+        @media(max-width:1023px){.nb-root{height:100dvh;overflow:hidden}}
+        .nb-main{padding-bottom:var(--sheet-pad);transition:padding-bottom 260ms cubic-bezier(.2,.8,.25,1)}
+        @media(min-width:1024px){.nb-main{padding-bottom:2rem}}
+        .nb-stream{flex:1 1 auto;min-height:0}
+        @media(min-width:1024px){.nb-stream{flex:none;height:auto;max-height:620px}}
         .nb-tap{transition:transform 90ms ease,opacity 120ms ease}
         .nb-tap:active{transform:scale(0.96)}
         .nb-row:hover{background:${T.faint}55}
@@ -1783,10 +1867,11 @@ export default function Planner() {
       </div>
 
       {/* ══ BODY ══ */}
-      <main className="px-3 sm:px-5 grid grid-cols-1 lg:grid-cols-12 gap-5 pb-24 lg:pb-8">
-        <section className="lg:col-span-7" onTouchStart={onSwipeStart} onTouchMove={onSwipeMove} onTouchEnd={onSwipeEnd} onTouchCancel={onSwipeEnd}
+      <main className="nb-main px-3 sm:px-5 grid grid-cols-1 lg:grid-cols-12 gap-5 flex-1 min-h-0"
+        style={{ "--sheet-pad": sheetPad }}>
+        <section className="lg:col-span-7 flex flex-col min-h-0" onTouchStart={onSwipeStart} onTouchMove={onSwipeMove} onTouchEnd={onSwipeEnd} onTouchCancel={onSwipeEnd}
           style={{ transform: `translateX(${swipe * 0.32}px)`, transition: swipe === 0 ? "transform 260ms cubic-bezier(.2,.8,.25,1)" : "none" }}>
-          <div key={turn ? turn.k : "first"} className={`nb-page ${turn ? (turn.dir > 0 ? "nb-turn-next" : "nb-turn-prev") : ""}`}>
+          <div key={turn ? turn.k : "first"} className={`nb-page flex flex-col min-h-0 flex-1 ${turn ? (turn.dir > 0 ? "nb-turn-next" : "nb-turn-prev") : ""}`}>
 
             {viewMode === "agenda" ? (
               <Agenda
@@ -2536,7 +2621,7 @@ function nextCalendarOccurrence(item, fromKey) {
 
 /* ═══════════════════════ ACTIONS ═══════════════════════ */
 
-function ActionsPanel({ T, listRef, tasks, notes, overdue, deadlines, showOverdue, todayKey, gesture, blockersFor, onPromoteSub, smartView, viewCounts, onSmartView, lists, onManageLists, clock = "12", selection, onToggleSelect, onStartSelect, onCancelSelect, onBulk, onPullOverdue, beep, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onAddTask, onEditNote, onUnschedule, onJump }) {
+function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, overdue, deadlines, showOverdue, todayKey, gesture, blockersFor, onPromoteSub, smartView, viewCounts, onSmartView, lists, onManageLists, clock = "12", selection, onToggleSelect, onStartSelect, onCancelSelect, onBulk, onPullOverdue, beep, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onAddTask, onEditNote, onUnschedule, onJump }) {
   const open = tasks.filter((t) => t.status !== "completed");
   const done = tasks.filter((t) => t.status === "completed");
   return (
@@ -2628,13 +2713,29 @@ function ActionsPanel({ T, listRef, tasks, notes, overdue, deadlines, showOverdu
       <div className="mt-6">
         <div className="flex items-baseline justify-between">
           <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">NOTES</span>
-          <button onClick={() => onEditNote(null)} style={{ fontFamily: MONO, color: T.accent }} className="nb-tap text-xs tracking-widest">+ WRITE</button>
+          <button onClick={() => onEditNote(notes[0] ?? null)} style={{ fontFamily: MONO, color: T.accent }} className="nb-tap text-xs tracking-widest">{notes.length ? "EDIT" : "+ WRITE"}</button>
         </div>
         <div className="flex flex-col gap-3 mt-2">
           {notes.map((n) => (
-            <button key={n.id} onClick={() => onEditNote(n)} className="text-left pl-3" style={{ borderLeft: `2px solid ${T.faint}` }}>
-              <p style={{ fontFamily: SERIF }} className="text-sm italic leading-relaxed">{n.text}</p>
-            </button>
+            <div key={n.id} className="pl-3" style={{ borderLeft: `2px solid ${T.faint}` }}>
+              {n.blocks.map((block) => (block.type === "checklist" ? (
+                <div key={block.id} className="flex items-center gap-2 py-1">
+                  <button onClick={() => onToggleNoteCheck(n.id, block.id)} className="shrink-0" aria-label={block.done ? "Reopen line" : "Complete line"}>
+                    <span className="block rounded-full" style={{ width: 14, height: 14, background: block.done ? T.accent : "transparent", boxShadow: `inset 0 0 0 1.5px ${block.done ? T.accent : T.faint}` }} />
+                  </button>
+                  <span className="flex-1 text-sm" style={{ textDecoration: block.done ? "line-through" : "none", color: block.done ? T.dim : T.text }}>{block.text}</span>
+                  {/* §7.2. Once a line has become a task the affordance goes away, so
+                      the same line cannot be turned into a second one. */}
+                  {!block.extractedTaskId
+                    ? <button onClick={() => onExtract(n.id, block.id, block.text)} style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest shrink-0">+ ACTION</button>
+                    : <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">TRACKED</span>}
+                </div>
+              ) : (
+                <button key={block.id} onClick={() => onEditNote(n)} className="text-left w-full">
+                  <p style={{ fontFamily: SERIF }} className="text-sm italic leading-relaxed py-0.5">{block.text}</p>
+                </button>
+              )))}
+            </div>
           ))}
           {notes.length === 0 && <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic pl-3">No notes on this page yet.</p>}
         </div>
@@ -2798,7 +2899,7 @@ function TaskCard({ T, t, beep, target, todayKey, blockers = [], onPromoteSub, c
    without counting entries. */
 function Agenda({ T, surface, days, dateKey, todayKey, clock, onOpenEvent, onOpenTask, onJump }) {
   return (
-    <div className="nb-s overflow-y-auto" style={{ background: T.card, borderRadius: 16, maxHeight: "62vh" }}>
+    <div className="nb-s overflow-y-auto flex-1 min-h-0" style={{ background: T.card, borderRadius: 16 }}>
       {days.map((day) => {
         const d = parseKey(day.key);
         const isToday = day.key === todayKey;
@@ -2965,11 +3066,13 @@ function SubComposer({ T, onAdd }) {
 }
 
 function NoteEditor({ T, note, onSave, onDelete }) {
-  const [v, setV] = useState(note.text || "");
+  /* The document is edited as text and stored as blocks. Round-tripping through
+     blank-line separated paragraphs keeps typing fast without inventing structure. */
+  const [v, setV] = useState(() => (note.blocks ?? []).map((b) => b.text).filter(Boolean).join("\n\n"));
   return (
     <div>
       <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">{note.id ? "EDIT NOTE" : "NEW NOTE"}</span>
-      <textarea autoFocus value={v} onChange={(e) => setV(e.target.value)} rows={6} placeholder="What was this day actually like?"
+      <textarea autoFocus value={v} onChange={(e) => setV(e.target.value)} rows={6} placeholder="What was this day actually like?&#10;&#10;Blank line starts a new paragraph."
         style={{ background: "transparent", border: `1px solid ${T.line}`, fontFamily: SERIF, resize: "none", width: "100%" }} className="text-sm italic leading-relaxed p-3 mt-2" />
       <div className="flex gap-2 mt-4">
         {note.id && <button onClick={onDelete} style={{ fontFamily: MONO, color: NOW_RED, border: `1px solid ${T.line}` }} className="nb-tap flex-1 py-3 text-xs tracking-widest">DELETE</button>}
@@ -2988,7 +3091,7 @@ function SearchPanel({ T, db, todayKey, onPick }) {
     return [
       ...db.events.filter(hit).map((e) => ({ ...eventForUi(e), kind: "event" })),
       ...db.tasks.filter(hit).map((t) => ({ ...t, kind: "task" })),
-      ...db.notes.filter(hit).map((n) => ({ ...n, kind: "note", title: n.text.slice(0, 60) })),
+      ...searchNotes(db.notes, q).map((n) => ({ ...n, kind: "note", title: noteExcerpt(n, 60) })),
     ].slice(0, 30);
   }, [q, db]);
 

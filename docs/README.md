@@ -33,6 +33,10 @@ are too detailed for the repository README.
   closes the Tasks domain: dependency authoring, smart views, lists and tags,
   waiting state, task reminders, and the scheduling warning.
 
+- [`superpowers/plans/2026-08-09-notes-phase-1.md`](superpowers/plans/2026-08-09-notes-phase-1.md)
+  replaces the legacy text note with a block document domain, links and backlinks,
+  system views, search, revisions, and the v7 migration.
+
 ## Architecture decisions
 
 - [`adr/0001-domain-oriented-modular-monolith.md`](adr/0001-domain-oriented-modular-monolith.md)

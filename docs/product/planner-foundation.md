@@ -2392,6 +2392,22 @@ way everywhere.
 - Section and metadata labels are uppercase mono with wide tracking.
 - Labels name what follows; they never repeat a value shown beside them.
 
+# Notes implementation status
+
+The Notes domain foundation is implemented under `src/domains/notes`. What is built,
+and what deliberately is not, is recorded in the Notes Phase 1 plan.
+
+Built: the block document model with stable block identity and deterministic
+serialization; daily, event, task and standalone note kinds; links with derived
+backlinks; system views for daily, inbox, pinned and archived; search over title,
+body and tags; revision counting that ignores no-op saves; checklist blocks with
+task extraction guarded against duplication; and the v6 to v7 migration that turns
+each legacy text note into a daily note of paragraph blocks.
+
+Not yet built: inline formatting, revision history browsing, conflict resolution,
+attachments, notebooks and folders as user-facing features, and the note templates
+and resurfacing behaviors. These remain specified above and unimplemented.
+
 # Decision log
 
 | Date | Decision |
@@ -2427,3 +2443,9 @@ way everywhere.
 | 2026-08-09 | Require that any relationship creatable from a view is removable from it. |
 | 2026-08-09 | Run every bulk action through the single-task command and report refusals by name. |
 | 2026-08-09 | Reuse the completion control for selection so the list never reflows on entering the mode. |
+| 2026-08-09 | Bound the page to one viewport below the desktop breakpoint so the day surface fills the space left. |
+| 2026-08-09 | Store note content as identified blocks rather than a string, so links and extraction can reference a line. |
+| 2026-08-09 | Carry unknown block attributes through migration rather than dropping what a later version wrote. |
+| 2026-08-09 | Split migrated note text only on blank lines; never infer headings or lists from prose. |
+| 2026-08-09 | Skip the revision bump when a save changes nothing, so autosave cannot inflate history. |
+| 2026-08-09 | Allow one daily note per day; writing on a day that has one edits it rather than adding a second. |
