@@ -2185,6 +2185,85 @@ reminder extraction, and frontend polish remain intentionally deferred.
 
 ---
 
+# Interface and presentation
+
+**Status:** Approved on 2026-08-09
+
+Presentation is specified separately from behavior. Nothing here changes what the
+domains do; it constrains how their output is drawn so the same rules read the same
+way everywhere.
+
+## 1. Card language
+
+### 1.1 Events and tasks are cards
+
+- An event, an all-day entry, a scheduled task, and an action all render as a
+  rounded rectangle lifted above the day surface, not cut into it.
+- Corner radius is a single shared value; mixed radii read as mixed components.
+- The lift is an opaque blend of the surface toward white on dark themes and
+  toward black on light ones. Opacity would let the hour grid show through the
+  card and break the sense that it sits above the page.
+
+### 1.2 Colour belongs to the category
+
+- Each category owns one colour, carried by a dot at the start of the card.
+- Category colours are fixed rather than tinted per theme. A category keeps the
+  same colour wherever it appears, which is what makes the dot scannable.
+- Colours sit in the mid-luminance band so a single value reads on both a
+  near-black and a cream ground.
+- The dot is used instead of a full-height left rail because a card can be as
+  short as one 22px row, where a rail is invisible.
+
+### 1.3 Time is secondary to title
+
+- The title is the primary line; the time is quieter and set in the mono face.
+- A time range is written with an arrow, `09:00 → 11:00`, not a dash.
+- On a card too short for a second line, the start time moves to the right edge
+  of the title row rather than being dropped.
+- An all-day entry shows no time at all; the `ALL DAY` section label carries it.
+
+### 1.4 State is shown, not described
+
+- A live event is outlined in the now colour and shows elapsed percentage.
+- A past event is dimmed rather than restyled.
+- A held card lifts further with a shadow and takes the accent outline.
+- A draft slot drawn by holding on the canvas is an outline with its time range
+  centred inside, so it reads as a space being claimed rather than an event that
+  already exists.
+
+## 2. Surfaces and density
+
+### 2.1 Three depths only
+
+- Page, day surface, and card. Additional depths make the hierarchy ambiguous.
+- Sheets sit above all three on a scrim.
+
+### 2.2 Quiet chrome
+
+- Hour rules, free-slot hints, and empty states use the faint token, never the
+  body colour. They orient without competing with content.
+- The events lane is inset from the hour gutter so cards never touch the rules.
+
+### 2.3 Theme integrity
+
+- Every colour resolves from the active theme except the category hues and the
+  now colour, which are deliberately constant.
+- The page background, browser chrome colour, and `color-scheme` follow the
+  active theme so native controls match the page.
+
+## 3. Type
+
+### 3.1 Three faces, fixed roles
+
+- Sans carries titles and body.
+- Mono carries times, labels, counts, and any value read as data.
+- Serif italic carries written reflection: notes and empty-state prose.
+
+### 3.2 Labels
+
+- Section and metadata labels are uppercase mono with wide tracking.
+- Labels name what follows; they never repeat a value shown beside them.
+
 # Decision log
 
 | Date | Decision |
@@ -2206,3 +2285,6 @@ reminder extraction, and frontend polish remain intentionally deferred.
 | 2026-08-09 | Migrate legacy sub-items to checklist items, not subtasks, and expose promotion instead. |
 | 2026-08-09 | Upgrade a v4 notebook straight to v6 in one confirmed write, never landing on an intermediate version. |
 | 2026-08-09 | Keep system and default task lists undeletable, and move rather than delete work when a list is removed. |
+| 2026-08-09 | Draw events and tasks as lifted rounded cards rather than blocks cut into the day surface. |
+| 2026-08-09 | Give each category one fixed colour carried by a dot, constant across every theme. |
+| 2026-08-09 | Blend card lift opaquely so the hour grid never shows through a card. |

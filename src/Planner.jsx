@@ -81,6 +81,20 @@ const THEMES = [
 ];
 
 const CATS = ["DEEP WORK", "ADMIN", "BODY", "PEOPLE", "RITUAL"];
+
+/* Category colour is the one hue an event card carries, so it has to read on both a
+   near-black and a cream ground. These sit in the mid-luminance band where that
+   holds, rather than being tinted per theme — a category keeps the same colour
+   wherever you see it, which is what makes the dot scannable. */
+const CAT_COLOR = {
+  "DEEP WORK": "#E0A33E",
+  ADMIN: "#5E8BC7",
+  BODY: "#45A877",
+  PEOPLE: "#D4456B",
+  RITUAL: "#9B6FD4",
+};
+const catColor = (cat) => CAT_COLOR[cat] || "#8A8A96";
+const CARD_R = 10;
 const HOUR_H = 58;
 const DAY_H = HOUR_H * 24;
 const XP_PER_LEVEL = 300;
@@ -105,6 +119,16 @@ const WD1 = ["S", "M", "T", "W", "T", "F", "S"];
 const MO = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 const hhmm = (m) => `${pad(Math.floor(m / 60) % 24)}:${pad(Math.round(m) % 60)}`;
 const uid = () => Math.random().toString(36).slice(2, 9);
+const hexToRgb = (hex) => {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+};
+const mixHex = (a, b, t) => {
+  const [ar, ag, ab] = hexToRgb(a);
+  const [br, bg, bb] = hexToRgb(b);
+  const c = (x, y) => Math.round(x + (y - x) * t).toString(16).padStart(2, "0");
+  return `#${c(ar, br)}${c(ag, bg)}${c(ab, bb)}`;
+};
 const isDark = (hex) => {
   const n = parseInt(hex.slice(1), 16);
   return (0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255 < 0.5;
@@ -438,6 +462,12 @@ export default function Planner() {
 
   const T = useMemo(() => THEMES.find((t) => t.id === (db && db.themeId)) || THEMES[0], [db]);
   const beep = useSynth(db ? db.sound : true);
+  /* An event card sits *above* the day surface, so it is lifted off the page rather
+     than cut into it. Blending keeps the fill opaque so cards never show the grid
+     lines through them. */
+  const dark = isDark(T.bg);
+  const surface = dark ? mixHex(T.card, "#FFFFFF", 0.13) : mixHex(T.card, "#000000", 0.06);
+  const surfaceHi = dark ? mixHex(T.card, "#FFFFFF", 0.14) : mixHex(T.card, "#000000", 0.08);
 
   /* The theme lives in state, so the page around the app has to follow it: the body
      (otherwise overscroll shows a mismatched strip), the browser chrome on mobile,
@@ -1622,15 +1652,18 @@ export default function Planner() {
           <div key={turn ? turn.k : "first"} className={`nb-page ${turn ? (turn.dir > 0 ? "nb-turn-next" : "nb-turn-prev") : ""}`}>
 
             {allDay.length > 0 && (
-              <div style={{ background: T.card, borderTopLeftRadius: 16, borderBottom: `1px solid ${T.line}` }} className="px-2 py-2 flex flex-col gap-1">
+              <div style={{ background: T.card, borderTopLeftRadius: 16, borderTopRightRadius: 16, borderBottom: `1px solid ${T.line}` }} className="px-3 pt-3 pb-2 flex flex-col gap-1.5">
+                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">ALL DAY</span>
                 {allDay.map((e) => {
                   const span = e.endDate ? diffDays(e.endDate, e.date) + 1 : 1;
                   const idx = diffDays(dateKey, e.date) + 1;
                   return (
-                    <button key={e.id} onClick={() => { beep("click"); setInspect({ kind: "event", id: e.id }); }} className="nb-tap flex items-center gap-2 px-2 py-1.5 text-left" style={{ background: T.accent, color: T.on }}>
-                      <span style={{ fontFamily: MONO }} className="text-xs tracking-widest">ALL DAY</span>
+                    <button key={e.id} onClick={() => { beep("click"); setInspect({ kind: "event", id: e.id }); }}
+                      className="nb-tap flex items-center gap-2 px-2.5 py-2 text-left"
+                      style={{ background: surface, borderRadius: CARD_R }}>
+                      <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: catColor(e.cat) }} />
                       <span className="text-xs font-semibold truncate flex-1">{e.title}</span>
-                      {span > 1 && <span style={{ fontFamily: MONO }} className="text-xs tracking-widest shrink-0">{idx}/{span}</span>}
+                      {span > 1 && <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">{idx}/{span}</span>}
                     </button>
                   );
                 })}
@@ -1643,7 +1676,7 @@ export default function Planner() {
                   <div key={h} className="absolute left-0 right-0 flex items-start pointer-events-none" style={{ top: h * HOUR_H, height: HOUR_H, borderTop: `1px solid ${T.line}` }}>
                     <span style={{ fontFamily: MONO, color: T.dim }} className="w-11 sm:w-12 shrink-0 pt-1 pl-2 text-xs tracking-widest">{pad(h)}</span>
                     {suggested.includes(h) && !gesture && (
-                      <span style={{ fontFamily: MONO, color: T.dim, border: `1px dashed ${T.faint}` }} className="flex-1 mr-2 mt-1.5 py-1 text-center text-xs tracking-widest">FREE — TAP TO ADD, HOLD TO SIZE</span>
+                      <span style={{ fontFamily: MONO, color: T.faint }} className="flex-1 mr-2 mt-1.5 text-xs tracking-widest">FREE</span>
                     )}
                   </div>
                 ))}
@@ -1652,7 +1685,7 @@ export default function Planner() {
                   onContextMenu={(e) => e.preventDefault()}
                   onPointerDown={canvasDown} onPointerUp={canvasUp} />
 
-                <div className="absolute left-11 sm:left-12 right-0 top-0" style={{ height: DAY_H, pointerEvents: "none" }}>
+                <div className="absolute left-12 sm:left-14 right-2 top-0" style={{ height: DAY_H, pointerEvents: "none" }}>
                   {isToday && (
                     <>
                       <div className="nb-morph absolute overflow-hidden pointer-events-none" style={{
@@ -1692,28 +1725,40 @@ export default function Planner() {
                         <div onPointerDown={(ev) => eventDown(ev, e)} onPointerUp={(ev) => eventUp(ev, e)} onContextMenu={(ev) => ev.preventDefault()}
                           className="relative w-full h-full overflow-hidden"
                           style={{
-                            background: live ? "transparent" : T.bg,
-                            opacity: past ? 0.42 : 1,
-                            boxShadow: held ? `0 8px 24px rgba(0,0,0,.45), inset 0 0 0 2px ${T.accent}` : live ? `inset 0 0 0 1px ${NOW_RED}` : "none",
+                            background: live ? "transparent" : surface,
+                            borderRadius: CARD_R,
+                            opacity: past ? 0.45 : 1,
+                            boxShadow: held
+                              ? `0 10px 28px rgba(0,0,0,.45), inset 0 0 0 2px ${T.accent}`
+                              : live ? `inset 0 0 0 1px ${NOW_RED}` : "none",
                             transform: held ? "scale(1.02)" : "none",
-                            transition: "transform 120ms ease, box-shadow 120ms ease",
+                            transition: "transform 120ms ease, box-shadow 120ms ease, background 200ms ease",
                             touchAction: "pan-y", cursor: "grab",
                           }}>
-                          {!live && <span className="absolute inset-y-0 left-0 w-0.5" style={{ background: held ? T.accent : T.faint }} />}
-                          <div className="relative pl-2.5 pr-2 py-1">
+                          <div className="relative pl-2.5 pr-2.5 py-1.5">
                             <div className="flex items-center gap-2">
-                              <span className="text-xs font-semibold truncate">{e.title}</span>
+                              {/* the category dot is the card's only colour, so it stays
+                                  legible at 22px height where a left rail would vanish */}
+                              <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: held ? T.accent : catColor(e.cat) }} />
+                              <span className="text-xs font-semibold truncate flex-1">{e.title}</span>
                               {e.repeat && <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs shrink-0">↻</span>}
                               {e.alerts && e.alerts.length > 0 && <span style={{ color: T.dim }} className="text-xs shrink-0">◔</span>}
-                              {live && <span style={{ fontFamily: MONO, background: NOW_RED, color: "#FFFFFF" }} className="shrink-0 px-1 text-xs tracking-widest">{Math.round(pct)}%</span>}
-                              {held && <span style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="shrink-0 px-1 text-xs tracking-widest">{gesture.overDay ? fmtDay(gesture.overDay) : hhmm(e.start)}</span>}
+                              {live && <span style={{ fontFamily: MONO, background: NOW_RED, color: "#FFFFFF", borderRadius: 4 }} className="shrink-0 px-1 text-xs tracking-widest">{Math.round(pct)}%</span>}
+                              {held && <span style={{ fontFamily: MONO, background: T.accent, color: T.on, borderRadius: 4 }} className="shrink-0 px-1 text-xs tracking-widest">{gesture.overDay ? fmtDay(gesture.overDay) : hhmm(e.start)}</span>}
+                              {!held && !live && h < 38 && <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">{hhmm(e.start)}</span>}
                             </div>
-                            {h >= 38 && <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest truncate">{hhmm(e.start)}–{hhmm(e.start + e.dur)} · {dur(e.dur)}</span>}
-                            {h >= 88 && (e.place || e.note) && <span style={{ fontFamily: SERIF, color: T.dim }} className="block text-xs italic mt-1 truncate">{e.place || e.note}</span>}
+                            {h >= 38 && (
+                              <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest truncate mt-0.5 pl-4">
+                                {hhmm(e.start)} → {hhmm(e.start + e.dur)}
+                              </span>
+                            )}
+                            {h >= 88 && (e.place || e.note) && (
+                              <span style={{ color: T.dim }} className="block text-xs mt-1 truncate pl-4">{e.place || e.note}</span>
+                            )}
                           </div>
                           {h >= 32 && (
-                            <div data-resize={e.id} onPointerDown={(ev) => resizeDown(ev, e)} className="absolute inset-x-0 bottom-0 flex items-end justify-center" style={{ height: 10, cursor: "ns-resize", touchAction: "none" }}>
-                              <span style={{ background: T.faint, width: 22, height: 2, marginBottom: 2 }} />
+                            <div data-resize={e.id} onPointerDown={(ev) => resizeDown(ev, e)} className="absolute inset-x-0 bottom-0 flex items-end justify-center" style={{ height: 12, cursor: "ns-resize", touchAction: "none" }}>
+                              <span style={{ background: T.faint, width: 22, height: 2, marginBottom: 3, borderRadius: 2 }} />
                             </div>
                           )}
                         </div>
@@ -1722,16 +1767,19 @@ export default function Planner() {
                   })}
 
                   {gesture && gesture.mode === "draft" && (
-                    <div className="absolute left-0 right-2 pointer-events-none" style={{ top: (gesture.start / 1440) * DAY_H, height: (gesture.dur / 1440) * DAY_H, background: `${T.accent}33`, boxShadow: `inset 0 0 0 2px ${T.accent}` }}>
-                      <span style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="absolute left-0 top-0 px-1 text-xs tracking-widest">{hhmm(gesture.start)} · {dur(gesture.dur)}</span>
+                    <div className="absolute left-0 right-2 pointer-events-none flex items-center justify-center"
+                      style={{ top: (gesture.start / 1440) * DAY_H, height: (gesture.dur / 1440) * DAY_H, borderRadius: CARD_R, boxShadow: `inset 0 0 0 1.5px ${T.accent}`, background: `${T.accent}14` }}>
+                      <span style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest">
+                        {hhmm(gesture.start)} – {hhmm(gesture.start + gesture.dur)}
+                      </span>
                     </div>
                   )}
 
                   {dayTasks.filter((t) => t.planned.startMinute != null).map((t) => (
                     <button key={t.id} onClick={() => { beep("click"); setInspect({ kind: "task", id: t.id }); }} className="nb-tap absolute left-0 right-2 text-left overflow-hidden"
-                      style={{ top: (t.planned.startMinute / 1440) * DAY_H + 2, height: 26, border: `1px dashed ${T.faint}`, opacity: t.status === "completed" ? 0.4 : 1, zIndex: 5, pointerEvents: "auto" }}>
-                      <span className="flex items-center gap-2 px-2 py-0.5">
-                        <span className="w-2 h-2 shrink-0" style={{ background: t.status === "completed" ? T.accent : "transparent", boxShadow: `inset 0 0 0 1px ${T.accent}` }} />
+                      style={{ top: (t.planned.startMinute / 1440) * DAY_H + 2, height: 28, borderRadius: CARD_R, border: `1px dashed ${T.faint}`, opacity: t.status === "completed" ? 0.4 : 1, zIndex: 5, pointerEvents: "auto" }}>
+                      <span className="flex items-center gap-2 px-2.5 py-1">
+                        <span className="w-2 h-2 shrink-0 rounded-full" style={{ background: t.status === "completed" ? T.accent : "transparent", boxShadow: `inset 0 0 0 1.5px ${T.accent}` }} />
                         <span className="text-xs font-semibold truncate" style={{ textDecoration: t.status === "completed" ? "line-through" : "none" }}>{t.title}</span>
                         <span style={{ fontFamily: MONO, color: T.dim }} className="ml-auto text-xs tracking-widest">{hhmm(t.planned.startMinute)}</span>
                       </span>
@@ -2252,6 +2300,10 @@ function TaskCard({ T, t, beep, target, todayKey, blockers = [], onPromoteSub, o
     setDx(0);
   };
 
+  /* Derived from the theme rather than passed down: the card only needs the same
+     lift rule as the timeline, and threading a token through three components to
+     say "one step above the page" is not worth the prop. */
+  const surface = isDark(T.bg) ? mixHex(T.card, "#FFFFFF", 0.13) : mixHex(T.card, "#000000", 0.06);
   const checklist = t.checklist ?? [];
   const subDone = checklist.filter((s) => s.done).length;
   const subPct = checklist.length ? (subDone / checklist.length) * 100 : 0;
@@ -2259,16 +2311,14 @@ function TaskCard({ T, t, beep, target, todayKey, blockers = [], onPromoteSub, o
   const isDone = t.status === "completed";
 
   return (
-    <div data-task={t.id} className="relative overflow-hidden" style={{ background: T.bg, boxShadow: target ? `inset 0 2px 0 ${T.accent}` : "none" }}>
+    <div data-task={t.id} className="relative overflow-hidden" style={{ background: "transparent", borderRadius: CARD_R, boxShadow: target ? `inset 0 2px 0 ${T.accent}` : "none" }}>
       <div className="absolute inset-0 flex items-center justify-between px-4" style={{ fontFamily: MONO }}>
         <span className="text-xs tracking-widest" style={{ color: T.accent, opacity: dx > 20 ? 1 : 0 }}>COMPLETE</span>
         <span className="text-xs tracking-widest" style={{ color: T.dim, opacity: dx < -20 ? 1 : 0 }}>TOMORROW</span>
       </div>
 
-      <article className="relative" style={{ background: T.card, transform: `translateX(${dx}px)`, transition: dx === 0 ? "transform 220ms cubic-bezier(.2,.8,.25,1)" : "none", opacity: isDone ? 0.55 : 1, touchAction: "pan-y", userSelect: "none", WebkitUserSelect: "none" }}
+      <article className="relative" style={{ background: surface, borderRadius: CARD_R, transform: `translateX(${dx}px)`, transition: dx === 0 ? "transform 220ms cubic-bezier(.2,.8,.25,1)" : "none", opacity: isDone ? 0.55 : 1, touchAction: "pan-y", userSelect: "none", WebkitUserSelect: "none" }}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
-        <span className="absolute inset-y-0 left-0 w-0.5" style={{ background: isDone ? T.accent : T.faint }} />
-
         <div className="flex items-start gap-3 p-3 pl-4">
           <button onPointerDown={(e) => { e.stopPropagation(); if (!isDone) startHold(); }} onPointerUp={(e) => { e.stopPropagation(); if (isDone) onReopen(t.id); else stopHold(true); }}
             onPointerLeave={() => stopHold(true)} onPointerCancel={() => stopHold(true)}
@@ -2289,7 +2339,10 @@ function TaskCard({ T, t, beep, target, todayKey, blockers = [], onPromoteSub, o
               <span className="block text-sm font-semibold leading-snug" style={{ textDecoration: isDone ? "line-through" : "none", color: isDone ? T.dim : T.text }}>{t.title}</span>
             </button>
             <div className="flex flex-wrap items-center gap-2 mt-1" style={{ fontFamily: MONO }}>
-              <span style={{ color: T.dim }} className="text-xs tracking-widest">{t.category}</span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="shrink-0 rounded-full" style={{ width: 7, height: 7, background: catColor(t.category) }} />
+                <span style={{ color: T.dim }} className="text-xs tracking-widest">{t.category}</span>
+              </span>
               {t.recurrence && <span style={{ color: T.dim }} className="text-xs">↻</span>}
               {t.planned.startMinute != null && <button onClick={() => onUnschedule(t.id)} style={{ color: T.accent }} className="text-xs tracking-widest">{hhmm(t.planned.startMinute)}</button>}
               {dueLeft != null && <span style={{ color: dueLeft <= 0 ? NOW_RED : T.dim }} className="text-xs tracking-widest">DUE {dueLeft === 0 ? "TODAY" : dueLeft < 0 ? `${-dueLeft}D LATE` : `${dueLeft}D`}</span>}
