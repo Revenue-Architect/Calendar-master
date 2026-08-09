@@ -470,6 +470,610 @@ or canonical mutation rules.
 
 # Tasks and subtasks domain
 
+**Status:** Approved on 2026-08-09
+
+## Responsibility and boundary
+
+The Tasks domain owns intentional work: capture, organization, planning,
+deadlines, recurrence, hierarchy, progress, and completion. It does not own
+calendar events, rich note content, notification delivery, provider
+synchronization, or reward calculations.
+
+## Core domain objects
+
+- `Task`: Canonical unit of work.
+- `TaskList`: Primary organizational container.
+- `TaskSeries`: Recurrence definition.
+- `TaskOccurrence`: One actionable instance of a recurring task.
+- `TaskSchedule`: When the user intends to work on the task.
+- `TaskDeadline`: When the task must be finished.
+- `Subtask`: Task linked to a parent task.
+- `ChecklistItem`: Lightweight completion step without independent planning
+  fields.
+- `TaskCompletion`: Historical completion record.
+- `TaskLink`: Relationship to an event, note, contact, attachment, or external
+  resource.
+- `TaskViewState`: Selected list, filters, ordering, grouping, and display
+  preferences.
+
+A subtask and checklist item are intentionally different:
+
+| Type | Independent schedule | Deadline | Reminder | Recurrence | Notes | Completion history |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Subtask | Yes | Yes | Yes | Future-ready | Yes | Yes |
+| Checklist item | No | No | No | No | No | Minimal |
+
+The initial interface supports `Task -> Subtask -> Checklist item`. Tasks are
+stored as flat records using `parentTaskId`, preventing nested persistence and
+leaving room for deeper hierarchy later.
+
+## 1. Task capture and lifecycle
+
+### 1.1 Task creation
+
+- Create from a global action, list, day, event, note, or parent task.
+- Support title-only quick capture.
+- Create a scheduled task by dropping onto the timeline.
+- Duplicate without copying completion history.
+- Create follow-up work from an event or note.
+- Apply list and scheduling defaults from creation context.
+
+### 1.2 Inbox capture
+
+- Title-only capture MUST remain fast.
+- Missing organization, date, priority, and duration are valid.
+- Newly captured items default to Inbox unless created in explicit context.
+- Inbox tasks remain actionable and searchable.
+- Processing Inbox moves tasks without changing identity.
+
+### 1.3 Task editing
+
+- Edit title, description, list, tags, priority, schedule, deadline, estimate,
+  recurrence, reminders, and links.
+- Preserve fields not exposed by the current editor.
+- Validate date relationships before commit.
+- Editing a recurring occurrence MUST request an edit scope.
+- Permission restrictions MAY make fields read-only later.
+
+### 1.4 Duplication and conversion
+
+- Duplicate as an independent task.
+- Convert a checklist item into a subtask.
+- Promote a subtask to a top-level task.
+- Convert selected note text into a linked task.
+- Schedule on Calendar without converting the task into an event.
+- Preserve backlinks to the conversion origin.
+
+### 1.5 Deletion and recovery
+
+- Soft-delete before permanent removal.
+- Restore hierarchy and links with a deleted task.
+- Deleting a parent MUST ask whether to delete, detach, or promote subtasks.
+- Deleting one recurring occurrence MUST NOT delete the series by default.
+- Completion history SHOULD survive ordinary archive operations.
+
+## 2. Task state
+
+### 2.1 Canonical statuses
+
+- `open`
+- `in_progress`
+- `waiting`
+- `completed`
+- `cancelled`
+- `archived`
+- The initial interface MAY emphasize Open and Completed while retaining the
+  richer canonical model.
+
+### 2.2 Derived states
+
+- Inbox
+- Planned
+- Scheduled
+- Due today
+- Upcoming
+- Overdue
+- Deferred
+- Blocked
+- Unscheduled
+- Recurring
+- Waiting without follow-up
+- Completed late
+- Derived states MUST be calculated rather than stored as competing statuses.
+
+### 2.3 State transitions
+
+- Open to In progress
+- Open, In progress, or Waiting to Completed
+- Any active state to Cancelled
+- Completed to Reopened
+- Completed or Cancelled to Archived
+- Archived to Restored
+- Every transition records when it occurred and emits a domain event.
+
+### 2.4 Waiting state
+
+- Waiting tasks SHOULD support a follow-up date.
+- The user MAY record whom or what they are waiting for.
+- Reaching the follow-up date surfaces the task without changing its deadline.
+- Waiting tasks remain searchable and can still become overdue.
+
+## 3. Task content and metadata
+
+### 3.1 Essential fields
+
+- Title
+- Status
+- Owner
+- Primary list
+- Created and updated timestamps
+
+### 3.2 Planning fields
+
+- Planned date and optional start time
+- Estimated duration
+- Deadline date and optional time
+- Priority
+- Effort or energy estimate
+- Follow-up date
+- Recurrence
+- Reminders
+
+### 3.3 Context fields
+
+- Short plain-text description
+- Tags and category
+- Location or context
+- Source
+- Linked event or note
+- Attachments and contacts
+- Long-form content belongs in Notes and is connected through `TaskLink`.
+
+### 3.4 Collaboration-ready fields
+
+- Owner ID
+- Optional assignee ID
+- Permission state
+- Created-by and last-modified-by IDs
+- Future follower or watcher references
+- These fields exist without requiring sharing functionality now.
+
+## 4. Organization
+
+### 4.1 Task lists
+
+- Every task has one primary list.
+- Inbox is a system list.
+- Create, rename, recolor, reorder, archive, restore, and delete lists.
+- Deleting a list requires moving, archiving, or deleting remaining tasks.
+- Lists MAY define default reminders, tags, or planning behavior.
+
+### 4.2 Tags
+
+- Tasks may have multiple tags independently from their primary list.
+- Renaming or recoloring updates every reference.
+- Deleting a tag removes relationships without deleting tasks.
+- Tags support search and smart views.
+
+### 4.3 Smart views
+
+- Inbox
+- Today
+- Scheduled
+- Upcoming
+- Deadlines
+- Overdue
+- Waiting
+- Someday
+- Completed
+- All tasks
+- Smart views are queries, not task containers.
+
+### 4.4 Someday and inactive work
+
+- A task may be intentionally unscheduled without being an Inbox item.
+- Someday tasks remain searchable but are excluded from daily pressure metrics.
+- A review date MAY surface a Someday task for reconsideration.
+- Someday is a planning state, not completion or cancellation.
+
+## 5. Planned work versus deadlines
+
+### 5.1 Planned date
+
+- Answers when the user intends to work on the task.
+- Is optional and freely reschedulable.
+- May exist without a deadline.
+- Moving it does not imply failure.
+
+### 5.2 Planned time
+
+- Is an optional time within the planned date.
+- MAY include estimated duration.
+- Can appear on the Calendar timeline.
+- Can move or resize independently from the deadline.
+- The task remains owned by Tasks when displayed on Calendar.
+
+### 5.3 Deadline
+
+- Answers when the task must be finished.
+- Is an optional date with optional time.
+- Is independent from planned date.
+- Drives due-today and overdue calculations.
+- Moving planned work past its deadline requires a warning or confirmation.
+
+### 5.4 Defer and reschedule
+
+- Defer by one day, next working day, next week, or custom date.
+- Preserve the deadline unless explicitly changed.
+- Allow undo.
+- Record reschedule history for future planning intelligence.
+- Repeated deferral MAY trigger review but never silent deletion.
+
+### 5.5 Overdue policy
+
+- One-off unfinished tasks become overdue after their deadline.
+- Tasks without deadlines do not become overdue because a planned date passed.
+- Missed planned work follows the user carry-forward preference.
+- Recurring tasks use their series-specific missed-occurrence policy.
+
+## 6. Calendar relationship
+
+### 6.1 Scheduled task blocks
+
+- A task can appear on Calendar with planned start and estimated duration.
+- The block references the task rather than copying it into an event.
+- Completion updates the calendar representation.
+- Moving or resizing updates `TaskSchedule`.
+- Removing it from the timeline clears its schedule without deleting it.
+
+### 6.2 Event links
+
+- A task may prepare for, occur during, or follow an event.
+- Event deletion MUST NOT automatically delete linked tasks.
+- Moving an event does not move linked tasks without configured behavior.
+- Planner composes linked events and tasks without changing domain ownership.
+
+### 6.3 Scheduling conflicts
+
+- Detect overlap with events and scheduled tasks.
+- Allow deliberate overlap after warning.
+- Support uncertain durations.
+- Identify work that no longer fits before its deadline.
+- Scheduling intelligence belongs to Planner using Calendar and Task queries.
+
+### 6.4 Task-to-event conversion
+
+- Preserve a backlink to the original task.
+- Ask whether the task remains independently completable.
+- Never create two completion sources of truth silently.
+- Record conversion so it can be undone.
+
+## 7. Subtasks
+
+### 7.1 Subtask identity
+
+- A subtask is a complete `Task` with `parentTaskId`.
+- It has its own ID, status, schedule, deadline, reminders, links, and history.
+- Moving between parents does not change identity.
+- A task cannot be its own ancestor.
+
+### 7.2 Initial hierarchy policy
+
+- Initial visible hierarchy is one subtask level.
+- A subtask MAY contain checklist items.
+- Flat parent references leave room for deeper nesting later.
+- Domain validation enforces the current depth limit.
+- Provider adapters MAY flatten unsupported hierarchies without changing
+  canonical data.
+
+### 7.3 Parent progress
+
+- Show completed subtasks versus total subtasks.
+- MAY weight progress by estimated duration.
+- Parent progress is derived from children.
+- Cancelled subtasks are excluded from required completion totals.
+- Waiting subtasks remain incomplete.
+
+### 7.4 Parent completion
+
+When incomplete subtasks remain, completing the parent must offer:
+
+- Complete the parent and remaining subtasks
+- Complete only the parent
+- Cancel and return to the task
+- The selected behavior is recorded. Incomplete child work MUST NOT disappear
+  silently.
+
+### 7.5 Moving and deleting subtasks
+
+- Reorder within a parent.
+- Move to another parent.
+- Promote to top level.
+- Detach without deleting.
+- Prevent cycles.
+- Preserve completion history and links.
+
+### 7.6 Subtask scheduling
+
+- Schedule a subtask independently.
+- Parent and child schedules may differ.
+- Warn when a child is scheduled after its parent deadline.
+- Completing required subtasks MAY suggest completing the parent.
+
+## 8. Checklist items
+
+### 8.1 Checklist lifecycle
+
+- Add, rename, reorder, complete, reopen, and remove.
+- Keep checklist items lightweight.
+- Exclude them from global results by default.
+- Inherit task ownership and deletion lifecycle.
+
+### 8.2 Checklist ordering
+
+- Preserve explicit ordering.
+- Completed items may remain in place or move according to preference.
+- Ordering MUST remain stable across persistence reloads and devices.
+
+### 8.3 Checklist completion
+
+- Record completed state and timestamp.
+- Report checklist progress separately from subtask progress.
+- Completing the parent MAY complete remaining items after confirmation.
+- Reopening the parent does not automatically reopen every checklist item.
+
+### 8.4 Checklist promotion
+
+- Promote a checklist item when it requires independent planning.
+- Preserve title, completion state, order, and parent relationship.
+- Promotion creates a full task identity and history.
+
+## 9. Recurring tasks
+
+### 9.1 Recurrence rules
+
+- Daily, weekly, monthly, and yearly frequency
+- Every N periods
+- Selected weekdays
+- End date, occurrence count, or indefinite recurrence
+- Monthly Nth weekday and month-end behavior
+- Shared recurrence primitives SHOULD align with Calendar without coupling the
+  domains.
+
+### 9.2 Task occurrence identity
+
+- Every occurrence has a stable identity.
+- Completion applies to one occurrence unless series scope is selected.
+- Moving one occurrence creates an exception rather than moving the series.
+- Notes and links can target a specific occurrence.
+
+### 9.3 Missed-occurrence policy
+
+- `skip`: Missed instances create no debt. Default for habits and rituals.
+- `roll_forward`: The latest unfinished instance moves forward.
+- `accumulate`: Every missed instance remains independently actionable.
+- This policy prevents daily habits from producing uncontrolled overdue debt.
+
+### 9.4 Recurrence edit scope
+
+- This occurrence
+- This and following occurrences
+- Entire series
+- Earlier completion history MUST remain intact.
+- Changing recurrence MUST define the fate of future exceptions.
+
+### 9.5 Completion history
+
+- Record occurrence ID and completion time.
+- Preserve skipped and missed states.
+- Reopening affects the selected occurrence.
+- Historical review does not require storing expanded future instances.
+
+## 10. Completion and recovery
+
+### 10.1 Completion
+
+- Complete through an explicit command.
+- Record completion timestamp and actor.
+- Preserve original schedule and deadline.
+- Emit `TaskCompleted`.
+- Feedback and rewards react without modifying Task rules.
+
+### 10.2 Reopening
+
+- Reopen a task or occurrence.
+- Preserve previous completion in audit history.
+- Emit `TaskReopened`.
+- Gamification MAY reverse or recalculate rewards independently.
+
+### 10.3 Undo
+
+- Undo recent completion, deferral, move, reorder, delete, and conversion.
+- Use the original command result rather than reconstructing partial state.
+- Expired undo does not remove recovery from trash or history.
+
+### 10.4 Archive
+
+- Archive manually or according to preference.
+- Remove clutter without erasing history.
+- Include archived tasks in search and reports only when requested.
+
+## 11. Ordering and bulk actions
+
+### 11.1 Stable ordering
+
+- Use explicit rank in relevant lists and planning views.
+- Reordering one view MUST NOT unpredictably reorder unrelated views.
+- Recurring occurrences inherit series rank unless overridden.
+- Persistence reloads MUST preserve order.
+
+### 11.2 Drag-and-drop
+
+- Reorder within a list or day.
+- Move to another list or planned date.
+- Schedule on the timeline.
+- Nest under a parent.
+- Preview target before commit.
+
+### 11.3 Bulk selection
+
+- Complete
+- Defer
+- Move list or planned date
+- Add or remove tags
+- Change priority
+- Archive or delete
+- Report partial failures rather than implying every task changed.
+
+### 11.4 Pull-in planning
+
+- Pull unfinished one-off work into today.
+- Show exactly which tasks will move.
+- Preserve deadlines.
+- Exclude recurring occurrences governed by `skip`.
+- Make the operation undoable.
+
+## 12. Reminders
+
+### 12.1 Reminder anchors
+
+- Planned start
+- Planned date
+- Deadline
+- Follow-up date
+- Custom instant
+- Relative offset
+
+### 12.2 Reminder lifecycle
+
+- Scheduled
+- Delivered
+- Snoozed
+- Dismissed
+- Cancelled
+- Failed
+- Superseded
+
+### 12.3 Reminder safety
+
+- Reschedule after planning changes.
+- Prevent duplicate delivery.
+- Cancel after deletion or completion when appropriate.
+- Reopening MAY restore future reminder intent.
+- Tasks defines intent; Reminders owns delivery.
+
+## 13. Search, filtering, and review
+
+### 13.1 Searchable content
+
+- Title, description, list, tags, and checklist text
+- Linked note or event
+- Contact
+- Attachment name
+
+### 13.2 Filters
+
+- Status, list, tag, and priority
+- Planned date and deadline
+- Assignee
+- Recurring state
+- Scheduled or unscheduled
+- With incomplete subtasks
+
+### 13.3 Review surfaces
+
+- Inbox review
+- Today planning
+- Upcoming deadlines
+- Overdue debt
+- Waiting follow-ups
+- Repeatedly deferred work
+- Recently completed
+- Someday review
+
+### 13.4 Task intelligence
+
+- Tasks exposes estimate, deadline, deferral count, and completion history.
+- Planner MAY suggest daily load, free slots, at-risk deadlines, repeatedly
+  deferred work, and parents blocked by children.
+- Suggestions MUST NOT mutate tasks without confirmation.
+
+## 14. Domain boundaries and auditability
+
+### 14.1 Commands
+
+- `CreateTask`
+- `UpdateTask`
+- `PlanTask`
+- `ScheduleTask`
+- `DeferTask`
+- `CompleteTask`
+- `ReopenTask`
+- `MoveTask`
+- `DeleteTask`
+- `ChangeTaskRecurrence`
+- `CreateSubtask`
+- `PromoteChecklistItem`
+
+### 14.2 Queries
+
+- `GetTask`
+- `GetTasksForDay`
+- `GetTasksForRange`
+- `GetInboxTasks`
+- `GetOverdueTasks`
+- `GetUpcomingDeadlines`
+- `GetTaskTree`
+- `SearchTasks`
+- `GetTaskCompletionHistory`
+
+### 14.3 Domain events
+
+- `TaskCreated`
+- `TaskChanged`
+- `TaskPlanned`
+- `TaskDeferred`
+- `TaskCompleted`
+- `TaskReopened`
+- `TaskDeleted`
+- `TaskHierarchyChanged`
+- `TaskReminderIntentChanged`
+- Calendar, Notes, Reminders, Gamification, and Planner MAY react without Tasks
+  importing their implementations.
+
+### 14.4 Test requirements
+
+- Planned date versus deadline behavior
+- Derived overdue states
+- Recurrence and missed-occurrence policies
+- Parent-child cycle prevention and depth enforcement
+- Parent completion with unfinished children
+- Checklist promotion
+- Stable ordering
+- Bulk-operation partial failure
+- Completion and reopen history
+- Undo, recovery, and permission enforcement
+
+## Tasks module target
+
+```text
+domains/tasks/
+  model/
+  commands/
+  queries/
+  hierarchy/
+  recurrence/
+  planning/
+  repositories/
+  events/
+  validation/
+  tests/
+```
+
+---
+
+# Notes domain
+
 **Status:** Awaiting product review
 
 This section will be appended after its three-level capability model is approved.
