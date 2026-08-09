@@ -29,6 +29,19 @@ Complete. This closes the Tasks domain against the approved specification.
   state updater runs during render and escapes the caller's `try`, so an invalid
   edge would have crashed the screen instead of explaining itself.
 
+## Modelled and tested, not yet reachable from the interface
+
+These are complete and covered in the domain, but no screen calls them. Recorded
+here so the gap is visible rather than discovered later.
+
+- [ ] `moveTaskToList` — lists can be created and deleted, but a task cannot yet
+      be moved between them from the interface.
+- [ ] `setTaskTags` — tags render and rename correctly, but there is no field to
+      put a tag on a task.
+- [ ] `renameTaskList` — lists can be created and deleted, not renamed.
+- [ ] `setTaskReminders` — task reminders fire correctly when present, but there
+      is no control to add one.
+
 ## Not in the Tasks domain
 
 - [ ] Bulk selection and partial-failure reporting (§11.3). Deliberately deferred:

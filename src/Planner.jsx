@@ -11,13 +11,9 @@ import {
   deleteTaskList,
   getEarliestResponsibleStart,
   getTasksByList,
-  moveTaskToList,
   removeTaskDependency,
-  renameTaskList,
   resolveSmartView,
-  setTaskReminders,
   setTaskStatus,
-  setTaskTags,
   smartViewCounts,
   completeTask as completeTaskCommand,
   completedOn,
@@ -103,8 +99,6 @@ const HOLD_MS = 420;
 const LIFT_MS = 300;
 const SNAP = 5;
 const NOW_RED = "#C43A56";
-const NOW_LINE = "#B33450";
-const NOW_INK = "#5E1628";
 const ALERT_CHOICES = [0, 5, 15, 30, 60];
 const DAY_LETTERS = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
 
@@ -118,7 +112,6 @@ const pad = (n) => String(n).padStart(2, "0");
 const WD = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 const WD1 = ["S", "M", "T", "W", "T", "F", "S"];
 const MO = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
-const hhmm = (m) => `${pad(Math.floor(m / 60) % 24)}:${pad(Math.round(m) % 60)}`;
 /* The clock is a display choice, never a stored one — minutes since midnight stay
    the single representation, so switching format can never move an event. */
 const h12 = (h) => (h % 12 === 0 ? 12 : h % 12);
@@ -262,22 +255,6 @@ function taskOccursOn(item, dateKey) {
   return false;
 }
 
-function expandTasks(items, dateKey, overrides) {
-  const out = [];
-  items.forEach((it) => {
-    if (!it.repeat) {
-      if (it.date === dateKey) out.push(it);
-      else if (it.allDay && it.endDate && it.date <= dateKey && dateKey <= it.endDate) out.push(it);
-      return;
-    }
-    if (!taskOccursOn(it, dateKey)) return;
-    const oid = `${it.id}@${dateKey}`;
-    const ov = overrides[oid];
-    if (ov && ov.deleted) return;
-    out.push({ ...it, ...(ov || {}), id: oid, seriesId: it.id, date: dateKey, instance: true });
-  });
-  return out;
-}
 
 const repeatLabel = (r) => {
   if (!r) return "";
@@ -500,7 +477,6 @@ export default function Planner() {
      lines through them. */
   const dark = isDark(T.bg);
   const surface = dark ? mixHex(T.card, "#FFFFFF", 0.13) : mixHex(T.card, "#000000", 0.06);
-  const surfaceHi = dark ? mixHex(T.card, "#FFFFFF", 0.14) : mixHex(T.card, "#000000", 0.08);
   const hourRule = dark ? mixHex(T.card, "#FFFFFF", 0.05) : mixHex(T.card, "#000000", 0.05);
   const hourBand = dark ? mixHex(T.card, "#FFFFFF", 0.022) : mixHex(T.card, "#000000", 0.018);
   const clock = (db && db.clock) || "12";
@@ -1576,7 +1552,6 @@ export default function Planner() {
         .nb-tap:active{transform:scale(0.96)}
         .nb-row:hover{background:${T.faint}55}
         .nb-cell{transition:opacity 420ms cubic-bezier(.2,.7,.3,1),transform 420ms cubic-bezier(.2,.7,.3,1)}
-        .nb-morph{transition:top 620ms cubic-bezier(.2,.8,.25,1),height 620ms cubic-bezier(.2,.8,.25,1),width 620ms cubic-bezier(.2,.8,.25,1),left 620ms cubic-bezier(.2,.8,.25,1),background 620ms ease,box-shadow 620ms ease}
         .nb-page{transform-origin:left center;backface-visibility:hidden}
         .nb-turn-next{animation:turnnext 380ms cubic-bezier(.22,.75,.3,1)}
         @keyframes turnnext{0%{opacity:.15;transform:perspective(1400px) rotateY(-19deg) translateX(11%) scale(.97)}60%{opacity:1}100%{opacity:1;transform:none}}
