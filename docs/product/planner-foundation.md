@@ -2383,7 +2383,19 @@ way everywhere.
   overlapping text is a correctness failure, not a cosmetic one.
 - Where a long word will not fit, shorten the word rather than the box.
 
-### 6.4 Undo must actually reverse
+### 6.4 A tap must not undo itself
+
+- Where a touch handler opens a surface, it MUST suppress the compatibility click
+  the browser emits afterwards. That click lands on the surface it just opened and
+  dismisses it, so the tap appears to do nothing at all.
+- A surface MUST ignore a dismissal arriving in the same tap that opened it.
+- Every tappable thing on a surface MUST be recognised by whatever handles that
+  surface's touches. An element the handler does not know about is treated as
+  background, and its own handler is suppressed along with the click.
+- Listeners bound to an element MUST be rebound when that element is replaced. A
+  view that unmounts and returns leaves an inert copy behind otherwise.
+
+### 6.5 Undo must actually reverse
 
 - Every action that offers undo MUST be reversible by the payload it recorded.
 - An undo affordance that does nothing is worse than none, because it is trusted.
@@ -2527,3 +2539,4 @@ and resurfacing behaviors. These remain specified above and unimplemented.
 | 2026-08-09 | Guard date navigation at its entry point so a bad key cannot take the screen down. |
 | 2026-08-09 | Hold body text to 4.5:1 and filled-control labels to 4:1 against their accent. |
 | 2026-08-09 | Hand a committed swipe straight to the page turn; never animate two transforms against each other. |
+| 2026-08-09 | Suppress the compatibility click after a touch opens a surface, and ignore same-tap dismissals. |

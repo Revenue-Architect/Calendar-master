@@ -1612,21 +1612,23 @@ export default function Planner() {
     const onStart = (e) => {
       if (e.touches.length !== 1 || gestureRef.current) return;
       const t = e.touches[0];
-      const node = e.target.closest ? e.target.closest("[data-event-id],[data-resize]") : null;
+      const node = e.target.closest ? e.target.closest("[data-event-id],[data-resize],[data-task-chip]") : null;
       const m = minutesAt(t.clientY);
       if (node && node.hasAttribute("data-resize")) {
         const ev = eventsRef.current.find((x) => x.id === node.getAttribute("data-resize"));
         if (ev) { beep("lift"); buzz(10); startGesture({ mode: "resize", kind: "event", id: ev.id, start: ev.start, dur: ev.dur, was: { start: ev.start, dur: ev.dur }, x: t.clientX, y: t.clientY }); }
         return;
       }
+      const chipId = node && node.getAttribute("data-task-chip");
       const id = node && node.getAttribute("data-event-id");
       const ev = id ? eventsRef.current.find((x) => x.id === id) : null;
-      const p = { x: t.clientX, y: t.clientY, ev, startMin: snapTo(m), grab: ev ? m - ev.start : 0, held: false, timer: null };
+      const p = { x: t.clientX, y: t.clientY, ev, chipId, startMin: snapTo(m), grab: ev ? m - ev.start : 0, held: false, timer: null };
       p.timer = setTimeout(() => {
         if (!press.t) return;
         press.t.held = true;
         beep("lift"); buzz(14);
         if (p.ev) startGesture({ mode: "move", kind: "event", id: p.ev.id, start: p.ev.start, dur: p.ev.dur, grab: p.grab, was: { start: p.ev.start, dur: p.ev.dur }, x: p.x, y: p.y });
+        else if (p.chipId) startGesture({ mode: "task", kind: "task", id: p.chipId, x: p.x, y: p.y });
         else startGesture({ mode: "draft", start: p.startMin, dur: 30, x: p.x, y: p.y });
       }, LIFT_MS);
       press.t = p;
@@ -1652,7 +1654,12 @@ export default function Planner() {
       const t = e.changedTouches && e.changedTouches[0];
       if (g) { finishRef.current(t ? t.clientX : g.x, t ? t.clientY : g.y); return; }
       if (p && !p.held) {
+        /* A tap handled here opens a sheet. Without this the browser still emits its
+           compatibility click ~300ms later, which lands on the freshly-opened sheet's
+           backdrop and closes it again — the card appeared not to open at all. */
+        if (e.cancelable) e.preventDefault();
         if (p.ev) { beep("click"); setInspect({ kind: "event", id: p.ev.id }); }
+        else if (p.chipId) { beep("click"); setInspect({ kind: "task", id: p.chipId }); }
         else { beep("click"); setComposer({ kind: "event", start: snapTo(p.startMin, 15), dur: 60 }); }
       }
     };
@@ -1665,7 +1672,7 @@ export default function Planner() {
 
     el.addEventListener("touchstart", onStart, { passive: true });
     el.addEventListener("touchmove", onMove, { passive: false });
-    el.addEventListener("touchend", onEnd);
+    el.addEventListener("touchend", onEnd, { passive: false });
     el.addEventListener("touchcancel", onCancel);
     return () => {
       el.removeEventListener("touchstart", onStart);
@@ -1673,7 +1680,7 @@ export default function Planner() {
       el.removeEventListener("touchend", onEnd);
       el.removeEventListener("touchcancel", onCancel);
     };
-  }, [ready]);
+  }, [ready, viewMode]);
 
   /* mouse / pen tracking, plus touch tracking for drags that begin outside the stream */
   useEffect(() => {
@@ -2120,7 +2127,7 @@ export default function Planner() {
                   )}
 
                   {dayTasks.filter((t) => t.planned.startMinute != null).map((t) => (
-                    <button key={t.id} onClick={() => { beep("click"); setInspect({ kind: "task", id: t.id }); }} className="nb-tap absolute left-0 right-2 text-left overflow-hidden"
+                    <button key={t.id} data-task-chip={t.id} onClick={() => { beep("click"); setInspect({ kind: "task", id: t.id }); }} className="nb-tap absolute left-0 right-2 text-left overflow-hidden"
                       style={{ top: (t.planned.startMinute / 1440) * DAY_H + 2, height: 28, borderRadius: CARD_R, border: `1px dashed ${T.faint}`, opacity: t.status === "completed" ? 0.4 : 1, zIndex: 5, pointerEvents: "auto" }}>
                       <span className="flex items-center gap-2 px-2.5 py-1">
                         <span className="w-2 h-2 shrink-0 rounded-full" style={{ background: t.status === "completed" ? T.accent : "transparent", boxShadow: `inset 0 0 0 1.5px ${T.accent}` }} />
@@ -3166,6 +3173,14 @@ function Row({ T, k, v }) {
 }
 
 function Sheet({ T, onClose, title, children }) {
+  /* Ignore a backdrop dismissal that arrives in the same tap that opened the sheet.
+     Belt and braces alongside preventDefault at the source: any future path that
+     opens a sheet from a touch inherits the protection. */
+  const openedAt = useRef(Date.now());
+  const guardedClose = useCallback(() => {
+    if (Date.now() - openedAt.current < 350) return;
+    onClose();
+  }, [onClose]);
   useEffect(() => {
     const h = (e) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", h);
@@ -3177,7 +3192,7 @@ function Sheet({ T, onClose, title, children }) {
     };
   }, [onClose]);
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" style={{ background: "rgba(0,0,0,0.8)" }} onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" style={{ background: "rgba(0,0,0,0.8)" }} onClick={guardedClose}>
       <div role="dialog" aria-modal="true" aria-label={title || "Details"} onClick={(e) => e.stopPropagation()}
         className="nb-up w-full sm:max-w-md overflow-y-auto nb-s" style={{ background: T.card, color: T.text, maxHeight: "88vh" }}>
         <div className="sticky top-0 flex items-center justify-between px-4 sm:px-5 pt-3 pb-2" style={{ background: T.card, zIndex: 3 }}>
