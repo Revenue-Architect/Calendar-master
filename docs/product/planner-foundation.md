@@ -2281,6 +2281,19 @@ way everywhere.
 - Attributes with no value are omitted rather than shown as an em dash, so the
   view length reflects how much is actually known.
 
+### 3.4 A task detail is a working document
+
+- A task opens left-aligned, not centred. Its checklist is a list to act on
+  rather than a title card to read.
+- Steps are full-width rows with their own control, and the add affordance is the
+  same row shape so the list grows in place.
+- Progress is a bar with its own count beside it.
+- The facts that govern the task — when it is planned, whether it repeats, its
+  reminder, its deadline, what blocks it — are grouped into one card so they read
+  as a set of rules rather than a run of unrelated rows.
+- Any relationship that can be created from this view MUST also be removable from
+  it.
+
 ## 4. Surfaces and density
 
 ### 4.1 Three depths only
@@ -2294,7 +2307,22 @@ way everywhere.
   body colour. They orient without competing with content.
 - The events lane is inset from the hour gutter so cards never touch the rules.
 
-### 4.3 Theme integrity
+### 4.3 Now, and the passage of time
+
+- The current time is a rule in the theme accent, not a separate signal colour.
+- A live event fills with the accent as it elapses, so "now" is expressed in the
+  same colour system as everything else and reads as part of its card.
+- Elapsed fill and the now rule move on the same easing, so the two never appear
+  to disagree about the time.
+
+### 4.4 Density is countable
+
+- A day cell shows its load as a small number of marks, capped, not as a wash of
+  colour. A wash tints the whole strip and leaves the selected day competing with
+  its neighbours.
+- Selection is a filled cell; today, when not selected, is an outlined one.
+
+### 4.5 Theme integrity
 
 - Every colour resolves from the active theme except the category hues and the
   now colour, which are deliberately constant.
@@ -2341,3 +2369,6 @@ way everywhere.
 | 2026-08-09 | Centre hour labels on their rule and carry day-view depth with bands rather than rules. |
 | 2026-08-09 | Offer 12-hour and 24-hour clocks as display only; minutes since midnight stay the stored form. |
 | 2026-08-09 | Show only figures the product has a source for; never invent travel time or weather. |
+| 2026-08-09 | Express "now" in the theme accent rather than a separate signal colour. |
+| 2026-08-09 | Show day density as countable marks, not a colour wash across the strip. |
+| 2026-08-09 | Give tasks their own detail layout: left-aligned, checklist-led, with grouped governing facts. |

@@ -160,6 +160,13 @@ const countdownLabel = (dateKey, startMin, todayKey, nowMin, durationMin = 0) =>
   if (minutes < 1440) return `${Math.floor(minutes / 60)}h`;
   return `${Math.floor(minutes / 1440)}d`;
 };
+const plannedLabel = (dateKey, todayKey) => {
+  const days = diffDays(dateKey, todayKey);
+  if (days === 0) return "Today";
+  if (days === 1) return "Tomorrow";
+  if (days === -1) return "Yesterday";
+  return fmtDay(dateKey);
+};
 const fmtDay = (k) => { const d = parseKey(k); return `${WD[d.getDay()]} ${pad(d.getDate())} ${MO[d.getMonth()]}`; };
 
 const recurrenceToRepeat = (recurrence) => recurrence ? {
@@ -1558,13 +1565,7 @@ export default function Planner() {
         @keyframes nbrw{0%{opacity:0;transform:translateY(20px) scale(.8)}25%{opacity:1;transform:translateY(0) scale(1)}100%{opacity:0;transform:translateY(-52px) scale(1)}}
         .nb-blink{animation:nbb 2s ease-in-out infinite}
         @keyframes nbb{0%,100%{opacity:1}50%{opacity:.4}}
-        .nb-liquid{background:repeating-linear-gradient(105deg, rgba(233,120,148,0.14) 0px, rgba(233,120,148,0.14) 10px, rgba(255,255,255,0) 10px, rgba(255,255,255,0) 30px);background-size:200% 100%;animation:nbliq 9s linear infinite}
-        @keyframes nbliq{from{background-position:0% 0}to{background-position:200% 0}}
-        .nb-liquid-2{background:radial-gradient(120% 70% at 20% 120%, rgba(255,150,175,0.16) 0%, rgba(255,150,175,0) 60%),radial-gradient(90% 60% at 75% -20%, rgba(120,20,45,0.5) 0%, rgba(120,20,45,0) 70%);animation:nbliq2 7s ease-in-out infinite alternate}
-        @keyframes nbliq2{from{transform:translateX(-3%) scaleY(1)}to{transform:translateX(3%) scaleY(1.04)}}
-        .nb-edge{background:linear-gradient(90deg, rgba(196,58,86,0) 0%, rgba(206,74,104,0.55) 55%, rgba(226,104,132,0.85) 100%);animation:nbedge 3.4s ease-in-out infinite}
-        @keyframes nbedge{0%,100%{opacity:.75;transform:scaleX(1)}50%{opacity:1;transform:scaleX(1.35)}}
-        button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid ${T.accent};outline-offset:2px}
+                                button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid ${T.accent};outline-offset:2px}
         input,textarea,select{color:${T.text}}
         input::placeholder,textarea::placeholder{color:${T.dim}}
         @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
@@ -1640,11 +1641,24 @@ export default function Planner() {
                   <button key={k} data-day={k} ref={on ? activeRef : null} onClick={() => jumpTo(k)}
                     className="nb-cell nb-tap relative w-16 sm:w-20 lg:w-24 shrink-0 py-2.5"
                     style={{ opacity: mounted ? 1 : 0, transform: mounted ? "none" : "translateY(10px)", transitionDelay: `${i * 26}ms`, boxShadow: target ? `inset 0 0 0 2px ${T.accent}` : "none" }}>
-                    <span className="absolute inset-y-0 left-0 right-px" style={{ background: T.accent, opacity: on ? 1 : n ? Math.min(0.5, 0.1 + n * 0.1) : 0 }} />
-                    <span className="relative block" style={{ color: on || n > 3 ? T.on : T.text }}>
+                    {/* Selection is a filled cell and today is an outlined one. Washing
+                        every busy day in accent turned the whole strip a muddy tint and
+                        made the selected day compete with its neighbours. */}
+                    <span className="absolute inset-1" style={{
+                      borderRadius: CARD_R,
+                      background: on ? T.accent : "transparent",
+                      boxShadow: !on && k === todayKey ? `inset 0 0 0 1.5px ${T.faint}` : "none",
+                    }} />
+                    <span className="relative block">
                       <span style={{ fontFamily: MONO, color: on ? T.on : T.dim }} className="block text-xs tracking-widest">{WD[d.getDay()]}</span>
-                      <span style={{ fontFamily: MONO }} className="block text-xl font-bold tracking-tight">{pad(d.getDate())}</span>
+                      <span style={{ fontFamily: MONO, color: on ? T.on : T.text }} className="block text-xl font-bold tracking-tight">{pad(d.getDate())}</span>
                       <span style={{ fontFamily: MONO, color: on ? T.on : T.dim }} className="block text-xs tracking-widest">{k === todayKey ? "NOW" : MO[d.getMonth()]}</span>
+                      {/* Density as a countable mark rather than a wash of colour. */}
+                      <span className="flex items-center justify-center gap-0.5 h-1.5 mt-1">
+                        {Array.from({ length: Math.min(3, n) }).map((_, dot) => (
+                          <span key={dot} className="rounded-full" style={{ width: 3, height: 3, background: on ? T.on : T.dim }} />
+                        ))}
+                      </span>
                     </span>
                   </button>
                 );
@@ -1726,26 +1740,20 @@ export default function Planner() {
                 <div className="absolute left-16 right-2 top-0" style={{ height: DAY_H, pointerEvents: "none" }}>
                   {isToday && (
                     <>
-                      <div className="nb-morph absolute overflow-hidden pointer-events-none" style={{
-                        left: liveEvent ? `${laneL}%` : 0,
-                        top: mounted ? (liveEvent ? (liveEvent.start / 1440) * DAY_H + 2 : (nowMin / 1440) * DAY_H) : 0,
-                        height: mounted ? (liveEvent ? Math.max(24, (liveEvent.dur / 1440) * DAY_H) - 3 : 2) : 2,
-                        width: liveEvent ? `calc((${laneW}% - 6px) * ${livePct})` : "calc(100% - 8px)",
-                        background: liveEvent
-                          ? `linear-gradient(100deg, ${NOW_INK} 0%, #7C1F38 42%, #97294A 78%, #A93055 100%)`
-                          : NOW_LINE,
-                        boxShadow: liveEvent ? "inset 0 0 22px rgba(0,0,0,0.35)" : "0 0 5px rgba(179,52,80,0.55)",
-                      }}>
-                        {liveEvent && (
-                          <>
-                            <span className="nb-liquid absolute inset-0" />
-                            <span className="nb-liquid-2 absolute inset-0" />
-                            <span className="nb-edge absolute inset-y-0" style={{ right: 0, width: 14 }} />
-                          </>
-                        )}
-                      </div>
-                      <span className="nb-morph absolute px-1 text-xs tracking-widest pointer-events-none"
-                        style={{ fontFamily: MONO, background: liveEvent ? "transparent" : NOW_LINE, color: liveEvent ? NOW_RED : "#FFFFFF", right: 8, top: mounted ? (liveEvent ? (liveEvent.start / 1440) * DAY_H + 4 : (nowMin / 1440) * DAY_H - 9) : -9 }}>
+                      <div className="absolute pointer-events-none" style={{
+                        left: 0,
+                        right: 0,
+                        top: mounted ? (nowMin / 1440) * DAY_H : 0,
+                        height: 2,
+                        background: T.accent,
+                        transition: "top 600ms cubic-bezier(.2,.8,.25,1)",
+                      }} />
+                      <span className="absolute px-1.5 py-0.5 text-xs tracking-widest pointer-events-none"
+                        style={{
+                          fontFamily: MONO, background: T.accent, color: T.on, borderRadius: 4,
+                          right: 0, top: mounted ? (nowMin / 1440) * DAY_H - 9 : -9,
+                          transition: "top 600ms cubic-bezier(.2,.8,.25,1)",
+                        }}>
                         {tm(nowMin)}
                       </span>
                     </>
@@ -1763,16 +1771,23 @@ export default function Planner() {
                         <div onPointerDown={(ev) => eventDown(ev, e)} onPointerUp={(ev) => eventUp(ev, e)} onContextMenu={(ev) => ev.preventDefault()}
                           className="relative w-full h-full overflow-hidden"
                           style={{
-                            background: live ? "transparent" : surface,
+                            background: surface,
                             borderRadius: CARD_R,
                             opacity: past ? 0.45 : 1,
                             boxShadow: held
                               ? `0 10px 28px rgba(0,0,0,.45), inset 0 0 0 2px ${T.accent}`
-                              : live ? `inset 0 0 0 1px ${NOW_RED}` : "none",
+                              : live ? `inset 0 0 0 1.5px ${T.accent}` : "none",
                             transform: held ? "scale(1.02)" : "none",
                             transition: "transform 120ms ease, box-shadow 120ms ease, background 200ms ease",
                             touchAction: "pan-y", cursor: "grab",
                           }}>
+                          {/* A live event fills with the theme accent as it elapses, so
+                              "now" is expressed in the same colour system as everything
+                              else instead of an unrelated crimson. */}
+                          {live && (
+                            <span className="absolute inset-y-0 left-0 pointer-events-none"
+                              style={{ width: `${pct}%`, background: `${T.accent}26`, transition: "width 600ms linear" }} />
+                          )}
                           <div className="relative pl-2.5 pr-2.5 py-1.5">
                             <div className="flex items-center gap-2">
                               {/* the category dot is the card's only colour, so it stays
@@ -1781,7 +1796,7 @@ export default function Planner() {
                               <span className="text-xs font-semibold truncate flex-1">{e.title}</span>
                               {e.repeat && <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs shrink-0">↻</span>}
                               {e.alerts && e.alerts.length > 0 && <span style={{ color: T.dim }} className="text-xs shrink-0">◔</span>}
-                              {live && <span style={{ fontFamily: MONO, background: NOW_RED, color: "#FFFFFF", borderRadius: 4 }} className="shrink-0 px-1 text-xs tracking-widest">{Math.round(pct)}%</span>}
+                              {live && <span style={{ fontFamily: MONO, background: T.accent, color: T.on, borderRadius: 4 }} className="shrink-0 px-1 text-xs tracking-widest">{Math.round(pct)}%</span>}
                               {held && <span style={{ fontFamily: MONO, background: T.accent, color: T.on, borderRadius: 4 }} className="shrink-0 px-1 text-xs tracking-widest">{gesture.overDay ? fmtDay(gesture.overDay) : tm(e.start)}</span>}
                               {!held && !live && h < 38 && <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">{tm(e.start)}</span>}
                             </div>
@@ -1893,6 +1908,120 @@ export default function Planner() {
       {/* ══ INSPECTOR ══ */}
       {inspectItem && (
         <Sheet T={T} title={inspect.kind === "event" ? "EVENT" : "ACTION"} onClose={() => { beep("click"); setInspect(null); }}>
+          {inspect.kind === "task" ? (
+            /* A task reads as a working document: what it is, the steps, then the
+               facts that govern it. Nothing is centred, because the checklist is a
+               list you act on rather than a title card you read. */
+            <div>
+              <h2 className="text-2xl font-bold tracking-tight leading-tight">{inspectItem.title}</h2>
+              <div className="flex items-center gap-2 mt-1.5">
+                <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: catColor(inspectItem.category) }} />
+                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">
+                  {(db.taskLists.find((l) => l.id === inspectItem.listId) || {}).name || "—"} · {inspectItem.category}
+                </span>
+              </div>
+
+              <div className="flex flex-col gap-1.5 mt-4">
+                {(inspectItem.checklist ?? []).map((item) => (
+                  <div key={item.id} className="flex items-center gap-3 px-3 py-2.5" style={{ background: surface, borderRadius: 999 }}>
+                    <button onClick={() => toggleSub(inspect.id, item.id)} className="shrink-0" aria-label={item.done ? "Reopen step" : "Complete step"}>
+                      <span className="block rounded-full" style={{
+                        width: 20, height: 20,
+                        background: item.done ? T.accent : "transparent",
+                        boxShadow: `inset 0 0 0 2px ${item.done ? T.accent : T.faint}`,
+                      }} />
+                    </button>
+                    <span className="flex-1 text-sm truncate" style={{ textDecoration: item.done ? "line-through" : "none", color: item.done ? T.dim : T.text }}>{item.title}</span>
+                    <button onClick={() => promoteSub(inspect.id, item.id)} style={{ color: T.dim }} className="text-xs px-1" aria-label="Promote step to a subtask">↥</button>
+                    <button onClick={() => removeSub(inspect.id, item.id)} style={{ color: T.dim }} className="text-xs px-1" aria-label="Remove step">✕</button>
+                  </div>
+                ))}
+                <InlineAdd T={T} surface={surface} onAdd={(v) => addSub(inspect.id, v)} />
+              </div>
+
+              {(inspectItem.checklist ?? []).length > 0 && (
+                <div className="flex items-center gap-3 mt-3">
+                  <span className="flex-1 h-1 rounded-full overflow-hidden" style={{ background: T.faint }}>
+                    <span className="block h-full rounded-full" style={{
+                      width: `${((inspectItem.checklist.filter((x) => x.done).length) / inspectItem.checklist.length) * 100}%`,
+                      background: T.accent, transition: "width 220ms ease",
+                    }} />
+                  </span>
+                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">
+                    {inspectItem.checklist.filter((x) => x.done).length} / {inspectItem.checklist.length}
+                  </span>
+                </div>
+              )}
+
+              {inspectItem.note && (
+                <div className="flex items-center gap-3 px-3 py-3 mt-4" style={{ background: surface, borderRadius: CARD_R }}>
+                  <span className="flex-1 text-sm">{inspectItem.note}</span>
+                  <span style={{ color: T.dim }} className="text-sm shrink-0">≡</span>
+                </div>
+              )}
+
+              {/* The governing facts, grouped as one card so they read as a block of
+                  rules rather than a run of unrelated rows. */}
+              <div className="mt-4 overflow-hidden" style={{ background: surface, borderRadius: CARD_R }}>
+                <DetailRow T={T} icon="▦" divider>
+                  <span className="block text-sm">{inspectItem.planned.date ? plannedLabel(inspectItem.planned.date, todayKey) : "Unplanned"}</span>
+                  <span style={{ color: T.dim }} className="block text-xs mt-0.5">
+                    {inspectItem.recurrence
+                      ? repeatLabel({ ...inspectItem.recurrence, freq: inspectItem.recurrence.frequency, byDay: inspectItem.recurrence.byWeekday })
+                      : "Does not repeat"}
+                  </span>
+                </DetailRow>
+                <DetailRow T={T} icon="◔" divider>
+                  <span className="block text-sm">
+                    {inspectItem.planned.startMinute != null ? `On the day at ${tm(inspectItem.planned.startMinute)}` : "No reminder"}
+                  </span>
+                </DetailRow>
+                <DetailRow T={T} icon="⌛" divider={inspectDependsOn.length > 0 || inspectItem.status === "waiting"}>
+                  <span className="block text-sm" style={{ color: inspectItem.deadline.date && inspectItem.deadline.date < todayKey ? NOW_RED : T.text }}>
+                    {inspectItem.deadline.date ? `Due ${fmtDay(inspectItem.deadline.date)}` : "No deadline"}
+                  </span>
+                </DetailRow>
+                {inspectItem.status === "waiting" && (
+                  <DetailRow T={T} icon="◷" divider={inspectDependsOn.length > 0}>
+                    <span className="block text-sm">{inspectItem.followUpDate ? `Follow up ${fmtDay(inspectItem.followUpDate)}` : "Waiting, no follow-up date"}</span>
+                  </DetailRow>
+                )}
+                {/* Every edge is listed, satisfied or not, each removable — otherwise a
+                    dependency could be added from here but never taken back. */}
+                {inspectDependsOn.map((blocker, i) => (
+                  <DetailRow key={blocker.id} T={T} icon="⛌" divider={i < inspectDependsOn.length - 1}>
+                    <div className="flex items-center gap-2">
+                      <span className="flex-1 text-sm truncate"
+                        style={{ color: blocker.status === "completed" ? T.dim : NOW_RED, textDecoration: blocker.status === "completed" ? "line-through" : "none" }}>
+                        Blocked by {blocker.title}
+                      </span>
+                      <button onClick={() => unblockTask(inspect.id, blocker.id)} style={{ color: T.dim }} className="text-xs px-1" aria-label="Remove dependency">✕</button>
+                    </div>
+                  </DetailRow>
+                ))}
+              </div>
+
+              <div className="flex items-center justify-between gap-2 mt-4">
+                <div className="flex flex-wrap gap-1">
+                  {["open", "in_progress", "waiting"].map((next) => (
+                    <button key={next} onClick={() => changeStatus(inspect.id, next)} className="px-2 py-1 text-xs tracking-widest"
+                      style={{ fontFamily: MONO, borderRadius: 999, background: inspectItem.status === next ? T.accent : "transparent", color: inspectItem.status === next ? T.on : T.dim, border: `1px solid ${inspectItem.status === next ? T.accent : T.line}` }}>
+                      {next.replace("_", " ").toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+                <button onClick={() => { beep("click"); setDependencyPicker({ taskId: parseTaskOccurrenceId(inspect.id).seriesId }); }}
+                  style={{ fontFamily: MONO, color: T.accent }} className="nb-tap text-xs tracking-widest shrink-0">+ BLOCK ON</button>
+              </div>
+
+              {earliestStart && inspectItem.planned.date && inspectItem.planned.date < earliestStart && (
+                <p style={{ fontFamily: MONO, color: NOW_RED }} className="text-xs tracking-widest mt-3">
+                  PLANNED BEFORE ITS BLOCKERS LAND — EARLIEST {fmtDay(earliestStart)}
+                </p>
+              )}
+            </div>
+          ) : (
+          <>
           {/* Header reads as a title card: what, when, which day — centred, with the
               detail rows below it. */}
           <div className="text-center pt-1 pb-4">
@@ -2009,6 +2138,9 @@ export default function Planner() {
             <p className="text-center text-sm mt-5" style={{ color: T.dim }}>
               <span className="font-bold" style={{ color: T.text }}>{countdownLabel(dateKey, inspectItem.start, todayKey, nowMin, inspectItem.dur)}</span> away
             </p>
+          )}
+
+          </>
           )}
 
           <div className="flex gap-2 mt-5">
@@ -2482,6 +2614,32 @@ function TaskCard({ T, t, beep, target, todayKey, blockers = [], onPromoteSub, c
 /* One attribute per row: an icon, the value in plain words, and an optional tint
    when the attribute carries meaning of its own — the category's colour, or the red
    of something overdue or blocked. */
+/* A row inside a grouped attribute card: value on the left, its icon on the right,
+   matching how the reference groups the facts that govern a task. */
+function DetailRow({ T, icon, children, divider = false }) {
+  return (
+    <div className="flex items-center gap-3 px-3 py-3" style={{ borderBottom: divider ? `1px solid ${T.line}` : "none" }}>
+      <div className="flex-1 min-w-0">{children}</div>
+      <span style={{ color: T.dim }} className="text-sm shrink-0">{icon}</span>
+    </div>
+  );
+}
+
+/* The add-a-step affordance is the same pill as a step, so the list grows in place
+   instead of opening a separate field somewhere else. */
+function InlineAdd({ T, surface, onAdd }) {
+  const [v, setV] = useState("");
+  const go = () => { if (v.trim()) { onAdd(v.trim()); setV(""); } };
+  return (
+    <div className="flex items-center gap-3 px-3 py-2.5" style={{ background: surface, borderRadius: 999 }}>
+      <span style={{ color: T.dim }} className="text-base shrink-0 w-5 text-center">+</span>
+      <input value={v} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => e.key === "Enter" && go()}
+        placeholder="Add a step" style={{ background: "transparent", border: "none" }} className="flex-1 text-sm py-0.5" />
+      {v.trim() && <button onClick={go} style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest">ADD</button>}
+    </div>
+  );
+}
+
 function Pill({ T, surface, icon, label, tint = null }) {
   return (
     <div className="flex items-center gap-3 px-3 py-2.5" style={{ background: tint ? `${tint}22` : surface, borderRadius: CARD_R }}>
