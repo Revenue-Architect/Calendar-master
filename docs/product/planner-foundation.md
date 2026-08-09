@@ -2360,20 +2360,48 @@ way everywhere.
   failure mode bulk action exists to avoid, because the user's whole reason for
   operating on many things at once is that they are not watching each one.
 
-## 6. Surfaces and density
+## 6. Reach and recovery
 
-### 6.1 Three depths only
+### 6.1 Every frequent action has a keyboard path
+
+- Completing, deferring, capturing and undoing MUST be reachable without a
+  pointer. A hold, a swipe and a drag are good affordances and poor sole ones.
+- Keyboard actions apply to the day's next open action, so no separate focus
+  model has to be learned.
+- Shortcuts are listed in Settings; an unlisted shortcut does not exist.
+
+### 6.2 A row that shows work must lead to it
+
+- Any row naming an entry MUST open that entry. A list that only displays is a
+  dead end, and a deadline you cannot act on is worse than no deadline list.
+- Opening from a summary navigates to the entry's own day first, so it is read in
+  context.
+
+### 6.3 Labels size to their content
+
+- A label MUST NOT be clipped to a fixed width it cannot hold. Truncated or
+  overlapping text is a correctness failure, not a cosmetic one.
+- Where a long word will not fit, shorten the word rather than the box.
+
+### 6.4 Undo must actually reverse
+
+- Every action that offers undo MUST be reversible by the payload it recorded.
+- An undo affordance that does nothing is worse than none, because it is trusted.
+
+## 7. Surfaces and density
+
+### 7.1 Three depths only
 
 - Page, day surface, and card. Additional depths make the hierarchy ambiguous.
 - Sheets sit above all three on a scrim.
 
-### 6.2 Quiet chrome
+### 7.2 Quiet chrome
 
 - Hour rules, free-slot hints, and empty states use the faint token, never the
   body colour. They orient without competing with content.
 - The events lane is inset from the hour gutter so cards never touch the rules.
 
-### 6.3 Now, and the passage of time
+### 7.3 Now, and the passage of time
 
 - The current time is a rule in the theme accent, not a separate signal colour.
 - A live event fills with the accent as it elapses, so "now" is expressed in the
@@ -2385,29 +2413,29 @@ way everywhere.
   is one continuous reading of "now" that flows into the event, never a line that
   disappears behind a card halfway across.
 
-### 6.4 Density is countable
+### 7.4 Density is countable
 
 - A day cell shows its load as a small number of marks, capped, not as a wash of
   colour. A wash tints the whole strip and leaves the selected day competing with
   its neighbours.
 - Selection is a filled cell; today, when not selected, is an outlined one.
 
-### 6.5 Theme integrity
+### 7.5 Theme integrity
 
 - Every colour resolves from the active theme except the category hues and the
   now colour, which are deliberately constant.
 - The page background, browser chrome colour, and `color-scheme` follow the
   active theme so native controls match the page.
 
-## 7. Type
+## 8. Type
 
-### 7.1 Three faces, fixed roles
+### 8.1 Three faces, fixed roles
 
 - Sans carries titles and body.
 - Mono carries times, labels, counts, and any value read as data.
 - Serif italic carries written reflection: notes and empty-state prose.
 
-### 7.2 Labels
+### 8.2 Labels
 
 - Section and metadata labels are uppercase mono with wide tracking.
 - Labels name what follows; they never repeat a value shown beside them.
@@ -2477,3 +2505,6 @@ and resurfacing behaviors. These remain specified above and unimplemented.
 | 2026-08-09 | Ask on first run whether to keep the sample notebook or start empty. |
 | 2026-08-09 | Warn on overlapping events from the lane clusters; detect and warn, never prevent. |
 | 2026-08-09 | Run the agenda backwards as well as forwards so past days are reviewable. |
+| 2026-08-09 | Give every frequent action a keyboard path; a hold or swipe is never the only way. |
+| 2026-08-09 | Require that a row naming an entry opens it, rather than only displaying it. |
+| 2026-08-09 | Guard date navigation at its entry point so a bad key cannot take the screen down. |

@@ -79,7 +79,7 @@ import {
   restoreEvent as restoreCalendarEvent,
   updateEvent as updateCalendarEvent,
 } from "./domains/calendar/index.js";
-import { addDays, addDaysToKey, diffDays, keyOf, parseKey } from "./shared/time/dateKey.js";
+import { addDays, addDaysToKey, diffDays, isDateKey, keyOf, parseKey } from "./shared/time/dateKey.js";
 import { addMinutesToLocalDateTime, localDateTimeToEpochMinutes } from "./shared/time/localDateTime.js";
 import { getOffsetCandidates } from "./shared/time/timezone.js";
 
@@ -747,7 +747,9 @@ export default function Planner() {
     setDateKey((k) => keyOf(addDays(parseKey(k), n)));
   }, [beep]);
   const jumpTo = (k) => {
-    if (k === dateKey) return;
+    /* Guard the entry point rather than every caller: a bad key used to reach
+       parseKey and take the whole screen down with it. */
+    if (!isDateKey(k) || k === dateKey) return;
     beep("page");
     setTurn({ dir: k > dateKey ? 1 : -1, k: uid() });
     setDateKey(k);
@@ -778,10 +780,22 @@ export default function Planner() {
       if (e.key === "ArrowLeft") goDay(-1);
       if (e.key === "t" || e.key === "T") jumpTo(todayKey);
       if (e.key === "n" || e.key === "N") setComposer({ kind: "event", start: snapTo(nowMin, 15), dur: 60 });
+      /* Completion, deferral and inspection were pointer-only — a hold, a swipe and a
+         tap with no keyboard path. These act on the first open action of the day. */
+      if (e.key === "c" || e.key === "C") {
+        const next = dayTasks.find((t) => t.status !== "completed");
+        if (next) completeTask(next.id);
+      }
+      if (e.key === "d" || e.key === "D") {
+        const next = dayTasks.find((t) => t.status !== "completed");
+        if (next && next.planned.date) deferTask(next.id, 1);
+      }
+      if (e.key === "a" || e.key === "A") setComposer({ kind: "task" });
+      if ((e.key === "z" && (e.metaKey || e.ctrlKey)) && undo) { e.preventDefault(); runUndo(); }
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [dateKey, inspect, composer, settings, noteEdit, search, scopeAsk, goDay, todayKey, nowMin]);
+  }, [dateKey, inspect, composer, settings, noteEdit, search, scopeAsk, goDay, todayKey, nowMin, dayTasks, undo]);
 
   /* ─── writes (series-aware) ─── */
   const flash = (label, payload) => {
@@ -1065,7 +1079,7 @@ export default function Planner() {
      would use, and counts what actually changed. A run that reports "5 completed"
      when two were blocked is worse than no bulk action at all — the whole risk of
      operating on many things at once is not noticing what refused. */
-  const runBulk = (action) => {
+  const runBulk = (action, bulkArg = null) => {
     const ids = [...(selection ?? [])];
     if (!ids.length) return;
     let done = 0;
@@ -1087,6 +1101,12 @@ export default function Planner() {
             tasks = deferTaskCommand(tasks, seriesId, 1).tasks;
           } else if (action === "today") {
             tasks = planTaskCommand(tasks, seriesId, { date: todayKey, startMinute: task.planned.startMinute, estimateMinutes: task.planned.estimateMinutes }).tasks;
+          } else if (action === "list") {
+            tasks = moveTaskToList(tasks, seriesId, bulkArg, d.taskLists).tasks;
+          } else if (action === "tag") {
+            tasks = setTaskTags(tasks, seriesId, [...(task.tags ?? []), bulkArg]).tasks;
+          } else if (action === "priority") {
+            tasks = updateTaskCommand(tasks, seriesId, { priority: bulkArg }, { now: nowStamp() }).tasks;
           } else if (action === "delete") {
             tasks = deleteTaskCommand(tasks, seriesId).tasks;
             if (task.status === "completed") xp = Math.max(0, xp - (task.reward || 0));
@@ -1102,7 +1122,7 @@ export default function Planner() {
     flash(
       failed.length
         ? `${done} of ${ids.length} — ${failed.length} ${failed[0].why === "blocked" ? "blocked" : "refused"}`
-        : `${done} ${action === "delete" ? "deleted" : action === "complete" ? "completed" : "moved"}`,
+        : `${done} ${action === "delete" ? "deleted" : action === "complete" ? "completed" : action === "tag" ? "tagged" : action === "priority" ? "reprioritised" : "moved"}`,
       null,
     );
     setSelection(null);
@@ -1194,7 +1214,15 @@ export default function Planner() {
         d.xp = Math.max(0, d.xp - (p.reward || 0));
       }
       if (p.type === "unskip") { const o = { ...d.overrides }; delete o[p.key]; d.overrides = o; }
-      if (p.type === "task-date") d.tasks = d.tasks.map((t) => (t.id === p.id ? { ...t, date: keyOf(addDays(parseKey(t.date), p.n)) } : t));
+      /* Deferral moves the planned date, so undo moves it back — the old handler
+         keyed on a payload type deferTask never emits and a field tasks no longer
+         have, which made undoing a defer silently do nothing. */
+      if (p.type === "task-defer" || p.type === "task-date") {
+        const seriesId = parseTaskOccurrenceId(p.id).seriesId;
+        d.tasks = d.tasks.map((t) => (t.id === seriesId && t.planned.date
+          ? { ...t, planned: { ...t.planned, date: addDaysToKey(t.planned.date, p.n) } }
+          : t));
+      }
       if (p.type === "back-date") d.tasks = d.tasks.map((x) => (x.id === p.id ? { ...x, date: p.date } : x));
       if (p.type === "calendar-event-move") return moveCalendarEvent(d, p.id, p.target, { scope: p.scope }).state;
       if (p.type === "task-restore-dates") d.tasks = d.tasks.map((t) => { const m = p.ids.find((x) => x.id === t.id); return m ? { ...t, date: m.date } : t; });
@@ -1716,6 +1744,14 @@ export default function Planner() {
       blockersFor={(t) => (db ? getTaskBlockers(db.tasks, parseTaskOccurrenceId(t.id).seriesId) : [])}
       onPromoteSub={promoteSub}
       onJump={jumpTo}
+      onOpenDeadline={(t) => {
+        /* Go to the day the work is planned for, falling back to the deadline day,
+           and open it — a deadline row that only navigated was a dead end. */
+        beep("click");
+        const target = t.planned.date || t.deadline.date;
+        if (target && target !== dateKey) jumpTo(target);
+        setTimeout(() => setInspect({ kind: "task", id: t.id }), target && target !== dateKey ? 80 : 0);
+      }}
     />
   );
 
@@ -2646,6 +2682,10 @@ export default function Planner() {
               <Row T={T} k="T" v="TODAY" />
               <Row T={T} k="N" v="NEW EVENT" />
               <Row T={T} k="/" v="SEARCH" />
+              <Row T={T} k="A" v="NEW ACTION" />
+              <Row T={T} k="C" v="COMPLETE NEXT ACTION" />
+              <Row T={T} k="D" v="DEFER NEXT ACTION" />
+              <Row T={T} k="⌘Z" v="UNDO" />
             </div>
           </div>
 
@@ -2673,7 +2713,7 @@ function nextCalendarOccurrence(item, fromKey) {
 
 /* ═══════════════════════ ACTIONS ═══════════════════════ */
 
-function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, overdue, deadlines, showOverdue, todayKey, gesture, blockersFor, onPromoteSub, smartView, viewCounts, onSmartView, lists, onManageLists, clock = "12", selection, onToggleSelect, onStartSelect, onCancelSelect, onBulk, onPullOverdue, beep, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onAddTask, onEditNote, onUnschedule, onJump }) {
+function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, onOpenDeadline, overdue, deadlines, showOverdue, todayKey, gesture, blockersFor, onPromoteSub, smartView, viewCounts, onSmartView, lists, onManageLists, clock = "12", selection, onToggleSelect, onStartSelect, onCancelSelect, onBulk, onPullOverdue, beep, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onAddTask, onEditNote, onUnschedule, onJump }) {
   const open = tasks.filter((t) => t.status !== "completed");
   const done = tasks.filter((t) => t.status === "completed");
   return (
@@ -2690,10 +2730,26 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
       {selection && (
         <div className="flex flex-wrap items-center gap-1 mb-2 px-2 py-2" style={{ boxShadow: `inset 0 0 0 1px ${T.accent}`, borderRadius: CARD_R }}>
           <span style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest mr-1">{selection.size} SELECTED</span>
-          {[["complete", "COMPLETE"], ["today", "TODAY"], ["defer", "TOMORROW"], ["delete", "DELETE"]].map(([action, label]) => (
-            <button key={action} onClick={() => onBulk(action)} className="px-2 py-1 text-xs tracking-widest"
-              style={{ fontFamily: MONO, borderRadius: 999, color: action === "delete" ? NOW_RED : T.text, border: `1px solid ${T.line}` }}>{label}</button>
+          {[["complete", "COMPLETE"], ["today", "TODAY"], ["defer", "TOMORROW"]].map(([action, label]) => (
+            <button key={action} onClick={() => onBulk(action)} className="nb-tap px-2 py-1 text-xs tracking-widest"
+              style={{ fontFamily: MONO, borderRadius: 999, color: T.text, border: `1px solid ${T.line}` }}>{label}</button>
           ))}
+          {/* §11.3. The three that benefit most from being done at once, each
+              borrowing the single-task command so the rules stay identical. */}
+          <select onChange={(e) => { if (e.target.value) { onBulk("list", e.target.value); e.target.value = ""; } }} defaultValue=""
+            style={{ fontFamily: MONO, borderRadius: 999, background: "transparent", color: T.dim, border: `1px solid ${T.line}` }} className="px-2 py-1 text-xs tracking-widest">
+            <option value="">MOVE TO…</option>
+            {lists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+          </select>
+          <select onChange={(e) => { if (e.target.value) { onBulk("priority", e.target.value); e.target.value = ""; } }} defaultValue=""
+            style={{ fontFamily: MONO, borderRadius: 999, background: "transparent", color: T.dim, border: `1px solid ${T.line}` }} className="px-2 py-1 text-xs tracking-widest">
+            <option value="">PRIORITY…</option>
+            {["urgent", "high", "normal", "low", "none"].map((v) => <option key={v} value={v}>{v.toUpperCase()}</option>)}
+          </select>
+          <button onClick={() => { const t = prompt("Tag to add"); if (t && t.trim()) onBulk("tag", t.trim()); }}
+            className="nb-tap px-2 py-1 text-xs tracking-widest" style={{ fontFamily: MONO, borderRadius: 999, color: T.text, border: `1px solid ${T.line}` }}>TAG…</button>
+          <button onClick={() => onBulk("delete")} className="nb-tap px-2 py-1 text-xs tracking-widest"
+            style={{ fontFamily: MONO, borderRadius: 999, color: NOW_RED, border: `1px solid ${T.line}` }}>DELETE</button>
           <button onClick={onCancelSelect} style={{ fontFamily: MONO, color: T.dim }} className="ml-auto text-xs tracking-widest">CANCEL</button>
         </div>
       )}
@@ -2727,9 +2783,14 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
             {deadlines.slice(0, 4).map((t) => {
               const dLeft = diffDays(t.deadline.date, todayKey);
               return (
-                <button key={t.id} onClick={() => onJump(t.date)} className="nb-row flex items-center gap-2 py-1.5 text-left" style={{ borderBottom: `1px solid ${T.line}` }}>
-                  <span style={{ fontFamily: MONO, color: dLeft <= 1 ? NOW_RED : T.dim }} className="text-xs tracking-widest shrink-0 w-14">{dLeft === 0 ? "TODAY" : dLeft === 1 ? "TOMORROW" : `${dLeft}D`}</span>
-                  <span className="flex-1 text-xs truncate">{t.title}</span>
+                <button key={t.id} data-deadline={t.id} onClick={() => onOpenDeadline(t)} className="nb-row flex items-center gap-2 py-2 text-left" style={{ borderBottom: `1px solid ${T.line}` }}>
+                  {/* The chip sizes to its longest word instead of being clipped to a
+                      fixed width, which was overlapping the title. */}
+                  <span style={{ fontFamily: MONO, color: dLeft <= 1 ? NOW_RED : T.dim, borderRadius: 999, border: `1px solid ${dLeft <= 1 ? NOW_RED : T.line}` }}
+                    className="px-2 py-0.5 text-xs tracking-widest shrink-0 whitespace-nowrap">
+                    {dLeft === 0 ? "TODAY" : dLeft === 1 ? "TOM" : `${dLeft}D`}
+                  </span>
+                  <span className="flex-1 text-xs truncate min-w-0">{t.title}</span>
                 </button>
               );
             })}
