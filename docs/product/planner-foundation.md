@@ -2056,7 +2056,7 @@ cover the initial Calendar and shared-time behavior at completion.
 
 ## Phase 2: Calendar completeness
 
-**Design status:** Phase 2A and Phase 2B approved on 2026-08-09
+**Implementation status:** Phase 2A and Phase 2B completed on 2026-08-09
 
 The detailed design is maintained in
 `docs/superpowers/specs/2026-08-09-calendar-phase-2-design.md`.
@@ -2082,6 +2082,12 @@ The detailed design is maintained in
 - Atomic series splitting, exception reassignment, occurrence aliases, orphan
   detection, and exact recovery.
 - Existing recurrence editor extensions and occurrence preview.
+
+The implementation is exposed through `src/domains/calendar/index.js`. Seventy-six
+automated tests cover Calendar and shared-time behavior at Phase 2 completion, and
+the production Vite bundle plus local development-server module smoke check pass.
+Provider integrations, calendar management UI, availability, conflict detection,
+reminder extraction, and frontend polish remain intentionally deferred.
 
 ### Later Phase 2 subprojects
 
@@ -2112,3 +2118,6 @@ The detailed design is maintained in
 | 2026-08-09 | Defer provider integration while preserving provider-neutral ports and identity. |
 | 2026-08-09 | Start Notes as daily, linked, and inbox notes inside a future-compatible notebook model. |
 | 2026-08-09 | Deliver Calendar first by extracting current behavior behind tested domain commands and queries. |
+| 2026-08-09 | Cut planner persistence directly to validated v5 after a confirmed migration write; do not dual-write. |
+| 2026-08-09 | Model event time as exclusive all-day, floating local, or explicit IANA-zoned intervals. |
+| 2026-08-09 | Use stable recurrence anchors, typed exceptions, and atomic series splitting for recurring edits. |

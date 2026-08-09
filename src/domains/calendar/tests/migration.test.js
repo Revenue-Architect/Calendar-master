@@ -42,6 +42,8 @@ test("calendar overrides become exceptions while task overrides remain", () => {
   };
   const migrated = migrateV4ToV5(state);
   assert.equal(migrated.eventExceptions[0].type, "cancelled");
+  assert.equal(migrated.eventExceptions[0].recurrenceAnchor, "2026-08-10T09:00");
+  assert.match(migrated.eventExceptions[0].occurrenceId, /^occ\.v1\./);
   assert.deepEqual(migrated.overrides, { "habit@2026-08-10": { done: true } });
   assert.equal(migrated.events[0].recurrence.frequency, "daily");
 });

@@ -45,7 +45,7 @@
 - Produces: `normalizeRecurrenceRule(input, seriesTiming): RecurrenceRule | null`
 - Produces: `describeRecurrenceRule(rule, seriesTiming): string`
 
-- [ ] **Step 1: Write failing rule tests**
+- [x] **Step 1: Write failing rule tests**
 
 ```js
 test("monthly last weekday and yearly leap-day rules normalize", () => {
@@ -58,19 +58,19 @@ test("count and until cannot coexist", () => {
 });
 ```
 
-- [ ] **Step 2: Run rule tests and verify RED**
+- [x] **Step 2: Run rule tests and verify RED**
 
 Run: `npm test -- src/domains/calendar/tests/recurrenceRule.test.js`
 
 Expected: FAIL because the model does not exist.
 
-- [ ] **Step 3: Implement rule normalization and readable summaries**
+- [x] **Step 3: Implement rule normalization and readable summaries**
 
 Validate weekdays 0-6, ordinals 1-4 or -1, months 1-12, positive month days
 or -1, positive count, inclusive until matching timing precision, interval, and
 missing-date policy.
 
-- [ ] **Step 4: Run rule tests and verify GREEN**
+- [x] **Step 4: Run rule tests and verify GREEN**
 
 Run: `npm test -- src/domains/calendar/tests/recurrenceRule.test.js`
 
@@ -92,7 +92,7 @@ Expected: rule and summary tests pass.
 - Produces: `generateRecurrenceAnchors(event, rangeStart, rangeEnd, limit?): string[]`
 - Produces: `expandSeries(event, exceptions, range, options?): EventOccurrence[]`
 
-- [ ] **Step 1: Write failing identity and generation tests**
+- [x] **Step 1: Write failing identity and generation tests**
 
 ```js
 test("occurrence IDs round-trip delimiter characters", () => {
@@ -106,19 +106,19 @@ test("last Monday and leap-day skip generate literal expected anchors", () => {
 });
 ```
 
-- [ ] **Step 2: Run advanced recurrence tests and verify RED**
+- [x] **Step 2: Run advanced recurrence tests and verify RED**
 
 Run: `npm test -- src/domains/calendar/tests/advancedRecurrence.test.js`
 
 Expected: FAIL because identity and generator modules do not exist.
 
-- [ ] **Step 3: Implement base64url component identity and finite generation**
+- [x] **Step 3: Implement base64url component identity and finite generation**
 
 Encode the series ID and anchor separately in a versioned ID. Generate daily,
 weekly, monthly, and yearly anchors with interval, weekday, month, month-day,
 ordinal, count, until, and missing-date policy. Bound every loop by range and limit.
 
-- [ ] **Step 4: Run advanced recurrence tests and verify GREEN**
+- [x] **Step 4: Run advanced recurrence tests and verify GREEN**
 
 Run: `npm test -- src/domains/calendar/tests/advancedRecurrence.test.js`
 
@@ -141,7 +141,7 @@ Expected: identity, boundaries, month-end, leap, count, until, DST, and determin
 - Produces: `addOccurrence(state, seriesId, eventInput, options): CommandResult`
 - Produces: `restoreOccurrence(state, snapshot): CommandResult`
 
-- [ ] **Step 1: Write failing typed-exception command tests**
+- [x] **Step 1: Write failing typed-exception command tests**
 
 ```js
 test("moving an occurrence changes timing but preserves its recurrence anchor", () => {
@@ -157,18 +157,18 @@ test("cancel and restore preserve exact prior exception state", () => {
 });
 ```
 
-- [ ] **Step 2: Run occurrence-command tests and verify RED**
+- [x] **Step 2: Run occurrence-command tests and verify RED**
 
 Run: `npm test -- src/domains/calendar/tests/occurrenceCommands.test.js`
 
 Expected: FAIL because typed exceptions and commands do not exist.
 
-- [ ] **Step 3: Implement typed exception validation and immutable commands**
+- [x] **Step 3: Implement typed exception validation and immutable commands**
 
 Enforce one active generated-anchor exception, immutable added IDs, series
 membership, revisions, expected revision conflicts, and exact undo snapshots.
 
-- [ ] **Step 4: Run occurrence-command tests and verify GREEN**
+- [x] **Step 4: Run occurrence-command tests and verify GREEN**
 
 Run: `npm test -- src/domains/calendar/tests/occurrenceCommands.test.js`
 
@@ -188,7 +188,7 @@ Expected: modify, move, cancel, add, restore, and idempotency tests pass.
 - Produces: `splitSeries(state, occurrenceId, changes, options): CommandResult`
 - Produces: `resolveOccurrenceAlias(aliases, occurrenceId): AliasResolution`
 
-- [ ] **Step 1: Write failing split tests**
+- [x] **Step 1: Write failing split tests**
 
 ```js
 test("splitSeries assigns remaining count and future exceptions to a new series", () => {
@@ -203,19 +203,19 @@ test("alias resolution rejects cycles", () => {
 });
 ```
 
-- [ ] **Step 2: Run split tests and verify RED**
+- [x] **Step 2: Run split tests and verify RED**
 
 Run: `npm test -- src/domains/calendar/tests/splitSeries.test.js`
 
 Expected: FAIL because split modules do not exist.
 
-- [ ] **Step 3: Implement one atomic split transition**
+- [x] **Step 3: Implement one atomic split transition**
 
 Validate the anchor, partition count, create the new event, bound the old event,
 reassign future exceptions, produce aliases, detect cycles, and return an exact
 snapshot. Do not mutate input state when any check fails.
 
-- [ ] **Step 4: Run split tests and verify GREEN**
+- [x] **Step 4: Run split tests and verify GREEN**
 
 Run: `npm test -- src/domains/calendar/tests/splitSeries.test.js`
 
@@ -240,7 +240,7 @@ and immutability tests pass.
 - Produces: `getSeriesExceptions(state, seriesId): EventException[]`
 - Produces: `getOrphanedExceptions(state, seriesId): EventException[]`
 
-- [ ] **Step 1: Write failing query tests**
+- [x] **Step 1: Write failing query tests**
 
 ```js
 test("cancelled generated positions consume count but are absent from results", () => {
@@ -253,19 +253,19 @@ test("added occurrences do not consume count", () => {
 });
 ```
 
-- [ ] **Step 2: Run occurrence-query tests and verify RED**
+- [x] **Step 2: Run occurrence-query tests and verify RED**
 
 Run: `npm test -- src/domains/calendar/tests/occurrenceQueries.test.js`
 
 Expected: FAIL because occurrence queries do not exist.
 
-- [ ] **Step 3: Implement exception-aware bounded queries and orphan detection**
+- [x] **Step 3: Implement exception-aware bounded queries and orphan detection**
 
 Expand finite ranges, apply typed exceptions, resolve aliases, exclude orphaned
 records by default, project time, segment only when the caller requests display
 segments, and sort by start then identity.
 
-- [ ] **Step 4: Run occurrence-query tests and verify GREEN**
+- [x] **Step 4: Run occurrence-query tests and verify GREEN**
 
 Run: `npm test -- src/domains/calendar/tests/occurrenceQueries.test.js src/domains/calendar/tests/queries.test.js`
 
@@ -282,28 +282,28 @@ Expected: all occurrence and Calendar query tests pass.
 **Interfaces:**
 - Consumes: recurrence normalizer, preview query, occurrence commands, and split command through Calendar public API.
 
-- [ ] **Step 1: Replace legacy repeat controls with canonical recurrence draft state**
+- [x] **Step 1: Replace legacy repeat controls with canonical recurrence draft state**
 
 Support once, daily, weekly, monthly, yearly, interval, weekdays, monthly pattern,
 yearly month/pattern, never/until/count, and missing-date policy.
 
-- [ ] **Step 2: Add next-five preview and readable summary**
+- [x] **Step 2: Add next-five preview and readable summary**
 
 Preview from the unsaved canonical draft. Invalid rules show structured validation
 without mutating canonical state.
 
-- [ ] **Step 3: Extend recurring edit/delete scope controls**
+- [x] **Step 3: Extend recurring edit/delete scope controls**
 
 Map this occurrence to typed exception commands, this and following to
 `splitSeries`, and entire series to series commands. Use returned snapshots for
 undo rather than direct override mutation.
 
-- [ ] **Step 4: Remove Calendar use of legacy `overrides` and `repeat` arithmetic**
+- [x] **Step 4: Remove Calendar use of legacy `overrides` and `repeat` arithmetic**
 
 Task recurrence may retain its legacy temporary functions. Calendar reads only
 `event.recurrence`, `eventExceptions`, and `occurrenceAliases`.
 
-- [ ] **Step 5: Run all tests and production build**
+- [x] **Step 5: Run all tests and production build**
 
 Run: `npm test && npm run build`
 
@@ -318,31 +318,31 @@ Expected: all tests pass and Vite builds.
 - Modify: `README.md`
 - Review all Phase 2 files.
 
-- [ ] **Step 1: Update implementation status and actual test count**
+- [x] **Step 1: Update implementation status and actual test count**
 
 Mark Phase 2A and 2B complete only after verification. Keep later Phase 2
 subprojects explicitly deferred.
 
-- [ ] **Step 2: Run requirement and coupling scans**
+- [x] **Step 2: Run requirement and coupling scans**
 
 Run: `rg -n "TBD|TODO|FIXME" docs src/domains/calendar src/shared/time || true && rg -n "window\\.|localStorage|from .*storage" src/domains/calendar src/shared/time || true`
 
 Expected: no placeholders and no browser/persistence coupling in domain/shared code.
 
-- [ ] **Step 3: Run fresh final verification**
+- [x] **Step 3: Run fresh final verification**
 
 Run: `npm test && npm run build && git diff --check`
 
 Expected: zero failures, successful build, and no whitespace errors.
 
-- [ ] **Step 4: Commit Phase 2B**
+- [x] **Step 4: Commit Phase 2B**
 
 ```bash
 git add README.md src docs
 git commit -m "feat: add advanced calendar recurrence"
 ```
 
-- [ ] **Step 5: Push every pending main commit**
+- [x] **Step 5: Push every pending main commit**
 
 Run: `git push origin main`
 

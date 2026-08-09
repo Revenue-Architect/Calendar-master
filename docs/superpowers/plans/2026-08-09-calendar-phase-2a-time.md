@@ -58,7 +58,7 @@
 - Produces: `assertHalfOpenInterval(start, end, compare, label?): void`
 - Produces: `intersectsHalfOpen(startA, endA, startB, endB, compare): boolean`
 
-- [ ] **Step 1: Write failing local date-time tests**
+- [x] **Step 1: Write failing local date-time tests**
 
 ```js
 test("strict local date-times reject impossible dates and 24:00", () => {
@@ -71,24 +71,24 @@ test("calendar arithmetic crosses midnight and leap day", () => {
 });
 ```
 
-- [ ] **Step 2: Run the local date-time test and verify RED**
+- [x] **Step 2: Run the local date-time test and verify RED**
 
 Run: `npm test -- src/shared/time/localDateTime.test.js`
 
 Expected: FAIL because `localDateTime.js` does not exist.
 
-- [ ] **Step 3: Implement strict UTC-backed calendar arithmetic**
+- [x] **Step 3: Implement strict UTC-backed calendar arithmetic**
 
 Use UTC fields only as an arithmetic container so host timezone and DST cannot
 change local calendar values. Reject seconds and malformed values.
 
-- [ ] **Step 4: Run the local date-time test and verify GREEN**
+- [x] **Step 4: Run the local date-time test and verify GREEN**
 
 Run: `npm test -- src/shared/time/localDateTime.test.js`
 
 Expected: all local date-time tests pass.
 
-- [ ] **Step 5: Write failing half-open interval tests**
+- [x] **Step 5: Write failing half-open interval tests**
 
 ```js
 test("touching half-open intervals do not overlap", () => {
@@ -97,17 +97,17 @@ test("touching half-open intervals do not overlap", () => {
 });
 ```
 
-- [ ] **Step 6: Run interval tests and verify RED**
+- [x] **Step 6: Run interval tests and verify RED**
 
 Run: `npm test -- src/shared/time/interval.test.js`
 
 Expected: FAIL because `interval.js` does not exist.
 
-- [ ] **Step 7: Implement interval validation and intersection**
+- [x] **Step 7: Implement interval validation and intersection**
 
 Reject equal or reversed bounds. Compare interval ends exclusively.
 
-- [ ] **Step 8: Run interval tests and verify GREEN**
+- [x] **Step 8: Run interval tests and verify GREEN**
 
 Run: `npm test -- src/shared/time/interval.test.js`
 
@@ -130,7 +130,7 @@ Expected: all interval tests pass.
 - Produces: `projectInstantToLocal(instant, timeZone): { localDateTime, offset }`
 - Produces: `detectLocalTimeStatus(localDateTime, timeZone): "valid" | "ambiguous" | "skipped"`
 
-- [ ] **Step 1: Write failing timezone tests with literal Toronto fixtures**
+- [x] **Step 1: Write failing timezone tests with literal Toronto fixtures**
 
 ```js
 test("Toronto spring-forward local time is skipped", () => {
@@ -144,19 +144,19 @@ test("Toronto fallback requires one of two explicit offsets", () => {
 });
 ```
 
-- [ ] **Step 2: Run timezone tests and verify RED**
+- [x] **Step 2: Run timezone tests and verify RED**
 
 Run: `npm test -- src/shared/time/timezone.test.js`
 
 Expected: FAIL because `timezone.js` does not exist.
 
-- [ ] **Step 3: Implement resolution through `Intl.DateTimeFormat`**
+- [x] **Step 3: Implement resolution through `Intl.DateTimeFormat`**
 
 Search a bounded UTC window around the requested wall time, project candidates
 into the requested zone, and retain exact wall-time matches. Zero matches means
 skipped; two means ambiguous. Format offsets as `±HH:MM`.
 
-- [ ] **Step 4: Run timezone tests and verify GREEN**
+- [x] **Step 4: Run timezone tests and verify GREEN**
 
 Run: `npm test -- src/shared/time/timezone.test.js`
 
@@ -180,7 +180,7 @@ Expected: valid, skipped, ambiguous, and viewer-projection tests pass.
 - Produces: `timingIntersectsDate(timing, dateKey, viewerTimeZone?): boolean`
 - Produces: `segmentOccurrence(occurrence, startDate, endDate, viewerTimeZone?): DisplaySegment[]`
 
-- [ ] **Step 1: Write failing timing tests**
+- [x] **Step 1: Write failing timing tests**
 
 ```js
 test("all-day timing requires an exclusive end after start", () => {
@@ -196,24 +196,24 @@ test("zoned timing preserves explicit fallback offsets", () => {
 });
 ```
 
-- [ ] **Step 2: Run timing tests and verify RED**
+- [x] **Step 2: Run timing tests and verify RED**
 
 Run: `npm test -- src/domains/calendar/tests/timing.test.js`
 
 Expected: FAIL because `timing.js` does not exist.
 
-- [ ] **Step 3: Implement canonical timing validation**
+- [x] **Step 3: Implement canonical timing validation**
 
 Floating time compares local calendar values. Zoned time resolves both endpoints
 to instants and compares instants. Do not silently select an ambiguous offset.
 
-- [ ] **Step 4: Run timing tests and verify GREEN**
+- [x] **Step 4: Run timing tests and verify GREEN**
 
 Run: `npm test -- src/domains/calendar/tests/timing.test.js`
 
 Expected: all timing tests pass.
 
-- [ ] **Step 5: Write failing segmentation tests**
+- [x] **Step 5: Write failing segmentation tests**
 
 ```js
 test("a floating overnight occurrence becomes two display segments", () => {
@@ -225,18 +225,18 @@ test("a floating overnight occurrence becomes two display segments", () => {
 });
 ```
 
-- [ ] **Step 6: Run segmentation tests and verify RED**
+- [x] **Step 6: Run segmentation tests and verify RED**
 
 Run: `npm test -- src/domains/calendar/tests/segmentation.test.js`
 
 Expected: FAIL because segmentation does not exist.
 
-- [ ] **Step 7: Implement all-day, floating, and viewer-zoned segmentation**
+- [x] **Step 7: Implement all-day, floating, and viewer-zoned segmentation**
 
 Return one immutable segment per intersected viewer date with explicit continuation
 flags and minute positions used by the current timeline.
 
-- [ ] **Step 8: Run segmentation tests and verify GREEN**
+- [x] **Step 8: Run segmentation tests and verify GREEN**
 
 Run: `npm test -- src/domains/calendar/tests/segmentation.test.js`
 
@@ -261,7 +261,7 @@ Expected: all segmentation tests pass.
 - Produces: `savePlannerState(storagePort, state): Promise<void>`
 - Storage port: `{ get(key), set(key, value), remove(key) }`
 
-- [ ] **Step 1: Write failing migration tests**
+- [x] **Step 1: Write failing migration tests**
 
 ```js
 test("v4 inclusive all-day range becomes exclusive v5 timing", () => {
@@ -275,25 +275,25 @@ test("v4 timed duration rolls over into the next local day", () => {
 });
 ```
 
-- [ ] **Step 2: Run migration tests and verify RED**
+- [x] **Step 2: Run migration tests and verify RED**
 
 Run: `npm test -- src/domains/calendar/tests/migration.test.js`
 
 Expected: FAIL because migration modules do not exist.
 
-- [ ] **Step 3: Implement complete immutable migration and v5 validation**
+- [x] **Step 3: Implement complete immutable migration and v5 validation**
 
 Create `calendar-default`, add every event's `calendarId`, migrate event timing,
 initialize `eventExceptions` and `occurrenceAliases`, preserve unrelated state and
 compatible unknown fields, and leave Task overrides in `overrides`.
 
-- [ ] **Step 4: Run migration tests and verify GREEN**
+- [x] **Step 4: Run migration tests and verify GREEN**
 
 Run: `npm test -- src/domains/calendar/tests/migration.test.js`
 
 Expected: migration and invalid-state tests pass.
 
-- [ ] **Step 5: Write failing persistence cutover tests with an in-memory real port**
+- [x] **Step 5: Write failing persistence cutover tests with an in-memory real port**
 
 ```js
 test("confirmed v5 cutover removes v4 only after v5 can be read", async () => {
@@ -311,18 +311,18 @@ test("failed v5 write leaves v4 untouched", async () => {
 });
 ```
 
-- [ ] **Step 6: Run persistence tests and verify RED**
+- [x] **Step 6: Run persistence tests and verify RED**
 
 Run: `npm test -- src/platform/persistence/plannerStateStore.test.js`
 
 Expected: FAIL because the store does not exist.
 
-- [ ] **Step 7: Implement v5-first load, confirmed cutover, save, and remove**
+- [x] **Step 7: Implement v5-first load, confirmed cutover, save, and remove**
 
 Reads never seed over malformed state. A missing v4 and v5 returns `{ state: null,
 migrated: false }`. Add `remove` to host/local storage adapters.
 
-- [ ] **Step 8: Run persistence tests and verify GREEN**
+- [x] **Step 8: Run persistence tests and verify GREEN**
 
 Run: `npm test -- src/platform/persistence/plannerStateStore.test.js`
 
@@ -348,7 +348,7 @@ Expected: cutover and failure tests pass.
 - Produces: `getEventSegmentsForDay(events, date, options): DisplaySegment[]`
 - Produces: `getEventSegmentsForRange(events, start, end, options): DisplaySegment[]`
 
-- [ ] **Step 1: Replace legacy tests with failing canonical command/query tests**
+- [x] **Step 1: Replace legacy tests with failing canonical command/query tests**
 
 ```js
 test("moveEvent preserves duration across midnight", () => {
@@ -361,19 +361,19 @@ test("day queries include an event that started yesterday", () => {
 });
 ```
 
-- [ ] **Step 2: Run Calendar tests and verify RED**
+- [x] **Step 2: Run Calendar tests and verify RED**
 
 Run: `npm test -- src/domains/calendar/tests/event.test.js src/domains/calendar/tests/commands.test.js src/domains/calendar/tests/queries.test.js`
 
 Expected: FAIL because legacy event fields are still required.
 
-- [ ] **Step 3: Refactor event normalization, commands, and queries**
+- [x] **Step 3: Refactor event normalization, commands, and queries**
 
 Store `timing`, canonical metadata, revision, and `calendarId`. Queries inspect
 interval intersection and return canonical occurrences. Event movement accepts a
 new canonical start and preserves duration in the event's timing mode.
 
-- [ ] **Step 4: Run Calendar tests and verify GREEN**
+- [x] **Step 4: Run Calendar tests and verify GREEN**
 
 Run: `npm test -- src/domains/calendar/tests/event.test.js src/domains/calendar/tests/commands.test.js src/domains/calendar/tests/queries.test.js`
 
@@ -391,28 +391,28 @@ Expected: canonical Calendar tests pass.
 - Consumes: planner state store and Calendar public API.
 - Produces: existing timeline/editor behavior backed by v5 timing and segments.
 
-- [ ] **Step 1: Replace direct storage load/save with `plannerStateStore`**
+- [x] **Step 1: Replace direct storage load/save with `plannerStateStore`**
 
 Use v5-first load, seed only when both keys are absent, and show the existing
 storage warning on migration or persistence failure without replacing valid data.
 
-- [ ] **Step 2: Adapt day views, reminders, search, ICS export, inspection, gestures, and duplication**
+- [x] **Step 2: Adapt day views, reminders, search, ICS export, inspection, gestures, and duplication**
 
 Read display date/start/duration from Calendar occurrence projections. Keep Task
 logic unchanged. Gesture commands submit canonical timing changes.
 
-- [ ] **Step 3: Extend `Composer` with canonical timing controls**
+- [x] **Step 3: Extend `Composer` with canonical timing controls**
 
 Add start/end dates, start/end times, all-day through-date mapping, floating/zoned
 mode, timezone selection, ambiguity offset selection, and multi-day summary.
 
-- [ ] **Step 4: Run all tests and production build**
+- [x] **Step 4: Run all tests and production build**
 
 Run: `npm test && npm run build`
 
 Expected: all tests pass and Vite builds with no unresolved imports.
 
-- [ ] **Step 5: Update README persistence and module documentation**
+- [x] **Step 5: Update README persistence and module documentation**
 
 Document v5 cutover, canonical timing, timezone policy, and migration failure
 behavior.
@@ -424,19 +424,19 @@ behavior.
 **Files:**
 - Review all Phase 2A files and `docs/superpowers/specs/2026-08-09-calendar-phase-2-design.md`.
 
-- [ ] **Step 1: Scan for forbidden coupling and transitional event fields**
+- [x] **Step 1: Scan for forbidden coupling and transitional event fields**
 
 Run: `rg -n "window\\.|localStorage|from .*storage" src/domains/calendar src/shared/time && rg -n "event\\.(date|start|dur|endDate)" src/Planner.jsx src/domains/calendar`
 
 Expected: no browser coupling; remaining legacy field matches are Task-specific or migration fixtures.
 
-- [ ] **Step 2: Run fresh verification**
+- [x] **Step 2: Run fresh verification**
 
 Run: `npm test && npm run build && git diff --check`
 
 Expected: zero test failures, successful production bundle, and no whitespace errors.
 
-- [ ] **Step 3: Commit Phase 2A**
+- [x] **Step 3: Commit Phase 2A**
 
 ```bash
 git add README.md src docs/superpowers/plans/2026-08-09-calendar-phase-2a-time.md

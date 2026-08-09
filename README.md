@@ -19,28 +19,44 @@ npm run preview  # serve the built bundle
 | Path | What it is |
 | --- | --- |
 | `src/Planner.jsx` | Current presentation tree and temporary Task/Note orchestration |
-| `src/domains/calendar/` | Phase 1 Calendar model, commands, queries, recurrence, layout, and tests |
-| `src/shared/time/` | Shared date-only primitives used by Calendar and the current planner |
-| `src/storage.js` | Current local persistence adapter and the only browser storage I/O |
+| `src/domains/calendar/` | Calendar timing, recurrence, commands, queries, migrations, layout, and tests |
+| `src/shared/time/` | Date, local date-time, interval, and IANA timezone primitives |
+| `src/platform/persistence/` | Validated planner-state loading, saving, and v4-to-v5 cutover |
+| `src/storage.js` | Browser/host storage adapter and the only browser storage I/O |
 | `src/main.jsx` | Entry point: mounts `Planner` |
 | `src/index.css` | Tailwind import plus page-level resets |
 
-Calendar event reads and writes now pass through the public API in
-`src/domains/calendar/index.js`. The current `{ events, overrides }` storage shape
-is intentionally preserved so existing `nbmp:state:v4` data remains readable while
-the modular migration continues.
+Calendar event reads and writes pass through `src/domains/calendar/index.js`.
+Canonical events use all-day, floating-time, or IANA-zoned timing; recurrence and
+typed exceptions remain provider-neutral. Task recurrence temporarily retains its
+legacy representation until the Tasks domain is extracted.
 
 ## Storage
 
-`src/storage.js` prefers a host-provided `window.storage`
-(`get(key) -> {value}` / `set(key, value)`) when the planner is embedded, and falls
-back to `localStorage` otherwise, under the key `nbmp:state:v4`.
+`src/storage.js` prefers a host-provided `window.storage` when embedded and falls
+back to `localStorage`. Planner state is schema version 5 under `nbmp:state:v5`.
+On first load, a complete v4 state is validated and migrated in memory, written to
+v5, read back and validated, and only then is `nbmp:state:v4` removed. There is no
+dual-write period. A failed v5 write or confirmation leaves v4 untouched.
 
-Reads never reject — a failure just means "nothing saved yet", and the planner seeds
-itself. Writes do reject, so if the device can't be written to (quota, Safari private
-mode, disabled cookies) Settings says so and points at export instead. That check runs
-at load, so the warning appears before you've lost anything rather than after the
-first failed save.
+Missing storage seeds a new validated v5 notebook. Malformed or failed migration
+does not seed over existing data. Writes reject on storage failure so Settings can
+warn the user and preserve export as a recovery path.
+
+## Calendar foundations
+
+- Half-open intervals and exclusive all-day end dates.
+- Cross-midnight and multi-day event segmentation.
+- Floating and IANA-zoned local times with explicit DST ambiguity selection and
+  rejection of skipped wall times.
+- Daily, weekly, monthly, and yearly recurrence with interval, count, until,
+  weekdays, month days, ordinal weekdays, leap-day policy, and bounded expansion.
+- Reversible occurrence identities, typed modified/moved/cancelled/added
+  exceptions, exact undo snapshots, atomic this-and-following splits, aliases, and
+  orphan detection.
+- Existing editor controls for end date, time basis, timezone, ambiguity offsets,
+  recurrence termination, missing-date policy, next-five preview, and all three
+  recurring edit scopes.
 
 Settings can export the calendar as `.ics` or the full state as `.json`, and import a
 previously exported `.json` (which replaces everything, behind a confirmation).

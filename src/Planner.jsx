@@ -1,18 +1,29 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import * as storage from "./storage.js";
+import { migrateV4ToV5 } from "./domains/calendar/migrations/migrateV4ToV5.js";
+import { validatePlannerStateV5 } from "./domains/calendar/migrations/validatePlannerStateV5.js";
+import { loadPlannerState, savePlannerState } from "./platform/persistence/plannerStateStore.js";
 import {
   createEvent as createCalendarEvent,
   deleteEvent as deleteCalendarEvent,
-  getCalendarDensity,
-  getEventsForDay,
+  getOccurrencesForRange,
+  legacyEventInputToCanonical,
+  parseOccurrenceId,
+  previewRecurrence,
+  cancelOccurrence,
+  modifyOccurrence,
+  moveOccurrence,
+  restoreOccurrence,
+  splitSeries,
   moveEvent as moveCalendarEvent,
-  occursOn as calendarOccursOn,
   packEventLanes,
   resizeEvent as resizeCalendarEvent,
   restoreEvent as restoreCalendarEvent,
   updateEvent as updateCalendarEvent,
 } from "./domains/calendar/index.js";
-import { addDays, diffDays, keyOf, parseKey } from "./shared/time/dateKey.js";
+import { addDays, addDaysToKey, diffDays, keyOf, parseKey } from "./shared/time/dateKey.js";
+import { addMinutesToLocalDateTime, localDateTimeToEpochMinutes } from "./shared/time/localDateTime.js";
+import { getOffsetCandidates } from "./shared/time/timezone.js";
 
 /* ═══════════════════════ TOKENS ═══════════════════════ */
 
@@ -39,7 +50,6 @@ const SNAP = 5;
 const NOW_RED = "#C43A56";
 const NOW_LINE = "#B33450";
 const NOW_INK = "#5E1628";
-const STORE_KEY = "nbmp:state:v4";
 const ALERT_CHOICES = [0, 5, 15, 30, 60];
 const DAY_LETTERS = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
 
@@ -64,6 +74,76 @@ const snapTo = (m, s = SNAP) => Math.max(0, Math.min(1440, Math.round(m / s) * s
 const buzz = (p) => { try { navigator.vibrate && navigator.vibrate(p); } catch (e) {} };
 const splitId = (id) => { const i = String(id).indexOf("@"); return i === -1 ? { base: id, date: null } : { base: id.slice(0, i), date: id.slice(i + 1) }; };
 const fmtDay = (k) => { const d = parseKey(k); return `${WD[d.getDay()]} ${pad(d.getDate())} ${MO[d.getMonth()]}`; };
+
+const recurrenceToRepeat = (recurrence) => recurrence ? {
+  freq: recurrence.frequency,
+  interval: recurrence.interval || 1,
+  ...(recurrence.byWeekday ? { byDay: recurrence.byWeekday.map((value) => typeof value === "number" ? value : value.weekday) } : {}),
+  until: recurrence.until || "",
+  ...(recurrence.count ? { count: recurrence.count } : {}),
+  endMode: recurrence.count ? "count" : recurrence.until ? "until" : "never",
+  missingDatePolicy: recurrence.missingDatePolicy || "skip",
+  ...(recurrence.frequency === "monthly" ? { monthlyMode: recurrence.byWeekday?.some((value) => typeof value === "object" && value.ordinal === -1) ? "last-weekday" : "day" } : {}),
+} : null;
+
+function eventForUi(event) {
+  if (!event?.timing) return event;
+  const repeat = recurrenceToRepeat(event.recurrence);
+  if (event.timing.kind === "all-day") {
+    return {
+      ...event,
+      date: event.date || event.timing.startDate,
+      allDay: true,
+      start: 0,
+      dur: event.dur || 1440,
+      endDate: addDaysToKey(event.timing.endDateExclusive, -1),
+      repeat,
+    };
+  }
+  const start = localDateTimeToEpochMinutes(event.timing.startLocal);
+  const end = localDateTimeToEpochMinutes(event.timing.endLocal);
+  return {
+    ...event,
+    date: event.date || event.timing.startLocal.slice(0, 10),
+    allDay: false,
+    start: event.start ?? ((start % 1440) + 1440) % 1440,
+    dur: event.dur || end - start,
+    endDate: event.timing.endLocal.slice(0, 10),
+    repeat,
+    timeZoneMode: event.timing.timeZoneMode,
+    timeZone: event.timing.timeZone || "",
+  };
+}
+
+function canonicalOccurrenceIdentity(id) {
+  try { return parseOccurrenceId(id); } catch { return null; }
+}
+
+function eventTimingFromPosition(event, date, start = event.start, duration = event.dur) {
+  if (event.timing.kind === "all-day") {
+    const span = diffDays(event.timing.endDateExclusive, event.timing.startDate);
+    return { kind: "all-day", startDate: date, endDateExclusive: addDaysToKey(date, span) };
+  }
+  const startLocal = addMinutesToLocalDateTime(`${date}T00:00`, start);
+  const endLocal = addMinutesToLocalDateTime(startLocal, duration);
+  if (event.timing.timeZoneMode === "floating") {
+    return { kind: "timed", timeZoneMode: "floating", startLocal, endLocal };
+  }
+  const chooseOffset = (local, preferred) => {
+    const candidates = getOffsetCandidates(local, event.timing.timeZone);
+    if (!candidates.length) throw new RangeError(`${local} does not exist in ${event.timing.timeZone}`);
+    const preferredCandidate = candidates.find((candidate) => candidate.offset === preferred);
+    if (preferredCandidate) return preferredCandidate.offset;
+    if (candidates.length === 1) return candidates[0].offset;
+    throw new RangeError(`${local} is ambiguous; use the event editor to select an offset`);
+  };
+  return {
+    kind: "timed", timeZoneMode: "zoned", startLocal, endLocal,
+    timeZone: event.timing.timeZone,
+    startOffset: chooseOffset(startLocal, event.timing.startOffset),
+    endOffset: chooseOffset(endLocal, event.timing.endOffset),
+  };
+}
 
 /* ─── recurrence ─── */
 function taskOccursOn(item, dateKey) {
@@ -113,6 +193,7 @@ const repeatLabel = (r) => {
     return `${n === 1 ? "Weekly" : `Every ${n} weeks`}${d ? ` · ${d}` : ""}`;
   }
   if (r.freq === "monthly") return n === 1 ? "Monthly" : `Every ${n} months`;
+  if (r.freq === "yearly") return n === 1 ? "Yearly" : `Every ${n} years`;
   return "";
 };
 
@@ -280,12 +361,14 @@ export default function Planner() {
   useEffect(() => {
     let dead = false;
     (async () => {
-      let loaded = null;
       try {
-        const r = await storage.get(STORE_KEY);
-        if (r && r.value) loaded = JSON.parse(r.value);
-      } catch (e) { loaded = null; }
-      if (!dead) { setDb(loaded && loaded.events ? { overrides: {}, ...loaded } : seed()); setReady(true); }
+        const loaded = await loadPlannerState(storage);
+        const state = loaded.state || migrateV4ToV5(seed());
+        if (!loaded.state) await savePlannerState(storage, state);
+        if (!dead) { setDb(state); setStorageBad(false); setReady(true); }
+      } catch (error) {
+        if (!dead) { setStorageBad(true); setReady(true); }
+      }
     })();
     return () => { dead = true; };
   }, []);
@@ -296,7 +379,7 @@ export default function Planner() {
     if (!ready || !db) return;
     clearTimeout(saveT.current);
     saveT.current = setTimeout(() => {
-      storage.set(STORE_KEY, JSON.stringify(db)).then(() => setStorageBad(false), () => setStorageBad(true));
+      savePlannerState(storage, db).then(() => setStorageBad(false), () => setStorageBad(true));
     }, 400);
     return () => clearTimeout(saveT.current);
   }, [db, ready]);
@@ -330,7 +413,9 @@ export default function Planner() {
     return Array.from({ length: 42 }, (_, i) => addDays(start, i));
   }, [monthCursor]);
 
-  const dayEvents = useMemo(() => (db ? getEventsForDay(db.events, dateKey, ov) : []), [db, dateKey, ov]);
+  const dayEvents = useMemo(() => (db
+    ? getOccurrencesForRange(db, dateKey, addDaysToKey(dateKey, 1), { segments: true }).map(eventForUi)
+    : []), [db, dateKey]);
   const timed = useMemo(() => dayEvents.filter((e) => !e.allDay), [dayEvents]);
   const allDay = useMemo(() => dayEvents.filter((e) => e.allDay), [dayEvents]);
   const dayTasks = useMemo(() => {
@@ -411,7 +496,9 @@ export default function Planner() {
   /* ─── reminders ─── */
   useEffect(() => {
     if (!db) return;
-    const todays = getEventsForDay(db.events, todayKey, ov).filter((e) => !e.allDay && e.alerts && e.alerts.length);
+    const todays = getOccurrencesForRange(db, todayKey, addDaysToKey(todayKey, 1), { segments: true })
+      .map(eventForUi)
+      .filter((e) => !e.allDay && e.alerts && e.alerts.length);
     todays.forEach((e) => {
       (e.alerts || []).forEach((a) => {
         const fireAt = e.start - a;
@@ -443,7 +530,7 @@ export default function Planner() {
   const densityOf = useCallback((d) => {
     if (!db) return 0;
     const k = keyOf(d);
-    return getCalendarDensity(db.events, k, ov) + expandTasks(db.tasks, k, ov).filter((t) => !t.done).length;
+    return getOccurrencesForRange(db, k, addDaysToKey(k, 1)).length + expandTasks(db.tasks, k, ov).filter((t) => !t.done).length;
   }, [db, ov]);
 
   const briefing = useMemo(() => {
@@ -586,7 +673,14 @@ export default function Planner() {
     if (!item) return;
     const { base, date } = splitId(id);
     if (kind === "event") {
-      const scope = date ? "occurrence" : "series";
+      const canonical = canonicalOccurrenceIdentity(id);
+      const scope = canonical || date ? "occurrence" : "series";
+      if (canonical) {
+        const result = moveOccurrence(db, id, eventTimingFromPosition(item, targetKey), { id: uid() });
+        setDb(result.state);
+        flash(`Moved to ${fmtDay(targetKey)}`, { type: "restore-calendar-occurrence", snapshot: result.removed });
+        return;
+      }
       mutate((d) => moveCalendarEvent(d, id, { date: targetKey }, { scope }).state);
       flash(`Moved to ${fmtDay(targetKey)}`, {
         type: "calendar-event-move",
@@ -622,7 +716,11 @@ export default function Planner() {
     delete copy.id;
     delete copy.seriesId;
     delete copy.recurrenceDate;
+    delete copy.recurrenceAnchor;
     delete copy.instance;
+    delete copy.timing;
+    delete copy.recurrence;
+    delete copy.segmentId;
     mutate((d) => createCalendarEvent(d, {
       ...copy,
       repeat: null,
@@ -672,14 +770,30 @@ export default function Planner() {
     const { base, date } = splitId(id);
     let removed = null;
     if (kind === "event") {
-      const result = deleteCalendarEvent(db, id, {
-        scope: scope === "one" ? "occurrence" : "series",
-      });
+      const canonical = canonicalOccurrenceIdentity(id);
+      let result;
+      if (canonical && scope === "one") {
+        result = cancelOccurrence(db, id, { id: uid() });
+      } else if (canonical && scope === "following") {
+        const newSeriesId = uid();
+        const split = splitSeries(db, id, {}, { newSeriesId });
+        const deleted = deleteCalendarEvent(split.state, newSeriesId, { scope: "series" });
+        result = {
+          ...deleted,
+          removed: { kind: "planner-state", state: structuredClone(db) },
+        };
+      } else {
+        result = deleteCalendarEvent(db, canonical ? canonical.seriesId : id, { scope: "series" });
+      }
       removed = result.removed;
       setDb(result.state);
       setInspect(null); setScopeAsk(null);
       flash(scope === "one" && date ? "This one skipped" : "Deleted", {
-        type: "restore-calendar-event",
+        type: canonical && scope === "one"
+          ? "restore-calendar-occurrence"
+          : canonical && scope === "following"
+            ? "restore-planner-state"
+            : "restore-calendar-event",
         snapshot: removed,
       });
       return;
@@ -703,7 +817,7 @@ export default function Planner() {
 
   const removeItem = (kind, id) => {
     const { date } = splitId(id);
-    if (date) setScopeAsk({ action: "delete", kind, id });
+    if (date || (kind === "event" && canonicalOccurrenceIdentity(id))) setScopeAsk({ action: "delete", kind, id });
     else doDelete(kind, id, "all");
   };
 
@@ -717,6 +831,8 @@ export default function Planner() {
         if (p.kind === "note") d.notes = [...d.notes, p.item];
       }
       if (p.type === "restore-calendar-event") return restoreCalendarEvent(d, p.snapshot).state;
+      if (p.type === "restore-calendar-occurrence") return restoreOccurrence(d, p.snapshot).state;
+      if (p.type === "restore-planner-state" && p.snapshot?.state) return structuredClone(p.snapshot.state);
       if (p.type === "drop-event") return deleteCalendarEvent(d, p.id, { scope: "series" }).state;
       if (p.type === "unskip") { const o = { ...d.overrides }; delete o[p.key]; d.overrides = o; }
       if (p.type === "task-date") d.tasks = d.tasks.map((t) => (t.id === p.id ? { ...t, date: keyOf(addDays(parseKey(t.date), p.n)) } : t));
@@ -732,13 +848,43 @@ export default function Planner() {
   const commitSave = (p, scope) => {
     beep(p.id ? "click" : "schedule");
     const patch = p.kind === "event"
-      ? { title: p.title, start: p.start, dur: p.dur, cat: p.cat, place: p.place, note: p.note, allDay: p.allDay, endDate: p.endDate || null, repeat: p.repeat, alerts: p.alerts }
+      ? { title: p.title, start: p.start, dur: p.dur, cat: p.cat, place: p.place, note: p.note, allDay: p.allDay, endDate: p.endDate || null, repeat: p.repeat, recurrence: p.recurrence, timing: p.timing, alerts: p.alerts }
       : { title: p.title, cat: p.cat, xp: p.xp, at: p.at, due: p.due, note: p.note, repeat: p.repeat };
     if (p.date && scope !== "one") patch.date = p.date;
     if (p.id && p.kind === "event") {
-      mutate((d) => updateCalendarEvent(d, p.id, patch, {
-        scope: scope === "all" ? "series" : "occurrence",
-      }).state);
+      const canonical = canonicalOccurrenceIdentity(p.id);
+      mutate((d) => {
+        if (!canonical) return updateCalendarEvent(d, p.id, patch, { scope: scope === "all" ? "series" : "occurrence" }).state;
+        const eventInput = legacyEventInputToCanonical({ ...patch, date: p.date || dateKey });
+        if (scope === "one") {
+          const { timing, recurrence, ...metadata } = eventInput;
+          return moveOccurrence(d, p.id, timing, { id: uid(), patch: metadata }).state;
+        }
+        if (scope === "following") {
+          return splitSeries(d, p.id, {
+            ...eventInput,
+            recurrence: eventInput.recurrence,
+          }, { newSeriesId: uid() }).state;
+        }
+        const base = d.events.find((event) => event.id === canonical.seriesId);
+        let seriesTiming = eventInput.timing;
+        if (base?.timing.kind === "timed" && eventInput.timing.kind === "timed") {
+          const baseDate = base.timing.startLocal.slice(0, 10);
+          const duration = localDateTimeToEpochMinutes(eventInput.timing.endLocal) - localDateTimeToEpochMinutes(eventInput.timing.startLocal);
+          const startLocal = `${baseDate}${eventInput.timing.startLocal.slice(10)}`;
+          seriesTiming = {
+            ...eventInput.timing,
+            startLocal,
+            endLocal: addMinutesToLocalDateTime(startLocal, duration),
+            startOffset: undefined,
+            endOffset: undefined,
+          };
+        } else if (base?.timing.kind === "all-day" && eventInput.timing.kind === "all-day") {
+          const span = diffDays(eventInput.timing.endDateExclusive, eventInput.timing.startDate);
+          seriesTiming = { kind: "all-day", startDate: base.timing.startDate, endDateExclusive: addDaysToKey(base.timing.startDate, span) };
+        }
+        return updateCalendarEvent(d, canonical.seriesId, { ...patch, date: undefined, timing: seriesTiming }, { scope: "series" }).state;
+      });
     } else if (p.id) patchItem(p.kind, p.id, patch, scope);
     else {
       mutate((d) => {
@@ -758,7 +904,7 @@ export default function Planner() {
   };
   const saveEntry = (p) => {
     const { date } = splitId(p.id || "");
-    if (p.id && date) setScopeAsk({ action: "save", payload: p });
+    if (p.id && (date || canonicalOccurrenceIdentity(p.id))) setScopeAsk({ action: "save", payload: p });
     else commitSave(p, "all");
   };
 
@@ -786,18 +932,21 @@ export default function Planner() {
   const exportJson = () => download(`planner-${todayKey}.json`, JSON.stringify(db, null, 2), "application/json");
   const exportIcs = () => {
     const esc = (s) => String(s || "").replace(/([,;\\])/g, "\\$1").replace(/\n/g, "\\n");
-    const stamp = (k, m) => `${k.replace(/-/g, "")}T${pad(Math.floor(m / 60))}${pad(m % 60)}00`;
     const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Not Boring Moleskine Planner//EN"];
     db.events.forEach((e) => {
+      const view = eventForUi(e);
       lines.push("BEGIN:VEVENT", `UID:${e.id}@planner`, `SUMMARY:${esc(e.title)}`);
-      if (e.allDay) {
-        lines.push(`DTSTART;VALUE=DATE:${e.date.replace(/-/g, "")}`);
-        lines.push(`DTEND;VALUE=DATE:${keyOf(addDays(parseKey(e.endDate || e.date), 1)).replace(/-/g, "")}`);
+      if (view.allDay) {
+        lines.push(`DTSTART;VALUE=DATE:${e.timing.startDate.replace(/-/g, "")}`);
+        lines.push(`DTEND;VALUE=DATE:${e.timing.endDateExclusive.replace(/-/g, "")}`);
       } else {
-        lines.push(`DTSTART:${stamp(e.date, e.start)}`, `DTEND:${stamp(e.date, e.start + e.dur)}`);
+        lines.push(
+          `DTSTART:${e.timing.startLocal.replace(/[-:]/g, "")}00`,
+          `DTEND:${e.timing.endLocal.replace(/[-:]/g, "")}00`,
+        );
       }
-      if (e.repeat) {
-        const r = e.repeat;
+      if (view.repeat) {
+        const r = view.repeat;
         let rule = `FREQ=${r.freq.toUpperCase()};INTERVAL=${r.interval || 1}`;
         if (r.freq === "weekly" && r.byDay && r.byDay.length) rule += `;BYDAY=${r.byDay.map((i) => DAY_LETTERS[i]).join(",")}`;
         if (r.until) rule += `;UNTIL=${r.until.replace(/-/g, "")}T235900Z`;
@@ -816,7 +965,7 @@ export default function Planner() {
     r.onload = () => {
       try {
         const parsed = JSON.parse(r.result);
-        if (parsed && parsed.events) setPendingImport(parsed);
+        if (parsed && parsed.events) setPendingImport(parsed.schemaVersion === 5 ? validatePlannerStateV5(parsed) : migrateV4ToV5(parsed));
         else beep("abort");
       } catch (e) { beep("abort"); }
     };
@@ -824,7 +973,7 @@ export default function Planner() {
   };
   const wipeAll = () => {
     beep("delete");
-    setDb({ themeId: T.id, sound: db.sound, notifs: db.notifs, xp: 0, overrides: {}, events: [], tasks: [], notes: [] });
+    setDb(migrateV4ToV5({ themeId: T.id, sound: db.sound, notifs: db.notifs, xp: 0, overrides: {}, events: [], tasks: [], notes: [] }));
     setConfirmWipe(false);
     setSettings(false);
   };
@@ -884,15 +1033,33 @@ export default function Planner() {
       if (g.overDay && g.overDay !== key) moveToDay("event", g.id, g.overDay);
       else {
         beep("drop"); buzz(8);
-        const scope = splitId(g.id).date ? "occurrence" : "series";
-        mutate((d) => moveCalendarEvent(d, g.id, { start: g.start }, { scope }).state);
-        flash(`Moved to ${hhmm(g.start)}`, { type: "event-time", id: g.id, start: g.was.start, dur: g.was.dur, scope });
+        const canonical = canonicalOccurrenceIdentity(g.id);
+        if (canonical) {
+          const item = eventsRef.current.find((event) => event.id === g.id);
+          const timing = eventTimingFromPosition(item, key, g.start, g.dur);
+          const result = moveOccurrence(db, g.id, timing, { id: uid() });
+          setDb(result.state);
+          flash(`Moved to ${hhmm(g.start)}`, { type: "restore-calendar-occurrence", snapshot: result.removed });
+        } else {
+          const scope = splitId(g.id).date ? "occurrence" : "series";
+          mutate((d) => moveCalendarEvent(d, g.id, { start: g.start }, { scope }).state);
+          flash(`Moved to ${hhmm(g.start)}`, { type: "event-time", id: g.id, start: g.was.start, dur: g.was.dur, scope });
+        }
       }
     } else if (g.mode === "resize") {
       beep("drop");
-      const scope = splitId(g.id).date ? "occurrence" : "series";
-      mutate((d) => resizeCalendarEvent(d, g.id, g.dur, { scope }).state);
-      flash(`Set to ${dur(g.dur)}`, { type: "event-time", id: g.id, start: g.was.start, dur: g.was.dur, scope });
+      const canonical = canonicalOccurrenceIdentity(g.id);
+      if (canonical) {
+        const item = eventsRef.current.find((event) => event.id === g.id);
+        const timing = eventTimingFromPosition(item, key, g.start, g.dur);
+        const result = moveOccurrence(db, g.id, timing, { id: uid() });
+        setDb(result.state);
+        flash(`Set to ${dur(g.dur)}`, { type: "restore-calendar-occurrence", snapshot: result.removed });
+      } else {
+        const scope = splitId(g.id).date ? "occurrence" : "series";
+        mutate((d) => resizeCalendarEvent(d, g.id, g.dur, { scope }).state);
+        flash(`Set to ${dur(g.dur)}`, { type: "event-time", id: g.id, start: g.was.start, dur: g.was.dur, scope });
+      }
     } else if (g.mode === "draft") {
       beep("click");
       setComposer({ kind: "event", start: g.start, dur: g.dur });
@@ -1481,6 +1648,12 @@ export default function Planner() {
           <div className="flex flex-col gap-2">
             <button onClick={() => (scopeAsk.action === "delete" ? doDelete(scopeAsk.kind, scopeAsk.id, "one") : commitSave(scopeAsk.payload, "one"))}
               style={{ fontFamily: MONO, border: `1px solid ${T.line}` }} className="nb-tap py-3 text-xs tracking-widest">THIS DAY ONLY</button>
+            {scopeAsk.kind === "event" && canonicalOccurrenceIdentity(scopeAsk.id || scopeAsk.payload?.id) && (
+              <button onClick={() => (scopeAsk.action === "delete"
+                ? doDelete(scopeAsk.kind, scopeAsk.id, "following")
+                : commitSave(scopeAsk.payload, "following"))}
+                style={{ fontFamily: MONO, border: `1px solid ${T.line}` }} className="nb-tap py-3 text-xs tracking-widest">THIS AND FOLLOWING</button>
+            )}
             <button onClick={() => (scopeAsk.action === "delete" ? doDelete(scopeAsk.kind, scopeAsk.id, "all") : commitSave(scopeAsk.payload, "all"))}
               style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="nb-tap py-3 text-xs font-bold tracking-widest">THE WHOLE SERIES</button>
           </div>
@@ -1503,9 +1676,12 @@ export default function Planner() {
         <Sheet T={T} title="SEARCH" onClose={() => { beep("click"); setSearch(false); }}>
           <SearchPanel T={T} db={db} todayKey={todayKey} onPick={(item) => {
             setSearch(false);
-            const target = item.kind === "note" ? item.date : item.repeat ? nextOccurrence(item, todayKey) : item.date;
+            const occurrence = item.kind === "event" && item.recurrence
+              ? nextCalendarOccurrence(item, todayKey)
+              : null;
+            const target = item.kind === "note" ? item.date : occurrence ? occurrence.timing.kind === "all-day" ? occurrence.timing.startDate : occurrence.timing.startLocal.slice(0, 10) : item.repeat ? nextOccurrence(item, todayKey) : item.date;
             jumpTo(target);
-            if (item.kind !== "note") setTimeout(() => setInspect({ kind: item.kind, id: item.repeat ? `${item.id}@${target}` : item.id }), 60);
+            if (item.kind !== "note") setTimeout(() => setInspect({ kind: item.kind, id: occurrence?.id || (item.repeat ? `${item.id}@${target}` : item.id) }), 60);
           }} />
         </Sheet>
       )}
@@ -1553,7 +1729,7 @@ export default function Planner() {
               <div className="flex items-center gap-2 mb-2 p-2" style={{ boxShadow: `inset 0 0 0 1px ${NOW_RED}` }}>
                 <span className="flex-1 text-xs">Replace everything on this device?</span>
                 <button onClick={() => { setPendingImport(null); beep("abort"); }} style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">CANCEL</button>
-                <button onClick={() => { setDb({ overrides: {}, ...pendingImport }); setPendingImport(null); beep("commit"); setSettings(false); }} style={{ fontFamily: MONO, color: NOW_RED }} className="text-xs font-bold tracking-widest">REPLACE</button>
+                <button onClick={() => { setDb(pendingImport); setPendingImport(null); beep("commit"); setSettings(false); }} style={{ fontFamily: MONO, color: NOW_RED }} className="text-xs font-bold tracking-widest">REPLACE</button>
               </div>
             )}
             <div className="flex flex-wrap gap-2">
@@ -1598,9 +1774,16 @@ export default function Planner() {
 function nextOccurrence(item, fromKey) {
   for (let i = 0; i < 400; i++) {
     const k = keyOf(addDays(parseKey(fromKey), i));
-    if ((item.kind === "event" ? calendarOccursOn : taskOccursOn)(item, k)) return k;
+    if (taskOccursOn(item, k)) return k;
   }
   return item.date;
+}
+
+function nextCalendarOccurrence(item, fromKey) {
+  return previewRecurrence(item, 100).find((occurrence) => {
+    const date = occurrence.timing.kind === "all-day" ? occurrence.timing.startDate : occurrence.timing.startLocal.slice(0, 10);
+    return date >= fromKey;
+  }) || null;
 }
 
 /* ═══════════════════════ ACTIONS ═══════════════════════ */
@@ -1873,7 +2056,7 @@ function SearchPanel({ T, db, todayKey, onPick }) {
     if (!s) return [];
     const hit = (x) => [x.title, x.note, x.place, x.text].filter(Boolean).some((f) => String(f).toLowerCase().includes(s));
     return [
-      ...db.events.filter(hit).map((e) => ({ ...e, kind: "event" })),
+      ...db.events.filter(hit).map((e) => ({ ...eventForUi(e), kind: "event" })),
       ...db.tasks.filter(hit).map((t) => ({ ...t, kind: "task" })),
       ...db.notes.filter(hit).map((n) => ({ ...n, kind: "note", title: n.text.slice(0, 60) })),
     ].slice(0, 30);
@@ -1914,15 +2097,56 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
   const [alerts, setAlerts] = useState(initial.alerts || []);
   const [repeat, setRepeat] = useState(initial.repeat || null);
   const [date, setDate] = useState(initial.date || dateKey);
-  const ok = title.trim().length > 0;
+  const [timeZoneMode, setTimeZoneMode] = useState(initial.timeZoneMode || "floating");
+  const [timeZone, setTimeZone] = useState(initial.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
+  const [startOffset, setStartOffset] = useState(initial.timing?.startOffset || "");
+  const [endOffset, setEndOffset] = useState(initial.timing?.endOffset || "");
   const field = { background: "transparent", border: `1px solid ${T.line}` };
+  const startLocal = `${date}T${`${pad(Math.floor(start / 60))}:${pad(start % 60)}`}`;
+  const endLocal = addMinutesToLocalDateTime(startLocal, len);
+  const offsetInfo = useMemo(() => {
+    if (allDay || timeZoneMode !== "zoned") return { start: [], end: [], valid: true };
+    try {
+      const startCandidates = getOffsetCandidates(startLocal, timeZone);
+      const endCandidates = getOffsetCandidates(endLocal, timeZone);
+      return { start: startCandidates, end: endCandidates, valid: startCandidates.length > 0 && endCandidates.length > 0 };
+    } catch { return { start: [], end: [], valid: false }; }
+  }, [allDay, timeZoneMode, startLocal, endLocal, timeZone]);
+  const recurrence = repeat?.freq ? {
+    frequency: repeat.freq,
+    interval: repeat.interval || 1,
+    weekStart: 0,
+    ...(repeat.freq === "weekly" ? { byWeekday: repeat.byDay || [parseKey(date).getDay()] } : {}),
+    ...(repeat.freq === "monthly" && repeat.monthlyMode === "last-weekday" ? { byWeekday: [{ weekday: parseKey(date).getDay(), ordinal: -1 }] } : {}),
+    ...(repeat.freq === "monthly" && repeat.monthlyMode !== "last-weekday" ? { byMonthDay: [parseKey(date).getDate()] } : {}),
+    ...(repeat.freq === "yearly" ? { byMonth: [parseKey(date).getMonth() + 1], byMonthDay: [parseKey(date).getDate()] } : {}),
+    ...(repeat.endMode === "count" ? { count: Math.max(1, Number(repeat.count) || 1) } : repeat.until ? { until: repeat.until } : {}),
+    missingDatePolicy: repeat.missingDatePolicy || "skip",
+  } : null;
+  const timing = allDay
+    ? { kind: "all-day", startDate: date, endDateExclusive: addDaysToKey(endDate && endDate >= date ? endDate : date, 1) }
+    : {
+      kind: "timed", timeZoneMode, startLocal, endLocal,
+      ...(timeZoneMode === "zoned" ? {
+        timeZone,
+        ...(offsetInfo.start.length > 1 ? { startOffset: startOffset || offsetInfo.start[0].offset } : {}),
+        ...(offsetInfo.end.length > 1 ? { endOffset: endOffset || offsetInfo.end[0].offset } : {}),
+      } : {}),
+    };
+  const ok = title.trim().length > 0 && (allDay || offsetInfo.valid);
+  const preview = useMemo(() => {
+    if (kind !== "event" || !recurrence || !ok) return [];
+    try {
+      return previewRecurrence({ id: "preview", title: title.trim(), calendarId: "calendar-default", timing, recurrence }, 5);
+    } catch { return []; }
+  }, [kind, recurrence && JSON.stringify(recurrence), JSON.stringify(timing), ok]);
   const submit = () => {
     if (!ok) return;
-    onSubmit({ id: initial.id, date, kind, title: title.trim(), cat, start: allDay ? 0 : start, dur: allDay ? 0 : len, xp, place, note, at, due: due || null, allDay, endDate, alerts, repeat: repeat && repeat.freq ? repeat : null });
+    onSubmit({ id: initial.id, date, kind, title: title.trim(), cat, start: allDay ? 0 : start, dur: allDay ? 0 : len, xp, place, note, at, due: due || null, allDay, endDate, alerts, repeat: repeat && repeat.freq ? repeat : null, recurrence, timing });
   };
   const toTime = (m) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
   const fromTime = (s) => { const [h, m] = s.split(":").map(Number); return h * 60 + m; };
-  const setFreq = (f) => { onTick(); setRepeat(f ? { freq: f, interval: 1, byDay: f === "weekly" ? [parseKey(dateKey).getDay()] : undefined, until: (repeat && repeat.until) || "" } : null); };
+  const setFreq = (f) => { onTick(); setRepeat(f ? { freq: f, interval: 1, byDay: f === "weekly" ? [parseKey(date).getDay()] : undefined, until: (repeat && repeat.until) || "", endMode: "never", missingDatePolicy: "skip" } : null); };
   const toggleDay = (i) => {
     onTick();
     const days = (repeat.byDay || []).includes(i) ? repeat.byDay.filter((d) => d !== i) : [...(repeat.byDay || []), i].sort();
@@ -1961,26 +2185,57 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
           {allDay ? (
             <label className="flex flex-col gap-1 mb-3">
               <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">THROUGH (OPTIONAL)</span>
-              <input type="date" value={endDate} min={dateKey} onChange={(e) => setEndDate(e.target.value)} style={{ ...field, fontFamily: MONO }} className="px-2 py-2 text-sm" />
+              <input type="date" value={endDate} min={date} onChange={(e) => setEndDate(e.target.value)} style={{ ...field, fontFamily: MONO }} className="px-2 py-2 text-sm" />
             </label>
           ) : (
             <>
               <div className="grid grid-cols-2 gap-2 mb-2">
                 <label className="flex flex-col gap-1">
-                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">START</span>
+                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">START TIME</span>
                   <input type="time" step={60} value={toTime(start)} onChange={(e) => e.target.value && setStart(fromTime(e.target.value))} style={{ ...field, fontFamily: MONO }} className="px-2 py-2 text-sm" />
                 </label>
                 <label className="flex flex-col gap-1">
-                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">END</span>
-                  <input type="time" step={60} value={toTime((start + len) % 1440)} onChange={(e) => { if (!e.target.value) return; const end = fromTime(e.target.value); setLen(Math.max(5, end - start)); }} style={{ ...field, fontFamily: MONO }} className="px-2 py-2 text-sm" />
+                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">END TIME</span>
+                  <input type="time" step={60} value={endLocal.slice(11)} onChange={(e) => {
+                    if (!e.target.value) return;
+                    const proposed = `${endLocal.slice(0, 10)}T${e.target.value}`;
+                    setLen(Math.max(5, localDateTimeToEpochMinutes(proposed) - localDateTimeToEpochMinutes(startLocal)));
+                  }} style={{ ...field, fontFamily: MONO }} className="px-2 py-2 text-sm" />
                 </label>
               </div>
+              <label className="flex items-center gap-2 mb-2">
+                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">END DATE</span>
+                <input type="date" min={date} value={endLocal.slice(0, 10)} onChange={(e) => {
+                  if (!e.target.value) return;
+                  const proposed = `${e.target.value}T${endLocal.slice(11)}`;
+                  setLen(Math.max(5, localDateTimeToEpochMinutes(proposed) - localDateTimeToEpochMinutes(startLocal)));
+                }} style={{ ...field, fontFamily: MONO }} className="px-2 py-1 text-sm" />
+              </label>
               <div className="flex items-center gap-2 mb-3">
                 <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">MIN</span>
                 <input type="number" min={5} max={1440} step={5} value={len} onChange={(e) => setLen(Math.max(5, Number(e.target.value) || 5))} style={{ ...field, fontFamily: MONO }} className="w-20 px-2 py-1 text-sm" />
                 {[15, 30, 45, 60, 90, 120].map((d) => (
                   <button key={d} onClick={() => { onTick(); setLen(d); }} style={{ fontFamily: MONO, color: len === d ? T.accent : T.dim }} className="text-xs tracking-widest">{d}</button>
                 ))}
+              </div>
+              <div className="mb-3">
+                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">TIME BASIS</span>
+                <div className="flex gap-1 mt-1">
+                  {["floating", "zoned"].map((mode) => (
+                    <button key={mode} onClick={() => setTimeZoneMode(mode)} className="flex-1 py-1 text-xs tracking-widest"
+                      style={{ fontFamily: MONO, background: timeZoneMode === mode ? T.accent : "transparent", color: timeZoneMode === mode ? T.on : T.dim, border: `1px solid ${timeZoneMode === mode ? T.accent : T.line}` }}>{mode.toUpperCase()}</button>
+                  ))}
+                </div>
+                {timeZoneMode === "zoned" && (
+                  <>
+                    <input list="planner-timezones" value={timeZone} onChange={(e) => setTimeZone(e.target.value)} placeholder="IANA timezone" style={{ ...field, fontFamily: MONO }} className="w-full px-2 py-2 text-sm mt-2" />
+                    <datalist id="planner-timezones"><option value="America/Toronto" /><option value="America/New_York" /><option value="America/Los_Angeles" /><option value="Europe/London" /><option value="UTC" /></datalist>
+                    {!offsetInfo.valid && <span style={{ fontFamily: MONO, color: NOW_RED }} className="block text-xs tracking-widest mt-1">THIS LOCAL TIME DOES NOT EXIST IN THAT ZONE</span>}
+                    {offsetInfo.start.length > 1 && <select value={startOffset || offsetInfo.start[0].offset} onChange={(e) => setStartOffset(e.target.value)} style={{ ...field, fontFamily: MONO }} className="w-full px-2 py-2 text-sm mt-2">{offsetInfo.start.map((candidate) => <option key={candidate.offset} value={candidate.offset}>START {candidate.offset}</option>)}</select>}
+                    {offsetInfo.end.length > 1 && <select value={endOffset || offsetInfo.end[0].offset} onChange={(e) => setEndOffset(e.target.value)} style={{ ...field, fontFamily: MONO }} className="w-full px-2 py-2 text-sm mt-2">{offsetInfo.end.map((candidate) => <option key={candidate.offset} value={candidate.offset}>END {candidate.offset}</option>)}</select>}
+                  </>
+                )}
+                <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest mt-2">{dur(len)} · {date === endLocal.slice(0, 10) ? "SAME DAY" : `${date} → ${endLocal.slice(0, 10)}`}</span>
               </div>
               <div className="mb-3">
                 <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">REMIND ME</span>
@@ -2026,7 +2281,7 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
       <div className="mb-3">
         <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">REPEATS</span>
         <div className="flex flex-wrap gap-1 mt-1">
-          {[["", "ONCE"], ["daily", "DAILY"], ["weekly", "WEEKLY"], ["monthly", "MONTHLY"]].map(([f, label]) => {
+          {[["", "ONCE"], ["daily", "DAILY"], ["weekly", "WEEKLY"], ["monthly", "MONTHLY"], ["yearly", "YEARLY"]].map(([f, label]) => {
             const on = (repeat ? repeat.freq : "") === f;
             return (
               <button key={label} onClick={() => setFreq(f)} className="px-2 py-1 text-xs tracking-widest"
@@ -2039,7 +2294,7 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
             <div className="flex items-center gap-2">
               <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">EVERY</span>
               <input type="number" min={1} max={30} value={repeat.interval || 1} onChange={(e) => setRepeat({ ...repeat, interval: Math.max(1, Number(e.target.value) || 1) })} style={{ ...field, fontFamily: MONO }} className="w-16 px-2 py-1 text-sm" />
-              <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">{repeat.freq === "daily" ? "DAYS" : repeat.freq === "weekly" ? "WEEKS" : "MONTHS"}</span>
+              <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">{repeat.freq === "daily" ? "DAYS" : repeat.freq === "weekly" ? "WEEKS" : repeat.freq === "monthly" ? "MONTHS" : "YEARS"}</span>
             </div>
             {repeat.freq === "weekly" && (
               <div className="flex gap-1">
@@ -2052,10 +2307,34 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
                 })}
               </div>
             )}
-            <label className="flex items-center gap-2">
-              <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">UNTIL</span>
-              <input type="date" value={repeat.until || ""} onChange={(e) => setRepeat({ ...repeat, until: e.target.value })} style={{ ...field, fontFamily: MONO }} className="px-2 py-1 text-sm" />
-            </label>
+            {repeat.freq === "monthly" && (
+              <div className="flex gap-1">
+                {[['day', `DAY ${parseKey(date).getDate()}`], ['last-weekday', `LAST ${WD[parseKey(date).getDay()]}`]].map(([mode, label]) => (
+                  <button key={mode} onClick={() => setRepeat({ ...repeat, monthlyMode: mode })} className="flex-1 py-1 text-xs tracking-widest"
+                    style={{ fontFamily: MONO, background: (repeat.monthlyMode || "day") === mode ? T.accent : "transparent", color: (repeat.monthlyMode || "day") === mode ? T.on : T.dim, border: `1px solid ${(repeat.monthlyMode || "day") === mode ? T.accent : T.line}` }}>{label}</button>
+                ))}
+              </div>
+            )}
+            <div className="grid grid-cols-3 gap-1">
+              {[['never', 'NEVER'], ['until', 'UNTIL'], ['count', 'COUNT']].map(([mode, label]) => (
+                <button key={mode} onClick={() => setRepeat({ ...repeat, endMode: mode, until: mode === "until" ? repeat.until : "" })} className="py-1 text-xs tracking-widest"
+                  style={{ fontFamily: MONO, background: (repeat.endMode || "never") === mode ? T.accent : "transparent", color: (repeat.endMode || "never") === mode ? T.on : T.dim, border: `1px solid ${(repeat.endMode || "never") === mode ? T.accent : T.line}` }}>{label}</button>
+              ))}
+            </div>
+            {repeat.endMode === "until" && <input type="date" min={date} value={repeat.until || ""} onChange={(e) => setRepeat({ ...repeat, until: e.target.value })} style={{ ...field, fontFamily: MONO }} className="px-2 py-1 text-sm" />}
+            {repeat.endMode === "count" && <input type="number" min={1} value={repeat.count || 5} onChange={(e) => setRepeat({ ...repeat, count: Math.max(1, Number(e.target.value) || 1) })} style={{ ...field, fontFamily: MONO }} className="px-2 py-1 text-sm" />}
+            {(repeat.freq === "monthly" || repeat.freq === "yearly") && (
+              <label className="flex items-center gap-2">
+                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">MISSING DATE</span>
+                <select value={repeat.missingDatePolicy || "skip"} onChange={(e) => setRepeat({ ...repeat, missingDatePolicy: e.target.value })} style={{ ...field, fontFamily: MONO }} className="px-2 py-1 text-sm"><option value="skip">SKIP</option><option value="clamp">LAST DAY</option></select>
+              </label>
+            )}
+            {kind === "event" && preview.length > 0 && (
+              <div style={{ borderTop: `1px solid ${T.line}` }} className="pt-2">
+                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">NEXT FIVE</span>
+                <span style={{ fontFamily: MONO, color: T.text }} className="block text-xs mt-1">{preview.map((item) => item.recurrenceAnchor?.slice(0, 10)).join(" · ")}</span>
+              </div>
+            )}
           </div>
         )}
       </div>

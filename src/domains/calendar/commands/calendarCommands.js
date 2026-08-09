@@ -189,6 +189,7 @@ export function resizeEvent(state, eventId, duration, options = {}) {
       timing: {
         ...event.timing,
         endLocal: addMinutesToLocalDateTime(event.timing.startLocal, duration),
+        ...(event.timing.timeZoneMode === "zoned" ? { endOffset: undefined } : {}),
       },
     }, options);
   }

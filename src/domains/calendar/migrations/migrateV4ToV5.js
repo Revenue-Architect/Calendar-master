@@ -1,6 +1,8 @@
 import { addDaysToKey, assertDateKey } from "../../../shared/time/dateKey.js";
 import { addMinutesToLocalDateTime } from "../../../shared/time/localDateTime.js";
 import { validatePlannerStateV5 } from "./validatePlannerStateV5.js";
+import { legacyEventInputToCanonical } from "../model/event.js";
+import { makeOccurrenceId } from "../recurrence/occurrenceIdentity.js";
 
 export const DEFAULT_CALENDAR = Object.freeze({
   id: "calendar-default",
@@ -59,26 +61,41 @@ function migrateEvent(event) {
   };
 }
 
-function migrateOverrides(overrides, events) {
+function migrateOverrides(overrides, events, canonicalEvents) {
   const eventIds = new Set(events.map((event) => event.id));
+  const sourceById = new Map(events.map((event) => [event.id, event]));
+  const canonicalById = new Map(canonicalEvents.map((event) => [event.id, event]));
   const taskOverrides = {};
   const eventExceptions = [];
   for (const [occurrenceId, override] of Object.entries(overrides || {})) {
     const separator = occurrenceId.lastIndexOf("@");
     const seriesId = separator > 0 ? occurrenceId.slice(0, separator) : "";
-    const recurrenceAnchor = separator > 0 ? occurrenceId.slice(separator + 1) : "";
+    const recurrenceDate = separator > 0 ? occurrenceId.slice(separator + 1) : "";
     if (!eventIds.has(seriesId)) {
       taskOverrides[occurrenceId] = { ...override };
       continue;
     }
-    const { deleted, date, ...patch } = override;
+    const source = sourceById.get(seriesId);
+    const canonical = canonicalById.get(seriesId);
+    const recurrenceAnchor = canonical.timing.kind === "all-day"
+      ? recurrenceDate
+      : `${recurrenceDate}${canonical.timing.startLocal.slice(10)}`;
+    const canonicalOccurrenceId = makeOccurrenceId(seriesId, recurrenceAnchor);
+    const { deleted, date, start, dur, allDay, endDate, ...patch } = override;
+    const moved = date != null || start != null || dur != null || allDay != null || endDate != null;
+    const timing = moved ? legacyEventInputToCanonical({
+      ...source,
+      ...override,
+      date: date || recurrenceDate,
+      repeat: null,
+    }).timing : null;
     eventExceptions.push({
       id: `migrated:${occurrenceId}`,
-      occurrenceId,
+      occurrenceId: canonicalOccurrenceId,
       seriesId,
       recurrenceAnchor,
-      type: deleted ? "cancelled" : date && date !== recurrenceAnchor ? "moved" : "modified",
-      ...(deleted ? {} : { patch: { ...patch, ...(date ? { date } : {}) } }),
+      type: deleted ? "cancelled" : moved ? "moved" : "modified",
+      ...(deleted ? {} : moved ? { timing, ...(Object.keys(patch).length ? { patch } : {}) } : { patch }),
       revision: 1,
     });
   }
@@ -89,7 +106,7 @@ export function migrateV4ToV5(state) {
   if (!state || typeof state !== "object") throw new TypeError("v4 planner state must be an object");
   const sourceEvents = Array.isArray(state.events) ? state.events : [];
   const events = sourceEvents.map(migrateEvent);
-  const { taskOverrides, eventExceptions } = migrateOverrides(state.overrides, sourceEvents);
+  const { taskOverrides, eventExceptions } = migrateOverrides(state.overrides, sourceEvents, events);
   const migrated = {
     ...state,
     schemaVersion: 5,
