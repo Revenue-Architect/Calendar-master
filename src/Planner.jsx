@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import * as storage from "./storage.js";
 
 /* ═══════════════════════ TOKENS ═══════════════════════ */
 
@@ -45,6 +46,10 @@ const WD1 = ["S", "M", "T", "W", "T", "F", "S"];
 const MO = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 const hhmm = (m) => `${pad(Math.floor(m / 60) % 24)}:${pad(Math.round(m) % 60)}`;
 const uid = () => Math.random().toString(36).slice(2, 9);
+const isDark = (hex) => {
+  const n = parseInt(hex.slice(1), 16);
+  return (0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255 < 0.5;
+};
 const dur = (m) => (m >= 60 ? `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ""}` : `${Math.round(m)}m`);
 const snapTo = (m, s = SNAP) => Math.max(0, Math.min(1440, Math.round(m / s) * s));
 const buzz = (p) => { try { navigator.vibrate && navigator.vibrate(p); } catch (e) {} };
@@ -267,7 +272,7 @@ export default function Planner() {
   const [alertToast, setAlertToast] = useState(null);
   const [confirmWipe, setConfirmWipe] = useState(false);
   const [pendingImport, setPendingImport] = useState(null);
-  const [storageBad, setStorageBad] = useState(false);
+  const [storageBad, setStorageBad] = useState(!storage.writable);
 
   const stripRef = useRef(null);
   const activeRef = useRef(null);
@@ -292,7 +297,7 @@ export default function Planner() {
     (async () => {
       let loaded = null;
       try {
-        const r = await window.storage.get(STORE_KEY);
+        const r = await storage.get(STORE_KEY);
         if (r && r.value) loaded = JSON.parse(r.value);
       } catch (e) { loaded = null; }
       if (!dead) { setDb(loaded && loaded.events ? { overrides: {}, ...loaded } : seed()); setReady(true); }
@@ -306,10 +311,7 @@ export default function Planner() {
     if (!ready || !db) return;
     clearTimeout(saveT.current);
     saveT.current = setTimeout(() => {
-      try {
-        const r = window.storage.set(STORE_KEY, JSON.stringify(db));
-        if (r && r.catch) r.catch(() => setStorageBad(true));
-      } catch (e) { setStorageBad(true); }
+      storage.set(STORE_KEY, JSON.stringify(db)).then(() => setStorageBad(false), () => setStorageBad(true));
     }, 400);
     return () => clearTimeout(saveT.current);
   }, [db, ready]);
@@ -318,6 +320,17 @@ export default function Planner() {
 
   const T = useMemo(() => THEMES.find((t) => t.id === (db && db.themeId)) || THEMES[0], [db]);
   const beep = useSynth(db ? db.sound : true);
+
+  /* The theme lives in state, so the page around the app has to follow it: the body
+     (otherwise overscroll shows a mismatched strip), the browser chrome on mobile,
+     and color-scheme — which is what makes the native date and time pickers in the
+     composer legible instead of dark-on-dark. */
+  useEffect(() => {
+    document.body.style.background = T.bg;
+    document.documentElement.style.colorScheme = isDark(T.bg) ? "dark" : "light";
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", T.bg);
+  }, [T]);
 
   const todayKey = keyOf(now);
   const nowMin = now.getHours() * 60 + now.getMinutes();
@@ -342,12 +355,18 @@ export default function Planner() {
   const notes = useMemo(() => (db ? db.notes.filter((n) => n.date === dateKey) : []), [db, dateKey]);
   const openCount = dayTasks.filter((t) => !t.done).length;
 
+  /* Overdue means unfinished work that still needs doing — a debt. A missed day of a
+     recurring task isn't one: you don't owe yesterday's walk on top of today's, and
+     today's instance is already on the page. So recurring instances are left out, the
+     same way deadlines already skip them, and the streak carries the "did you keep it
+     up" signal instead. Without this a single daily habit reads as 14 overdue items
+     that PULL IN can't clear. */
   const overdue = useMemo(() => {
     if (!db) return [];
     const out = [];
     for (let i = 1; i <= 14; i++) {
       const k = keyOf(addDays(now, -i));
-      expand(db.tasks, k, ov).forEach((t) => { if (!t.done) out.push(t); });
+      expand(db.tasks, k, ov).forEach((t) => { if (!t.done && !t.instance) out.push(t); });
     }
     return out;
   }, [db, todayKey, ov]);
@@ -591,8 +610,7 @@ export default function Planner() {
   };
   const pullOverdue = () => {
     beep("schedule");
-    const plain = overdue.filter((t) => !t.instance);
-    const ids = plain.map((t) => ({ id: t.id, date: t.date }));
+    const ids = overdue.map((t) => ({ id: t.id, date: t.date }));
     mutate((d) => { d.tasks = d.tasks.map((t) => (ids.find((x) => x.id === t.id) ? { ...t, date: todayKey } : t)); return d; });
     flash(`${ids.length} pulled to today`, { type: "task-restore-dates", ids });
   };
