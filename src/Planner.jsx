@@ -18,7 +18,6 @@ import {
   updateNote as updateNoteCommand,
 } from "./domains/notes/index.js";
 import { migrateV4ToV5 } from "./domains/calendar/migrations/migrateV4ToV5.js";
-import { validatePlannerStateV5 } from "./domains/calendar/migrations/validatePlannerStateV5.js";
 import {
   SMART_VIEWS,
   addTaskDependency,
@@ -37,7 +36,6 @@ import {
   countOpen,
   createTask as createTaskCommand,
   deferTask as deferTaskCommand,
-  deleteTask as deleteTaskCommand,
   getBlockedTasks,
   getDayTasks,
   getOverdueForToday,
@@ -55,14 +53,30 @@ import {
   planTask as planTaskCommand,
   promoteChecklistItem as promoteChecklistItemCommand,
   removeTaskException,
-  removeTaskExceptionsForSeries,
-  taskExceptionsForSeries,
   reopenTask as reopenTaskCommand,
   scheduleTask as scheduleTaskCommand,
   updateTask as updateTaskCommand,
   upsertTaskException,
 } from "./domains/tasks/index.js";
 import { loadPlannerState, savePlannerState } from "./platform/persistence/plannerStateStore.js";
+import {
+  createBlankPlannerState,
+  normalizeImportedPlannerState,
+} from "./platform/persistence/plannerStateImport.js";
+import {
+  projectNoteSearchResult,
+  projectTaskSearchResult,
+  searchResultDateLabel,
+} from "./features/search/searchProjection.js";
+import { textToNoteBlocks } from "./features/notes/noteText.js";
+import {
+  applyBulkTaskAction,
+  createTaskMutationUndoPayload,
+  deleteTaskFromPlannerState,
+  restoreDeletedTaskInPlannerState,
+  restoreTaskPlannedDates,
+} from "./features/planner/taskMutations.js";
+import { resolveTaskForInspection } from "./features/planner/taskInspection.js";
 import {
   createEvent as createCalendarEvent,
   deleteEvent as deleteCalendarEvent,
@@ -939,8 +953,9 @@ export default function Planner() {
     if (!t) return;
     beep("defer"); buzz(10);
     /* §5.4 keeps the deadline where it is; only the plan moves. */
+    const undoPayload = createTaskMutationUndoPayload(db, id, { type: "task-defer", id, n: -n });
     writeTask(id, (state, taskId) => deferTaskCommand(state.tasks, taskId, n));
-    flash(n > 0 ? "Moved to tomorrow" : "Moved back", { type: "task-defer", id, n: -n });
+    flash(n > 0 ? "Moved to tomorrow" : "Moved back", undoPayload);
   };
   const moveToDay = (kind, id, targetKey) => {
     beep("drop"); buzz(8);
@@ -965,24 +980,32 @@ export default function Planner() {
       });
       return;
     }
+    const undoPayload = createTaskMutationUndoPayload(db, id, {
+      type: "back-date", kind, id, date: item.planned?.date,
+    });
     writeTask(id, (state, taskId) => planTaskCommand(state.tasks, taskId, {
       date: targetKey,
       startMinute: item.planned?.startMinute ?? null,
       estimateMinutes: item.planned?.estimateMinutes ?? null,
     }));
-    flash(`Moved to ${fmtDay(targetKey)}`, { type: "back-date", kind, id, date: item.planned?.date });
+    flash(`Moved to ${fmtDay(targetKey)}`, undoPayload);
   };
   const pullOverdue = () => {
     beep("schedule");
     /* Everything counted as overdue is a real one-off task, so everything counted is
        something this button can actually move — the count always clears. */
     const ids = overdue.map((t) => ({ id: t.id, date: t.planned.date }));
-    mutate((d) => ({
-      ...d,
-      tasks: d.tasks.map((t) => (ids.some((x) => x.id === t.id)
-        ? { ...t, planned: { ...t.planned, date: todayKey } }
-        : t)),
-    }));
+    mutate((d) => {
+      let tasks = d.tasks;
+      for (const entry of ids) {
+        tasks = planTaskCommand(tasks, entry.id, {
+          date: todayKey,
+          startMinute: tasks.find((task) => task.id === entry.id)?.planned.startMinute ?? null,
+          estimateMinutes: tasks.find((task) => task.id === entry.id)?.planned.estimateMinutes ?? null,
+        }).tasks;
+      }
+      return { ...d, tasks };
+    });
     flash(`${ids.length} planned for today`, { type: "task-restore-dates", ids });
   };
   const duplicateEvent = (id) => {
@@ -1113,48 +1136,22 @@ export default function Planner() {
   const runBulk = (action, bulkArg = null) => {
     const ids = [...(selection ?? [])];
     if (!ids.length) return;
-    let done = 0;
-    const failed = [];
-    mutate((d) => {
-      let tasks = d.tasks;
-      let taskExceptions = d.taskExceptions;
-      let xp = d.xp;
-      for (const id of ids) {
-        const seriesId = parseTaskOccurrenceId(id).seriesId;
-        const task = tasks.find((t) => t.id === seriesId);
-        if (!task) { failed.push({ id, why: "gone" }); continue; }
-        try {
-          if (action === "complete") {
-            if (blockingReasons(tasks, task).length) { failed.push({ id, why: "blocked", title: task.title }); continue; }
-            tasks = completeTaskCommand(tasks, seriesId, { now: nowStamp() }).tasks;
-            xp += task.reward || 0;
-          } else if (action === "defer") {
-            tasks = deferTaskCommand(tasks, seriesId, 1).tasks;
-          } else if (action === "today") {
-            tasks = planTaskCommand(tasks, seriesId, { date: todayKey, startMinute: task.planned.startMinute, estimateMinutes: task.planned.estimateMinutes }).tasks;
-          } else if (action === "list") {
-            tasks = moveTaskToList(tasks, seriesId, bulkArg, d.taskLists).tasks;
-          } else if (action === "tag") {
-            tasks = setTaskTags(tasks, seriesId, [...(task.tags ?? []), bulkArg]).tasks;
-          } else if (action === "priority") {
-            tasks = updateTaskCommand(tasks, seriesId, { priority: bulkArg }, { now: nowStamp() }).tasks;
-          } else if (action === "delete") {
-            tasks = deleteTaskCommand(tasks, seriesId).tasks;
-            if (task.status === "completed") xp = Math.max(0, xp - (task.reward || 0));
-          }
-          done += 1;
-        } catch (error) {
-          failed.push({ id, why: "refused", title: task.title });
-        }
-      }
-      return { ...d, tasks, taskExceptions, xp };
+    const before = structuredClone(db);
+    const result = applyBulkTaskAction(db, ids, action, {
+      bulkArg,
+      createId: uid,
+      now: nowStamp(),
+      todayKey,
     });
+    const done = result.completedIds.length;
+    const failed = result.failures;
+    setDb(result.state);
     beep(failed.length ? "abort" : "commit");
     flash(
       failed.length
-        ? `${done} of ${ids.length} — ${failed.length} ${failed[0].why === "blocked" ? "blocked" : "refused"}`
+        ? `${done} of ${ids.length} — ${failed.length} ${failed[0].reason === "blocked" ? "blocked" : "refused"}`
         : `${done} ${action === "delete" ? "deleted" : action === "complete" ? "completed" : action === "tag" ? "tagged" : action === "priority" ? "reprioritised" : "moved"}`,
-      null,
+      done ? { type: "restore-planner-state", snapshot: { state: before } } : null,
     );
     setSelection(null);
   };
@@ -1197,43 +1194,29 @@ export default function Planner() {
       });
       return;
     }
+    if (kind === "task") {
+      const targetId = date && scope === "one" ? id : base;
+      const result = deleteTaskFromPlannerState(db, targetId, { exceptionId: uid() });
+      const reward = result.removed.kind === "series" && result.removed.tasks[0]?.status === "completed"
+        ? result.removed.tasks[0].reward || 0
+        : 0;
+      setDb(reward
+        ? { ...result.state, xp: Math.max(0, result.state.xp - reward) }
+        : result.state);
+      setInspect(null); setScopeAsk(null);
+      flash(result.removed.kind === "occurrence" ? "This one skipped" : "Deleted", {
+        type: "restore-task-deletion",
+        removed: result.removed,
+        reward,
+      });
+      return;
+    }
     mutate((d) => {
-      if (date && scope === "one") {
-        d.overrides = { ...d.overrides, [`${base}@${date}`]: { ...(d.overrides[`${base}@${date}`] || {}), deleted: true } };
-        return d;
-      }
-      if (kind === "task") {
-        removed = d.tasks.find((x) => x.id === base);
-        if (removed && removed.status === "completed") d.xp = Math.max(0, d.xp - (removed.reward || 0));
-        /* §15.5. Strips every dependency edge pointing at what is going away, so no
-           survivor is left permanently and invisibly blocked by a ghost. */
-        const result = deleteTaskCommand(d.tasks, base);
-        const goneIds = new Set((result.events[0]?.removed ?? [removed]).filter(Boolean).map((x) => x.id));
-        /* An occurrence exception outlives the series it belongs to unless it is
-           taken with it, and a stored exception whose series is missing makes the
-           whole notebook fail validation — after which nothing saves at all. The
-           dropped exceptions travel in the undo payload so completion history is
-           restored with the task rather than reconstructed. */
-        const droppedExceptions = taskExceptionsForSeries(d.taskExceptions, goneIds);
-        d.taskExceptions = removeTaskExceptionsForSeries(d.taskExceptions, goneIds);
-        /* A note line that produced one of these tasks must be able to produce one
-           again, so its extraction marker is cleared with the task (§7.2). */
-        d.notes = d.notes.map((note) => (note.blocks.some((blk) => goneIds.has(blk.extractedTaskId))
-          ? { ...note, blocks: note.blocks.map((blk) => (goneIds.has(blk.extractedTaskId) ? { ...blk, extractedTaskId: null } : blk)) }
-          : note));
-        d.tasks = result.tasks;
-        removed = {
-          ...removed,
-          detachedFrom: result.events[0]?.detachedFrom ?? [],
-          alsoRemoved: (result.events[0]?.removed ?? []).filter((x) => x.id !== base),
-          droppedExceptions,
-        };
-      }
       if (kind === "note") { removed = d.notes.find((n) => n.id === base); d.notes = d.notes.filter((n) => n.id !== base); }
       return d;
     });
     setInspect(null); setNoteEdit(null); setScopeAsk(null);
-    flash(scope === "one" && date ? "This one skipped" : "Deleted", date && scope === "one" ? { type: "unskip", key: `${base}@${date}` } : { type: "restore", kind, item: removed });
+    flash("Deleted", { type: "restore", kind, item: removed });
   };
 
   const removeItem = (kind, id) => {
@@ -1248,16 +1231,11 @@ export default function Planner() {
     beep("click");
     mutate((d) => {
       if (p.type === "restore" && p.item) {
-        if (p.kind === "task") {
-          const { detachedFrom, alsoRemoved, droppedExceptions, ...task } = p.item;
-          d.tasks = [...d.tasks, task, ...(alsoRemoved ?? [])];
-          d.taskExceptions = [...(d.taskExceptions ?? []), ...(droppedExceptions ?? [])];
-          for (const entry of detachedFrom ?? []) {
-            d.tasks = d.tasks.map((x) => (x.id === entry.taskId ? { ...x, dependsOn: [...entry.dependsOn] } : x));
-          }
-          if (task.status === "completed") d.xp += task.reward || 0;
-        }
         if (p.kind === "note") d.notes = [...d.notes, p.item];
+      }
+      if (p.type === "restore-task-deletion" && p.removed) {
+        const restored = restoreDeletedTaskInPlannerState(d, p.removed);
+        return p.reward ? { ...restored, xp: restored.xp + p.reward } : restored;
       }
       if (p.type === "restore-calendar-event") return restoreCalendarEvent(d, p.snapshot).state;
       if (p.type === "restore-calendar-occurrence") return restoreOccurrence(d, p.snapshot).state;
@@ -1280,9 +1258,9 @@ export default function Planner() {
           ? { ...t, planned: { ...t.planned, date: addDaysToKey(t.planned.date, p.n) } }
           : t));
       }
-      if (p.type === "back-date") d.tasks = d.tasks.map((x) => (x.id === p.id ? { ...x, date: p.date } : x));
+      if (p.type === "back-date") d.tasks = restoreTaskPlannedDates(d.tasks, [{ id: p.id, date: p.date }]);
       if (p.type === "calendar-event-move") return moveCalendarEvent(d, p.id, p.target, { scope: p.scope }).state;
-      if (p.type === "task-restore-dates") d.tasks = d.tasks.map((t) => { const m = p.ids.find((x) => x.id === t.id); return m ? { ...t, date: m.date } : t; });
+      if (p.type === "task-restore-dates") d.tasks = restoreTaskPlannedDates(d.tasks, p.ids);
       if (p.type === "event-time") return updateCalendarEvent(d, p.id, { start: p.start, dur: p.dur }, { scope: p.scope }).state;
       return d;
     });
@@ -1358,21 +1336,6 @@ export default function Planner() {
     else commitSave(p, "all");
   };
 
-  /* A note is a document of blocks, so the editor edits blocks. Splitting typed text
-     on blank lines is the one structural signal plain typing carries; nothing else
-     is inferred. */
-  const textToBlocks = (text, existing = []) => text
-    .split(/\n{2,}/)
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .map((part, index) => ({
-      id: existing[index]?.id ?? uid(),
-      type: existing[index]?.type === "checklist" ? "checklist" : "paragraph",
-      text: part,
-      order: index,
-      ...(existing[index]?.type === "checklist" ? { done: existing[index].done } : {}),
-    }));
-
   const saveNote = (id, text) => {
     beep("click");
     mutate((d) => {
@@ -1382,7 +1345,7 @@ export default function Planner() {
       const targetId = id || getDailyNote(d.notes, dateKey)?.id || null;
       if (targetId) {
         const current = d.notes.find((n) => n.id === targetId);
-        return { ...d, notes: updateNoteCommand(d.notes, targetId, { blocks: textToBlocks(text, current?.blocks ?? []) }, { now: nowStamp() }).notes };
+        return { ...d, notes: updateNoteCommand(d.notes, targetId, { blocks: textToNoteBlocks(text, current?.blocks ?? [], uid) }, { now: nowStamp() }).notes };
       }
       return {
         ...d,
@@ -1390,7 +1353,7 @@ export default function Planner() {
           id: uid(),
           kind: "daily",
           date: dateKey,
-          blocks: textToBlocks(text),
+          blocks: textToNoteBlocks(text, [], uid),
         }, { now: nowStamp() }).notes,
       };
     });
@@ -1467,7 +1430,7 @@ export default function Planner() {
     r.onload = () => {
       try {
         const parsed = JSON.parse(r.result);
-        if (parsed && parsed.events) setPendingImport(parsed.schemaVersion === 6 ? parsed : migrateV5ToV6(parsed.schemaVersion === 5 ? validatePlannerStateV5(parsed) : migrateV4ToV5(parsed)));
+        if (parsed && parsed.events) setPendingImport(normalizeImportedPlannerState(parsed));
         else beep("abort");
       } catch (e) { beep("abort"); }
     };
@@ -1475,7 +1438,7 @@ export default function Planner() {
   };
   const wipeAll = () => {
     beep("delete");
-    setDb(migrateV4ToV5({ themeId: T.id, sound: db.sound, notifs: db.notifs, xp: 0, overrides: {}, events: [], tasks: [], notes: [] }));
+    setDb(createBlankPlannerState({ themeId: T.id, sound: db.sound, notifs: db.notifs, clock: db.clock }));
     setConfirmWipe(false);
     setSettings(false);
   };
@@ -1751,7 +1714,9 @@ export default function Planner() {
   eventsRef.current = events;
   dateKeyRef.current = dateKey;
 
-  const inspectItem = inspect && (inspect.kind === "event" ? dayEvents.find((e) => e.id === inspect.id) : dayTasks.find((t) => t.id === inspect.id));
+  const inspectItem = inspect && (inspect.kind === "event"
+    ? dayEvents.find((event) => event.id === inspect.id)
+    : resolveTaskForInspection(dayTasks, db.tasks, inspect.id));
   const inspectBlockers = inspect && inspect.kind === "task" && db
     ? getTaskBlockers(db.tasks, parseTaskOccurrenceId(inspect.id).seriesId)
     : [];
@@ -2682,12 +2647,17 @@ export default function Planner() {
         <Sheet T={T} title="SEARCH" onClose={() => { beep("click"); setSearch(false); }}>
           <SearchPanel T={T} db={db} todayKey={todayKey} onPick={(item) => {
             setSearch(false);
+            if (item.kind === "note") {
+              if (item.date) jumpTo(item.date);
+              setNoteEdit(item);
+              return;
+            }
             const occurrence = item.kind === "event" && item.recurrence
               ? nextCalendarOccurrence(item, todayKey)
               : null;
-            const target = item.kind === "note" ? item.date : occurrence ? occurrence.timing.kind === "all-day" ? occurrence.timing.startDate : occurrence.timing.startLocal.slice(0, 10) : item.repeat ? nextOccurrence(item, todayKey) : item.date;
-            jumpTo(target);
-            if (item.kind !== "note") setTimeout(() => setInspect({ kind: item.kind, id: occurrence?.id || (item.repeat ? `${item.id}@${target}` : item.id) }), 60);
+            const target = occurrence ? occurrence.timing.kind === "all-day" ? occurrence.timing.startDate : occurrence.timing.startLocal.slice(0, 10) : item.repeat ? nextOccurrence(item, todayKey) : item.date;
+            if (target) jumpTo(target);
+            setTimeout(() => setInspect({ kind: item.kind, id: occurrence?.id || (item.repeat ? `${item.id}@${target}` : item.id) }), 60);
           }} />
         </Sheet>
       )}
@@ -3300,8 +3270,8 @@ function SearchPanel({ T, db, todayKey, onPick }) {
     const hit = (x) => [x.title, x.note, x.place, x.text].filter(Boolean).some((f) => String(f).toLowerCase().includes(s));
     return [
       ...db.events.filter(hit).map((e) => ({ ...eventForUi(e), kind: "event" })),
-      ...db.tasks.filter(hit).map((t) => ({ ...t, kind: "task" })),
-      ...searchNotes(db.notes, q).map((n) => ({ ...n, kind: "note", title: noteExcerpt(n, 60) })),
+      ...db.tasks.filter(hit).map(projectTaskSearchResult),
+      ...searchNotes(db.notes, q).map((n) => projectNoteSearchResult(n, noteExcerpt(n, 60))),
     ].slice(0, 30);
   }, [q, db]);
 
@@ -3315,7 +3285,7 @@ function SearchPanel({ T, db, todayKey, onPick }) {
           <button key={r.kind + r.id} onClick={() => onPick(r)} className="nb-row flex items-center gap-2 py-2.5 text-left" style={{ borderBottom: `1px solid ${T.line}` }}>
             <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0 w-12">{r.kind === "event" ? "EVT" : r.kind === "task" ? "ACT" : "NOTE"}</span>
             <span className="flex-1 text-sm truncate">{r.title}</span>
-            <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">{r.repeat ? "↻" : fmtDay(r.date).slice(4)}</span>
+            <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">{searchResultDateLabel(r, (date) => fmtDay(date).slice(4))}</span>
           </button>
         ))}
       </div>

@@ -14,6 +14,15 @@ are too detailed for the repository README.
 - [`superpowers/specs/2026-08-09-calendar-phase-2-design.md`](superpowers/specs/2026-08-09-calendar-phase-2-design.md)
   defines the approved Phase 2A canonical-time and Phase 2B advanced-recurrence
   design, migration policy, boundaries, and completion criteria.
+- [`superpowers/specs/2026-08-09-planner-qa-repair-design.md`](superpowers/specs/2026-08-09-planner-qa-repair-design.md)
+  defines the persistence, search, notes, recurring-task, and recovery repairs found
+  during the post-implementation pressure test.
+
+## Quality reports
+
+- [`qa/2026-08-09-claude-implementation-pressure-test.md`](qa/2026-08-09-claude-implementation-pressure-test.md)
+  records confirmed defects, repairs, browser flows, automated evidence, and the
+  remaining physical-device checks.
 
 ## Implementation plans
 
@@ -36,6 +45,9 @@ are too detailed for the repository README.
 - [`superpowers/plans/2026-08-09-notes-phase-1.md`](superpowers/plans/2026-08-09-notes-phase-1.md)
   replaces the legacy text note with a block document domain, links and backlinks,
   system views, search, revisions, and the v7 migration.
+- [`superpowers/plans/2026-08-09-planner-qa-repair.md`](superpowers/plans/2026-08-09-planner-qa-repair.md)
+  implements the post-implementation persistence, search, notes, task-mutation,
+  browser-pressure-test, and publication gates.
 
 ## Architecture decisions
 
