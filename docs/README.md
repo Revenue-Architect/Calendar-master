@@ -9,6 +9,17 @@ are too detailed for the repository README.
   three-level capability specification for Calendar, Tasks, Notes, and the shared
   planner platform. Approved domains are appended incrementally.
 
+## Feature designs
+
+- [`superpowers/specs/2026-08-09-calendar-phase-2-design.md`](superpowers/specs/2026-08-09-calendar-phase-2-design.md)
+  defines the approved Phase 2A canonical-time and Phase 2B advanced-recurrence
+  design, migration policy, boundaries, and completion criteria.
+
+## Implementation plans
+
+- [`superpowers/plans/2026-08-09-calendar-phase-1.md`](superpowers/plans/2026-08-09-calendar-phase-1.md)
+  records the completed Calendar Phase 1 extraction plan.
+
 ## Architecture decisions
 
 - [`adr/0001-domain-oriented-modular-monolith.md`](adr/0001-domain-oriented-modular-monolith.md)

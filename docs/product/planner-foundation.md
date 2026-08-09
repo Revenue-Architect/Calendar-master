@@ -2056,10 +2056,36 @@ cover the initial Calendar and shared-time behavior at completion.
 
 ## Phase 2: Calendar completeness
 
+**Design status:** Phase 2A and Phase 2B approved on 2026-08-09
+
+The detailed design is maintained in
+`docs/superpowers/specs/2026-08-09-calendar-phase-2-design.md`.
+
+### Phase 2A: Canonical time
+
+- Immediate validated cutover from `nbmp:state:v4` to versioned v5 state.
+- Canonical all-day, floating timed, and timezone-bound timed event models.
+- Exclusive all-day end dates.
+- DST ambiguity and skipped-time handling.
+- Cross-midnight and multi-day timed events.
+- Shared timezone projection and per-day event segmentation.
+- Existing editor extensions without visual redesign.
+
+### Phase 2B: Advanced recurrence
+
+- Daily, weekly, monthly, and yearly rules.
+- Count, until, selected weekdays, month-day, nth-weekday, last-weekday, and
+  missing-date policies.
+- Stable recurrence anchors and typed modified, moved, cancelled, and added
+  exceptions.
+- This occurrence, this and following, and entire-series edits.
+- Atomic series splitting, exception reassignment, occurrence aliases, orphan
+  detection, and exact recovery.
+- Existing recurrence editor extensions and occurrence preview.
+
+### Later Phase 2 subprojects
+
 - Calendar containers, visibility, defaults, and permissions.
-- Canonical timed and all-day migration with exclusive end dates.
-- Timezones, DST edge behavior, cross-midnight and multi-day timed events.
-- Advanced recurrence, series splitting, exception lifecycle, and durable recovery.
 - Availability, conflict detection, briefing projections, and reminder intents.
 
 ## Phase 3: Planner composition
