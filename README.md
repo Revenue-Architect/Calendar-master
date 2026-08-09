@@ -107,6 +107,19 @@ actionable but cannot un-miss the deadline — which is why that action reads
 `PLAN TODAY` and the flag persists until the task is completed or the deadline
 moves.
 
+## Day view
+
+Hour labels sit in a fixed gutter, centred on the rule they name and without
+`:00` — a rail mark is not a timestamp. Depth comes from alternating hour bands
+rather than a hairline per hour, and the events lane is inset so no card touches a
+rule. The clock is a display preference in 12-hour or 24-hour form; it changes
+labels only, since minutes since midnight remain the stored representation.
+
+Opening an event or action shows its title, time and day centred, two figures drawn
+from the item itself, and one pill per attribute. Attributes with no value are
+omitted rather than shown empty, and the view never displays a figure the app has no
+source for.
+
 ## Keyboard
 
 | Key   | Action              |

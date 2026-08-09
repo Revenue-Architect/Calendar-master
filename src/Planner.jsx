@@ -95,7 +95,7 @@ const CAT_COLOR = {
 };
 const catColor = (cat) => CAT_COLOR[cat] || "#8A8A96";
 const CARD_R = 10;
-const HOUR_H = 58;
+const HOUR_H = 68;
 const DAY_H = HOUR_H * 24;
 const XP_PER_LEVEL = 300;
 const HOLD_MS = 420;
@@ -118,6 +118,18 @@ const WD = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 const WD1 = ["S", "M", "T", "W", "T", "F", "S"];
 const MO = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 const hhmm = (m) => `${pad(Math.floor(m / 60) % 24)}:${pad(Math.round(m) % 60)}`;
+/* The clock is a display choice, never a stored one — minutes since midnight stay
+   the single representation, so switching format can never move an event. */
+const h12 = (h) => (h % 12 === 0 ? 12 : h % 12);
+const meridiem = (h) => (h < 12 ? "AM" : "PM");
+const fmtTime = (m, clock) => {
+  const hour = Math.floor(m / 60) % 24;
+  const minute = Math.round(m) % 60;
+  if (clock === "24") return `${pad(hour)}:${pad(minute)}`;
+  return `${h12(hour)}:${pad(minute)} ${meridiem(hour)}`;
+};
+/* The rail drops ":00" — an hour label is a ruler mark, not a timestamp. */
+const fmtHour = (h, clock) => (clock === "24" ? pad(h) : `${h12(h)} ${meridiem(h)}`);
 const uid = () => Math.random().toString(36).slice(2, 9);
 const hexToRgb = (hex) => {
   const n = parseInt(hex.slice(1), 16);
@@ -137,6 +149,17 @@ const dur = (m) => (m >= 60 ? `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : 
 const snapTo = (m, s = SNAP) => Math.max(0, Math.min(1440, Math.round(m / s) * s));
 const buzz = (p) => { try { navigator.vibrate && navigator.vibrate(p); } catch (e) {} };
 const splitId = (id) => { const i = String(id).indexOf("@"); return i === -1 ? { base: id, date: null } : { base: id.slice(0, i), date: id.slice(i + 1) }; };
+/* "STARTS" reads in the largest unit that still says something useful — days for
+   next week, hours today, minutes when it is imminent, and past tense once gone. */
+const minutesUntil = (dateKey, startMin, todayKey, nowMin) => diffDays(dateKey, todayKey) * 1440 + startMin - nowMin;
+const countdownLabel = (dateKey, startMin, todayKey, nowMin, durationMin = 0) => {
+  const minutes = minutesUntil(dateKey, startMin, todayKey, nowMin);
+  /* An event that has begun is not "in -20 minutes"; it is happening, then over. */
+  if (minutes <= 0) return minutes + durationMin > 0 ? "Now" : "Ended";
+  if (minutes < 60) return `${Math.round(minutes)}m`;
+  if (minutes < 1440) return `${Math.floor(minutes / 60)}h`;
+  return `${Math.floor(minutes / 1440)}d`;
+};
 const fmtDay = (k) => { const d = parseKey(k); return `${WD[d.getDay()]} ${pad(d.getDate())} ${MO[d.getMonth()]}`; };
 
 const recurrenceToRepeat = (recurrence) => recurrence ? {
@@ -337,6 +360,7 @@ function seed() {
   return {
     themeId: "obsidian-acid",
     sound: true,
+    clock: "12",
     notifs: false,
     xp: 690,
     overrides: {},
@@ -468,6 +492,10 @@ export default function Planner() {
   const dark = isDark(T.bg);
   const surface = dark ? mixHex(T.card, "#FFFFFF", 0.13) : mixHex(T.card, "#000000", 0.06);
   const surfaceHi = dark ? mixHex(T.card, "#FFFFFF", 0.14) : mixHex(T.card, "#000000", 0.08);
+  const hourRule = dark ? mixHex(T.card, "#FFFFFF", 0.05) : mixHex(T.card, "#000000", 0.05);
+  const hourBand = dark ? mixHex(T.card, "#FFFFFF", 0.022) : mixHex(T.card, "#000000", 0.018);
+  const clock = (db && db.clock) || "12";
+  const tm = (m) => fmtTime(m, clock);
 
   /* The theme lives in state, so the page around the app has to follow it: the body
      (otherwise overscroll shows a mismatched strip), the browser chrome on mobile,
@@ -577,7 +605,7 @@ export default function Planner() {
         if (firedRef.current.has(key)) return;
         if (nowMin >= fireAt && nowMin < fireAt + 2) {
           firedRef.current.add(key);
-          const body = a === 0 ? `Starting now · ${hhmm(e.start)}` : `In ${dur(a)} · ${hhmm(e.start)}`;
+          const body = a === 0 ? `Starting now · ${tm(e.start)}` : `In ${dur(a)} · ${tm(e.start)}`;
           beep("alert"); buzz([10, 60, 10]);
           setAlertToast({ title: e.title, body, k: uid() });
           setTimeout(() => setAlertToast(null), 8000);
@@ -615,8 +643,8 @@ export default function Planner() {
           if (nowMin >= fireAt && nowMin < fireAt + 2) {
             firedRef.current.add(key);
             fire(task.title, reminder.offsetMinutes === 0
-              ? `Due now · ${hhmm(anchorMinute)}`
-              : `In ${dur(reminder.offsetMinutes)} · ${hhmm(anchorMinute)}`);
+              ? `Due now · ${tm(anchorMinute)}`
+              : `In ${dur(reminder.offsetMinutes)} · ${tm(anchorMinute)}`);
           }
         });
       });
@@ -641,7 +669,7 @@ export default function Planner() {
     if (!db) return "";
     const sorted = timed.slice().sort((a, b) => a.start - b.start);
     if (dateKey < todayKey) return `Archive · ${sorted.length} events, ${dayTasks.filter((t) => t.status === "completed").length} done`;
-    if (dateKey > todayKey) return sorted.length ? `${sorted.length} events · first at ${hhmm(sorted[0].start)}` : `${openCount} actions waiting, nothing scheduled`;
+    if (dateKey > todayKey) return sorted.length ? `${sorted.length} events · first at ${tm(sorted[0].start)}` : `${openCount} actions waiting, nothing scheduled`;
     const live = sorted.find((e) => nowMin >= e.start && nowMin < e.start + e.dur);
     if (live) return `${live.title} · ${dur(live.start + live.dur - nowMin)} left`;
     const next = sorted.find((e) => e.start > nowMin);
@@ -1250,11 +1278,11 @@ export default function Planner() {
           const timing = eventTimingFromPosition(item, key, g.start, g.dur);
           const result = moveOccurrence(db, g.id, timing, { id: uid() });
           setDb(result.state);
-          flash(`Moved to ${hhmm(g.start)}`, { type: "restore-calendar-occurrence", snapshot: result.removed });
+          flash(`Moved to ${tm(g.start)}`, { type: "restore-calendar-occurrence", snapshot: result.removed });
         } else {
           const scope = splitId(g.id).date ? "occurrence" : "series";
           mutate((d) => moveCalendarEvent(d, g.id, { start: g.start }, { scope }).state);
-          flash(`Moved to ${hhmm(g.start)}`, { type: "event-time", id: g.id, start: g.was.start, dur: g.was.dur, scope });
+          flash(`Moved to ${tm(g.start)}`, { type: "event-time", id: g.id, start: g.was.start, dur: g.was.dur, scope });
         }
       }
     } else if (g.mode === "resize") {
@@ -1488,7 +1516,7 @@ export default function Planner() {
       T={T} listRef={listRef} tasks={shownTasks} notes={notes}
       smartView={smartView} viewCounts={viewCounts}
       onSmartView={(id) => { beep("tick"); setSmartView(id); }}
-      lists={db.taskLists} onManageLists={() => { beep("click"); setListManager(true); }} overdue={overdue} deadlines={deadlines} showOverdue={isToday}
+      lists={db.taskLists} onManageLists={() => { beep("click"); setListManager(true); }} clock={clock} overdue={overdue} deadlines={deadlines} showOverdue={isToday}
       todayKey={todayKey} gesture={gesture} onPullOverdue={pullOverdue} beep={beep}
       onComplete={completeTask} onReopen={reopenTask} onDefer={deferTask}
       onInspect={(id) => setInspect({ kind: "task", id })} onToggleSub={toggleSub} onAddSub={addSub} onRemoveSub={removeSub}
@@ -1673,8 +1701,18 @@ export default function Planner() {
             <div ref={streamRef} className="nb-s nb-stream overflow-y-auto relative" style={{ background: T.card, borderTopLeftRadius: allDay.length ? 0 : 16, userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}>
               <div className="relative" style={{ height: DAY_H }}>
                 {Array.from({ length: 24 }).map((_, h) => (
-                  <div key={h} className="absolute left-0 right-0 flex items-start pointer-events-none" style={{ top: h * HOUR_H, height: HOUR_H, borderTop: `1px solid ${T.line}` }}>
-                    <span style={{ fontFamily: MONO, color: T.dim }} className="w-11 sm:w-12 shrink-0 pt-1 pl-2 text-xs tracking-widest">{pad(h)}</span>
+                  <div key={h} className="absolute left-0 right-0 flex items-start pointer-events-none"
+                    style={{
+                      top: h * HOUR_H,
+                      height: HOUR_H,
+                      /* Depth comes from banding, not from rules. A hairline every hour
+                         reads as a table; alternating fills give the same reading
+                         without drawing 24 lines across the content. */
+                      borderTop: `1px solid ${hourRule}`,
+                      background: h % 2 ? hourBand : "transparent",
+                    }}>
+                    <span style={{ fontFamily: MONO, color: T.dim, transform: h === 0 ? "none" : "translateY(-50%)" }}
+                      className="w-14 shrink-0 pr-3 text-right text-xs tracking-widest">{fmtHour(h, clock)}</span>
                     {suggested.includes(h) && !gesture && (
                       <span style={{ fontFamily: MONO, color: T.faint }} className="flex-1 mr-2 mt-1.5 text-xs tracking-widest">FREE</span>
                     )}
@@ -1685,7 +1723,7 @@ export default function Planner() {
                   onContextMenu={(e) => e.preventDefault()}
                   onPointerDown={canvasDown} onPointerUp={canvasUp} />
 
-                <div className="absolute left-12 sm:left-14 right-2 top-0" style={{ height: DAY_H, pointerEvents: "none" }}>
+                <div className="absolute left-16 right-2 top-0" style={{ height: DAY_H, pointerEvents: "none" }}>
                   {isToday && (
                     <>
                       <div className="nb-morph absolute overflow-hidden pointer-events-none" style={{
@@ -1708,7 +1746,7 @@ export default function Planner() {
                       </div>
                       <span className="nb-morph absolute px-1 text-xs tracking-widest pointer-events-none"
                         style={{ fontFamily: MONO, background: liveEvent ? "transparent" : NOW_LINE, color: liveEvent ? NOW_RED : "#FFFFFF", right: 8, top: mounted ? (liveEvent ? (liveEvent.start / 1440) * DAY_H + 4 : (nowMin / 1440) * DAY_H - 9) : -9 }}>
-                        {hhmm(nowMin)}
+                        {tm(nowMin)}
                       </span>
                     </>
                   )}
@@ -1744,12 +1782,12 @@ export default function Planner() {
                               {e.repeat && <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs shrink-0">↻</span>}
                               {e.alerts && e.alerts.length > 0 && <span style={{ color: T.dim }} className="text-xs shrink-0">◔</span>}
                               {live && <span style={{ fontFamily: MONO, background: NOW_RED, color: "#FFFFFF", borderRadius: 4 }} className="shrink-0 px-1 text-xs tracking-widest">{Math.round(pct)}%</span>}
-                              {held && <span style={{ fontFamily: MONO, background: T.accent, color: T.on, borderRadius: 4 }} className="shrink-0 px-1 text-xs tracking-widest">{gesture.overDay ? fmtDay(gesture.overDay) : hhmm(e.start)}</span>}
-                              {!held && !live && h < 38 && <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">{hhmm(e.start)}</span>}
+                              {held && <span style={{ fontFamily: MONO, background: T.accent, color: T.on, borderRadius: 4 }} className="shrink-0 px-1 text-xs tracking-widest">{gesture.overDay ? fmtDay(gesture.overDay) : tm(e.start)}</span>}
+                              {!held && !live && h < 38 && <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">{tm(e.start)}</span>}
                             </div>
                             {h >= 38 && (
                               <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest truncate mt-0.5 pl-4">
-                                {hhmm(e.start)} → {hhmm(e.start + e.dur)}
+                                {tm(e.start)} → {tm(e.start + e.dur)}
                               </span>
                             )}
                             {h >= 88 && (e.place || e.note) && (
@@ -1770,7 +1808,7 @@ export default function Planner() {
                     <div className="absolute left-0 right-2 pointer-events-none flex items-center justify-center"
                       style={{ top: (gesture.start / 1440) * DAY_H, height: (gesture.dur / 1440) * DAY_H, borderRadius: CARD_R, boxShadow: `inset 0 0 0 1.5px ${T.accent}`, background: `${T.accent}14` }}>
                       <span style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest">
-                        {hhmm(gesture.start)} – {hhmm(gesture.start + gesture.dur)}
+                        {tm(gesture.start)} – {tm(gesture.start + gesture.dur)}
                       </span>
                     </div>
                   )}
@@ -1781,7 +1819,7 @@ export default function Planner() {
                       <span className="flex items-center gap-2 px-2.5 py-1">
                         <span className="w-2 h-2 shrink-0 rounded-full" style={{ background: t.status === "completed" ? T.accent : "transparent", boxShadow: `inset 0 0 0 1.5px ${T.accent}` }} />
                         <span className="text-xs font-semibold truncate" style={{ textDecoration: t.status === "completed" ? "line-through" : "none" }}>{t.title}</span>
-                        <span style={{ fontFamily: MONO, color: T.dim }} className="ml-auto text-xs tracking-widest">{hhmm(t.planned.startMinute)}</span>
+                        <span style={{ fontFamily: MONO, color: T.dim }} className="ml-auto text-xs tracking-widest">{tm(t.planned.startMinute)}</span>
                       </span>
                     </button>
                   ))}
@@ -1789,7 +1827,7 @@ export default function Planner() {
                   {dropMin != null && (
                     <div className="absolute left-0 right-2 pointer-events-none" style={{ top: (dropMin / 1440) * DAY_H, zIndex: 30 }}>
                       <div style={{ background: T.accent, height: 2 }} />
-                      <span style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="absolute right-0 -top-2 px-1 text-xs tracking-widest">{hhmm(dropMin)}</span>
+                      <span style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="absolute right-0 -top-2 px-1 text-xs tracking-widest">{tm(dropMin)}</span>
                     </div>
                   )}
                 </div>
@@ -1855,36 +1893,80 @@ export default function Planner() {
       {/* ══ INSPECTOR ══ */}
       {inspectItem && (
         <Sheet T={T} title={inspect.kind === "event" ? "EVENT" : "ACTION"} onClose={() => { beep("click"); setInspect(null); }}>
-          <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">{inspect.kind === "event" ? "EVENT" : "ACTION"} · {inspect.kind === "event" ? inspectItem.cat : inspectItem.category}{(inspect.kind === "event" ? inspectItem.repeat : inspectItem.recurrence) ? " · ↻" : ""}</span>
-          <h2 className="text-2xl font-bold tracking-tight leading-tight mt-2">{inspectItem.title}</h2>
-          <div className="mt-4">
+          {/* Header reads as a title card: what, when, which day — centred, with the
+              detail rows below it. */}
+          <div className="text-center pt-1 pb-4">
+            <h2 className="text-2xl font-bold tracking-tight leading-tight">{inspectItem.title}</h2>
+            <p className="text-base font-semibold mt-1.5">
+              {inspect.kind === "event"
+                ? (inspectItem.allDay ? "All day" : `${tm(inspectItem.start)} – ${tm(inspectItem.start + inspectItem.dur)}`)
+                : (inspectItem.planned.startMinute != null ? tm(inspectItem.planned.startMinute) : "Unscheduled")}
+            </p>
+            <p style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest mt-1">{fmtDay(dateKey)}</p>
+          </div>
+
+          {/* Two figures the app can actually answer, rather than borrowed metrics. */}
+          <div className="flex gap-2 pb-4">
+            <div className="flex-1 text-center py-3" style={{ background: surface, borderRadius: CARD_R }}>
+              <span className="block text-2xl font-semibold tracking-tight">
+                {inspect.kind === "event" ? (inspectItem.allDay ? "—" : dur(inspectItem.dur)) : `+${inspectItem.reward}`}
+              </span>
+              <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest mt-0.5">
+                {inspect.kind === "event" ? "LENGTH" : "REWARD"}
+              </span>
+            </div>
+            <div className="flex-1 text-center py-3" style={{ background: surface, borderRadius: CARD_R }}>
+              <span className="block text-2xl font-semibold tracking-tight">
+                {inspect.kind === "event"
+                  ? (inspectItem.allDay ? "—" : countdownLabel(dateKey, inspectItem.start, todayKey, nowMin))
+                  : `${(inspectItem.checklist ?? []).filter((x) => x.done).length}/${(inspectItem.checklist ?? []).length}`}
+              </span>
+              <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest mt-0.5">
+                {inspect.kind === "event" ? "STARTS" : "STEPS"}
+              </span>
+            </div>
+          </div>
+
+          {/* One pill per attribute, the category pill carrying its own colour. */}
+          <div className="flex flex-col gap-2">
+            <Pill T={T} surface={surface} icon="◑" label={inspect.kind === "event" ? (inspectItem.cat || "—") : (inspectItem.category || "—")}
+              tint={catColor(inspect.kind === "event" ? inspectItem.cat : inspectItem.category)} />
+            <Pill T={T} surface={surface} icon="↻"
+              label={(inspect.kind === "event" ? inspectItem.repeat : inspectItem.recurrence)
+                ? repeatLabel(inspect.kind === "event" ? inspectItem.repeat : { ...inspectItem.recurrence, freq: inspectItem.recurrence.frequency, byDay: inspectItem.recurrence.byWeekday })
+                : "Never"} />
             {inspect.kind === "event" ? (
               <>
-                <Row T={T} k="WINDOW" v={inspectItem.allDay ? "ALL DAY" : `${hhmm(inspectItem.start)} – ${hhmm(inspectItem.start + inspectItem.dur)}`} />
-                {!inspectItem.allDay && <Row T={T} k="LENGTH" v={dur(inspectItem.dur)} />}
-                {inspectItem.allDay && inspectItem.endDate && <Row T={T} k="THROUGH" v={fmtDay(inspectItem.endDate)} />}
-                <Row T={T} k="PLACE" v={inspectItem.place || "—"} />
-                <Row T={T} k="ALERTS" v={(inspectItem.alerts || []).length ? inspectItem.alerts.map((a) => (a === 0 ? "AT TIME" : dur(a))).join(", ") : "NONE"} />
+                <Pill T={T} surface={surface} icon="◔"
+                  label={(inspectItem.alerts || []).length
+                    ? inspectItem.alerts.map((a) => (a === 0 ? "When it starts" : `${dur(a)} before`)).join(", ")
+                    : "No reminder"} />
+                {inspectItem.place && <Pill T={T} surface={surface} icon="⌖" label={inspectItem.place} />}
+                {inspectItem.allDay && inspectItem.endDate && <Pill T={T} surface={surface} icon="→" label={`Through ${fmtDay(inspectItem.endDate)}`} />}
               </>
             ) : (
               <>
-                <Row T={T} k="REWARD" v={`+${inspectItem.reward} XP`} />
-                <Row T={T} k="STATE" v={inspectItem.status.replace("_", " ").toUpperCase()} />
-                <Row T={T} k="PLANNED" v={inspectItem.planned.date ? `${fmtDay(inspectItem.planned.date)}${inspectItem.planned.startMinute != null ? ` · ${hhmm(inspectItem.planned.startMinute)}` : ""}` : "UNPLANNED"} />
-                <Row T={T} k="DUE" v={inspectItem.deadline.date ? fmtDay(inspectItem.deadline.date) : "NO DEADLINE"} />
-                <Row T={T} k="STEPS" v={`${(inspectItem.checklist ?? []).filter((s) => s.done).length}/${(inspectItem.checklist ?? []).length}`} />
-                <Row T={T} k="BLOCKED BY" v={inspectBlockers.length ? inspectBlockers.map((b) => b.title).join(", ") : "NOTHING"} />
-                {inspectSubtasks.length > 0 && <Row T={T} k="SUBTASKS" v={`${inspectSubtasks.filter((x) => x.status === "completed").length}/${inspectSubtasks.length}`} />}
+                <Pill T={T} surface={surface} icon="✓" label={inspectItem.status.replace("_", " ").replace(/^./, (c) => c.toUpperCase())} />
+                <Pill T={T} surface={surface} icon="⌛"
+                  label={inspectItem.deadline.date ? `Due ${fmtDay(inspectItem.deadline.date)}` : "No deadline"}
+                  tint={inspectItem.deadline.date && inspectItem.deadline.date < todayKey ? NOW_RED : null} />
+                <Pill T={T} surface={surface} icon="▤" label={(db.taskLists.find((l) => l.id === inspectItem.listId) || {}).name || "—"} />
                 {inspectItem.status === "waiting" && (
-                  <Row T={T} k="FOLLOW UP" v={inspectItem.followUpDate ? `${fmtDay(inspectItem.followUpDate)}${inspectItem.waitingFor ? ` · ${inspectItem.waitingFor}` : ""}` : "NO DATE SET"} />
+                  <Pill T={T} surface={surface} icon="◷" label={inspectItem.followUpDate ? `Follow up ${fmtDay(inspectItem.followUpDate)}` : "No follow-up date"} />
                 )}
-                {inspectItem.tags.length > 0 && <Row T={T} k="TAGS" v={inspectItem.tags.join(", ")} />}
-                <Row T={T} k="LIST" v={(db.taskLists.find((l) => l.id === inspectItem.listId) || {}).name || "—"} />
+                {inspectBlockers.length > 0 && (
+                  <Pill T={T} surface={surface} icon="⛌" tint={NOW_RED} label={`Blocked by ${inspectBlockers.map((b) => b.title).join(", ")}`} />
+                )}
+                {inspectItem.tags.length > 0 && <Pill T={T} surface={surface} icon="#" label={inspectItem.tags.join(", ")} />}
               </>
             )}
-            <Row T={T} k="REPEATS" v={(inspect.kind === "event" ? inspectItem.repeat : inspectItem.recurrence) ? repeatLabel(inspect.kind === "event" ? inspectItem.repeat : { ...inspectItem.recurrence, freq: inspectItem.recurrence.frequency, byDay: inspectItem.recurrence.byWeekday }).toUpperCase() : "ONCE"} />
-            <Row T={T} k="DATE" v={fmtDay(dateKey)} />
+            {inspectItem.note && (
+              <div className="px-3 py-2.5" style={{ background: surface, borderRadius: CARD_R }}>
+                <p className="text-sm leading-relaxed">{inspectItem.note}</p>
+              </div>
+            )}
           </div>
+
           {inspect.kind === "task" && (
             <div className="mt-4">
               <div className="flex items-baseline justify-between">
@@ -1923,7 +2005,12 @@ export default function Planner() {
             </div>
           )}
 
-          {inspectItem.note && <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic leading-relaxed mt-4">{inspectItem.note}</p>}
+          {inspect.kind === "event" && !inspectItem.allDay && minutesUntil(dateKey, inspectItem.start, todayKey, nowMin) > 0 && (
+            <p className="text-center text-sm mt-5" style={{ color: T.dim }}>
+              <span className="font-bold" style={{ color: T.text }}>{countdownLabel(dateKey, inspectItem.start, todayKey, nowMin, inspectItem.dur)}</span> away
+            </p>
+          )}
+
           <div className="flex gap-2 mt-5">
             <button onClick={() => removeItem(inspect.kind, inspect.id)} style={{ fontFamily: MONO, color: NOW_RED, border: `1px solid ${T.line}` }} className="nb-tap flex-1 py-3 text-xs tracking-widest">DELETE</button>
             <button onClick={() => { beep("click"); setComposer(inspect.kind === "task" ? { kind: "task", id: inspectItem.id, title: inspectItem.title, cat: inspectItem.category, xp: inspectItem.reward, at: inspectItem.planned.startMinute, due: inspectItem.deadline.date || "", date: inspectItem.planned.date || dateKey, note: inspectItem.note, repeat: inspectItem.recurrence ? { ...inspectItem.recurrence, freq: inspectItem.recurrence.frequency, byDay: inspectItem.recurrence.byWeekday } : null } : { ...inspectItem, kind: inspect.kind, id: inspectItem.id }); }} style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="nb-tap flex-1 py-3 text-xs font-bold tracking-widest">EDIT</button>
@@ -2066,6 +2153,10 @@ export default function Planner() {
               <span className="text-sm">Sound</span>
               <span style={{ fontFamily: MONO, color: db.sound ? T.accent : T.dim }} className="text-xs tracking-widest">{db.sound ? "ON" : "OFF"}</span>
             </button>
+            <button onClick={() => { beep("tick"); mutate((d) => ({ ...d, clock: d.clock === "24" ? "12" : "24" })); }} className="w-full flex items-center justify-between py-2.5" style={{ borderBottom: `1px solid ${T.line}` }}>
+              <span className="text-sm">Clock</span>
+              <span style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest">{clock === "24" ? "24-HOUR" : "12-HOUR"}</span>
+            </button>
             <button onClick={askNotifs} className="w-full flex items-center justify-between py-2.5" style={{ borderBottom: `1px solid ${T.line}` }}>
               <span className="text-sm">System notifications</span>
               <span style={{ fontFamily: MONO, color: db.notifs ? T.accent : T.dim }} className="text-xs tracking-widest">{db.notifs ? "ON" : "ALLOW"}</span>
@@ -2158,7 +2249,7 @@ function nextCalendarOccurrence(item, fromKey) {
 
 /* ═══════════════════════ ACTIONS ═══════════════════════ */
 
-function ActionsPanel({ T, listRef, tasks, notes, overdue, deadlines, showOverdue, todayKey, gesture, blockersFor, onPromoteSub, smartView, viewCounts, onSmartView, lists, onManageLists, onPullOverdue, beep, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onAddTask, onEditNote, onUnschedule, onJump }) {
+function ActionsPanel({ T, listRef, tasks, notes, overdue, deadlines, showOverdue, todayKey, gesture, blockersFor, onPromoteSub, smartView, viewCounts, onSmartView, lists, onManageLists, clock = "12", onPullOverdue, beep, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onAddTask, onEditNote, onUnschedule, onJump }) {
   const open = tasks.filter((t) => t.status !== "completed");
   const done = tasks.filter((t) => t.status === "completed");
   return (
@@ -2218,7 +2309,7 @@ function ActionsPanel({ T, listRef, tasks, notes, overdue, deadlines, showOverdu
 
       <div className="flex flex-col gap-2">
         {open.map((t) => (
-          <TaskCard key={t.id} T={T} t={t} beep={beep} target={gesture && gesture.overTask === t.id} todayKey={todayKey} blockers={blockersFor(t)} onPromoteSub={onPromoteSub}
+          <TaskCard key={t.id} T={T} t={t} beep={beep} target={gesture && gesture.overTask === t.id} todayKey={todayKey} blockers={blockersFor(t)} onPromoteSub={onPromoteSub} clock={clock}
             onComplete={onComplete} onReopen={onReopen} onDefer={onDefer} onInspect={onInspect} onToggleSub={onToggleSub} onAddSub={onAddSub} onRemoveSub={onRemoveSub} onDragStart={onDragStart} onUnschedule={onUnschedule} />
         ))}
       </div>
@@ -2228,7 +2319,7 @@ function ActionsPanel({ T, listRef, tasks, notes, overdue, deadlines, showOverdu
           <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">DONE · {done.length}</span>
           <div className="flex flex-col gap-2 mt-2">
             {done.map((t) => (
-              <TaskCard key={t.id} T={T} t={t} beep={beep} todayKey={todayKey} blockers={blockersFor(t)} onPromoteSub={onPromoteSub}
+              <TaskCard key={t.id} T={T} t={t} beep={beep} todayKey={todayKey} blockers={blockersFor(t)} onPromoteSub={onPromoteSub} clock={clock}
                 onComplete={onComplete} onReopen={onReopen} onDefer={onDefer} onInspect={onInspect} onToggleSub={onToggleSub} onAddSub={onAddSub} onRemoveSub={onRemoveSub} onDragStart={onDragStart} onUnschedule={onUnschedule} />
             ))}
           </div>
@@ -2253,7 +2344,7 @@ function ActionsPanel({ T, listRef, tasks, notes, overdue, deadlines, showOverdu
   );
 }
 
-function TaskCard({ T, t, beep, target, todayKey, blockers = [], onPromoteSub, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onUnschedule }) {
+function TaskCard({ T, t, beep, target, todayKey, blockers = [], onPromoteSub, clock = "12", onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onUnschedule }) {
   const [prog, setProg] = useState(0);
   const [dx, setDx] = useState(0);
   const [burst, setBurst] = useState(null);
@@ -2344,7 +2435,7 @@ function TaskCard({ T, t, beep, target, todayKey, blockers = [], onPromoteSub, o
                 <span style={{ color: T.dim }} className="text-xs tracking-widest">{t.category}</span>
               </span>
               {t.recurrence && <span style={{ color: T.dim }} className="text-xs">↻</span>}
-              {t.planned.startMinute != null && <button onClick={() => onUnschedule(t.id)} style={{ color: T.accent }} className="text-xs tracking-widest">{hhmm(t.planned.startMinute)}</button>}
+              {t.planned.startMinute != null && <button onClick={() => onUnschedule(t.id)} style={{ color: T.accent }} className="text-xs tracking-widest">{fmtTime(t.planned.startMinute, clock)}</button>}
               {dueLeft != null && <span style={{ color: dueLeft <= 0 ? NOW_RED : T.dim }} className="text-xs tracking-widest">DUE {dueLeft === 0 ? "TODAY" : dueLeft < 0 ? `${-dueLeft}D LATE` : `${dueLeft}D`}</span>}
               {checklist.length > 0 && <span style={{ color: T.dim }} className="text-xs tracking-widest">{subDone}/{checklist.length}</span>}
               {blockers.length > 0 && (
@@ -2387,6 +2478,18 @@ function TaskCard({ T, t, beep, target, todayKey, blockers = [], onPromoteSub, o
 }
 
 /* ═══════════════════════ PIECES ═══════════════════════ */
+
+/* One attribute per row: an icon, the value in plain words, and an optional tint
+   when the attribute carries meaning of its own — the category's colour, or the red
+   of something overdue or blocked. */
+function Pill({ T, surface, icon, label, tint = null }) {
+  return (
+    <div className="flex items-center gap-3 px-3 py-2.5" style={{ background: tint ? `${tint}22` : surface, borderRadius: CARD_R }}>
+      <span style={{ color: tint || T.dim }} className="text-sm shrink-0 w-4 text-center">{icon}</span>
+      <span className="flex-1 text-sm truncate" style={{ color: tint || T.text }}>{label}</span>
+    </div>
+  );
+}
 
 function Row({ T, k, v }) {
   return (

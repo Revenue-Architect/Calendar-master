@@ -2231,35 +2231,85 @@ way everywhere.
   centred inside, so it reads as a space being claimed rather than an event that
   already exists.
 
-## 2. Surfaces and density
+## 2. Day view
 
-### 2.1 Three depths only
+### 2.1 The hour rail
+
+- Hour labels sit in a fixed left gutter, right-aligned against the events lane.
+- A label is centred on the rule it names, not dropped below it, so the eye reads
+  the mark and its name as one thing.
+- The rail omits `:00`. An hour label is a ruler mark, not a timestamp.
+- The clock format is a display preference offered in 12-hour and 24-hour form.
+  It changes labels only: minutes since midnight remain the single stored
+  representation, so switching format can never move an event.
+
+### 2.2 Depth without rules
+
+- Alternating hour bands carry the sense of depth; the hourly hairline is faint
+  enough to orient without drawing a table across the content.
+- The events lane is inset from the gutter so no card touches a rule.
+- Hour height is generous enough that a thirty-minute event is still a legible
+  card rather than a strip.
+
+### 2.3 Sections are labelled
+
+- All-day entries sit in a labelled band above the timeline.
+- The timeline itself is a labelled section, so an empty day still reads as a
+  day with nothing in it rather than as a failure to load.
+
+## 3. Detail view
+
+### 3.1 Header states the essentials
+
+- Title, then the time range, then the day, centred and in descending weight.
+- An all-day entry says so in place of a range.
+
+### 3.2 Figures the app can answer
+
+- The two figures below the header are drawn from the item itself — length and
+  time-to-start for an event, reward and step progress for a task.
+- The view MUST NOT show figures the product has no source for. Borrowed
+  metrics such as travel time or weather are not invented from nothing.
+- A countdown reads in the largest unit that still says something useful, and an
+  item that has begun reads as happening or ended rather than as negative time.
+
+### 3.3 One attribute per row
+
+- Each attribute is a single pill: an icon, the value in plain words.
+- A pill tints itself only when the attribute carries meaning — the category's
+  own colour, or the warning colour for something overdue or blocked.
+- Attributes with no value are omitted rather than shown as an em dash, so the
+  view length reflects how much is actually known.
+
+## 4. Surfaces and density
+
+### 4.1 Three depths only
 
 - Page, day surface, and card. Additional depths make the hierarchy ambiguous.
 - Sheets sit above all three on a scrim.
 
-### 2.2 Quiet chrome
+### 4.2 Quiet chrome
 
 - Hour rules, free-slot hints, and empty states use the faint token, never the
   body colour. They orient without competing with content.
 - The events lane is inset from the hour gutter so cards never touch the rules.
 
-### 2.3 Theme integrity
+### 4.3 Theme integrity
 
 - Every colour resolves from the active theme except the category hues and the
   now colour, which are deliberately constant.
 - The page background, browser chrome colour, and `color-scheme` follow the
   active theme so native controls match the page.
 
-## 3. Type
+## 5. Type
 
-### 3.1 Three faces, fixed roles
+### 5.1 Three faces, fixed roles
 
 - Sans carries titles and body.
 - Mono carries times, labels, counts, and any value read as data.
 - Serif italic carries written reflection: notes and empty-state prose.
 
-### 3.2 Labels
+### 5.2 Labels
 
 - Section and metadata labels are uppercase mono with wide tracking.
 - Labels name what follows; they never repeat a value shown beside them.
@@ -2288,3 +2338,6 @@ way everywhere.
 | 2026-08-09 | Draw events and tasks as lifted rounded cards rather than blocks cut into the day surface. |
 | 2026-08-09 | Give each category one fixed colour carried by a dot, constant across every theme. |
 | 2026-08-09 | Blend card lift opaquely so the hour grid never shows through a card. |
+| 2026-08-09 | Centre hour labels on their rule and carry day-view depth with bands rather than rules. |
+| 2026-08-09 | Offer 12-hour and 24-hour clocks as display only; minutes since midnight stay the stored form. |
+| 2026-08-09 | Show only figures the product has a source for; never invent travel time or weather. |
