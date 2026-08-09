@@ -23,6 +23,9 @@ are too detailed for the repository README.
   implements canonical v5 timing, migration, timezone behavior, and segmentation.
 - [`superpowers/plans/2026-08-09-calendar-phase-2b-recurrence.md`](superpowers/plans/2026-08-09-calendar-phase-2b-recurrence.md)
   implements advanced recurrence, typed exceptions, and series splitting.
+- [`superpowers/plans/2026-08-09-tasks-phase-1.md`](superpowers/plans/2026-08-09-tasks-phase-1.md)
+  establishes the Tasks domain: model, hierarchy, dependencies, planning semantics,
+  commands, queries, and events, and records what carries into Tasks Phase 2.
 
 ## Architecture decisions
 

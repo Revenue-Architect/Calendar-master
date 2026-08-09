@@ -20,6 +20,7 @@ npm run preview  # serve the built bundle
 | --- | --- |
 | `src/Planner.jsx` | Current presentation tree and temporary Task/Note orchestration |
 | `src/domains/calendar/` | Calendar timing, recurrence, commands, queries, migrations, layout, and tests |
+| `src/domains/tasks/` | Task model, hierarchy, dependencies, planning semantics, commands, queries, and tests |
 | `src/shared/time/` | Date, local date-time, interval, and IANA timezone primitives |
 | `src/platform/persistence/` | Validated planner-state loading, saving, and v4-to-v5 cutover |
 | `src/storage.js` | Browser/host storage adapter and the only browser storage I/O |
@@ -60,6 +61,25 @@ warn the user and preserve export as a recovery path.
 
 Settings can export the calendar as `.ics` or the full state as `.json`, and import a
 previously exported `.json` (which replaces everything, behind a confirmation).
+
+## Task foundations
+
+Reads and writes for the Tasks domain pass through `src/domains/tasks/index.js`.
+Planned work and deadlines are independent: planned answers when you intend to work
+on something, the deadline answers when it must be finished, and only the deadline
+drives overdue. Hierarchy is one subtask level over flat `parentTaskId` records, with
+checklist items kept deliberately lighter than subtasks and promotable when a step
+needs its own planning.
+
+Dependencies are directed "is blocked by" edges stored once on the dependent task;
+the inverse is always derived. Cycles, self-edges, and edges that duplicate the
+parent/child relationship are rejected. A blocker counts as satisfied once it is
+completed, cancelled, or archived, so abandoned work cannot deadlock what follows it.
+Blocking is advisory: completing past an unmet blocker takes an explicit override and
+is recorded on the task.
+
+`Planner.jsx` still reads the legacy task fields; the persistence cutover and
+interface adoption are Tasks Phase 2.
 
 ## Overdue vs. recurring
 

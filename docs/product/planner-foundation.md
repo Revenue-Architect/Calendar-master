@@ -1014,6 +1014,8 @@ When incomplete subtasks remain, completing the parent must offer:
 - `ChangeTaskRecurrence`
 - `CreateSubtask`
 - `PromoteChecklistItem`
+- `AddTaskDependency`
+- `RemoveTaskDependency`
 
 ### 14.2 Queries
 
@@ -1026,6 +1028,9 @@ When incomplete subtasks remain, completing the parent must offer:
 - `GetTaskTree`
 - `SearchTasks`
 - `GetTaskCompletionHistory`
+- `GetBlockedTasks`
+- `GetTaskBlockers`
+- `GetEarliestResponsibleStart`
 
 ### 14.3 Domain events
 
@@ -1037,6 +1042,7 @@ When incomplete subtasks remain, completing the parent must offer:
 - `TaskReopened`
 - `TaskDeleted`
 - `TaskHierarchyChanged`
+- `TaskDependenciesChanged`
 - `TaskReminderIntentChanged`
 - Calendar, Notes, Reminders, Gamification, and Planner MAY react without Tasks
   importing their implementations.
@@ -1054,6 +1060,68 @@ When incomplete subtasks remain, completing the parent must offer:
 - Completion and reopen history
 - Undo, recovery, and permission enforcement
 
+## 15. Task dependencies
+
+### 15.1 Dependency model
+
+- A dependency is a directed "is blocked by" edge from a dependent task to a
+  blocker.
+- The edge is stored once, on the dependent task, as `dependsOn`.
+- The inverse "blocks" direction MUST be derived rather than stored, so the two
+  directions can never disagree after a partial write.
+- Dependencies form a directed acyclic graph. Cycles MUST be rejected when the
+  edge is added, evaluating the full transitive closure rather than direct edges
+  only.
+- A dependency references a task. Occurrence-level dependencies are deferred.
+
+### 15.2 Permitted edges
+
+- A task MAY depend on any other task, across lists and across parents.
+- A task MUST NOT depend on itself.
+- A task MUST NOT depend on its own ancestor or descendant. Hierarchy already
+  defines that relationship through parent progress and parent completion, and a
+  second, contradictory encoding of it produces a task that can never start.
+- Subtasks under different parents MAY depend on each other. This is the case
+  dependencies exist to serve: sequencing work across two workstreams.
+- Adding an edge that already exists succeeds without duplicating it.
+
+### 15.3 Satisfaction
+
+- A dependency is satisfied when its blocker reaches a settled status:
+  `completed`, `cancelled`, or `archived`.
+- Cancelled and archived blockers MUST count as satisfied. Abandoned work that
+  still blocks its dependents would strand them permanently with no path
+  forward.
+- A task is blocked when at least one of its dependencies is unsatisfied.
+- Blocked is a derived state (§2.2) and MUST NOT be stored as a status.
+
+### 15.4 Advisory enforcement
+
+- Blocking is advisory, consistent with parent completion (§7.4).
+- Starting or completing a blocked task MUST surface the unsatisfied blockers
+  and MUST NOT proceed silently, but the user MAY override.
+- An override MUST be recorded on the task's history.
+- A hard block would strand users who know something the graph does not, which
+  is why the domain reports blockers and leaves refusal to the caller.
+
+### 15.5 Lifecycle integrity
+
+- Deleting a task MUST remove every edge that references it. Dangling blocker
+  references would make dependents permanently and invisibly blocked.
+- Deleting a blocker MUST NOT delete its dependents.
+- Undo MUST restore removed edges from the original command result (§10.3),
+  not by reconstructing them.
+- A checklist item promoted to a task (§8.4) participates in dependencies like
+  any other task.
+
+### 15.6 Scheduling intelligence
+
+- The earliest responsible start date is the latest known date among unsatisfied
+  blockers, preferring a blocker's deadline and falling back to its planned date.
+- Planning work before that date SHOULD warn, consistent with §5.3.
+- Dependencies MUST NOT move dates automatically. Tasks exposes the query and
+  Planner owns the warning.
+
 ## Tasks module target
 
 ```text
@@ -1062,6 +1130,7 @@ domains/tasks/
   commands/
   queries/
   hierarchy/
+  dependencies/
   recurrence/
   planning/
   repositories/
@@ -2121,3 +2190,7 @@ reminder extraction, and frontend polish remain intentionally deferred.
 | 2026-08-09 | Cut planner persistence directly to validated v5 after a confirmed migration write; do not dual-write. |
 | 2026-08-09 | Model event time as exclusive all-day, floating local, or explicit IANA-zoned intervals. |
 | 2026-08-09 | Use stable recurrence anchors, typed exceptions, and atomic series splitting for recurring edits. |
+| 2026-08-09 | Derive overdue from deadlines only, so replanning a task is never recorded as failure. |
+| 2026-08-09 | Store task dependencies on the dependent task and derive the inverse, preventing two-sided drift. |
+| 2026-08-09 | Treat cancelled and archived blockers as satisfied so abandoned work cannot deadlock its dependents. |
+| 2026-08-09 | Keep dependency blocking advisory and recorded rather than enforced, consistent with parent completion. |

@@ -339,6 +339,7 @@ export default function Planner() {
   const [confirmWipe, setConfirmWipe] = useState(false);
   const [pendingImport, setPendingImport] = useState(null);
   const [storageBad, setStorageBad] = useState(!storage.writable);
+  const [saveBlocked, setSaveBlocked] = useState(false);
 
   const stripRef = useRef(null);
   const activeRef = useRef(null);
@@ -367,7 +368,12 @@ export default function Planner() {
         if (!loaded.state) await savePlannerState(storage, state);
         if (!dead) { setDb(state); setStorageBad(false); setReady(true); }
       } catch (error) {
-        if (!dead) { setStorageBad(true); setReady(true); }
+        /* Either the device can't be written to, or what's already stored is
+           unreadable. Open a fresh notebook in memory so the app is still usable —
+           without it `ready` flips while `db` stays null and the loader never
+           clears — but leave autosave off. Overwriting here would seed straight over
+           data that is damaged rather than gone, and export stays the way out. */
+        if (!dead) { setDb(migrateV4ToV5(seed())); setSaveBlocked(true); setStorageBad(true); setReady(true); }
       }
     })();
     return () => { dead = true; };
@@ -376,7 +382,7 @@ export default function Planner() {
   useEffect(() => { if (ready) { const r = requestAnimationFrame(() => setMounted(true)); return () => cancelAnimationFrame(r); } }, [ready]);
 
   useEffect(() => {
-    if (!ready || !db) return;
+    if (!ready || !db || saveBlocked) return;
     clearTimeout(saveT.current);
     saveT.current = setTimeout(() => {
       savePlannerState(storage, db).then(() => setStorageBad(false), () => setStorageBad(true));
