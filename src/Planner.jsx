@@ -1,5 +1,18 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import * as storage from "./storage.js";
+import {
+  createEvent as createCalendarEvent,
+  deleteEvent as deleteCalendarEvent,
+  getCalendarDensity,
+  getEventsForDay,
+  moveEvent as moveCalendarEvent,
+  occursOn as calendarOccursOn,
+  packEventLanes,
+  resizeEvent as resizeCalendarEvent,
+  restoreEvent as restoreCalendarEvent,
+  updateEvent as updateCalendarEvent,
+} from "./domains/calendar/index.js";
+import { addDays, diffDays, keyOf, parseKey } from "./shared/time/dateKey.js";
 
 /* ═══════════════════════ TOKENS ═══════════════════════ */
 
@@ -37,10 +50,6 @@ const SERIF = "Georgia, Cambria, Times New Roman, serif";
 /* ═══════════════════════ UTILS ═══════════════════════ */
 
 const pad = (n) => String(n).padStart(2, "0");
-const keyOf = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-const parseKey = (k) => new Date(k + "T00:00:00");
-const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
-const diffDays = (a, b) => Math.round((parseKey(a) - parseKey(b)) / 86400000);
 const WD = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 const WD1 = ["S", "M", "T", "W", "T", "F", "S"];
 const MO = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
@@ -57,7 +66,7 @@ const splitId = (id) => { const i = String(id).indexOf("@"); return i === -1 ? {
 const fmtDay = (k) => { const d = parseKey(k); return `${WD[d.getDay()]} ${pad(d.getDate())} ${MO[d.getMonth()]}`; };
 
 /* ─── recurrence ─── */
-function occursOn(item, dateKey) {
+function taskOccursOn(item, dateKey) {
   if (dateKey < item.date) return false;
   const r = item.repeat;
   if (!r) return item.date === dateKey;
@@ -78,7 +87,7 @@ function occursOn(item, dateKey) {
   return false;
 }
 
-function expand(items, dateKey, overrides) {
+function expandTasks(items, dateKey, overrides) {
   const out = [];
   items.forEach((it) => {
     if (!it.repeat) {
@@ -86,36 +95,12 @@ function expand(items, dateKey, overrides) {
       else if (it.allDay && it.endDate && it.date <= dateKey && dateKey <= it.endDate) out.push(it);
       return;
     }
-    if (!occursOn(it, dateKey)) return;
+    if (!taskOccursOn(it, dateKey)) return;
     const oid = `${it.id}@${dateKey}`;
     const ov = overrides[oid];
     if (ov && ov.deleted) return;
     out.push({ ...it, ...(ov || {}), id: oid, seriesId: it.id, date: dateKey, instance: true });
   });
-  return out;
-}
-
-function packLanes(list) {
-  const sorted = [...list].sort((a, b) => a.start - b.start || b.dur - a.dur);
-  const out = [];
-  let cluster = [], clusterEnd = -1;
-  const flush = () => {
-    const laneEnds = [];
-    const marked = cluster.map((ev) => {
-      let li = laneEnds.findIndex((end) => end <= ev.start);
-      if (li === -1) { laneEnds.push(ev.start + ev.dur); li = laneEnds.length - 1; }
-      else laneEnds[li] = ev.start + ev.dur;
-      return { ev, lane: li };
-    });
-    marked.forEach(({ ev, lane }) => out.push({ ...ev, lane, cols: laneEnds.length }));
-    cluster = []; clusterEnd = -1;
-  };
-  sorted.forEach((ev) => {
-    if (cluster.length && ev.start >= clusterEnd) flush();
-    cluster.push(ev);
-    clusterEnd = Math.max(clusterEnd, ev.start + ev.dur);
-  });
-  if (cluster.length) flush();
   return out;
 }
 
@@ -345,11 +330,11 @@ export default function Planner() {
     return Array.from({ length: 42 }, (_, i) => addDays(start, i));
   }, [monthCursor]);
 
-  const dayEvents = useMemo(() => (db ? expand(db.events, dateKey, ov) : []), [db, dateKey, ov]);
+  const dayEvents = useMemo(() => (db ? getEventsForDay(db.events, dateKey, ov) : []), [db, dateKey, ov]);
   const timed = useMemo(() => dayEvents.filter((e) => !e.allDay), [dayEvents]);
   const allDay = useMemo(() => dayEvents.filter((e) => e.allDay), [dayEvents]);
   const dayTasks = useMemo(() => {
-    const list = db ? expand(db.tasks, dateKey, ov) : [];
+    const list = db ? expandTasks(db.tasks, dateKey, ov) : [];
     return list.sort((a, b) => (a.order || 0) - (b.order || 0));
   }, [db, dateKey, ov]);
   const notes = useMemo(() => (db ? db.notes.filter((n) => n.date === dateKey) : []), [db, dateKey]);
@@ -366,7 +351,7 @@ export default function Planner() {
     const out = [];
     for (let i = 1; i <= 14; i++) {
       const k = keyOf(addDays(now, -i));
-      expand(db.tasks, k, ov).forEach((t) => { if (!t.done && !t.instance) out.push(t); });
+      expandTasks(db.tasks, k, ov).forEach((t) => { if (!t.done && !t.instance) out.push(t); });
     }
     return out;
   }, [db, todayKey, ov]);
@@ -381,7 +366,7 @@ export default function Planner() {
   const events = useMemo(() => {
     const g = gesture;
     const list = timed.map((e) => (g && g.id === e.id && (g.mode === "move" || g.mode === "resize") ? { ...e, start: g.start, dur: g.dur } : e));
-    return packLanes(list);
+    return packEventLanes(list);
   }, [timed, gesture]);
 
   const xp = db ? db.xp : 0;
@@ -390,7 +375,7 @@ export default function Planner() {
 
   const streak = useMemo(() => {
     if (!db) return 0;
-    const doneOn = (k) => expand(db.tasks, k, ov).some((t) => t.done);
+    const doneOn = (k) => expandTasks(db.tasks, k, ov).some((t) => t.done);
     let n = 0, cur = new Date(now);
     if (!doneOn(keyOf(cur))) cur = addDays(cur, -1);
     while (n < 60 && doneOn(keyOf(cur))) { n++; cur = addDays(cur, -1); }
@@ -426,7 +411,7 @@ export default function Planner() {
   /* ─── reminders ─── */
   useEffect(() => {
     if (!db) return;
-    const todays = expand(db.events, todayKey, ov).filter((e) => !e.allDay && e.alerts && e.alerts.length);
+    const todays = getEventsForDay(db.events, todayKey, ov).filter((e) => !e.allDay && e.alerts && e.alerts.length);
     todays.forEach((e) => {
       (e.alerts || []).forEach((a) => {
         const fireAt = e.start - a;
@@ -458,7 +443,7 @@ export default function Planner() {
   const densityOf = useCallback((d) => {
     if (!db) return 0;
     const k = keyOf(d);
-    return expand(db.events, k, ov).length + expand(db.tasks, k, ov).filter((t) => !t.done).length;
+    return getCalendarDensity(db.events, k, ov) + expandTasks(db.tasks, k, ov).filter((t) => !t.done).length;
   }, [db, ov]);
 
   const briefing = useMemo(() => {
@@ -540,16 +525,20 @@ export default function Planner() {
   };
 
   const patchItem = (kind, id, patch, scope = "one") => {
+    if (kind === "event") {
+      mutate((d) => updateCalendarEvent(d, id, patch, {
+        scope: scope === "all" ? "series" : "occurrence",
+      }).state);
+      return;
+    }
     const { base, date } = splitId(id);
     mutate((d) => {
       if (!date) {
-        const arr = kind === "event" ? "events" : "tasks";
-        d[arr] = d[arr].map((x) => (x.id === base ? { ...x, ...patch } : x));
+        d.tasks = d.tasks.map((x) => (x.id === base ? { ...x, ...patch } : x));
         return d;
       }
       if (scope === "all") {
-        const arr = kind === "event" ? "events" : "tasks";
-        d[arr] = d[arr].map((x) => (x.id === base ? { ...x, ...patch } : x));
+        d.tasks = d.tasks.map((x) => (x.id === base ? { ...x, ...patch } : x));
       } else {
         d.overrides = { ...d.overrides, [`${base}@${date}`]: { ...(d.overrides[`${base}@${date}`] || {}), ...patch } };
       }
@@ -596,11 +585,21 @@ export default function Planner() {
     const item = kind === "event" ? dayEvents.find((e) => e.id === id) : findTask(id);
     if (!item) return;
     const { base, date } = splitId(id);
+    if (kind === "event") {
+      const scope = date ? "occurrence" : "series";
+      mutate((d) => moveCalendarEvent(d, id, { date: targetKey }, { scope }).state);
+      flash(`Moved to ${fmtDay(targetKey)}`, {
+        type: "calendar-event-move",
+        id,
+        target: { date: item.date, start: item.start },
+        scope,
+      });
+      return;
+    }
     if (date) {
       mutate((d) => {
         d.overrides = { ...d.overrides, [`${base}@${date}`]: { ...(d.overrides[`${base}@${date}`] || {}), deleted: true } };
-        const arr = kind === "event" ? "events" : "tasks";
-        d[arr] = [...d[arr], { ...item, id: uid(), repeat: null, seriesId: undefined, instance: false, date: targetKey }];
+        d.tasks = [...d.tasks, { ...item, id: uid(), repeat: null, seriesId: undefined, instance: false, date: targetKey }];
         return d;
       });
     } else {
@@ -619,10 +618,17 @@ export default function Planner() {
     if (!e) return;
     beep("schedule");
     const nid = uid();
-    mutate((d) => {
-      d.events = [...d.events, { ...e, id: nid, seriesId: undefined, instance: undefined, repeat: null, date: dateKey, start: Math.min(1435, e.start + (e.dur || 60)) }];
-      return d;
-    });
+    const copy = { ...e };
+    delete copy.id;
+    delete copy.seriesId;
+    delete copy.recurrenceDate;
+    delete copy.instance;
+    mutate((d) => createCalendarEvent(d, {
+      ...copy,
+      repeat: null,
+      date: dateKey,
+      start: e.allDay ? 0 : Math.min(1440 - e.dur, e.start + (e.dur || 60)),
+    }, { id: nid }).state);
     setInspect(null);
     flash("Duplicated", { type: "drop-event", id: nid });
   };
@@ -665,12 +671,24 @@ export default function Planner() {
     beep("delete");
     const { base, date } = splitId(id);
     let removed = null;
+    if (kind === "event") {
+      const result = deleteCalendarEvent(db, id, {
+        scope: scope === "one" ? "occurrence" : "series",
+      });
+      removed = result.removed;
+      setDb(result.state);
+      setInspect(null); setScopeAsk(null);
+      flash(scope === "one" && date ? "This one skipped" : "Deleted", {
+        type: "restore-calendar-event",
+        snapshot: removed,
+      });
+      return;
+    }
     mutate((d) => {
       if (date && scope === "one") {
         d.overrides = { ...d.overrides, [`${base}@${date}`]: { ...(d.overrides[`${base}@${date}`] || {}), deleted: true } };
         return d;
       }
-      if (kind === "event") { removed = d.events.find((e) => e.id === base); d.events = d.events.filter((e) => e.id !== base); }
       if (kind === "task") {
         removed = d.tasks.find((x) => x.id === base);
         if (removed && removed.done) d.xp = Math.max(0, d.xp - removed.xp);
@@ -695,16 +713,17 @@ export default function Planner() {
     beep("click");
     mutate((d) => {
       if (p.type === "restore" && p.item) {
-        if (p.kind === "event") d.events = [...d.events, p.item];
         if (p.kind === "task") { d.tasks = [...d.tasks, p.item]; if (p.item.done) d.xp += p.item.xp; }
         if (p.kind === "note") d.notes = [...d.notes, p.item];
       }
-      if (p.type === "drop-event") d.events = d.events.filter((e) => e.id !== p.id);
+      if (p.type === "restore-calendar-event") return restoreCalendarEvent(d, p.snapshot).state;
+      if (p.type === "drop-event") return deleteCalendarEvent(d, p.id, { scope: "series" }).state;
       if (p.type === "unskip") { const o = { ...d.overrides }; delete o[p.key]; d.overrides = o; }
       if (p.type === "task-date") d.tasks = d.tasks.map((t) => (t.id === p.id ? { ...t, date: keyOf(addDays(parseKey(t.date), p.n)) } : t));
-      if (p.type === "back-date") { const arr = p.kind === "event" ? "events" : "tasks"; d[arr] = d[arr].map((x) => (x.id === p.id ? { ...x, date: p.date } : x)); }
+      if (p.type === "back-date") d.tasks = d.tasks.map((x) => (x.id === p.id ? { ...x, date: p.date } : x));
+      if (p.type === "calendar-event-move") return moveCalendarEvent(d, p.id, p.target, { scope: p.scope }).state;
       if (p.type === "task-restore-dates") d.tasks = d.tasks.map((t) => { const m = p.ids.find((x) => x.id === t.id); return m ? { ...t, date: m.date } : t; });
-      if (p.type === "event-time") d.events = d.events.map((e) => (e.id === p.id ? { ...e, start: p.start, dur: p.dur } : e));
+      if (p.type === "event-time") return updateCalendarEvent(d, p.id, { start: p.start, dur: p.dur }, { scope: p.scope }).state;
       return d;
     });
     setUndo(null);
@@ -716,10 +735,18 @@ export default function Planner() {
       ? { title: p.title, start: p.start, dur: p.dur, cat: p.cat, place: p.place, note: p.note, allDay: p.allDay, endDate: p.endDate || null, repeat: p.repeat, alerts: p.alerts }
       : { title: p.title, cat: p.cat, xp: p.xp, at: p.at, due: p.due, note: p.note, repeat: p.repeat };
     if (p.date && scope !== "one") patch.date = p.date;
-    if (p.id) patchItem(p.kind, p.id, patch, scope);
+    if (p.id && p.kind === "event") {
+      mutate((d) => updateCalendarEvent(d, p.id, patch, {
+        scope: scope === "all" ? "series" : "occurrence",
+      }).state);
+    } else if (p.id) patchItem(p.kind, p.id, patch, scope);
     else {
       mutate((d) => {
-        if (p.kind === "event") d.events = [...d.events, { id: uid(), date: p.date || dateKey, ...patch, alerts: p.alerts || [] }];
+        if (p.kind === "event") return createCalendarEvent(d, {
+          date: p.date || dateKey,
+          ...patch,
+          alerts: p.alerts || [],
+        }, { id: uid() }).state;
         else {
           const maxOrder = d.tasks.reduce((m, t) => Math.max(m, t.order || 0), 0);
           d.tasks = [...d.tasks, { id: uid(), date: p.date || dateKey, done: false, subs: [], order: maxOrder + 1, ...patch }];
@@ -857,13 +884,15 @@ export default function Planner() {
       if (g.overDay && g.overDay !== key) moveToDay("event", g.id, g.overDay);
       else {
         beep("drop"); buzz(8);
-        patchItem("event", g.id, { start: g.start, dur: g.dur });
-        flash(`Moved to ${hhmm(g.start)}`, { type: "event-time", id: splitId(g.id).base, start: g.was.start, dur: g.was.dur });
+        const scope = splitId(g.id).date ? "occurrence" : "series";
+        mutate((d) => moveCalendarEvent(d, g.id, { start: g.start }, { scope }).state);
+        flash(`Moved to ${hhmm(g.start)}`, { type: "event-time", id: g.id, start: g.was.start, dur: g.was.dur, scope });
       }
     } else if (g.mode === "resize") {
       beep("drop");
-      patchItem("event", g.id, { start: g.start, dur: g.dur });
-      flash(`Set to ${dur(g.dur)}`, { type: "event-time", id: splitId(g.id).base, start: g.was.start, dur: g.was.dur });
+      const scope = splitId(g.id).date ? "occurrence" : "series";
+      mutate((d) => resizeCalendarEvent(d, g.id, g.dur, { scope }).state);
+      flash(`Set to ${dur(g.dur)}`, { type: "event-time", id: g.id, start: g.was.start, dur: g.was.dur, scope });
     } else if (g.mode === "draft") {
       beep("click");
       setComposer({ kind: "event", start: g.start, dur: g.dur });
@@ -1569,7 +1598,7 @@ export default function Planner() {
 function nextOccurrence(item, fromKey) {
   for (let i = 0; i < 400; i++) {
     const k = keyOf(addDays(parseKey(fromKey), i));
-    if (occursOn(item, k)) return k;
+    if ((item.kind === "event" ? calendarOccursOn : taskOccursOn)(item, k)) return k;
   }
   return item.date;
 }

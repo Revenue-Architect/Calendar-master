@@ -1074,6 +1074,1015 @@ domains/tasks/
 
 # Notes domain
 
-**Status:** Awaiting product review
+**Status:** Approved on 2026-08-09
 
-This section will be appended after its three-level capability model is approved.
+## Responsibility and boundary
+
+The Notes domain owns captured knowledge, reflection, contextual writing, document
+content, note organization, links, and revision history. It does not own task
+execution, calendar timing, reminder delivery, binary attachment storage, search
+infrastructure, or provider synchronization.
+
+The initial product exposes daily notes, notes linked to events or tasks, and a
+standalone note inbox. Every note still receives durable identity and belongs to a
+default system notebook internally so a future notebook product can be introduced
+without re-identifying or rewriting existing notes.
+
+## Core domain objects
+
+- `Note`: Durable identity, ownership, metadata, lifecycle, and organization.
+- `NoteDocument`: Versioned content belonging to one note.
+- `NoteBlock`: Stable content unit within a document.
+- `NoteLink`: Typed relationship to a day, event, occurrence, task, note, contact,
+  document, location, or external resource.
+- `Notebook`: Note container, initially represented by a default system notebook.
+- `NoteFolder`: Optional future hierarchy within a notebook.
+- `NoteTag`: Reusable user-owned classification.
+- `NoteRevision`: Immutable document checkpoint.
+- `NoteDraft`: Recoverable uncommitted editing state.
+- `NoteAttachment`: Metadata reference to content owned by platform storage.
+- `NoteViewState`: Selected note, sort, filters, layout, and navigation context.
+
+## 1. Note capture and lifecycle
+
+### 1.1 Quick capture
+
+- Create a note from the global action, day surface, event, task, or note inbox.
+- Capture MUST work with only text; title, tags, and organization remain optional.
+- Record capture context without requiring the user to classify the note first.
+- A fast capture MUST be recoverable if the surface closes unexpectedly.
+
+### 1.2 Contextual capture
+
+- A note created from a day receives a date link.
+- A note created from an event or task receives a typed entity link.
+- The source context MAY prefill a title or template but MUST NOT copy canonical
+  content from the linked entity.
+- Removing a link MUST NOT delete the note.
+
+### 1.3 Drafts
+
+- Draft content remains separate from the last committed document revision.
+- Autosave a local draft while editing.
+- Restore a draft after refresh, crash, or accidental dismissal.
+- Warn before discarding a modified draft that has not been safely persisted.
+
+### 1.4 Editing
+
+- Edit title, document content, tags, links, pin state, and organization.
+- Preserve unsupported or temporarily hidden block data during edits.
+- Reject stale writes when the expected revision no longer matches.
+- Expose save state as saved, saving, offline, conflicted, or failed.
+
+### 1.5 Archive and deletion
+
+- Archive and restore notes without changing identity.
+- Use recoverable soft deletion before permanent removal.
+- Exclude archived and deleted notes from default views.
+- Offer undo for recent destructive commands.
+
+## 2. Note contexts
+
+### 2.1 Inbox notes
+
+- Notes created without a day or entity context enter the note inbox.
+- Inbox membership is a processing state, not a notebook.
+- A note leaves the inbox when the user files, links, archives, or explicitly marks
+  it processed.
+- A processed note remains discoverable through normal note views.
+
+### 2.2 Daily notes
+
+- A daily note links to a date-only value in the user's planning timezone.
+- Do not create empty daily records merely because a date was viewed.
+- Support multiple notes per day while allowing one note to be designated primary.
+- Changing timezone MUST NOT silently move a date-only daily note.
+
+### 2.3 Event notes
+
+- Link to either an event series or a stable event occurrence.
+- Series notes appear across the series context; occurrence notes appear only on
+  the selected occurrence unless explicitly promoted.
+- A moved occurrence retains its note links through occurrence identity.
+- A deleted event does not delete linked notes; links become unresolved but
+  recoverable.
+
+### 2.4 Task notes
+
+- Link to tasks or subtasks using stable task identity.
+- Linked notes remain owned and editable by Notes.
+- Completing, archiving, or rescheduling a task MUST NOT delete its notes.
+- Task backlinks expose related notes without embedding document content.
+
+### 2.5 Standalone notes
+
+- Notes MAY exist without a day or entity link.
+- Standalone notes remain addressable by ID, searchable, taggable, and movable.
+- Adding context later MUST preserve identity and revision history.
+
+## 3. Content model
+
+### 3.1 Versioned document
+
+- Store document schema version independently from note metadata version.
+- Preserve unknown compatible block attributes during migration.
+- Reject malformed content before replacing a valid document.
+- Keep document serialization deterministic for reliable revisions and conflict
+  detection.
+
+### 3.2 Initial block types
+
+- Paragraph
+- Heading
+- Bulleted list item
+- Numbered list item
+- Checklist item
+- Quote
+- Divider
+- Code block
+- Link preview placeholder
+
+### 3.3 Stable block identity
+
+- Every block MUST have an immutable ID within its note.
+- Reordering a block MUST NOT change identity.
+- Task extraction and deep links reference a block ID, not a text offset.
+- Deleted block IDs MUST NOT be silently reused.
+
+### 3.4 Text behavior
+
+- Support plain-text entry and paste without requiring formatting controls.
+- Preserve paragraph and list boundaries.
+- Sanitize imported HTML and unsafe URLs.
+- Normalize line endings without changing meaningful content.
+
+### 3.5 Inline formatting
+
+- Bold, italic, underline, strike-through, inline code, and links.
+- Formatting MUST remain optional and keyboard-accessible.
+- Pasted formatting SHOULD degrade safely to supported marks.
+- Search indexing consumes readable text rather than serialized editor markup.
+
+## 4. Daily notes
+
+### 4.1 Creation policy
+
+- Create a persisted daily note only after the user writes or applies a template.
+- Reopening a date resolves the existing primary daily note when one exists.
+- A blank abandoned draft MUST NOT create timeline noise.
+
+### 4.2 Daily display
+
+- Show the primary daily note, additional daily notes, and entity-linked notes as
+  distinct groups.
+- Preserve user ordering within the date.
+- Surface unresolved drafts and save failures.
+
+### 4.3 Prompts and templates
+
+- MAY offer optional morning, planning, reflection, or review prompts.
+- Prompts never create content without user action.
+- Applied template content becomes normal editable note content.
+
+### 4.4 Movement and duplication
+
+- Move a date link to another day without changing note identity.
+- Copy a note as a new note with new note and block identities.
+- Duplicating a note MUST NOT copy revision history or external attachment ownership
+  blindly.
+
+## 5. Entity links and backlinks
+
+### 5.1 Link types
+
+- Day
+- Event series
+- Event occurrence
+- Task or subtask
+- Note
+- Contact, document, location, attachment, or external URL
+
+### 5.2 Link lifecycle
+
+- Create and remove links independently from note content.
+- Prevent exact duplicate links.
+- Preserve unresolved links when a target is archived, deleted, or temporarily
+  unavailable.
+- Restore backlinks when a target returns.
+
+### 5.3 Backlinks
+
+- Linked entities can query notes that reference them.
+- Note-to-note backlinks show incoming and outgoing relationships.
+- Backlink queries MUST respect note ownership and visibility.
+
+### 5.4 Occurrence links
+
+- Store both series ID and stable occurrence identity.
+- A moved occurrence remains resolvable.
+- A series split defines whether existing occurrence links remain on the original
+  series or are remapped through an explicit migration.
+
+## 6. Inbox processing
+
+### 6.1 Processing states
+
+- Unprocessed
+- In progress
+- Processed
+- Snoozed until a date
+- Archived
+
+### 6.2 Processing actions
+
+- Add or change title.
+- Add tags.
+- Link to a day, task, event, or note.
+- Move to a notebook or folder when those surfaces are exposed.
+- Extract a task.
+- Archive or delete.
+
+### 6.3 Completion
+
+- Processing state changes do not alter document content.
+- Bulk processing reports partial failures rather than silently skipping notes.
+- Snoozed notes return to the inbox when their date arrives.
+
+## 7. Task extraction and note checklists
+
+### 7.1 Task extraction
+
+- Convert selected text or a whole block into a new task through an application
+  workflow.
+- Notes emits `TaskExtractionRequested`; Tasks owns task creation and validation.
+- Preserve a backlink between the source block and created task.
+- The note remains readable after extraction.
+
+### 7.2 Duplicate prevention
+
+- One extraction request has an idempotency key.
+- Retrying after a failure MUST NOT create duplicate tasks.
+- A block records created task links without embedding task state.
+
+### 7.3 Note checklists
+
+- Checklist items inside notes remain note content by default.
+- Checking a note item does not award task completion or gamification rewards.
+- Checklist ordering and completion are revisioned as document edits.
+
+### 7.4 Checklist promotion
+
+- Promote a checklist item into a task explicitly.
+- Retain the source checklist item and show its task link.
+- Removing the task link MUST NOT delete either record.
+
+## 8. Organization
+
+### 8.1 System views
+
+- Inbox
+- Daily notes
+- Pinned
+- Recent
+- Linked notes
+- Archived
+- Trash
+
+### 8.2 Pinning
+
+- Pin or unpin without changing notebook or links.
+- Support stable manual ordering of pinned notes.
+- Pin state is personal by default.
+
+### 8.3 Tags
+
+- Create, rename, recolor, merge, and delete tags.
+- Tag identity remains stable across rename.
+- Deleting a tag removes classification, not notes.
+- Normalize duplicate tag names according to locale-aware comparison rules.
+
+### 8.4 Future notebooks
+
+- Every note belongs to exactly one notebook internally.
+- The initial default notebook is a hidden system container.
+- Future UI MAY expose notebook creation, sharing, ordering, archive, and deletion.
+- Moving between notebooks MUST preserve note and block identity.
+
+### 8.5 Future folders
+
+- Folders MAY form an ordered hierarchy within one notebook.
+- Prevent hierarchy cycles.
+- Moving or deleting a folder requires an explicit policy for contained notes and
+  child folders.
+- Folder identity remains independent from display name and path.
+
+## 9. Search and discovery
+
+### 9.1 Indexed fields
+
+- Title
+- Readable document text
+- Tags
+- Linked entity titles cached as non-canonical search hints
+- Notebook and folder names
+- Created, updated, linked, and daily dates
+
+### 9.2 Filters
+
+- Inbox state
+- Date or date range
+- Tag
+- Link type or linked entity
+- Notebook or folder
+- Pinned, archived, deleted, or attachment state
+
+### 9.3 Results
+
+- Return a contextual snippet and matching block ID.
+- Open at the matching block when possible.
+- Clearly identify unresolved links or stale indexed context.
+- Search remains useful offline.
+
+### 9.4 Resurfacing
+
+- Recent notes derive from meaningful open or edit activity.
+- MAY resurface notes linked to today's events and tasks.
+- Resurfacing rules remain explainable and dismissible.
+- Do not create engagement pressure from private writing.
+
+## 10. Autosave, revisions, and conflicts
+
+### 10.1 Autosave
+
+- Debounce document commits while maintaining an immediately recoverable draft.
+- Expose saving, saved, offline, conflicted, and failed state.
+- Retry transient persistence failures without losing the local draft.
+- Never report saved until durable persistence confirms the revision.
+
+### 10.2 Revisions
+
+- Create immutable revisions at meaningful checkpoints rather than every keystroke.
+- Retain author, timestamp, source, schema version, and content checksum.
+- Allow a user to inspect and restore a prior revision.
+- Restoring creates a new head revision and does not erase later history.
+
+### 10.3 Conflicts
+
+- Commit commands include the expected head revision.
+- A mismatched revision produces a conflict result with both versions available.
+- Never silently overwrite a newer revision.
+- Future collaborative merging MAY operate at block level because blocks have
+  stable identity.
+
+### 10.4 Editor undo and redo
+
+- Session undo and redo remain separate from persisted revision restoration.
+- Autosave MUST NOT clear the editor undo stack unnecessarily.
+- Closing and reopening MAY begin a new local undo session.
+
+## 11. Attachments
+
+### 11.1 Metadata ownership
+
+- Notes stores attachment ID, display name, media type, size, checksum, status,
+  caption, and storage reference.
+- Platform storage owns binary bytes and upload mechanics.
+- External URLs remain links, not attachments, unless explicitly imported.
+
+### 11.2 Lifecycle
+
+- Pending, available, failed, quarantined, missing, or deleted.
+- Removing an attachment reference follows retention policy before binary deletion.
+- Revision restoration MUST NOT revive expired binary data silently.
+
+### 11.3 Safety
+
+- Sanitize filenames and previews.
+- Enforce allowed type and size policy at the storage boundary.
+- Treat imported content as untrusted.
+- A failed attachment MUST NOT block saving the note document.
+
+### 11.4 Future media
+
+- Images, files, scans, audio, drawings, and generated previews MAY be introduced
+  without changing note identity.
+- Rich media blocks reference attachment IDs rather than embedding large payloads.
+
+## 12. Templates
+
+### 12.1 Initial templates
+
+- Blank note
+- Daily planning
+- Daily reflection
+- Meeting note
+- Task planning
+- Weekly review
+- Decision record
+
+### 12.2 Template application
+
+- Applying a template copies content into a note with new block IDs.
+- Template updates do not rewrite notes previously created from it.
+- Record template ID and version as optional provenance.
+
+### 12.3 User templates
+
+- Future user templates share the NoteDocument schema.
+- Templates MAY provide default title, tags, links, or notebook destination.
+- Invalid or outdated templates migrate or fail without replacing valid note data.
+
+## 13. Privacy, ownership, and portability
+
+### 13.1 Ownership
+
+- Notes are private to their owner by default.
+- Reserve owner, editor, commenter, and viewer roles.
+- Linking a private note to a shared event or task does not share the note.
+- Backlinks disclose only notes the current user may view.
+
+### 13.2 Integration boundary
+
+- Calendar and task providers receive no note content by default.
+- A future explicit export or share action defines exactly what leaves the app.
+- Provider IDs never become canonical note identity.
+
+### 13.3 Export
+
+- Export a note as plain text, Markdown, or native versioned JSON.
+- Export notebook or selected-note collections with link metadata.
+- Indicate missing attachments and unresolved links.
+
+### 13.4 Import
+
+- Import plain text, Markdown, and native backups initially.
+- Sanitize rich content and URLs.
+- Detect duplicates and support copy, merge, or skip where identity is known.
+- Invalid imports MUST NOT replace valid notes.
+
+## 14. Reliability and auditability
+
+### 14.1 Commands
+
+- `CreateNote`
+- `UpdateNoteMetadata`
+- `CommitNoteDocument`
+- `MoveNote`
+- `LinkNote`
+- `UnlinkNote`
+- `PinNote`
+- `ArchiveNote`
+- `DeleteNote`
+- `RestoreNote`
+- `CreateTaskFromNoteBlock`
+- `RestoreNoteRevision`
+
+### 14.2 Queries
+
+- `GetNote`
+- `GetNotesForDay`
+- `GetNotesForEntity`
+- `GetInboxNotes`
+- `GetRecentNotes`
+- `GetBacklinks`
+- `SearchNotes`
+- `GetNoteRevisions`
+- `GetNotebookTree`
+
+### 14.3 Domain events
+
+- `NoteCreated`
+- `NoteDocumentChanged`
+- `NoteLinked`
+- `NoteUnlinked`
+- `NoteMoved`
+- `NotePinned`
+- `NoteArchived`
+- `NoteDeleted`
+- `NoteRestored`
+- `TaskExtractionRequested`
+
+### 14.4 Test requirements
+
+- Draft recovery and autosave failure
+- Expected-revision conflicts
+- Date-only daily notes across timezone changes
+- Link and backlink consistency
+- Deleted and restored link targets
+- Task extraction idempotency
+- Checklist promotion
+- Notebook and folder hierarchy cycles
+- Import sanitization
+- Revision restoration
+- Attachment retention
+- Ownership and permission enforcement
+
+## Notes module target
+
+```text
+domains/notes/
+  model/
+  commands/
+  queries/
+  documents/
+  links/
+  organization/
+  revisions/
+  repositories/
+  events/
+  validation/
+  tests/
+```
+
+---
+
+# Shared planner capabilities
+
+**Status:** Approved for foundation delivery on 2026-08-09
+
+These capabilities compose Calendar, Tasks, and Notes without taking ownership of
+their canonical records. They complete the planner foundation while preserving
+domain boundaries and leaving provider integrations deferred.
+
+## 1. Planner composition
+
+### 1.1 Day aggregate
+
+- Compose one date from visible event occurrences, planned tasks, deadlines,
+  daily notes, linked notes, reminder state, and planning intelligence.
+- Preserve source domain identity in every item.
+- A composed day is a query result, not a persisted duplicate of domain records.
+- Partial domain failure MUST identify unavailable sections while preserving the
+  rest of the day.
+
+### 1.2 Today
+
+- Distinguish current date, selected date, and current time.
+- Surface live event, next event, open actions, overdue debt, reminders, and daily
+  note without automatically changing canonical data.
+- Recalculate at the user's planning-day boundary and after relevant domain events.
+
+### 1.3 Plan mode
+
+- Pull selected overdue tasks into a planned day through Tasks commands.
+- Suggest unscheduled tasks and free calendar intervals.
+- Preview changes before committing bulk scheduling.
+- Never move events or tasks automatically without confirmation.
+
+### 1.4 Review mode
+
+- Daily review: completed work, unfinished work, schedule variance, and notes.
+- Weekly review: inboxes, overdue debt, upcoming deadlines, calendar load, and
+  unresolved planning conflicts.
+- Review state records dismissal or completion without rewriting source records.
+
+### 1.5 Cross-domain workflows
+
+- Task extraction from a note.
+- Task scheduling into a calendar block.
+- Event preparation and follow-up tasks.
+- Notes linked to days, events, occurrences, tasks, or subtasks.
+- Workflows are coordinated in `app`, use idempotency keys, and never import one
+  domain's persistence implementation into another domain.
+
+## 2. Reminders
+
+### 2.1 Reminder intent
+
+- Calendar and Tasks define reminder intent and anchors.
+- Reminders owns scheduling, delivery, snooze, dismissal, retry, and audit state.
+- An intent references its source by domain, entity ID, and optional occurrence ID.
+
+### 2.2 Scheduling
+
+- Resolve relative anchors into delivery instants using shared time policy.
+- Recalculate when source timing, timezone, recurrence, or completion changes.
+- Cancel superseded schedules safely.
+- Use idempotency keys to prevent duplicate scheduled deliveries.
+
+### 2.3 Delivery channels
+
+- In-app reminders are the baseline channel.
+- System notifications are permission-gated.
+- Future email, wearable, or platform channels remain adapters.
+- Channel failure does not mutate the source event or task.
+
+### 2.4 User controls
+
+- Snooze to a duration, time, or date.
+- Dismiss one occurrence without changing future recurrence.
+- Respect quiet hours, disabled calendars or lists, and notification permission.
+- Explain why a reminder fired and what source produced it.
+
+### 2.5 Reliability
+
+- States: pending, scheduled, delivered, snoozed, dismissed, cancelled, failed,
+  and superseded.
+- Record attempt count, last error category, and next retry.
+- Reconcile overdue schedules after app restart without flooding the user.
+
+## 3. Global search and command surface
+
+### 3.1 Unified search
+
+- Search events, tasks, notes, and later commands from one surface.
+- Domains provide searchable projections and deep-link targets.
+- Search owns indexing and ranking, not canonical content.
+
+### 3.2 Query behavior
+
+- Normalize case, punctuation, and diacritics according to locale.
+- Support quoted text and filters for type, date, status, tag, calendar, list, and
+  linked entity.
+- Return useful local results while offline.
+- Exclude deleted or inaccessible records by default.
+
+### 3.3 Ranking
+
+- Combine text match, recency, upcoming relevance, pin state, and current context.
+- Keep ranking explainable and deterministic enough for stable use.
+- Private activity MUST NOT be used for manipulative engagement ranking.
+
+### 3.4 Deep links
+
+- Resolve to the correct date, entity, occurrence, or note block.
+- Preserve navigation context so back returns to search.
+- Handle archived, deleted, moved, or unavailable targets explicitly.
+
+### 3.5 Command palette foundation
+
+- Commands MAY share the search surface after explicit selection.
+- Destructive commands require confirmation where appropriate.
+- Keyboard shortcuts are discoverable, remappable in the future, and disabled while
+  text input owns the same keystroke.
+
+## 4. Gamification and humane motivation
+
+### 4.1 Reward boundary
+
+- Gamification reacts to verified task completion and review actions.
+- It never owns task completion state.
+- Calendar attendance and private note writing do not grant rewards by default.
+
+### 4.2 Points and levels
+
+- Point awards are idempotent per completion record.
+- Reopening a task reverses or invalidates its award predictably.
+- Level thresholds are versioned so policy changes do not corrupt history.
+- Displayed celebration never blocks core planning actions.
+
+### 4.3 Streaks
+
+- Define exactly which behavior qualifies and which timezone/day boundary applies.
+- Preserve a grace policy separately from completion history.
+- Recurring-task streaks do not manufacture overdue task debt.
+- Streak loss is communicated neutrally without shame or artificial urgency.
+
+### 4.4 Controls
+
+- Users can disable sound, haptics, celebrations, points, levels, and streaks.
+- Reduced-motion settings suppress non-essential animation.
+- Core task and calendar behavior remains complete when gamification is disabled.
+
+### 4.5 Auditability
+
+- Store immutable award entries with reason, source, policy version, and reversal.
+- Rebuild totals from the ledger when needed.
+- Prevent duplicate awards after retries, imports, or repeated completion events.
+
+## 5. Settings and preferences
+
+### 5.1 Profile preferences
+
+- Locale, timezone, planning-day boundary, week start, date format, and 12/24-hour
+  clock.
+- Working days, working hours, and default planning duration.
+- Preferences have safe defaults and explicit schema versions.
+
+### 5.2 Domain defaults
+
+- Default calendar, event duration, event reminders, task list, task reminder,
+  note template, and inbox behavior.
+- A changed default affects new records, not existing records unless the user asks.
+
+### 5.3 Experience preferences
+
+- Theme, density, text size, sound, haptics, reduced motion, and gamification.
+- Calendar density and business rules remain independent from visual theme.
+- Respect operating-system accessibility preferences by default.
+
+### 5.4 Notification preferences
+
+- Permission state, enabled channels, quiet hours, and per-domain controls.
+- Explain when browser or operating-system permission blocks delivery.
+- Disabling delivery preserves reminder intent unless the user removes it.
+
+### 5.5 Reset and recovery
+
+- Reset one preference group or all preferences separately from user content.
+- Destructive data reset requires clear scope and confirmation.
+- Export is offered before full local-data deletion when storage is available.
+
+## 6. Persistence, migrations, and portability
+
+### 6.1 Repository ports
+
+- Each domain defines repository interfaces around domain concepts.
+- Platform persistence implements those interfaces.
+- UI code does not read or write browser storage directly.
+- Transactions preserve invariants across records changed by one command.
+
+### 6.2 Local-first baseline
+
+- Core create, read, update, delete, recurrence, planning, and notes work offline.
+- Persist canonical records, drafts, indexes, settings, and outbox state separately.
+- Surface degraded or read-only storage before data is lost.
+
+### 6.3 Schema versions
+
+- Version the application backup and each persisted aggregate family.
+- Migrations are deterministic, restartable, and covered by fixtures.
+- Preserve compatible unknown fields.
+- Never replace valid data with a failed migration result.
+
+### 6.4 Import and export
+
+- Native JSON backup includes schema version and integrity metadata.
+- Preview counts, conflicts, unsupported data, and destructive impact.
+- Support merge, replace, copy, or skip as appropriate to identity.
+- ICS and Markdown exports remain domain-specific projections.
+
+### 6.5 Backup and recovery
+
+- Provide manual export from the local-first release.
+- Future automatic backup remains a platform adapter.
+- Detect interrupted writes and retain the last known valid snapshot.
+- Recovery actions explain data age and scope.
+
+### 6.6 Deletion and retention
+
+- Soft-delete domain records before permanent removal.
+- Keep retention policy explicit by record type.
+- Permanent deletion clears dependent indexes and platform blobs without deleting
+  unrelated linked records.
+
+## 7. Shared time, recurrence, validation, and identity
+
+### 7.1 Time primitives
+
+- Date-only, local date-time, instant, duration, timezone, and planning-day types.
+- Centralize date arithmetic, parsing, formatting, comparison, and DST policy.
+- UI components consume formatted values and commands rather than implementing
+  calendar calculations.
+
+### 7.2 Recurrence primitives
+
+- Share recurrence vocabulary and parsing without forcing Calendar and Tasks to
+  share occurrence policies.
+- Support frequency, interval, weekday selection, count, until, and exceptions.
+- Domain-specific services decide missed-task behavior, event movement, and
+  completion semantics.
+
+### 7.3 Identity
+
+- Internal IDs are immutable and provider-independent.
+- Occurrence IDs are stable and derivable from a series and recurrence anchor.
+- Idempotency keys protect retried commands and cross-domain workflows.
+- Imported external IDs live in source metadata, never as sole canonical identity.
+
+### 7.4 Validation
+
+- Validate at domain command boundaries and import boundaries.
+- Return structured field and invariant errors suitable for UI presentation.
+- Preserve unknown compatible fields while rejecting malformed canonical data.
+- Do not rely on form controls as the only validation layer.
+
+### 7.5 Domain events
+
+- Events include unique ID, type, aggregate ID, occurred-at time, schema version,
+  causation ID, and correlation ID.
+- Publish only after the owning state transition succeeds.
+- Consumers are idempotent and tolerate replay.
+
+## 8. Reliability, offline behavior, and future sync readiness
+
+### 8.1 Operation states
+
+- Commands expose pending, succeeded, rejected, conflicted, or failed outcomes.
+- Distinguish validation, permission, storage, connectivity, and unexpected errors.
+- Retain user input after recoverable failure.
+
+### 8.2 Offline behavior
+
+- Read and mutate local canonical data without a network connection.
+- Queue future remote operations in an outbox without changing domain APIs.
+- Show local-only, pending, conflicted, and failed state where it affects trust.
+
+### 8.3 Conflict foundation
+
+- Aggregates carry revision or version values.
+- Mutating commands MAY require an expected version.
+- Preserve both sides of an unresolved conflict.
+- Provider conflict policy remains in future integration specifications.
+
+### 8.4 Idempotency
+
+- Every externally retried or cross-domain command accepts an idempotency key.
+- Store successful results long enough to return them on retry.
+- Duplicate delivery MUST NOT duplicate records, notifications, or rewards.
+
+### 8.5 Error recovery
+
+- Autosave and command failures are visible and retryable.
+- Crashes do not discard persisted drafts or the last valid snapshot.
+- Domain errors are safe for user display; technical detail goes to diagnostics.
+
+## 9. Accessibility and interaction contracts
+
+### 9.1 Keyboard
+
+- Every core action has a keyboard path.
+- Focus order follows visual and semantic order.
+- Shortcuts do not fire while an input owns the keystroke.
+- Focus returns predictably after dialogs, sheets, and destructive actions.
+
+### 9.2 Screen readers
+
+- Use semantic controls and meaningful accessible names.
+- Announce save state, validation errors, reminders, drag alternatives, and undo.
+- Time and recurrence labels are understandable without relying on visual position.
+
+### 9.3 Direct manipulation alternatives
+
+- Drag, swipe, hold, and pinch actions have button, menu, or keyboard equivalents.
+- A gesture previews its result and can be cancelled.
+- Failed gestures do not leave partial canonical mutations.
+
+### 9.4 Visual accessibility
+
+- Support text scaling and reflow.
+- Do not encode category, status, conflict, or density with color alone.
+- Respect reduced motion and sufficient contrast.
+- Current-time indicators and focus rings remain distinguishable across themes.
+
+### 9.5 Destructive safety
+
+- Confirm permanent or broad deletion.
+- Offer undo for recent recoverable changes.
+- Describe scope explicitly for one occurrence, future occurrences, or full series.
+
+## 10. Telemetry, privacy, and diagnostics
+
+### 10.1 Product telemetry
+
+- Collect only events needed to understand reliability and feature outcomes.
+- Do not collect note content, event titles, task titles, locations, or attendee data.
+- Use coarse categories and counts where possible.
+
+### 10.2 Consent and controls
+
+- Make analytics policy clear and configurable where required.
+- Core planning remains functional without optional analytics.
+- Deletion and export requests include applicable telemetry identifiers according to
+  policy.
+
+### 10.3 Diagnostics
+
+- Record technical error category, app version, schema version, operation type,
+  and anonymized correlation ID.
+- Redact user-authored content and provider secrets.
+- Diagnostic export is explicit and previewable.
+
+### 10.4 Health signals
+
+- Persistence write failure
+- Migration failure
+- Reminder scheduling and delivery failure
+- Search index lag or corruption
+- Command conflict and unhandled application error
+
+## 11. Security foundation
+
+### 11.1 Untrusted input
+
+- Treat imports, pasted rich text, URLs, files, and future provider payloads as
+  untrusted.
+- Sanitize rendered content and prevent executable markup.
+- Validate protocol allowlists for opened links.
+
+### 11.2 Local data
+
+- Avoid exposing planner content in logs, URLs, or analytics.
+- Use platform-provided secure storage for future credentials.
+- Browser storage limitations and shared-device risk are communicated honestly.
+
+### 11.3 Authorization
+
+- Domain commands enforce ownership and role policy even when the current release
+  has one owner.
+- UI visibility is not an authorization control.
+- Cross-domain queries filter inaccessible linked records.
+
+## Shared platform module targets
+
+```text
+src/
+  app/
+    commands/
+    queries/
+    workflows/
+  domains/
+    planner/
+    reminders/
+    gamification/
+    search/
+  platform/
+    persistence/
+    notifications/
+    integrations/
+    telemetry/
+  shared/
+    time/
+    recurrence/
+    validation/
+    types/
+  ui/
+    primitives/
+    patterns/
+    themes/
+```
+
+---
+
+# Delivery sequence
+
+## Phase 1: Calendar domain foundation
+
+**Implementation status:** Completed on 2026-08-09
+
+Phase 1 extracts the calendar rules already exercised by the prototype into a
+tested domain module without redesigning the visual experience.
+
+### Included
+
+- Shared date-key arithmetic that remains correct across DST boundaries.
+- Event validation and canonical creation commands.
+- Stable occurrence identity for daily, weekly, and monthly recurrence.
+- One-occurrence exceptions and whole-series updates or deletion.
+- Event move and resize commands.
+- Day, date-range, density, and next-event queries.
+- Deterministic overlap clustering and lane assignment.
+- React adoption of calendar commands and queries for all current event behavior.
+- Compatibility with the current local-storage schema and existing user data.
+- Automated domain tests plus production build verification.
+
+The implementation lives behind `src/domains/calendar/index.js`, uses shared
+date-only primitives from `src/shared/time/dateKey.js`, and is adopted by the
+current React planner for event reads and writes. Thirty-four automated tests
+cover the initial Calendar and shared-time behavior at completion.
+
+### Explicitly deferred
+
+- Provider accounts and synchronization.
+- Multiple calendar container UI and permissions.
+- Canonical timezone-bound instants and timezone conversion UI.
+- Cross-midnight and arbitrary multi-day timed events.
+- Yearly and advanced monthly recurrence.
+- Count-based recurrence and `this and following` series splitting.
+- Added occurrences outside a recurrence rule.
+- Durable trash retention beyond the existing immediate undo interaction.
+- Reminder delivery extraction, advanced availability, and search indexing.
+- Frontend visual and interaction polish.
+
+## Phase 2: Calendar completeness
+
+- Calendar containers, visibility, defaults, and permissions.
+- Canonical timed and all-day migration with exclusive end dates.
+- Timezones, DST edge behavior, cross-midnight and multi-day timed events.
+- Advanced recurrence, series splitting, exception lifecycle, and durable recovery.
+- Availability, conflict detection, briefing projections, and reminder intents.
+
+## Phase 3: Planner composition
+
+- Extract Tasks and Notes behind their own commands, queries, and repositories.
+- Introduce the day aggregate and cross-domain workflows.
+- Extract Reminders, Search, Gamification, Settings, and persistence adapters.
+- Complete accessibility alternatives and reliability projections.
+
+## Phase 4: Integrations
+
+- Add Google and Microsoft calendar and task adapters behind existing domain ports.
+- Define sync, conflict, deletion, identity mapping, retry, and observability policy
+  in provider-specific specifications.
+
+---
+
+# Decision log
+
+| Date | Decision |
+| --- | --- |
+| 2026-08-09 | Use a domain-oriented modular monolith. |
+| 2026-08-09 | Build personal-first while reserving collaboration-ready ownership and permissions. |
+| 2026-08-09 | Defer provider integration while preserving provider-neutral ports and identity. |
+| 2026-08-09 | Start Notes as daily, linked, and inbox notes inside a future-compatible notebook model. |
+| 2026-08-09 | Deliver Calendar first by extracting current behavior behind tested domain commands and queries. |

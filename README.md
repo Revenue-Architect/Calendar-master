@@ -9,18 +9,26 @@ themes. All state is local to the device.
 ```bash
 npm install
 npm run dev      # dev server
+npm test         # Calendar domain and shared time tests
 npm run build    # production bundle into dist/
 npm run preview  # serve the built bundle
 ```
 
 ## Layout
 
-| Path              | What it is                                            |
-| ----------------- | ----------------------------------------------------- |
-| `src/Planner.jsx` | The whole app — one component tree                    |
-| `src/storage.js`  | Where state is persisted, and the only I/O in the app |
-| `src/main.jsx`    | Entry point: mounts `Planner`                         |
-| `src/index.css`   | Tailwind import plus page-level resets                |
+| Path | What it is |
+| --- | --- |
+| `src/Planner.jsx` | Current presentation tree and temporary Task/Note orchestration |
+| `src/domains/calendar/` | Phase 1 Calendar model, commands, queries, recurrence, layout, and tests |
+| `src/shared/time/` | Shared date-only primitives used by Calendar and the current planner |
+| `src/storage.js` | Current local persistence adapter and the only browser storage I/O |
+| `src/main.jsx` | Entry point: mounts `Planner` |
+| `src/index.css` | Tailwind import plus page-level resets |
+
+Calendar event reads and writes now pass through the public API in
+`src/domains/calendar/index.js`. The current `{ events, overrides }` storage shape
+is intentionally preserved so existing `nbmp:state:v4` data remains readable while
+the modular migration continues.
 
 ## Storage
 
