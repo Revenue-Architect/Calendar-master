@@ -441,6 +441,7 @@ export default function Planner() {
   const [viewMode, setViewMode] = useState("timeline");
   const [listPicker, setListPicker] = useState(null);
   const [selection, setSelection] = useState(null);
+  const [firstRun, setFirstRun] = useState(false);
 
   const stripRef = useRef(null);
   const activeRef = useRef(null);
@@ -467,7 +468,10 @@ export default function Planner() {
         const loaded = await loadPlannerState(storage);
         const state = loaded.state || migrateV6ToV7(migrateV5ToV6(migrateV4ToV5(seed())));
         if (!loaded.state) await savePlannerState(storage, state);
-        if (!dead) { setDb(state); setStorageBad(false); setReady(true); }
+        /* A brand-new notebook opens on someone else's week. The sample is useful for
+           judging the app and confusing as your own planner, so the first run asks
+           rather than assuming. */
+        if (!dead) { setDb(state); setStorageBad(false); setFirstRun(!loaded.state); setReady(true); }
       } catch (error) {
         /* Either the device can't be written to, or what's already stored is
            unreadable. Open a fresh notebook in memory so the app is still usable —
@@ -538,10 +542,13 @@ export default function Planner() {
   /* One continuous run of days rather than a single page. Reads go through the same
      domain queries the timeline uses, so an occurrence, an exception or a missed
      habit behaves identically in both views. */
-  const AGENDA_SPAN = 21;
+  /* Backwards as well as forwards: "what did I do last week" is a question the
+     agenda is the right view to answer, and it could not before. */
+  const AGENDA_BACK = 7;
+  const AGENDA_SPAN = 28;
   const agenda = useMemo(() => {
     if (!db) return [];
-    const start = dateKey;
+    const start = addDaysToKey(dateKey, -AGENDA_BACK);
     const end = addDaysToKey(start, AGENDA_SPAN);
     const events = getOccurrencesForRange(db, start, end, { segments: true }).map(eventForUi);
     const tasks = getUpcomingRange(db, start, AGENDA_SPAN);
@@ -725,6 +732,9 @@ export default function Planner() {
     return free.sort((a, b) => Math.abs(a - anchor) - Math.abs(b - anchor)).slice(0, 2);
   }, [timed, dayTasks, isToday, nowMin]);
 
+  /* §6.3. Lane packing already computes overlap clusters; an event sharing its
+     cluster is double-booked. Detected, warned about, never prevented. */
+  const conflictIds = useMemo(() => new Set(events.filter((e) => e.cols > 1).map((e) => e.id)), [events]);
   const liveEvent = isToday ? events.find((e) => nowMin >= e.start && nowMin < e.start + e.dur) : null;
   const livePct = liveEvent ? (nowMin - liveEvent.start) / liveEvent.dur : 0;
   const laneL = liveEvent ? (liveEvent.lane / liveEvent.cols) * 100 : 0;
@@ -867,6 +877,9 @@ export default function Planner() {
       override: true,
     }), { completed: true });
     mutate((d) => ({ ...d, xp: d.xp + (t.reward || 0) }));
+    /* §10.3. Completion is the most-used action and fires from a 420ms hold, so it
+       is the one that most needs a way back. */
+    flash("Completed", { type: "task-complete", id, reward: t.reward || 0 });
     setConfirmComplete(null);
   };
   const reopenTask = (id) => {
@@ -1173,6 +1186,13 @@ export default function Planner() {
       if (p.type === "restore-calendar-occurrence") return restoreOccurrence(d, p.snapshot).state;
       if (p.type === "restore-planner-state" && p.snapshot?.state) return structuredClone(p.snapshot.state);
       if (p.type === "drop-event") return deleteCalendarEvent(d, p.id, { scope: "series" }).state;
+      if (p.type === "task-complete") {
+        const seriesId = parseTaskOccurrenceId(p.id).seriesId;
+        const target = d.tasks.find((x) => x.id === seriesId);
+        if (target && target.status === "completed") d.tasks = reopenTaskCommand(d.tasks, seriesId).tasks;
+        d.taskExceptions = removeTaskException(d.taskExceptions, seriesId, parseTaskOccurrenceId(p.id).occurrenceDate ?? "");
+        d.xp = Math.max(0, d.xp - (p.reward || 0));
+      }
       if (p.type === "unskip") { const o = { ...d.overrides }; delete o[p.key]; d.overrides = o; }
       if (p.type === "task-date") d.tasks = d.tasks.map((t) => (t.id === p.id ? { ...t, date: keyOf(addDays(parseKey(t.date), p.n)) } : t));
       if (p.type === "back-date") d.tasks = d.tasks.map((x) => (x.id === p.id ? { ...x, date: p.date } : x));
@@ -1193,7 +1213,7 @@ export default function Planner() {
         category: p.cat,
         reward: p.xp,
         note: p.note,
-        planned: { date: p.date || dateKey, startMinute: p.at ?? null, estimateMinutes: null },
+        planned: { date: p.unplanned ? null : (p.date || dateKey), startMinute: p.unplanned ? null : (p.at ?? null), estimateMinutes: null },
         deadline: { date: p.due || null, minute: null },
         recurrence: p.repeat ? { ...p.repeat, frequency: p.repeat.freq ?? p.repeat.frequency, missedPolicy: p.repeat.missedPolicy ?? "skip" } : null,
       };
@@ -1992,6 +2012,7 @@ export default function Planner() {
                                   legible at 22px height where a left rail would vanish */}
                               <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: held ? T.accent : catColor(e.cat) }} />
                               <span className="text-xs font-semibold truncate flex-1">{e.title}</span>
+                              {conflictIds.has(e.id) && <span title="Overlaps another event" style={{ color: NOW_RED }} className="text-xs shrink-0">⚠</span>}
                               {e.repeat && <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs shrink-0">↻</span>}
                               {e.alerts && e.alerts.length > 0 && <span style={{ color: T.dim }} className="text-xs shrink-0">◔</span>}
                               {live && <span style={{ fontFamily: MONO, background: T.accent, color: T.on, borderRadius: 4 }} className="shrink-0 px-1 text-xs tracking-widest">{Math.round(pct)}%</span>}
@@ -2313,6 +2334,9 @@ export default function Planner() {
                 {inspectItem.tags.length > 0 && <Pill T={T} surface={surface} icon="#" label={inspectItem.tags.join(", ")} />}
               </>
             )}
+            {inspect.kind === "event" && conflictIds.has(inspect.id) && (
+              <Pill T={T} surface={surface} icon="⚠" tint={NOW_RED} label="Overlaps another event on this day" />
+            )}
             {inspectItem.note && (
               <div className="px-3 py-2.5" style={{ background: surface, borderRadius: CARD_R }}>
                 <p className="text-sm leading-relaxed">{inspectItem.note}</p>
@@ -2396,6 +2420,25 @@ export default function Planner() {
               style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="nb-tap py-3 text-xs font-bold tracking-widest">COMPLETE ANYWAY</button>
             <button onClick={() => { beep("click"); setConfirmComplete(null); }}
               style={{ fontFamily: MONO, border: `1px solid ${T.line}` }} className="nb-tap py-3 text-xs tracking-widest">KEEP IT OPEN</button>
+          </div>
+        </Sheet>
+      )}
+
+      {firstRun && (
+        <Sheet T={T} onClose={() => setFirstRun(false)} title="Welcome">
+          <h2 className="text-2xl font-bold tracking-tight">Start how you like</h2>
+          <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic mt-1 mb-4">
+            There's a sample week loaded so you can see how everything behaves. Keep it
+            to explore, or clear it and make the notebook yours.
+          </p>
+          <div className="flex flex-col gap-2">
+            <button onClick={() => { beep("commit"); setFirstRun(false); }}
+              style={{ fontFamily: MONO, background: T.accent, color: T.on, borderRadius: CARD_R }} className="nb-tap py-3 text-xs font-bold tracking-widest">EXPLORE THE SAMPLE</button>
+            <button onClick={() => {
+              beep("click");
+              mutate((d) => ({ ...d, events: [], tasks: [], notes: [], eventExceptions: [], taskExceptions: [], occurrenceAliases: [], overrides: {}, xp: 0 }));
+              setFirstRun(false);
+            }} style={{ fontFamily: MONO, background: surface, borderRadius: CARD_R }} className="nb-tap py-3 text-xs tracking-widest">START EMPTY</button>
           </div>
         </Sheet>
       )}
@@ -2694,7 +2737,7 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
         </div>
       )}
 
-      {tasks.length === 0 && (
+      {tasks.length === 0 && !selection && (
         <button onClick={onAddTask} className="w-full py-8 text-center" style={{ border: `1px dashed ${T.faint}` }}>
           <span style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic">Nothing claimed for this day yet. Add the one thing that matters.</span>
         </button>
@@ -3139,6 +3182,9 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
   const [alerts, setAlerts] = useState(initial.alerts || []);
   const [repeat, setRepeat] = useState(initial.repeat || null);
   const [date, setDate] = useState(initial.date || dateKey);
+  const [more, setMore] = useState(false);
+  /* §1.2. An action captured without a day is what makes the Inbox reachable. */
+  const [unplanned, setUnplanned] = useState(initial.kind === "task" && initial.id ? !initial.date : false);
   const [timeZoneMode, setTimeZoneMode] = useState(initial.timeZoneMode || "floating");
   const [timeZone, setTimeZone] = useState(initial.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
   const [startOffset, setStartOffset] = useState(initial.timing?.startOffset || "");
@@ -3187,7 +3233,7 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
   }, [kind, recurrence && JSON.stringify(recurrence), JSON.stringify(timing), ok]);
   const submit = () => {
     if (!ok) return;
-    onSubmit({ id: initial.id, date, kind, title: title.trim(), cat, start: allDay ? 0 : start, dur: allDay ? 0 : len, xp, place, note, at, due: due || null, allDay, endDate, alerts, repeat: repeat && repeat.freq ? repeat : null, recurrence, timing });
+    onSubmit({ id: initial.id, date: unplanned && kind === "task" ? null : date, unplanned, kind, title: title.trim(), cat, start: allDay ? 0 : start, dur: allDay ? 0 : len, xp, place, note, at, due: due || null, allDay, endDate, alerts, repeat: repeat && repeat.freq ? repeat : null, recurrence, timing });
   };
   const toTime = (m) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
   const fromTime = (s) => { const [h, m] = s.split(":").map(Number); return h * 60 + m; };
@@ -3201,19 +3247,17 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
   return (
     <div>
       {!editing && (
-        <div className="flex gap-1 p-1" style={{ background: surface, borderRadius: 999 }}>
+        <div className="flex gap-1 p-1 mb-1" style={{ background: surface, borderRadius: 999 }}>
           {["event", "task"].map((k) => (
-            <button key={k} onClick={() => { onTick(); setKind(k); }} className="flex-1 py-1.5 text-xs tracking-widest"
-              style={{ fontFamily: MONO, borderRadius: 999, background: kind === k ? T.accent : "transparent", color: kind === k ? T.on : T.dim }}>
+            <button key={k} onClick={() => { onTick(); setKind(k); }} className="nb-tap flex-1 py-1.5 text-xs tracking-widest"
+              style={{ fontFamily: MONO, borderRadius: 999, background: kind === k ? T.accent : "transparent", color: kind === k ? T.on : T.dim, transition: "background 180ms ease, color 180ms ease" }}>
               {k === "event" ? "EVENT" : "ACTION"}
             </button>
           ))}
         </div>
       )}
 
-      {/* An event is composed the way it is read — centred title over its day. An
-          action is composed left-aligned, like the working document it becomes. */}
-      <div className={`${kind === "event" ? "text-center" : ""} pt-3 pb-3`}>
+      <div className={`${kind === "event" ? "text-center" : ""} pt-3 pb-4`}>
         <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
           placeholder={kind === "event" ? "What's happening?" : "What gets finished?"}
           style={{ background: "transparent", border: "none" }}
@@ -3222,195 +3266,180 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
           {editing ? "EDITING" : dateLabel}
         </span>
       </div>
-      {!initial.instance && (
-        <label className="flex items-center gap-2 mb-3">
-          <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">ON</span>
-          <input type="date" value={date} onChange={(e) => e.target.value && setDate(e.target.value)} style={{ ...field, fontFamily: MONO }} className="px-2.5 py-1.5 text-sm" />
-        </label>
-      )}
 
-      {kind === "event" ? (
-        <>
-          <button onClick={() => { onTick(); setAllDay(!allDay); }} className="flex items-center gap-2 mb-3">
-            <span className="w-4 h-4" style={{ background: allDay ? T.accent : "transparent", boxShadow: `inset 0 0 0 1px ${allDay ? T.accent : T.faint}` }} />
-            <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">ALL DAY</span>
-          </button>
+      {/* Only what the entry cannot exist without. Everything else waits behind
+          "More options", so adding a thing is one decision and refining it is another. */}
+      <div className="flex flex-col gap-2">
+        {kind === "event" ? (
+          <>
+            <Chips T={T} surface={surface} value={allDay ? "all" : "timed"} onChange={(v) => { onTick(); setAllDay(v === "all"); }}
+              options={[["timed", "AT A TIME"], ["all", "ALL DAY"]]} />
+            {!allDay && (
+              <div className="flex items-center gap-2 px-3 py-2.5" style={{ background: surface, borderRadius: CARD_R }}>
+                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">FROM</span>
+                <input type="time" step={60} value={toTime(start)} onChange={(e) => e.target.value && setStart(fromTime(e.target.value))}
+                  style={{ background: "transparent", border: "none", fontFamily: MONO }} className="text-sm" />
+                <span style={{ color: T.dim }} className="text-sm">&#8594;</span>
+                <input type="time" step={60} value={endLocal.slice(11)} onChange={(e) => {
+                  if (!e.target.value) return;
+                  const proposed = `${endLocal.slice(0, 10)}T${e.target.value}`;
+                  setLen(Math.max(5, localDateTimeToEpochMinutes(proposed) - localDateTimeToEpochMinutes(startLocal)));
+                }} style={{ background: "transparent", border: "none", fontFamily: MONO }} className="text-sm" />
+                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest ml-auto shrink-0">{dur(len)}</span>
+              </div>
+            )}
+            {!allDay && (
+              <Chips T={T} surface={surface} value={len} onChange={(v) => { onTick(); setLen(v); }}
+                options={[[30, "30M"], [60, "1H"], [90, "1H30"], [120, "2H"]]} />
+            )}
+          </>
+        ) : (
+          <>
+            <Chips T={T} surface={surface} value={unplanned ? "inbox" : "day"} onChange={(v) => { onTick(); setUnplanned(v === "inbox"); }}
+              options={[["day", "ON A DAY"], ["inbox", "INBOX"]]} />
+            {!unplanned && (
+              <div className="flex items-center gap-2 px-3 py-2.5" style={{ background: surface, borderRadius: CARD_R }}>
+                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">ON</span>
+                <input type="date" value={date} onChange={(e) => e.target.value && setDate(e.target.value)}
+                  style={{ background: "transparent", border: "none", fontFamily: MONO }} className="text-sm flex-1" />
+              </div>
+            )}
+          </>
+        )}
 
-          {allDay ? (
-            <label className="flex flex-col gap-1 mb-3">
-              <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">THROUGH (OPTIONAL)</span>
-              <input type="date" value={endDate} min={date} onChange={(e) => setEndDate(e.target.value)} style={{ ...field, fontFamily: MONO }} className="px-2.5 py-2 text-sm" />
-            </label>
+        <Chips T={T} surface={surface} value={cat} onChange={(v) => { onTick(); setCat(v); }}
+          options={CATS.map((c) => [c, c])} dot={catColor} wrap />
+      </div>
+
+      <button onClick={() => { onTick(); setMore(!more); }}
+        style={{ fontFamily: MONO, color: T.dim }} className="nb-tap w-full py-3 text-xs tracking-widest">
+        {more ? "FEWER OPTIONS" : "MORE OPTIONS"}
+      </button>
+
+      <div data-more-panel style={{
+        maxHeight: more ? 1600 : 0,
+        opacity: more ? 1 : 0,
+        overflow: "hidden",
+        transition: "max-height 380ms cubic-bezier(.2,.8,.25,1), opacity 240ms ease",
+      }}>
+        <div className="flex flex-col gap-2 pb-1">
+          {kind === "event" && allDay && (
+            <div className="flex items-center gap-2 px-3 py-2.5" style={{ background: surface, borderRadius: CARD_R }}>
+              <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">THROUGH</span>
+              <input type="date" value={endDate} min={date} onChange={(e) => setEndDate(e.target.value)}
+                style={{ background: "transparent", border: "none", fontFamily: MONO }} className="text-sm flex-1" />
+            </div>
+          )}
+          {kind === "event" && !initial.instance && (
+            <div className="flex items-center gap-2 px-3 py-2.5" style={{ background: surface, borderRadius: CARD_R }}>
+              <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">ON</span>
+              <input type="date" value={date} onChange={(e) => e.target.value && setDate(e.target.value)}
+                style={{ background: "transparent", border: "none", fontFamily: MONO }} className="text-sm flex-1" />
+            </div>
+          )}
+
+          {kind === "event" ? (
+            <>
+              <Chips T={T} surface={surface} label="REMIND ME" multi value={alerts}
+                onChange={(v) => { onTick(); setAlerts(v); }}
+                options={ALERT_CHOICES.map((a) => [a, a === 0 ? "AT TIME" : `${a}M`])} wrap />
+              <input value={place} onChange={(e) => setPlace(e.target.value)} placeholder="Where"
+                style={{ background: surface, border: "none", borderRadius: CARD_R }} className="w-full px-3 py-2.5 text-sm" />
+            </>
           ) : (
             <>
-              <div className="grid grid-cols-2 gap-2 mb-2">
-                <label className="flex flex-col gap-1">
-                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">START TIME</span>
-                  <input type="time" step={60} value={toTime(start)} onChange={(e) => e.target.value && setStart(fromTime(e.target.value))} style={{ ...field, fontFamily: MONO }} className="px-2.5 py-2 text-sm" />
-                </label>
-                <label className="flex flex-col gap-1">
-                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">END TIME</span>
-                  <input type="time" step={60} value={endLocal.slice(11)} onChange={(e) => {
-                    if (!e.target.value) return;
-                    const proposed = `${endLocal.slice(0, 10)}T${e.target.value}`;
-                    setLen(Math.max(5, localDateTimeToEpochMinutes(proposed) - localDateTimeToEpochMinutes(startLocal)));
-                  }} style={{ ...field, fontFamily: MONO }} className="px-2.5 py-2 text-sm" />
-                </label>
-              </div>
-              <label className="flex items-center gap-2 mb-2">
-                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">END DATE</span>
-                <input type="date" min={date} value={endLocal.slice(0, 10)} onChange={(e) => {
-                  if (!e.target.value) return;
-                  const proposed = `${e.target.value}T${endLocal.slice(11)}`;
-                  setLen(Math.max(5, localDateTimeToEpochMinutes(proposed) - localDateTimeToEpochMinutes(startLocal)));
-                }} style={{ ...field, fontFamily: MONO }} className="px-2.5 py-1.5 text-sm" />
-              </label>
-              <div className="flex items-center gap-2 mb-3">
-                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">MIN</span>
-                <input type="number" min={5} max={1440} step={5} value={len} onChange={(e) => setLen(Math.max(5, Number(e.target.value) || 5))} style={{ ...field, fontFamily: MONO }} className="w-20 px-2 py-1 text-sm" />
-                {[15, 30, 45, 60, 90, 120].map((d) => (
-                  <button key={d} onClick={() => { onTick(); setLen(d); }} style={{ fontFamily: MONO, color: len === d ? T.accent : T.dim }} className="text-xs tracking-widest">{d}</button>
-                ))}
-              </div>
-              <div className="mb-3">
-                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">TIME BASIS</span>
-                <div className="flex gap-1 mt-1">
-                  {["floating", "zoned"].map((mode) => (
-                    <button key={mode} onClick={() => setTimeZoneMode(mode)} className="flex-1 py-1 text-xs tracking-widest"
-                      style={{ fontFamily: MONO, background: timeZoneMode === mode ? T.accent : "transparent", color: timeZoneMode === mode ? T.on : T.dim, border: `1px solid ${timeZoneMode === mode ? T.accent : T.line}` }}>{mode.toUpperCase()}</button>
-                  ))}
+              <Chips T={T} surface={surface} label="REWARD" value={xp} onChange={(v) => { onTick(); setXp(v); }}
+                options={[[30, "+30"], [40, "+40"], [50, "+50"], [60, "+60"]]} />
+              {!unplanned && (
+                <div className="flex items-center gap-2 px-3 py-2.5" style={{ background: surface, borderRadius: CARD_R }}>
+                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">AT</span>
+                  <input type="time" step={60} value={at != null ? toTime(at) : ""} onChange={(e) => setAt(e.target.value ? fromTime(e.target.value) : null)}
+                    style={{ background: "transparent", border: "none", fontFamily: MONO }} className="text-sm" />
+                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0 ml-auto">DUE</span>
+                  <input type="date" value={due} onChange={(e) => setDue(e.target.value)}
+                    style={{ background: "transparent", border: "none", fontFamily: MONO }} className="text-sm" />
                 </div>
-                {timeZoneMode === "zoned" && (
-                  <>
-                    <input list="planner-timezones" value={timeZone} onChange={(e) => setTimeZone(e.target.value)} placeholder="IANA timezone" style={{ ...field, fontFamily: MONO }} className="w-full px-2 py-2 text-sm mt-2" />
-                    <datalist id="planner-timezones"><option value="America/Toronto" /><option value="America/New_York" /><option value="America/Los_Angeles" /><option value="Europe/London" /><option value="UTC" /></datalist>
-                    {!offsetInfo.valid && <span style={{ fontFamily: MONO, color: NOW_RED }} className="block text-xs tracking-widest mt-1">THIS LOCAL TIME DOES NOT EXIST IN THAT ZONE</span>}
-                    {offsetInfo.start.length > 1 && <select value={startOffset || offsetInfo.start[0].offset} onChange={(e) => setStartOffset(e.target.value)} style={{ ...field, fontFamily: MONO }} className="w-full px-2 py-2 text-sm mt-2">{offsetInfo.start.map((candidate) => <option key={candidate.offset} value={candidate.offset}>START {candidate.offset}</option>)}</select>}
-                    {offsetInfo.end.length > 1 && <select value={endOffset || offsetInfo.end[0].offset} onChange={(e) => setEndOffset(e.target.value)} style={{ ...field, fontFamily: MONO }} className="w-full px-2 py-2 text-sm mt-2">{offsetInfo.end.map((candidate) => <option key={candidate.offset} value={candidate.offset}>END {candidate.offset}</option>)}</select>}
-                  </>
-                )}
-                <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest mt-2">{dur(len)} · {date === endLocal.slice(0, 10) ? "SAME DAY" : `${date} → ${endLocal.slice(0, 10)}`}</span>
+              )}
+            </>
+          )}
+
+          <Chips T={T} surface={surface} label="REPEATS" value={repeat ? repeat.freq : ""}
+            onChange={(v) => setFreq(v)}
+            options={[["", "ONCE"], ["daily", "DAILY"], ["weekly", "WEEKLY"], ["monthly", "MONTHLY"], ["yearly", "YEARLY"]]} wrap />
+
+          {repeat && (
+            <div className="flex flex-col gap-2 px-3 py-2.5" style={{ background: surface, borderRadius: CARD_R }}>
+              <div className="flex items-center gap-2">
+                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">EVERY</span>
+                <input type="number" min={1} max={30} value={repeat.interval || 1}
+                  onChange={(e) => setRepeat({ ...repeat, interval: Math.max(1, Number(e.target.value) || 1) })}
+                  style={{ background: "transparent", border: "none", fontFamily: MONO }} className="w-12 text-sm" />
+                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">
+                  {repeat.freq === "daily" ? "DAYS" : repeat.freq === "weekly" ? "WEEKS" : repeat.freq === "monthly" ? "MONTHS" : "YEARS"}
+                </span>
+                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest ml-auto">UNTIL</span>
+                <input type="date" value={repeat.until || ""} onChange={(e) => setRepeat({ ...repeat, until: e.target.value })}
+                  style={{ background: "transparent", border: "none", fontFamily: MONO }} className="text-sm" />
               </div>
-              <div className="mb-3">
-                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">REMIND ME</span>
-                <div className="flex flex-wrap gap-1 mt-1">
-                  {ALERT_CHOICES.map((a) => {
-                    const on = alerts.includes(a);
+              {repeat.freq === "weekly" && (
+                <div className="flex gap-1">
+                  {DAY_LETTERS.map((d, i) => {
+                    const on = (repeat.byDay || []).includes(i);
                     return (
-                      <button key={a} onClick={() => { onTick(); setAlerts(on ? alerts.filter((x) => x !== a) : [...alerts, a].sort((p, q) => p - q)); }}
-                        className="px-2 py-1 text-xs tracking-widest" style={{ fontFamily: MONO, background: on ? T.accent : "transparent", color: on ? T.on : T.dim, border: `1px solid ${on ? T.accent : T.line}` }}>
-                        {a === 0 ? "AT TIME" : `${a}M`}
-                      </button>
+                      <button key={d} onClick={() => toggleDay(i)} className="nb-tap flex-1 py-1 text-xs tracking-widest"
+                        style={{ fontFamily: MONO, borderRadius: 999, background: on ? T.accent : "transparent", color: on ? T.on : T.dim, border: `1px solid ${on ? T.accent : T.line}` }}>{d[0]}</button>
                     );
                   })}
                 </div>
-              </div>
-            </>
+              )}
+            </div>
           )}
-        </>
-      ) : (
-        <>
-          <div className="mb-3">
-            <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">REWARD</span>
-            <div className="flex gap-1 mt-1">
-              {[30, 40, 50, 60].map((v) => (
-                <button key={v} onClick={() => { onTick(); setXp(v); }} className="flex-1 py-2 text-xs tracking-widest"
-                  style={{ fontFamily: MONO, background: xp === v ? T.accent : "transparent", color: xp === v ? T.on : T.dim, border: `1px solid ${xp === v ? T.accent : T.line}` }}>+{v}</button>
-              ))}
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-2 mb-3">
-            <label className="flex flex-col gap-1">
-              <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">DO IT AT</span>
-              <input type="time" step={60} value={at != null ? toTime(at) : ""} onChange={(e) => setAt(e.target.value ? fromTime(e.target.value) : null)} style={{ ...field, fontFamily: MONO }} className="px-2.5 py-2 text-sm" />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">DUE BY</span>
-              <input type="date" value={due} onChange={(e) => setDue(e.target.value)} style={{ ...field, fontFamily: MONO }} className="px-2.5 py-2 text-sm" />
-            </label>
-          </div>
-        </>
-      )}
 
-      <div className="mb-3">
-        <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">REPEATS</span>
-        <div className="flex flex-wrap gap-1 mt-1">
-          {[["", "ONCE"], ["daily", "DAILY"], ["weekly", "WEEKLY"], ["monthly", "MONTHLY"], ["yearly", "YEARLY"]].map(([f, label]) => {
-            const on = (repeat ? repeat.freq : "") === f;
-            return (
-              <button key={label} onClick={() => setFreq(f)} className="px-2 py-1 text-xs tracking-widest"
-                style={{ fontFamily: MONO, background: on ? T.accent : "transparent", color: on ? T.on : T.dim, border: `1px solid ${on ? T.accent : T.line}` }}>{label}</button>
-            );
-          })}
-        </div>
-        {repeat && (
-          <div className="mt-2 flex flex-col gap-2">
-            <div className="flex items-center gap-2">
-              <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">EVERY</span>
-              <input type="number" min={1} max={30} value={repeat.interval || 1} onChange={(e) => setRepeat({ ...repeat, interval: Math.max(1, Number(e.target.value) || 1) })} style={{ ...field, fontFamily: MONO }} className="w-16 px-2 py-1 text-sm" />
-              <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">{repeat.freq === "daily" ? "DAYS" : repeat.freq === "weekly" ? "WEEKS" : repeat.freq === "monthly" ? "MONTHS" : "YEARS"}</span>
-            </div>
-            {repeat.freq === "weekly" && (
-              <div className="flex gap-1">
-                {DAY_LETTERS.map((d, i) => {
-                  const on = (repeat.byDay || []).includes(i);
-                  return (
-                    <button key={d} onClick={() => toggleDay(i)} className="flex-1 py-1 text-xs tracking-widest"
-                      style={{ fontFamily: MONO, background: on ? T.accent : "transparent", color: on ? T.on : T.dim, border: `1px solid ${on ? T.accent : T.line}` }}>{d[0]}</button>
-                  );
-                })}
-              </div>
-            )}
-            {repeat.freq === "monthly" && (
-              <div className="flex gap-1">
-                {[['day', `DAY ${parseKey(date).getDate()}`], ['last-weekday', `LAST ${WD[parseKey(date).getDay()]}`]].map(([mode, label]) => (
-                  <button key={mode} onClick={() => setRepeat({ ...repeat, monthlyMode: mode })} className="flex-1 py-1 text-xs tracking-widest"
-                    style={{ fontFamily: MONO, background: (repeat.monthlyMode || "day") === mode ? T.accent : "transparent", color: (repeat.monthlyMode || "day") === mode ? T.on : T.dim, border: `1px solid ${(repeat.monthlyMode || "day") === mode ? T.accent : T.line}` }}>{label}</button>
-                ))}
-              </div>
-            )}
-            <div className="grid grid-cols-3 gap-1">
-              {[['never', 'NEVER'], ['until', 'UNTIL'], ['count', 'COUNT']].map(([mode, label]) => (
-                <button key={mode} onClick={() => setRepeat({ ...repeat, endMode: mode, until: mode === "until" ? repeat.until : "" })} className="py-1 text-xs tracking-widest"
-                  style={{ fontFamily: MONO, background: (repeat.endMode || "never") === mode ? T.accent : "transparent", color: (repeat.endMode || "never") === mode ? T.on : T.dim, border: `1px solid ${(repeat.endMode || "never") === mode ? T.accent : T.line}` }}>{label}</button>
-              ))}
-            </div>
-            {repeat.endMode === "until" && <input type="date" min={date} value={repeat.until || ""} onChange={(e) => setRepeat({ ...repeat, until: e.target.value })} style={{ ...field, fontFamily: MONO }} className="px-2.5 py-1.5 text-sm" />}
-            {repeat.endMode === "count" && <input type="number" min={1} value={repeat.count || 5} onChange={(e) => setRepeat({ ...repeat, count: Math.max(1, Number(e.target.value) || 1) })} style={{ ...field, fontFamily: MONO }} className="px-2.5 py-1.5 text-sm" />}
-            {(repeat.freq === "monthly" || repeat.freq === "yearly") && (
-              <label className="flex items-center gap-2">
-                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">MISSING DATE</span>
-                <select value={repeat.missingDatePolicy || "skip"} onChange={(e) => setRepeat({ ...repeat, missingDatePolicy: e.target.value })} style={{ ...field, fontFamily: MONO }} className="px-2.5 py-1.5 text-sm"><option value="skip">SKIP</option><option value="clamp">LAST DAY</option></select>
-              </label>
-            )}
-            {kind === "event" && preview.length > 0 && (
-              <div style={{ borderTop: `1px solid ${T.line}` }} className="pt-2">
-                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">NEXT FIVE</span>
-                <span style={{ fontFamily: MONO, color: T.text }} className="block text-xs mt-1">{preview.map((item) => item.recurrenceAnchor?.slice(0, 10)).join(" · ")}</span>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      <div className="mb-3">
-        <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">CATEGORY</span>
-        <div className="flex flex-wrap gap-1 mt-1">
-          {CATS.map((c) => (
-            <button key={c} onClick={() => { onTick(); setCat(c); }} className="px-2 py-1 text-xs tracking-widest"
-              style={{ fontFamily: MONO, background: cat === c ? T.accent : "transparent", color: cat === c ? T.on : T.dim, border: `1px solid ${cat === c ? T.accent : T.line}` }}>{c}</button>
-          ))}
+          <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Notes"
+            style={{ background: surface, border: "none", borderRadius: CARD_R, fontFamily: SERIF, resize: "none" }}
+            className="w-full px-3 py-2.5 text-sm italic" />
         </div>
       </div>
 
-      {kind === "event" && <input value={place} onChange={(e) => setPlace(e.target.value)} placeholder="Where (optional)" style={field} className="w-full px-3 py-2.5 text-sm mb-3" />}
-      <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Notes (optional)" style={{ ...field, fontFamily: SERIF, resize: "none" }} className="w-full px-3 py-2.5 text-sm italic mb-3" />
-
-      <button onClick={submit}
-        disabled={!ok} className="nb-tap w-full py-3 text-xs font-bold tracking-widest"
-        style={{ fontFamily: MONO, borderRadius: CARD_R, background: ok ? T.accent : surface, color: ok ? T.on : T.dim, border: "none" }}>
+      <button onClick={submit} disabled={!ok} className="nb-tap w-full py-3 mt-2 text-xs font-bold tracking-widest"
+        style={{ fontFamily: MONO, borderRadius: CARD_R, background: ok ? T.accent : surface, color: ok ? T.on : T.dim, border: "none", transition: "background 180ms ease" }}>
         {editing ? "SAVE CHANGES" : kind === "event" ? "ADD TO TIMELINE" : "ADD ACTION"}
       </button>
+    </div>
+  );
+}
+
+/* One chip row, one shape. Mixing pills with boxed fields makes unrelated controls
+   look like different kinds of thing, so everything selectable here is a pill. */
+function Chips({ T, surface, label, value, onChange, options, multi = false, wrap = false, dot = null }) {
+  const selected = (key) => (multi ? (value ?? []).includes(key) : value === key);
+  const pick = (key) => {
+    if (!multi) return onChange(key);
+    const set = new Set(value ?? []);
+    if (set.has(key)) set.delete(key); else set.add(key);
+    onChange([...set].sort((a, b) => a - b));
+  };
+  return (
+    <div>
+      {label && <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest mb-1">{label}</span>}
+      <div className={`flex gap-1 ${wrap ? "flex-wrap" : ""}`}>
+        {options.map(([key, text]) => {
+          const on = selected(key);
+          return (
+            <button key={String(key)} onClick={() => pick(key)}
+              className={`nb-tap ${wrap ? "" : "flex-1"} inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs tracking-widest`}
+              style={{
+                fontFamily: MONO, borderRadius: 999,
+                background: on ? T.accent : surface,
+                color: on ? T.on : T.dim,
+                transition: "background 180ms ease, color 180ms ease, transform 120ms ease",
+              }}>
+              {dot && <span className="rounded-full shrink-0" style={{ width: 7, height: 7, background: on ? T.on : dot(key) }} />}
+              {text}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

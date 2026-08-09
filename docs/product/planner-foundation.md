@@ -2332,6 +2332,13 @@ way everywhere.
   is composed left-aligned, like the working document it becomes.
 - Moving between reading and editing MUST NOT feel like moving between two
   different applications.
+- An editor shows only what the entry cannot exist without. Everything else waits
+  behind a disclosure, so adding a thing is one decision and refining it is a
+  separate one.
+- Everything selectable in an editor is the same shape. Mixing pills with boxed
+  fields makes unrelated controls look like different kinds of thing.
+- The disclosure animates open rather than appearing, so the form is understood as
+  having grown rather than been replaced.
 
 ## 5. Selection and bulk action
 
@@ -2464,3 +2471,9 @@ and resurfacing behaviors. These remain specified above and unimplemented.
 | 2026-08-09 | Allow one daily note per day; writing on a day that has one edits it rather than adding a second. |
 | 2026-08-09 | Flow the now rule into a live event's elapsed fill rather than letting a card cut it off. |
 | 2026-08-09 | Style each editor as its own detail view in an editable state, not as a separate form. |
+| 2026-08-09 | Show only required fields in an editor; everything else expands behind a disclosure. |
+| 2026-08-09 | Offer undo on completion, the most-used action and the easiest to trigger by accident. |
+| 2026-08-09 | Let an action be captured with no day, which is what makes the Inbox reachable. |
+| 2026-08-09 | Ask on first run whether to keep the sample notebook or start empty. |
+| 2026-08-09 | Warn on overlapping events from the lane clusters; detect and warn, never prevent. |
+| 2026-08-09 | Run the agenda backwards as well as forwards so past days are reviewable. |
