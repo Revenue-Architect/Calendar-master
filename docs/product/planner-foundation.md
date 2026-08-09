@@ -2401,7 +2401,19 @@ way everywhere.
   body colour. They orient without competing with content.
 - The events lane is inset from the hour gutter so cards never touch the rules.
 
-### 7.3 Now, and the passage of time
+### 7.3 Turning a page
+
+- A swipe past the threshold hands straight over to the page turn: the drag offset
+  is dropped in the same commit, without its own return animation.
+- Two transforms MUST NOT animate against each other on nested elements. A page
+  springing back while its replacement rotates in reads as a glitch, not as two
+  effects.
+- An abandoned swipe returns with a transition, because there nothing else is
+  moving.
+- An element at rest sets no transform at all. A zero translate still creates a
+  containing block and a compositing layer for no benefit.
+
+### 7.4 Now, and the passage of time
 
 - The current time is a rule in the theme accent, not a separate signal colour.
 - A live event fills with the accent as it elapses, so "now" is expressed in the
@@ -2413,14 +2425,14 @@ way everywhere.
   is one continuous reading of "now" that flows into the event, never a line that
   disappears behind a card halfway across.
 
-### 7.4 Density is countable
+### 7.5 Density is countable
 
 - A day cell shows its load as a small number of marks, capped, not as a wash of
   colour. A wash tints the whole strip and leaves the selected day competing with
   its neighbours.
 - Selection is a filled cell; today, when not selected, is an outlined one.
 
-### 7.5 Theme integrity
+### 7.6 Theme integrity
 
 - Every colour resolves from the active theme except the category hues and the
   now colour, which are deliberately constant.
@@ -2514,3 +2526,4 @@ and resurfacing behaviors. These remain specified above and unimplemented.
 | 2026-08-09 | Require that a row naming an entry opens it, rather than only displaying it. |
 | 2026-08-09 | Guard date navigation at its entry point so a bad key cannot take the screen down. |
 | 2026-08-09 | Hold body text to 4.5:1 and filled-control labels to 4:1 against their accent. |
+| 2026-08-09 | Hand a committed swipe straight to the page turn; never animate two transforms against each other. |

@@ -438,6 +438,7 @@ export default function Planner() {
   const [gesture, setGesture] = useState(null);
   const [turn, setTurn] = useState(null);
   const [swipe, setSwipe] = useState(0);
+  const [snapping, setSnapping] = useState(false);
   const [alertToast, setAlertToast] = useState(null);
   const [confirmWipe, setConfirmWipe] = useState(false);
   const [pendingImport, setPendingImport] = useState(null);
@@ -764,18 +765,37 @@ export default function Planner() {
     setDateKey(k);
   };
 
-  const onSwipeStart = (e) => { if (e.touches.length !== 1 || gestureRef.current) return; swipeRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, live: false }; };
+  const onSwipeStart = (e) => {
+    if (e.touches.length !== 1 || gestureRef.current) return;
+    swipeRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, dx: 0, live: false };
+  };
   const onSwipeMove = (e) => {
     const s = swipeRef.current;
     if (!s || e.touches.length !== 1 || gestureRef.current) return;
     const dx = e.touches[0].clientX - s.x, dy = e.touches[0].clientY - s.y;
     if (!s.live && Math.abs(dx) > 16 && Math.abs(dx) > Math.abs(dy) * 1.4) { s.live = true; clearTimeout(holdRef.current); }
-    if (s.live) setSwipe(Math.max(-140, Math.min(140, dx)));
+    if (s.live) {
+      /* The committed distance is kept on the ref as well as in state: the end
+         handler must decide from the last position actually seen, not from a state
+         value that may not have flushed. */
+      s.dx = Math.max(-140, Math.min(140, dx));
+      setSwipe(s.dx);
+    }
   };
   const onSwipeEnd = () => {
     const s = swipeRef.current;
     swipeRef.current = null;
-    if (s && s.live) { if (swipe < -64) goDay(1); else if (swipe > 64) goDay(-1); }
+    if (s && s.live && Math.abs(s.dx) > 64) {
+      /* Drop the drag offset in the same commit as the page turn and without a
+         transition. Springing the page back while the turn animation rotates the
+         new one in animates two transforms against each other on nested elements,
+         which is the jump. Only the turn should play. */
+      setSnapping(true);
+      setSwipe(0);
+      goDay(s.dx < 0 ? 1 : -1);
+      requestAnimationFrame(() => setSnapping(false));
+      return;
+    }
     setSwipe(0);
   };
 
@@ -1935,7 +1955,10 @@ export default function Planner() {
       <main className="nb-main px-3 sm:px-5 grid grid-cols-1 lg:grid-cols-12 gap-5 flex-1 min-h-0"
         style={{ "--sheet-pad": sheetPad }}>
         <section className="lg:col-span-7 flex flex-col min-h-0" onTouchStart={onSwipeStart} onTouchMove={onSwipeMove} onTouchEnd={onSwipeEnd} onTouchCancel={onSwipeEnd}
-          style={{ transform: `translateX(${swipe * 0.32}px)`, transition: swipe === 0 ? "transform 260ms cubic-bezier(.2,.8,.25,1)" : "none" }}>
+          style={{
+            transform: swipe === 0 ? "none" : `translateX(${swipe * 0.32}px)`,
+            transition: snapping || swipe !== 0 ? "none" : "transform 260ms cubic-bezier(.2,.8,.25,1)",
+          }}>
           <div key={turn ? turn.k : "first"} className={`nb-page flex flex-col min-h-0 flex-1 ${turn ? (turn.dir > 0 ? "nb-turn-next" : "nb-turn-prev") : ""}`}>
 
             {viewMode === "agenda" ? (
