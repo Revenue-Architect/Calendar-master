@@ -1,7 +1,7 @@
 # Planner
 
 A single-page day planner: a 24-hour timeline, an actions list with hold-to-complete
-and swipe gestures, recurring events and tasks, reminders, XP/levels/streaks, and ten
+and swipe gestures, recurring events and tasks, reminders, XP/levels/streaks, and fifteen
 themes. All state is local to the device.
 
 ## Running it

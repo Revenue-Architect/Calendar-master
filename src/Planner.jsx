@@ -88,14 +88,24 @@ import { getOffsetCandidates } from "./shared/time/timezone.js";
 const THEMES = [
   { id: "obsidian-acid", name: "Obsidian / Acid", bg: "#0A0A0C", card: "#121216", line: "#1E1E26", text: "#F2F2F5", dim: "#797987", faint: "#2A2A34", accent: "#CCFF00", on: "#000000" },
   { id: "obsidian-cyan", name: "Obsidian / Cyan", bg: "#0A0A0C", card: "#121216", line: "#1E1E26", text: "#F2F2F5", dim: "#797987", faint: "#2A2A34", accent: "#00F0FF", on: "#000000" },
-  { id: "ink-violet", name: "Ink / Violet", bg: "#0C0B12", card: "#15131E", line: "#221F2E", text: "#F1EFF7", dim: "#7C778C", faint: "#2B2739", accent: "#A855F7", on: "#FFFFFF" },
-  { id: "ember", name: "Ember / Orange", bg: "#0B0908", card: "#151110", line: "#211B18", text: "#F5F1EE", dim: "#857C75", faint: "#2C2521", accent: "#FF5500", on: "#FFFFFF" },
-  { id: "signal", name: "Obsidian / Crimson", bg: "#0A0A0C", card: "#121216", line: "#1E1E26", text: "#F2F2F5", dim: "#797987", faint: "#2A2A34", accent: "#FF2A55", on: "#FFFFFF" },
-  { id: "raw-amber", name: "Raw Paper / Amber", bg: "#1A1917", card: "#221F1C", line: "#2C2822", text: "#F0EBE1", dim: "#8B8477", faint: "#38332B", accent: "#D97706", on: "#FFFFFF" },
+  { id: "ink-violet", name: "Ink / Violet", bg: "#0C0B12", card: "#15131E", line: "#221F2E", text: "#F1EFF7", dim: "#7C778C", faint: "#2B2739", accent: "#A855F7", on: "#150A22" },
+  { id: "ember", name: "Ember / Orange", bg: "#0B0908", card: "#151110", line: "#211B18", text: "#F5F1EE", dim: "#857C75", faint: "#2C2521", accent: "#FF5500", on: "#1B0A02" },
+  { id: "signal", name: "Obsidian / Crimson", bg: "#0A0A0C", card: "#121216", line: "#1E1E26", text: "#F2F2F5", dim: "#797987", faint: "#2A2A34", accent: "#FF2A55", on: "#1F0208" },
+  { id: "raw-amber", name: "Raw Paper / Amber", bg: "#1A1917", card: "#221F1C", line: "#2C2822", text: "#F0EBE1", dim: "#8B8477", faint: "#38332B", accent: "#D97706", on: "#1B1102" },
   { id: "cream-terracotta", name: "Cream / Terracotta", bg: "#F4F1EA", card: "#FFFFFF", line: "#E4DED2", text: "#14141A", dim: "#79736A", faint: "#DED7C9", accent: "#C85A32", on: "#FFFFFF" },
   { id: "cream-sage", name: "Cream / Sage", bg: "#F4F1EA", card: "#FFFFFF", line: "#E4DED2", text: "#14141A", dim: "#79736A", faint: "#DED7C9", accent: "#789078", on: "#000000" },
   { id: "cream-slate", name: "Cream / Slate", bg: "#F1F2F4", card: "#FFFFFF", line: "#E1E3E7", text: "#14141A", dim: "#71757C", faint: "#D8DBE0", accent: "#5B7C99", on: "#FFFFFF" },
   { id: "linen-dusty", name: "Linen / Dusty Rose", bg: "#F7F3F4", card: "#FFFFFF", line: "#E9E0E2", text: "#1A1418", dim: "#7C7074", faint: "#E0D4D7", accent: "#C48B9F", on: "#000000" },
+
+  /* The Moleskine set commits to a saturated ground rather than tinting a dark one.
+     A coloured page is the notebook's own identity, so here the accent is the light
+     that sits on it and every neutral is mixed from the same hue — a grey borrowed
+     from a different theme reads as dirt on a coloured page. */
+  { id: "moleskine-red", name: "Moleskine / Red", bg: "#7E1A17", card: "#93211D", line: "#A93430", text: "#FFF3F0", dim: "#E4ADA6", faint: "#B4443F", accent: "#FFFFFF", on: "#7E1A17" },
+  { id: "actions-blue", name: "Moleskine / Actions Blue", bg: "#065F73", card: "#0A7288", line: "#128AA3", text: "#FFFFFF", dim: "#C3E7EF", faint: "#1E97B0", accent: "#FFFFFF", on: "#065F73" },
+  { id: "timepage-indigo", name: "Moleskine / Indigo", bg: "#141B3D", card: "#1D264F", line: "#2C3766", text: "#EEF0FF", dim: "#8189B5", faint: "#333F73", accent: "#FFC24B", on: "#141B3D" },
+  { id: "moleskine-forest", name: "Moleskine / Forest", bg: "#0F2E22", card: "#163B2C", line: "#224E3B", text: "#EDF6F1", dim: "#7FA593", faint: "#2A5A45", accent: "#F2E2C4", on: "#0F2E22" },
+  { id: "moleskine-sand", name: "Moleskine / Sand", bg: "#EDE4D3", card: "#F8F2E7", line: "#DCCFB8", text: "#241D14", dim: "#7D7161", faint: "#D2C3A8", accent: "#1F5C4D", on: "#FFFFFF" },
 ];
 
 const CATS = ["DEEP WORK", "ADMIN", "BODY", "PEOPLE", "RITUAL"];
@@ -2001,7 +2011,11 @@ export default function Planner() {
                       <span className="absolute px-1.5 py-0.5 text-xs tracking-widest pointer-events-none"
                         style={{
                           fontFamily: MONO, background: T.accent, color: T.on, borderRadius: 4,
-                          right: 0, top: mounted ? (nowMin / 1440) * DAY_H - 9 : -9,
+                          /* The card's own elapsed chip is right-aligned, so when an
+                             event is live the time moves to the left edge instead of
+                             landing on top of it. */
+                          ...(liveEvent ? { left: 0 } : { right: 0 }),
+                          top: mounted ? (nowMin / 1440) * DAY_H - 9 : -9,
                           zIndex: 7,
                           transition: "top 600ms cubic-bezier(.2,.8,.25,1)",
                         }}>
