@@ -2324,6 +2324,15 @@ way everywhere.
 - Any relationship that can be created from this view MUST also be removable from
   it.
 
+### 4.5 Editing is the detail view in an editable state
+
+- An editor uses the same surfaces as the view it edits: filled rounded fields
+  rather than outlined boxes, and the same grouping.
+- An event is composed the way it is read — centred title above its day. An action
+  is composed left-aligned, like the working document it becomes.
+- Moving between reading and editing MUST NOT feel like moving between two
+  different applications.
+
 ## 5. Selection and bulk action
 
 ### 5.1 Selection reuses the completion control
@@ -2364,6 +2373,10 @@ way everywhere.
   same colour system as everything else and reads as part of its card.
 - Elapsed fill and the now rule move on the same easing, so the two never appear
   to disagree about the time.
+- The rule runs up to a live event and stops; inside the card the elapsed fill
+  carries the same accent onward and its leading edge continues the line. The rule
+  is one continuous reading of "now" that flows into the event, never a line that
+  disappears behind a card halfway across.
 
 ### 6.4 Density is countable
 
@@ -2449,3 +2462,5 @@ and resurfacing behaviors. These remain specified above and unimplemented.
 | 2026-08-09 | Split migrated note text only on blank lines; never infer headings or lists from prose. |
 | 2026-08-09 | Skip the revision bump when a save changes nothing, so autosave cannot inflate history. |
 | 2026-08-09 | Allow one daily note per day; writing on a day that has one edits it rather than adding a second. |
+| 2026-08-09 | Flow the now rule into a live event's elapsed fill rather than letting a card cut it off. |
+| 2026-08-09 | Style each editor as its own detail view in an editable state, not as a separate form. |

@@ -1929,18 +1929,24 @@ export default function Planner() {
                 <div className="absolute left-16 right-2 top-0" style={{ height: DAY_H, pointerEvents: "none" }}>
                   {isToday && (
                     <>
+                      {/* The rule runs up to the live card and stops there; inside the
+                          card the elapsed fill carries the same accent onward, so the
+                          line reads as flowing into the event rather than being cut
+                          off behind it. With nothing live it spans the full width. */}
                       <div className="absolute pointer-events-none" style={{
                         left: 0,
-                        right: 0,
+                        width: liveEvent ? `calc(${laneL}% + 2px)` : "100%",
                         top: mounted ? (nowMin / 1440) * DAY_H : 0,
                         height: 2,
                         background: T.accent,
-                        transition: "top 600ms cubic-bezier(.2,.8,.25,1)",
+                        zIndex: 6,
+                        transition: "top 600ms cubic-bezier(.2,.8,.25,1), width 600ms cubic-bezier(.2,.8,.25,1)",
                       }} />
                       <span className="absolute px-1.5 py-0.5 text-xs tracking-widest pointer-events-none"
                         style={{
                           fontFamily: MONO, background: T.accent, color: T.on, borderRadius: 4,
                           right: 0, top: mounted ? (nowMin / 1440) * DAY_H - 9 : -9,
+                          zIndex: 7,
                           transition: "top 600ms cubic-bezier(.2,.8,.25,1)",
                         }}>
                         {tm(nowMin)}
@@ -1975,7 +1981,10 @@ export default function Planner() {
                               else instead of an unrelated crimson. */}
                           {live && (
                             <span className="absolute inset-y-0 left-0 pointer-events-none"
-                              style={{ width: `${pct}%`, background: `${T.accent}26`, transition: "width 600ms linear" }} />
+                              style={{ width: `${pct}%`, background: `${T.accent}26`, transition: "width 600ms linear" }}>
+                              {/* the leading edge is the rule, continued through the card */}
+                              <span className="absolute inset-y-0" style={{ right: 0, width: 2, background: T.accent }} />
+                            </span>
                           )}
                           <div className="relative pl-2.5 pr-2.5 py-1.5">
                             <div className="flex items-center gap-2">
@@ -3134,7 +3143,10 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
   const [timeZone, setTimeZone] = useState(initial.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
   const [startOffset, setStartOffset] = useState(initial.timing?.startOffset || "");
   const [endOffset, setEndOffset] = useState(initial.timing?.endOffset || "");
-  const field = { background: "transparent", border: `1px solid ${T.line}` };
+  /* The editor is the detail view in an editable state, so it borrows the same
+     surfaces: filled rounded fields rather than outlined boxes. */
+  const surface = isDark(T.bg) ? mixHex(T.card, "#FFFFFF", 0.13) : mixHex(T.card, "#000000", 0.06);
+  const field = { background: surface, border: "none", borderRadius: CARD_R };
   const startLocal = `${date}T${`${pad(Math.floor(start / 60))}:${pad(start % 60)}`}`;
   const endLocal = addMinutesToLocalDateTime(startLocal, len);
   const offsetInfo = useMemo(() => {
@@ -3189,22 +3201,31 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
   return (
     <div>
       {!editing && (
-        <div className="flex" style={{ borderBottom: `1px solid ${T.line}` }}>
+        <div className="flex gap-1 p-1" style={{ background: surface, borderRadius: 999 }}>
           {["event", "task"].map((k) => (
-            <button key={k} onClick={() => { onTick(); setKind(k); }} className="flex-1 py-2 text-xs tracking-widest"
-              style={{ fontFamily: MONO, color: kind === k ? T.text : T.dim, boxShadow: kind === k ? `inset 0 -2px 0 ${T.accent}` : "none" }}>
+            <button key={k} onClick={() => { onTick(); setKind(k); }} className="flex-1 py-1.5 text-xs tracking-widest"
+              style={{ fontFamily: MONO, borderRadius: 999, background: kind === k ? T.accent : "transparent", color: kind === k ? T.on : T.dim }}>
               {k === "event" ? "EVENT" : "ACTION"}
             </button>
           ))}
         </div>
       )}
 
-      <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest mt-2">{editing ? "EDITING" : dateLabel}</span>
-      <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submit(); }} placeholder={kind === "event" ? "What's happening?" : "What gets finished?"} style={field} className="w-full px-3 py-3 text-base font-semibold mt-2 mb-3" />
+      {/* An event is composed the way it is read — centred title over its day. An
+          action is composed left-aligned, like the working document it becomes. */}
+      <div className={`${kind === "event" ? "text-center" : ""} pt-3 pb-3`}>
+        <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+          placeholder={kind === "event" ? "What's happening?" : "What gets finished?"}
+          style={{ background: "transparent", border: "none" }}
+          className={`w-full text-2xl font-bold tracking-tight leading-tight ${kind === "event" ? "text-center" : ""}`} />
+        <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest mt-1.5">
+          {editing ? "EDITING" : dateLabel}
+        </span>
+      </div>
       {!initial.instance && (
         <label className="flex items-center gap-2 mb-3">
           <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">ON</span>
-          <input type="date" value={date} onChange={(e) => e.target.value && setDate(e.target.value)} style={{ ...field, fontFamily: MONO }} className="px-2 py-1 text-sm" />
+          <input type="date" value={date} onChange={(e) => e.target.value && setDate(e.target.value)} style={{ ...field, fontFamily: MONO }} className="px-2.5 py-1.5 text-sm" />
         </label>
       )}
 
@@ -3218,14 +3239,14 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
           {allDay ? (
             <label className="flex flex-col gap-1 mb-3">
               <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">THROUGH (OPTIONAL)</span>
-              <input type="date" value={endDate} min={date} onChange={(e) => setEndDate(e.target.value)} style={{ ...field, fontFamily: MONO }} className="px-2 py-2 text-sm" />
+              <input type="date" value={endDate} min={date} onChange={(e) => setEndDate(e.target.value)} style={{ ...field, fontFamily: MONO }} className="px-2.5 py-2 text-sm" />
             </label>
           ) : (
             <>
               <div className="grid grid-cols-2 gap-2 mb-2">
                 <label className="flex flex-col gap-1">
                   <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">START TIME</span>
-                  <input type="time" step={60} value={toTime(start)} onChange={(e) => e.target.value && setStart(fromTime(e.target.value))} style={{ ...field, fontFamily: MONO }} className="px-2 py-2 text-sm" />
+                  <input type="time" step={60} value={toTime(start)} onChange={(e) => e.target.value && setStart(fromTime(e.target.value))} style={{ ...field, fontFamily: MONO }} className="px-2.5 py-2 text-sm" />
                 </label>
                 <label className="flex flex-col gap-1">
                   <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">END TIME</span>
@@ -3233,7 +3254,7 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
                     if (!e.target.value) return;
                     const proposed = `${endLocal.slice(0, 10)}T${e.target.value}`;
                     setLen(Math.max(5, localDateTimeToEpochMinutes(proposed) - localDateTimeToEpochMinutes(startLocal)));
-                  }} style={{ ...field, fontFamily: MONO }} className="px-2 py-2 text-sm" />
+                  }} style={{ ...field, fontFamily: MONO }} className="px-2.5 py-2 text-sm" />
                 </label>
               </div>
               <label className="flex items-center gap-2 mb-2">
@@ -3242,7 +3263,7 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
                   if (!e.target.value) return;
                   const proposed = `${e.target.value}T${endLocal.slice(11)}`;
                   setLen(Math.max(5, localDateTimeToEpochMinutes(proposed) - localDateTimeToEpochMinutes(startLocal)));
-                }} style={{ ...field, fontFamily: MONO }} className="px-2 py-1 text-sm" />
+                }} style={{ ...field, fontFamily: MONO }} className="px-2.5 py-1.5 text-sm" />
               </label>
               <div className="flex items-center gap-2 mb-3">
                 <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">MIN</span>
@@ -3301,11 +3322,11 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
           <div className="grid grid-cols-2 gap-2 mb-3">
             <label className="flex flex-col gap-1">
               <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">DO IT AT</span>
-              <input type="time" step={60} value={at != null ? toTime(at) : ""} onChange={(e) => setAt(e.target.value ? fromTime(e.target.value) : null)} style={{ ...field, fontFamily: MONO }} className="px-2 py-2 text-sm" />
+              <input type="time" step={60} value={at != null ? toTime(at) : ""} onChange={(e) => setAt(e.target.value ? fromTime(e.target.value) : null)} style={{ ...field, fontFamily: MONO }} className="px-2.5 py-2 text-sm" />
             </label>
             <label className="flex flex-col gap-1">
               <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">DUE BY</span>
-              <input type="date" value={due} onChange={(e) => setDue(e.target.value)} style={{ ...field, fontFamily: MONO }} className="px-2 py-2 text-sm" />
+              <input type="date" value={due} onChange={(e) => setDue(e.target.value)} style={{ ...field, fontFamily: MONO }} className="px-2.5 py-2 text-sm" />
             </label>
           </div>
         </>
@@ -3354,12 +3375,12 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
                   style={{ fontFamily: MONO, background: (repeat.endMode || "never") === mode ? T.accent : "transparent", color: (repeat.endMode || "never") === mode ? T.on : T.dim, border: `1px solid ${(repeat.endMode || "never") === mode ? T.accent : T.line}` }}>{label}</button>
               ))}
             </div>
-            {repeat.endMode === "until" && <input type="date" min={date} value={repeat.until || ""} onChange={(e) => setRepeat({ ...repeat, until: e.target.value })} style={{ ...field, fontFamily: MONO }} className="px-2 py-1 text-sm" />}
-            {repeat.endMode === "count" && <input type="number" min={1} value={repeat.count || 5} onChange={(e) => setRepeat({ ...repeat, count: Math.max(1, Number(e.target.value) || 1) })} style={{ ...field, fontFamily: MONO }} className="px-2 py-1 text-sm" />}
+            {repeat.endMode === "until" && <input type="date" min={date} value={repeat.until || ""} onChange={(e) => setRepeat({ ...repeat, until: e.target.value })} style={{ ...field, fontFamily: MONO }} className="px-2.5 py-1.5 text-sm" />}
+            {repeat.endMode === "count" && <input type="number" min={1} value={repeat.count || 5} onChange={(e) => setRepeat({ ...repeat, count: Math.max(1, Number(e.target.value) || 1) })} style={{ ...field, fontFamily: MONO }} className="px-2.5 py-1.5 text-sm" />}
             {(repeat.freq === "monthly" || repeat.freq === "yearly") && (
               <label className="flex items-center gap-2">
                 <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">MISSING DATE</span>
-                <select value={repeat.missingDatePolicy || "skip"} onChange={(e) => setRepeat({ ...repeat, missingDatePolicy: e.target.value })} style={{ ...field, fontFamily: MONO }} className="px-2 py-1 text-sm"><option value="skip">SKIP</option><option value="clamp">LAST DAY</option></select>
+                <select value={repeat.missingDatePolicy || "skip"} onChange={(e) => setRepeat({ ...repeat, missingDatePolicy: e.target.value })} style={{ ...field, fontFamily: MONO }} className="px-2.5 py-1.5 text-sm"><option value="skip">SKIP</option><option value="clamp">LAST DAY</option></select>
               </label>
             )}
             {kind === "event" && preview.length > 0 && (
@@ -3382,12 +3403,12 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
         </div>
       </div>
 
-      {kind === "event" && <input value={place} onChange={(e) => setPlace(e.target.value)} placeholder="Where (optional)" style={field} className="w-full px-3 py-2 text-sm mb-3" />}
-      <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Notes (optional)" style={{ ...field, fontFamily: SERIF, resize: "none" }} className="w-full px-3 py-2 text-sm italic mb-3" />
+      {kind === "event" && <input value={place} onChange={(e) => setPlace(e.target.value)} placeholder="Where (optional)" style={field} className="w-full px-3 py-2.5 text-sm mb-3" />}
+      <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Notes (optional)" style={{ ...field, fontFamily: SERIF, resize: "none" }} className="w-full px-3 py-2.5 text-sm italic mb-3" />
 
       <button onClick={submit}
         disabled={!ok} className="nb-tap w-full py-3 text-xs font-bold tracking-widest"
-        style={{ fontFamily: MONO, background: ok ? T.accent : "transparent", color: ok ? T.on : T.dim, border: `1px solid ${ok ? T.accent : T.faint}` }}>
+        style={{ fontFamily: MONO, borderRadius: CARD_R, background: ok ? T.accent : surface, color: ok ? T.on : T.dim, border: "none" }}>
         {editing ? "SAVE CHANGES" : kind === "event" ? "ADD TO TIMELINE" : "ADD ACTION"}
       </button>
     </div>
