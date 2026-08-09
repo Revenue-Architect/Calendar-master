@@ -45,6 +45,8 @@ are too detailed for the repository README.
 - [`superpowers/plans/2026-08-09-notes-phase-1.md`](superpowers/plans/2026-08-09-notes-phase-1.md)
   replaces the legacy text note with a block document domain, links and backlinks,
   system views, search, revisions, and the v7 migration.
+- [`superpowers/plans/2026-08-09-notes-phase-2.md`](superpowers/plans/2026-08-09-notes-phase-2.md)
+  makes every block type reachable through line shorthand and adds note revisions.
 - [`superpowers/plans/2026-08-09-planner-qa-repair.md`](superpowers/plans/2026-08-09-planner-qa-repair.md)
   implements the post-implementation persistence, search, notes, task-mutation,
   browser-pressure-test, and publication gates.

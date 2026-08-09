@@ -14,7 +14,9 @@ test("editing note text preserves extraction references and unknown block attrib
     futureAttribute: { source: "import" },
   }];
 
-  const result = textToNoteBlocks("Edited text", existing, () => "new-id");
+  /* The editor round-trips through shorthand, so a checklist arrives back with its
+     marker; keeping it is what preserves the type. */
+  const result = textToNoteBlocks("[ ] Edited text", existing, () => "new-id");
 
   assert.deepEqual(result, [{
     id: "block-a",
@@ -22,13 +24,20 @@ test("editing note text preserves extraction references and unknown block attrib
     text: "Edited text",
     order: 0,
     done: false,
+    completedAt: null,
     extractedTaskId: "task-a",
     futureAttribute: { source: "import" },
   }]);
 });
 
+test("a line declares its own type through shorthand", () => {
+  const ids = ["a", "b", "c", "d"];
+  const result = textToNoteBlocks("# Heading\n- Bullet\n> Quote\n---", [], () => ids.shift());
+  assert.deepEqual(result.map((b) => b.type), ["heading", "bulleted", "quote", "divider"]);
+});
+
 test("editing a checklist block preserves its type and completion state", () => {
-  const result = textToNoteBlocks("Still done", [{
+  const result = textToNoteBlocks("[x] Still done", [{
     id: "check-a",
     type: "checklist",
     text: "Done",
@@ -36,7 +45,7 @@ test("editing a checklist block preserves its type and completion state", () => 
     done: true,
   }], () => "new-id");
 
-  assert.deepEqual(result, [{ id: "check-a", type: "checklist", text: "Still done", order: 0, done: true }]);
+  assert.deepEqual(result, [{ id: "check-a", type: "checklist", text: "Still done", order: 0, done: true, completedAt: null, extractedTaskId: null }]);
 });
 
 test("new paragraphs receive stable supplied ids", () => {

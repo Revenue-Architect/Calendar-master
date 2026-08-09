@@ -2562,3 +2562,6 @@ and resurfacing behaviors. These remain specified above and unimplemented.
 | 2026-08-09 | Take dependent records with a deletion, and carry them in the result so undo restores them. |
 | 2026-08-09 | Surface a failed write where the user already is, not only in settings. |
 | 2026-08-09 | Stack a question above the surface that raised it, so it can be answered. |
+| 2026-08-09 | Let a note line declare its own block type through shorthand rather than a toolbar. |
+| 2026-08-09 | Show the editor the same notation it parses, so a type is never lost by editing. |
+| 2026-08-09 | Record note revisions at checkpoints with a checksum, capped per note. |

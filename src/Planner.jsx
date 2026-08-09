@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from "react"
 import * as storage from "./storage.js";
 import {
   appendBlock as appendNoteBlock,
+  blocksToShorthand,
   blocksToText,
   createNote as createNoteCommand,
   deleteNote as deleteNoteCommand,
@@ -818,7 +819,11 @@ export default function Planner() {
   useEffect(() => {
     const h = (e) => {
       if (e.target && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
-      if (inspect || composer || settings || noteEdit || scopeAsk) return;
+      /* Every modal counts. Leaving the newer sheets off this list let shortcuts act
+         on the page behind them — arrow keys turned days while the first-run choice
+         was still up. */
+      if (inspect || composer || settings || noteEdit || scopeAsk
+        || firstRun || confirmComplete || dependencyPicker || listPicker || pendingImport) return;
       if (e.key === "/" || (e.key === "k" && (e.metaKey || e.ctrlKey))) { e.preventDefault(); setSearch(true); return; }
       if (search) return;
       if (e.key === "ArrowRight") goDay(1);
@@ -840,7 +845,7 @@ export default function Planner() {
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [dateKey, inspect, composer, settings, noteEdit, search, scopeAsk, goDay, todayKey, nowMin, dayTasks, undo]);
+  }, [dateKey, inspect, composer, settings, noteEdit, search, scopeAsk, goDay, todayKey, nowMin, dayTasks, undo, firstRun, confirmComplete, dependencyPicker, listPicker, pendingImport]);
 
   /* ─── writes (series-aware) ─── */
   const flash = (label, payload) => {
@@ -3248,7 +3253,11 @@ function SubComposer({ T, onAdd }) {
 function NoteEditor({ T, note, onSave, onDelete }) {
   /* The document is edited as text and stored as blocks. Round-tripping through
      blank-line separated paragraphs keeps typing fast without inventing structure. */
-  const [v, setV] = useState(() => (note.blocks ?? []).map((b) => b.text).filter(Boolean).join("\n\n"));
+  /* The editor shows the document as shorthand, not as bare text. Round-tripping
+     through the same notation it parses is what makes the other block types usable:
+     a checklist reads back as "[ ] …", so retyping the line without its marker is a
+     deliberate change of type rather than a silent loss of one. */
+  const [v, setV] = useState(() => blocksToShorthand(note.blocks ?? []));
   return (
     <div>
       <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">{note.id ? "EDIT NOTE" : "NEW NOTE"}</span>
