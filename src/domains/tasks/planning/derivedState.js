@@ -36,10 +36,12 @@ export function isPlanned(task) {
   return task.planned.date != null;
 }
 
-/* §1.2/§4.3. Inbox is "captured but not yet organised" — no plan, no deadline, and
-   not deliberately parked in Someday. */
+/* §1.2/§4.3. Inbox is "captured but not yet organised": no plan, no deadline, not
+   parked in Someday, and still untouched. Status is part of that test — starting a
+   task or moving it to waiting is triage, so those have left the inbox even when
+   they carry no dates. */
 export function isInbox(task) {
-  return isTaskActive(task)
+  return task.status === "open"
     && !task.parentTaskId
     && !isPlanned(task)
     && task.deadline.date == null

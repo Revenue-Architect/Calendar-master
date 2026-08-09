@@ -70,6 +70,8 @@ export {
   reopenTask,
   restoreTask,
   scheduleTask,
+  setTaskReminders,
+  setTaskStatus,
   updateTask,
 } from "./commands/taskCommands.js";
 export {
@@ -106,5 +108,18 @@ export {
   getSubtasksOf,
   getUpcomingRange,
 } from "./queries/dayView.js";
+export {
+  allTags,
+  createTaskList,
+  deleteTag,
+  deleteTaskList,
+  getTasksByList,
+  moveTaskToList,
+  renameTag,
+  renameTaskList,
+  setTaskTags,
+} from "./commands/listCommands.js";
+export { SMART_VIEWS, resolveSmartView, smartViewCounts } from "./queries/smartViews.js";
+export { REMINDER_ANCHORS } from "./model/task.js";
 export { DEFAULT_TASK_LISTS, migrateV5ToV6 } from "./migrations/migrateV5ToV6.js";
 export { validatePlannerStateV6 } from "./migrations/validatePlannerStateV6.js";

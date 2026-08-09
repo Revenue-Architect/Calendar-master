@@ -13,6 +13,11 @@ export const TASK_PRIORITIES = Object.freeze(["none", "low", "normal", "high", "
    manufactures an unbounded overdue pile. */
 export const MISSED_POLICIES = Object.freeze(["skip", "roll_forward", "accumulate"]);
 
+/* §12.1. A task reminder hangs off one of the dates the task already has, rather
+   than storing its own absolute time — moving the plan moves the reminder with it,
+   so a rescheduled task can never fire at the old moment. */
+export const REMINDER_ANCHORS = Object.freeze(["planned", "deadline", "followUp"]);
+
 const MINUTES_PER_DAY = 1440;
 
 function issue(issues, field, message) {
@@ -98,6 +103,24 @@ function normalizeRecurrence(input, issues) {
   };
 }
 
+function normalizeReminders(input, issues) {
+  if (input == null) return [];
+  if (!Array.isArray(input)) {
+    issue(issues, "reminders", "must be an array");
+    return [];
+  }
+  return input.map((entry, index) => {
+    if (!REMINDER_ANCHORS.includes(entry?.anchor)) {
+      issue(issues, `reminders[${index}].anchor`, `must be one of ${REMINDER_ANCHORS.join(", ")}`);
+    }
+    const offsetMinutes = Number(entry?.offsetMinutes ?? 0);
+    if (!Number.isInteger(offsetMinutes) || offsetMinutes < 0) {
+      issue(issues, `reminders[${index}].offsetMinutes`, "must be a whole number of minutes before the anchor");
+    }
+    return { id: entry?.id ?? `rem-${index}`, anchor: entry?.anchor, offsetMinutes };
+  });
+}
+
 function normalizeTags(input, issues) {
   if (input == null) return [];
   if (!Array.isArray(input)) {
@@ -172,6 +195,12 @@ export function normalizeTaskInput(input) {
   }
 
   const followUpDate = optionalDate(input.followUpDate, "followUpDate", issues);
+  const reminders = normalizeReminders(input.reminders, issues);
+  /* §2.4. Waiting is the one status that carries an expectation of a nudge, so a
+     follow-up date only means something there. */
+  if (followUpDate && status !== "waiting") {
+    issue(issues, "followUpDate", "only a waiting task can carry a follow-up date");
+  }
   const rank = Number.isInteger(input.rank) ? input.rank : 0;
   const reward = Number.isInteger(input.reward) ? input.reward : 0;
 
@@ -199,6 +228,7 @@ export function normalizeTaskInput(input) {
     rank,
     reward,
     followUpDate,
+    reminders,
     waitingFor: typeof input.waitingFor === "string" ? input.waitingFor : "",
     completedAt,
     /* §3.4. Collaboration-ready without requiring sharing to exist yet. */

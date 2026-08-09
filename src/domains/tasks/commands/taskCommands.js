@@ -159,6 +159,31 @@ export function reopenTask(tasks, taskId, { now = null } = {}) {
   return result(replace(tasks, next), [taskEvent("TaskReopened", current.id, { previousCompletedAt: current.completedAt })]);
 }
 
+/* §2.3/§2.4. Status changes go through the transition table, and waiting is the one
+   status that can carry a follow-up date and a note about who is being waited on.
+   Leaving waiting clears both, so a stale "waiting on Ana" never lingers. */
+export function setTaskStatus(tasks, taskId, status, { now = null, followUpDate = null, waitingFor = "" } = {}) {
+  const current = requireTask(tasks, taskId);
+  assertTransition(current.status, status);
+  const next = normalizeTaskInput({
+    ...current,
+    status,
+    followUpDate: status === "waiting" ? followUpDate : null,
+    waitingFor: status === "waiting" ? waitingFor : "",
+    completedAt: status === "completed" ? current.completedAt ?? now : null,
+  });
+  return result(replace(tasks, touch(next, now)), [taskEvent("TaskChanged", taskId, { status })]);
+}
+
+export function setTaskReminders(tasks, taskId, reminders, { now = null } = {}) {
+  const current = requireTask(tasks, taskId);
+  const next = normalizeTaskInput({ ...current, reminders });
+  return result(
+    replace(tasks, touch(next, now)),
+    [taskEvent("TaskReminderIntentChanged", taskId, { reminders: next.reminders })],
+  );
+}
+
 export function moveTask(tasks, taskId, parentTaskId, { now = null } = {}) {
   const current = requireTask(tasks, taskId);
   assertParentAssignment(tasks, current.id, parentTaskId);

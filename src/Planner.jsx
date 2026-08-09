@@ -3,7 +3,22 @@ import * as storage from "./storage.js";
 import { migrateV4ToV5 } from "./domains/calendar/migrations/migrateV4ToV5.js";
 import { validatePlannerStateV5 } from "./domains/calendar/migrations/validatePlannerStateV5.js";
 import {
+  SMART_VIEWS,
+  addTaskDependency,
+  allTags,
   blockingReasons,
+  createTaskList,
+  deleteTaskList,
+  getEarliestResponsibleStart,
+  getTasksByList,
+  moveTaskToList,
+  removeTaskDependency,
+  renameTaskList,
+  resolveSmartView,
+  setTaskReminders,
+  setTaskStatus,
+  setTaskTags,
+  smartViewCounts,
   completeTask as completeTaskCommand,
   completedOn,
   countOpen,
@@ -366,6 +381,9 @@ export default function Planner() {
   const [storageBad, setStorageBad] = useState(!storage.writable);
   const [saveBlocked, setSaveBlocked] = useState(false);
   const [confirmComplete, setConfirmComplete] = useState(null);
+  const [smartView, setSmartView] = useState("today");
+  const [dependencyPicker, setDependencyPicker] = useState(null);
+  const [listManager, setListManager] = useState(false);
 
   const stripRef = useRef(null);
   const activeRef = useRef(null);
@@ -539,6 +557,39 @@ export default function Planner() {
         }
       });
     });
+
+    /* §12.1. Task reminders hang off a date the task already has, so a rescheduled
+       task moves its reminder with it instead of firing at the old moment. */
+    const fire = (title, body) => {
+      beep("alert"); buzz([10, 60, 10]);
+      setAlertToast({ title, body, k: uid() });
+      setTimeout(() => setAlertToast(null), 8000);
+      try {
+        if (db.notifs && "Notification" in window && Notification.permission === "granted") new Notification(title, { body });
+      } catch (err) {}
+    };
+    getDayTasks(db, todayKey)
+      .filter((task) => task.status !== "completed" && (task.reminders ?? []).length)
+      .forEach((task) => {
+        task.reminders.forEach((reminder) => {
+          const anchorDate = reminder.anchor === "deadline" ? task.deadline.date
+            : reminder.anchor === "followUp" ? task.followUpDate
+              : task.planned.date;
+          if (anchorDate !== todayKey) return;
+          const anchorMinute = reminder.anchor === "deadline"
+            ? task.deadline.minute ?? 9 * 60
+            : task.planned.startMinute ?? 9 * 60;
+          const fireAt = anchorMinute - reminder.offsetMinutes;
+          const key = `task:${task.id}|${reminder.id}`;
+          if (firedRef.current.has(key)) return;
+          if (nowMin >= fireAt && nowMin < fireAt + 2) {
+            firedRef.current.add(key);
+            fire(task.title, reminder.offsetMinutes === 0
+              ? `Due now · ${hhmm(anchorMinute)}`
+              : `In ${dur(reminder.offsetMinutes)} · ${hhmm(anchorMinute)}`);
+          }
+        });
+      });
   }, [now, db, todayKey]);
 
   const askNotifs = async () => {
@@ -847,6 +898,38 @@ export default function Planner() {
   };
   /* §8.4. A step that needs its own planning stops being a checklist line and
      becomes a real subtask, keeping its title, state and place in the order. */
+  const blockOn = (taskId, blockerId) => {
+    const seriesId = parseTaskOccurrenceId(taskId).seriesId;
+    try {
+      /* Validated eagerly against current state, not inside the state updater: a
+         throw from within an updater runs during render and escapes this catch,
+         which would crash the screen instead of explaining the rejected edge. */
+      const next = addTaskDependency(db.tasks, seriesId, blockerId, { now: nowStamp() });
+      mutate((d) => ({ ...d, tasks: next.tasks }));
+      beep("schedule");
+      setDependencyPicker(null);
+    } catch (error) {
+      /* §15.2 rejects cycles and hierarchy edges; say which, rather than failing mute. */
+      beep("abort");
+      setDependencyPicker((current) => ({ ...current, error: error.message }));
+    }
+  };
+  const unblockTask = (taskId, blockerId) => {
+    beep("delete");
+    const seriesId = parseTaskOccurrenceId(taskId).seriesId;
+    mutate((d) => ({ ...d, tasks: removeTaskDependency(d.tasks, seriesId, blockerId, { now: nowStamp() }).tasks }));
+  };
+  const changeStatus = (taskId, status) => {
+    beep("tick");
+    const seriesId = parseTaskOccurrenceId(taskId).seriesId;
+    mutate((d) => ({
+      ...d,
+      tasks: setTaskStatus(d.tasks, seriesId, status, {
+        now: nowStamp(),
+        followUpDate: status === "waiting" ? keyOf(addDays(now, 3)) : null,
+      }).tasks,
+    }));
+  };
   const promoteSub = (taskId, subId) => {
     beep("schedule");
     writeTask(taskId, (state, id) => promoteChecklistItemCommand(state.tasks, id, subId, uid(), { now: nowStamp() }));
@@ -1347,6 +1430,13 @@ export default function Planner() {
   const inspectSubtasks = inspect && inspect.kind === "task" && db
     ? getSubtasksOf(db, parseTaskOccurrenceId(inspect.id).seriesId)
     : [];
+  const inspectDependsOn = inspect && inspect.kind === "task" && db
+    ? (db.tasks.find((t) => t.id === parseTaskOccurrenceId(inspect.id).seriesId)?.dependsOn ?? [])
+      .map((id) => db.tasks.find((t) => t.id === id)).filter(Boolean)
+    : [];
+  const earliestStart = inspect && inspect.kind === "task" && db
+    ? getEarliestResponsibleStart(db.tasks, parseTaskOccurrenceId(inspect.id).seriesId)
+    : null;
   const draggingTask = gesture && gesture.mode === "task" ? dayTasks.find((t) => t.id === gesture.id) : null;
   const dropMin = gesture && gesture.mode === "task" && !gesture.overDay && !gesture.overTask && streamRef.current
     ? (() => {
@@ -1356,9 +1446,19 @@ export default function Planner() {
       })()
     : null;
 
+  /* §4.3. The day is one view among several; the rest are queries over the same
+     tasks, so switching never moves or copies anything. */
+  /* Plain computations, not hooks: this block sits below the loading guard, so a
+     hook here would run conditionally and change the hook order between renders. */
+  const viewCounts = smartViewCounts(db, todayKey);
+  const shownTasks = smartView === "today" ? dayTasks : resolveSmartView(db, smartView, todayKey);
+
   const actionsPanel = (
     <ActionsPanel
-      T={T} listRef={listRef} tasks={dayTasks} notes={notes} overdue={overdue} deadlines={deadlines} showOverdue={isToday}
+      T={T} listRef={listRef} tasks={shownTasks} notes={notes}
+      smartView={smartView} viewCounts={viewCounts}
+      onSmartView={(id) => { beep("tick"); setSmartView(id); }}
+      lists={db.taskLists} onManageLists={() => { beep("click"); setListManager(true); }} overdue={overdue} deadlines={deadlines} showOverdue={isToday}
       todayKey={todayKey} gesture={gesture} onPullOverdue={pullOverdue} beep={beep}
       onComplete={completeTask} onReopen={reopenTask} onDefer={deferTask}
       onInspect={(id) => setInspect({ kind: "task", id })} onToggleSub={toggleSub} onAddSub={addSub} onRemoveSub={removeSub}
@@ -1726,11 +1826,55 @@ export default function Planner() {
                 <Row T={T} k="DUE" v={inspectItem.deadline.date ? fmtDay(inspectItem.deadline.date) : "NO DEADLINE"} />
                 <Row T={T} k="STEPS" v={`${(inspectItem.checklist ?? []).filter((s) => s.done).length}/${(inspectItem.checklist ?? []).length}`} />
                 <Row T={T} k="BLOCKED BY" v={inspectBlockers.length ? inspectBlockers.map((b) => b.title).join(", ") : "NOTHING"} />
+                {inspectSubtasks.length > 0 && <Row T={T} k="SUBTASKS" v={`${inspectSubtasks.filter((x) => x.status === "completed").length}/${inspectSubtasks.length}`} />}
+                {inspectItem.status === "waiting" && (
+                  <Row T={T} k="FOLLOW UP" v={inspectItem.followUpDate ? `${fmtDay(inspectItem.followUpDate)}${inspectItem.waitingFor ? ` · ${inspectItem.waitingFor}` : ""}` : "NO DATE SET"} />
+                )}
+                {inspectItem.tags.length > 0 && <Row T={T} k="TAGS" v={inspectItem.tags.join(", ")} />}
+                <Row T={T} k="LIST" v={(db.taskLists.find((l) => l.id === inspectItem.listId) || {}).name || "—"} />
               </>
             )}
             <Row T={T} k="REPEATS" v={(inspect.kind === "event" ? inspectItem.repeat : inspectItem.recurrence) ? repeatLabel(inspect.kind === "event" ? inspectItem.repeat : { ...inspectItem.recurrence, freq: inspectItem.recurrence.frequency, byDay: inspectItem.recurrence.byWeekday }).toUpperCase() : "ONCE"} />
             <Row T={T} k="DATE" v={fmtDay(dateKey)} />
           </div>
+          {inspect.kind === "task" && (
+            <div className="mt-4">
+              <div className="flex items-baseline justify-between">
+                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">DEPENDENCIES</span>
+                <button onClick={() => { beep("click"); setDependencyPicker({ taskId: parseTaskOccurrenceId(inspect.id).seriesId }); }}
+                  style={{ fontFamily: MONO, color: T.accent }} className="nb-tap text-xs tracking-widest">+ BLOCK ON</button>
+              </div>
+              {inspectDependsOn.length === 0 && (
+                <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic mt-1">Nothing has to happen first.</p>
+              )}
+              {inspectDependsOn.map((blocker) => (
+                <div key={blocker.id} className="flex items-center gap-2 py-1.5" style={{ borderBottom: `1px solid ${T.line}` }}>
+                  <span style={{ fontFamily: MONO, color: blocker.status === "completed" ? T.dim : NOW_RED }} className="text-xs tracking-widest shrink-0">
+                    {blocker.status === "completed" ? "DONE" : "OPEN"}
+                  </span>
+                  <span className="flex-1 text-xs truncate" style={{ textDecoration: blocker.status === "completed" ? "line-through" : "none" }}>{blocker.title}</span>
+                  <button onClick={() => unblockTask(inspect.id, blocker.id)} style={{ color: T.dim }} className="text-xs px-1" aria-label="Remove dependency">✕</button>
+                </div>
+              ))}
+              {/* §15.6. Advisory only — the plan is allowed to stand. */}
+              {earliestStart && inspectItem.planned.date && inspectItem.planned.date < earliestStart && (
+                <p style={{ fontFamily: MONO, color: NOW_RED }} className="text-xs tracking-widest mt-2">
+                  PLANNED BEFORE ITS BLOCKERS LAND — EARLIEST {fmtDay(earliestStart)}
+                </p>
+              )}
+
+              <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest mt-4">STATE</span>
+              <div className="flex flex-wrap gap-1 mt-1">
+                {["open", "in_progress", "waiting"].map((next) => (
+                  <button key={next} onClick={() => changeStatus(inspect.id, next)} className="px-2 py-1 text-xs tracking-widest"
+                    style={{ fontFamily: MONO, background: inspectItem.status === next ? T.accent : "transparent", color: inspectItem.status === next ? T.on : T.dim, border: `1px solid ${inspectItem.status === next ? T.accent : T.line}` }}>
+                    {next.replace("_", " ").toUpperCase()}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {inspectItem.note && <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic leading-relaxed mt-4">{inspectItem.note}</p>}
           <div className="flex gap-2 mt-5">
             <button onClick={() => removeItem(inspect.kind, inspect.id)} style={{ fontFamily: MONO, color: NOW_RED, border: `1px solid ${T.line}` }} className="nb-tap flex-1 py-3 text-xs tracking-widest">DELETE</button>
@@ -1762,6 +1906,59 @@ export default function Planner() {
             <button onClick={() => { beep("click"); setConfirmComplete(null); }}
               style={{ fontFamily: MONO, border: `1px solid ${T.line}` }} className="nb-tap py-3 text-xs tracking-widest">KEEP IT OPEN</button>
           </div>
+        </Sheet>
+      )}
+
+      {dependencyPicker && (
+        <Sheet T={T} onClose={() => { beep("click"); setDependencyPicker(null); }} title="What has to happen first?">
+          {dependencyPicker.error && (
+            <p style={{ fontFamily: MONO, color: NOW_RED }} className="text-xs tracking-widest mb-2">{dependencyPicker.error.toUpperCase()}</p>
+          )}
+          <div className="flex flex-col max-h-80 overflow-y-auto nb-s">
+            {db.tasks
+              .filter((candidate) => candidate.id !== dependencyPicker.taskId && candidate.status !== "archived")
+              .map((candidate) => (
+                <button key={candidate.id} onClick={() => blockOn(dependencyPicker.taskId, candidate.id)}
+                  className="nb-row flex items-center gap-2 py-2.5 text-left" style={{ borderBottom: `1px solid ${T.line}` }}>
+                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0 w-12">
+                    {candidate.status === "completed" ? "DONE" : "OPEN"}
+                  </span>
+                  <span className="flex-1 text-sm truncate">{candidate.title}</span>
+                </button>
+              ))}
+          </div>
+        </Sheet>
+      )}
+
+      {listManager && (
+        <Sheet T={T} onClose={() => { beep("click"); setListManager(false); }} title="Lists and tags">
+          <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">LISTS</span>
+          <div className="flex flex-col mt-1">
+            {db.taskLists.map((list) => (
+              <div key={list.id} className="flex items-center gap-2 py-2" style={{ borderBottom: `1px solid ${T.line}` }}>
+                <span className="flex-1 text-sm">{list.name}</span>
+                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">
+                  {getTasksByList(db.tasks, list.id).length}
+                </span>
+                {!list.isSystem && !list.isDefault && (
+                  <button onClick={() => { beep("delete"); mutate((d) => { const r = deleteTaskList(d.taskLists, d.tasks, list.id); return { ...d, taskLists: r.lists, tasks: r.tasks }; }); }}
+                    style={{ color: T.dim }} className="text-xs px-1" aria-label="Delete list">✕</button>
+                )}
+              </div>
+            ))}
+          </div>
+          <NewListField T={T} onAdd={(name) => { beep("schedule"); mutate((d) => ({ ...d, taskLists: createTaskList(d.taskLists, { id: `list-${uid()}`, name }) })); }} />
+
+          <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest mt-5">TAGS</span>
+          {allTags(db.tasks).length === 0
+            ? <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic mt-1">No tags yet. Add them when composing an action.</p>
+            : (
+              <div className="flex flex-wrap gap-1 mt-1">
+                {allTags(db.tasks).map((tag) => (
+                  <span key={tag} style={{ fontFamily: MONO, color: T.dim, border: `1px solid ${T.line}` }} className="px-2 py-1 text-xs tracking-widest">{tag}</span>
+                ))}
+              </div>
+            )}
         </Sheet>
       )}
 
@@ -1913,14 +2110,31 @@ function nextCalendarOccurrence(item, fromKey) {
 
 /* ═══════════════════════ ACTIONS ═══════════════════════ */
 
-function ActionsPanel({ T, listRef, tasks, notes, overdue, deadlines, showOverdue, todayKey, gesture, blockersFor, onPromoteSub, onPullOverdue, beep, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onAddTask, onEditNote, onUnschedule, onJump }) {
+function ActionsPanel({ T, listRef, tasks, notes, overdue, deadlines, showOverdue, todayKey, gesture, blockersFor, onPromoteSub, smartView, viewCounts, onSmartView, lists, onManageLists, onPullOverdue, beep, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onAddTask, onEditNote, onUnschedule, onJump }) {
   const open = tasks.filter((t) => t.status !== "completed");
   const done = tasks.filter((t) => t.status === "completed");
   return (
     <div ref={listRef}>
       <div className="hidden lg:flex items-baseline justify-between mb-3">
         <h2 className="text-2xl font-bold tracking-tight">Actions</h2>
-        <button onClick={onAddTask} style={{ fontFamily: MONO, color: T.accent }} className="nb-tap text-xs tracking-widest">+ ADD</button>
+        <div className="flex items-center gap-3">
+          <button onClick={onManageLists} style={{ fontFamily: MONO, color: T.dim }} className="nb-tap text-xs tracking-widest">LISTS</button>
+          <button onClick={onAddTask} style={{ fontFamily: MONO, color: T.accent }} className="nb-tap text-xs tracking-widest">+ ADD</button>
+        </div>
+      </div>
+
+      <div className="nb-x flex gap-1 overflow-x-auto mb-3 -mx-1 px-1">
+        {SMART_VIEWS.map((view) => {
+          const on = view.id === smartView;
+          const count = viewCounts?.[view.id] ?? 0;
+          if (!on && count === 0 && view.id !== "today") return null;
+          return (
+            <button key={view.id} onClick={() => onSmartView(view.id)} className="shrink-0 px-2 py-1 text-xs tracking-widest"
+              style={{ fontFamily: MONO, background: on ? T.accent : "transparent", color: on ? T.on : T.dim, border: `1px solid ${on ? T.accent : T.line}` }}>
+              {view.label}{count ? ` ${count}` : ""}
+            </button>
+          );
+        })}
       </div>
 
       {showOverdue && overdue.length > 0 && (
@@ -2151,6 +2365,18 @@ function Sheet({ T, onClose, title, children }) {
         </div>
         <div className="px-4 sm:px-5 pb-5">{children}</div>
       </div>
+    </div>
+  );
+}
+
+function NewListField({ T, onAdd }) {
+  const [v, setV] = useState("");
+  const go = () => { if (v.trim()) { onAdd(v.trim()); setV(""); } };
+  return (
+    <div className="flex items-center gap-2 py-2">
+      <input value={v} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => e.key === "Enter" && go()}
+        placeholder="New list" style={{ background: "transparent", border: `1px solid ${T.line}` }} className="flex-1 px-2 py-1.5 text-sm" />
+      {v.trim() && <button onClick={go} style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest">ADD</button>}
     </div>
   );
 }

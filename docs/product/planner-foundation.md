@@ -580,6 +580,8 @@ leaving room for deeper hierarchy later.
 - Waiting without follow-up
 - Completed late
 - Derived states MUST be calculated rather than stored as competing statuses.
+- Inbox additionally requires status `open`. Starting a task or moving it to
+  waiting is triage, so those have left the inbox even when they carry no dates.
 
 ### 2.3 State transitions
 
@@ -936,6 +938,11 @@ When incomplete subtasks remain, completing the parent must offer:
 ## 12. Reminders
 
 ### 12.1 Reminder anchors
+
+- A task reminder MUST be stored as an anchor plus an offset, never as an
+  absolute time. Rescheduling a task then moves its reminder with it instead of
+  firing at the moment the task used to occupy.
+- Supported anchors are the planned time, the deadline, and the follow-up date.
 
 - Planned start
 - Planned date
@@ -2194,3 +2201,8 @@ reminder extraction, and frontend polish remain intentionally deferred.
 | 2026-08-09 | Store task dependencies on the dependent task and derive the inverse, preventing two-sided drift. |
 | 2026-08-09 | Treat cancelled and archived blockers as satisfied so abandoned work cannot deadlock its dependents. |
 | 2026-08-09 | Keep dependency blocking advisory and recorded rather than enforced, consistent with parent completion. |
+| 2026-08-09 | Require status `open` for Inbox, so starting or parking a task counts as triage. |
+| 2026-08-09 | Anchor task reminders to an existing date plus an offset, never an absolute time. |
+| 2026-08-09 | Migrate legacy sub-items to checklist items, not subtasks, and expose promotion instead. |
+| 2026-08-09 | Upgrade a v4 notebook straight to v6 in one confirmed write, never landing on an intermediate version. |
+| 2026-08-09 | Keep system and default task lists undeletable, and move rather than delete work when a list is removed. |

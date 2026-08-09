@@ -29,6 +29,9 @@ are too detailed for the repository README.
 - [`superpowers/plans/2026-08-09-tasks-phase-2.md`](superpowers/plans/2026-08-09-tasks-phase-2.md)
   cuts persistence over to schema v6, expands recurring tasks through the domain,
   adopts the Tasks API in the interface, and surfaces dependencies.
+- [`superpowers/plans/2026-08-09-tasks-phase-3.md`](superpowers/plans/2026-08-09-tasks-phase-3.md)
+  closes the Tasks domain: dependency authoring, smart views, lists and tags,
+  waiting state, task reminders, and the scheduling warning.
 
 ## Architecture decisions
 

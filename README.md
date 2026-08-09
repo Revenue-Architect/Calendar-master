@@ -78,7 +78,15 @@ the inverse is always derived. Cycles, self-edges, and edges that duplicate the
 parent/child relationship are rejected. A blocker counts as satisfied once it is
 completed, cancelled, or archived, so abandoned work cannot deadlock what follows it.
 Blocking is advisory: completing past an unmet blocker takes an explicit override and
-is recorded on the task.
+is recorded on the task. Dependencies are authored from the task inspector, and
+planning work before its blockers are expected to land raises a warning without
+preventing it.
+
+Work is organised by one list per task plus tags that cut across lists, and read
+through ten named smart views — Today, Inbox, Upcoming, Deadlines, Overdue, Waiting,
+Someday, Unscheduled, Completed, All — which are queries rather than containers.
+Task reminders anchor to the planned time, deadline, or follow-up date and move with
+the task when it is rescheduled.
 
 Recurring tasks are expanded on read rather than stored. Completing or reopening a
 single occurrence records a typed exception so the series and its earlier history
