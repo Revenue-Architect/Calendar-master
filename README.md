@@ -120,6 +120,16 @@ from the item itself, and one pill per attribute. Attributes with no value are
 omitted rather than shown empty, and the view never displays a figure the app has no
 source for.
 
+## Agenda
+
+The timeline answers "when, and for how long"; the agenda answers "what is coming".
+Both read the same days through the same domain queries, so an occurrence, an
+exception or a missed habit behaves identically in either. Days stack down one rail
+with today outlined, empty days included — the gap is what shows the shape of a
+week. Each entry carries its category dot, its title, and one trailing value: a start
+time, `ALL DAY`, or `ACTION` for unscheduled work. Opening an entry moves to its day
+first, so the detail is always read in context.
+
 ## Keyboard
 
 | Key   | Action              |

@@ -30,6 +30,7 @@ import {
   getOverdueForToday,
   getSubtasksOf,
   getTaskBlockers,
+  getUpcomingRange,
   getUpcomingDeadlines,
   migrateV5ToV6,
   normalizeTaskInput,
@@ -439,6 +440,7 @@ export default function Planner() {
   const [smartView, setSmartView] = useState("today");
   const [dependencyPicker, setDependencyPicker] = useState(null);
   const [listManager, setListManager] = useState(false);
+  const [viewMode, setViewMode] = useState("timeline");
 
   const stripRef = useRef(null);
   const activeRef = useRef(null);
@@ -527,6 +529,29 @@ export default function Planner() {
     const start = addDays(first, -first.getDay());
     return Array.from({ length: 42 }, (_, i) => addDays(start, i));
   }, [monthCursor]);
+
+  /* One continuous run of days rather than a single page. Reads go through the same
+     domain queries the timeline uses, so an occurrence, an exception or a missed
+     habit behaves identically in both views. */
+  const AGENDA_SPAN = 21;
+  const agenda = useMemo(() => {
+    if (!db) return [];
+    const start = dateKey;
+    const end = addDaysToKey(start, AGENDA_SPAN);
+    const events = getOccurrencesForRange(db, start, end, { segments: true }).map(eventForUi);
+    const tasks = getUpcomingRange(db, start, AGENDA_SPAN);
+    return Array.from({ length: AGENDA_SPAN }, (_, i) => {
+      const key = addDaysToKey(start, i);
+      const onDay = events.filter((e) => e.date === key);
+      return {
+        key,
+        allDay: onDay.filter((e) => e.allDay),
+        timed: onDay.filter((e) => !e.allDay).sort((a, b) => a.start - b.start),
+        tasks: tasks.filter((t) => t.planned.date === key)
+          .sort((a, b) => (a.planned.startMinute ?? 1441) - (b.planned.startMinute ?? 1441)),
+      };
+    });
+  }, [db, dateKey]);
 
   const dayEvents = useMemo(() => (db
     ? getOccurrencesForRange(db, dateKey, addDaysToKey(dateKey, 1), { segments: true }).map(eventForUi)
@@ -1594,6 +1619,17 @@ export default function Planner() {
             {zoom === "day" ? "◂ 14 DAYS" : zoom === "week" ? "◂ MONTH" : `${MO[monthCursor.getMonth()]} ${monthCursor.getFullYear()}`}
           </button>
           <div className="flex items-center gap-2">
+            {/* Timeline answers "when, and for how long"; agenda answers "what is
+                coming". Same days, same data, two questions. */}
+            <div className="flex" style={{ borderRadius: 999, border: `1px solid ${T.line}` }}>
+              {[["timeline", "TIMELINE"], ["agenda", "AGENDA"]].map(([mode, label]) => (
+                <button key={mode} onClick={() => { beep("tick"); setViewMode(mode); }}
+                  className="px-2 py-1 text-xs tracking-widest"
+                  style={{ fontFamily: MONO, borderRadius: 999, background: viewMode === mode ? T.accent : "transparent", color: viewMode === mode ? T.on : T.dim }}>
+                  {label}
+                </button>
+              ))}
+            </div>
             {zoom === "month" && (
               <>
                 <button onClick={() => { beep("page"); setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() - 1, 1)); }} style={{ color: T.dim }} className="nb-tap px-2 text-xs">◂</button>
@@ -1693,6 +1729,15 @@ export default function Planner() {
           style={{ transform: `translateX(${swipe * 0.32}px)`, transition: swipe === 0 ? "transform 260ms cubic-bezier(.2,.8,.25,1)" : "none" }}>
           <div key={turn ? turn.k : "first"} className={`nb-page ${turn ? (turn.dir > 0 ? "nb-turn-next" : "nb-turn-prev") : ""}`}>
 
+            {viewMode === "agenda" ? (
+              <Agenda
+                T={T} surface={surface} days={agenda} dateKey={dateKey} todayKey={todayKey} clock={clock}
+                onOpenEvent={(id, key) => { beep("click"); if (key !== dateKey) jumpTo(key); setTimeout(() => setInspect({ kind: "event", id }), key !== dateKey ? 80 : 0); }}
+                onOpenTask={(id, key) => { beep("click"); if (key !== dateKey) jumpTo(key); setTimeout(() => setInspect({ kind: "task", id }), key !== dateKey ? 80 : 0); }}
+                onJump={jumpTo}
+              />
+            ) : (
+            <>
             {allDay.length > 0 && (
               <div style={{ background: T.card, borderTopLeftRadius: 16, borderTopRightRadius: 16, borderBottom: `1px solid ${T.line}` }} className="px-3 pt-3 pb-2 flex flex-col gap-1.5">
                 <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">ALL DAY</span>
@@ -1848,6 +1893,8 @@ export default function Planner() {
                 </div>
               </div>
             </div>
+            </>
+            )}
           </div>
         </section>
 
@@ -2616,6 +2663,64 @@ function TaskCard({ T, t, beep, target, todayKey, blockers = [], onPromoteSub, c
    of something overdue or blocked. */
 /* A row inside a grouped attribute card: value on the left, its icon on the right,
    matching how the reference groups the facts that govern a task. */
+/* The agenda: a continuous run of days down one rail. A day with nothing in it is
+   still drawn, because the gap is the information — you can see the shape of a week
+   without counting entries. */
+function Agenda({ T, surface, days, dateKey, todayKey, clock, onOpenEvent, onOpenTask, onJump }) {
+  return (
+    <div className="nb-s overflow-y-auto" style={{ background: T.card, borderRadius: 16, maxHeight: "62vh" }}>
+      {days.map((day) => {
+        const d = parseKey(day.key);
+        const isToday = day.key === todayKey;
+        const count = day.allDay.length + day.timed.length + day.tasks.length;
+        return (
+          <div key={day.key} className="flex" style={{ borderTop: `1px solid ${T.line}`, minHeight: 76 }}>
+            <button onClick={() => onJump(day.key)} className="shrink-0 w-16 py-3 text-center" style={{ background: T.bg }}>
+              <span className="inline-flex flex-col items-center px-2 py-1"
+                style={{ borderRadius: CARD_R, boxShadow: isToday ? `inset 0 0 0 1.5px ${T.text}` : "none" }}>
+                <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest">{WD[d.getDay()]}</span>
+                <span style={{ fontFamily: MONO }} className="block text-xl font-bold tracking-tight">{pad(d.getDate())}</span>
+              </span>
+            </button>
+            <div className="flex-1 min-w-0 flex flex-col gap-1.5 py-2 pr-2 pl-2">
+              {count === 0 && <span style={{ fontFamily: MONO, color: T.faint }} className="text-xs tracking-widest py-2">—</span>}
+              {day.allDay.map((e) => (
+                <button key={e.id} onClick={() => onOpenEvent(e.id, day.key)} className="nb-tap flex items-center gap-2.5 px-3 py-2.5 text-left"
+                  style={{ background: surface, borderRadius: CARD_R }}>
+                  <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: catColor(e.cat) }} />
+                  <span className="flex-1 text-sm font-semibold truncate">{e.title}</span>
+                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">ALL DAY</span>
+                </button>
+              ))}
+              {day.timed.map((e) => (
+                <button key={e.id} onClick={() => onOpenEvent(e.id, day.key)} className="nb-tap flex items-center gap-2.5 px-3 py-2.5 text-left"
+                  style={{ background: surface, borderRadius: CARD_R }}>
+                  <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: catColor(e.cat) }} />
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-sm font-semibold truncate">{e.title}</span>
+                    {e.place && <span style={{ color: T.dim }} className="block text-xs truncate">{e.place}</span>}
+                  </span>
+                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">{fmtTime(e.start, clock)}</span>
+                </button>
+              ))}
+              {day.tasks.map((t) => (
+                <button key={t.id} onClick={() => onOpenTask(t.id, day.key)} className="nb-tap flex items-center gap-2.5 px-3 py-2.5 text-left"
+                  style={{ background: surface, borderRadius: CARD_R, opacity: t.status === "completed" ? 0.45 : 1 }}>
+                  <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, boxShadow: `inset 0 0 0 1.5px ${catColor(t.category)}`, background: t.status === "completed" ? catColor(t.category) : "transparent" }} />
+                  <span className="flex-1 text-sm font-semibold truncate" style={{ textDecoration: t.status === "completed" ? "line-through" : "none" }}>{t.title}</span>
+                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">
+                    {t.planned.startMinute != null ? fmtTime(t.planned.startMinute, clock) : "ACTION"}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function DetailRow({ T, icon, children, divider = false }) {
   return (
     <div className="flex items-center gap-3 px-3 py-3" style={{ borderBottom: divider ? `1px solid ${T.line}` : "none" }}>

@@ -2257,14 +2257,44 @@ way everywhere.
 - The timeline itself is a labelled section, so an empty day still reads as a
   day with nothing in it rather than as a failure to load.
 
-## 3. Detail view
+## 3. Agenda view
 
-### 3.1 Header states the essentials
+### 3.1 Two questions, one set of days
+
+- The timeline answers "when, and for how long". The agenda answers "what is
+  coming". They show the same days and the same data through the same domain
+  queries, so an occurrence, an exception, or a missed habit behaves identically
+  in both.
+- The choice between them is a view mode, not a zoom level. Zoom changes how much
+  time is on screen; view mode changes what the time is drawn as.
+
+### 3.2 Days are a continuous run
+
+- Days stack down a single rail, each labelled with its weekday and date.
+- Today is outlined in the rail rather than filled, so it marks position without
+  claiming selection.
+- A day with nothing in it is still drawn. The gap is the information: the shape
+  of a week is visible without counting entries.
+
+### 3.3 Entries are one line of meaning each
+
+- An entry shows its category dot, its title, and one trailing value.
+- The trailing value is the start time for a timed event, `ALL DAY` for an
+  all-day entry, the planned time for a scheduled action, and `ACTION` for an
+  unscheduled one.
+- A location appears under the title when there is one; nothing else competes for
+  the row.
+- Opening an entry from the agenda moves to its day first, so the detail view is
+  always read in the context of the day it belongs to.
+
+## 4. Detail view
+
+### 4.1 Header states the essentials
 
 - Title, then the time range, then the day, centred and in descending weight.
 - An all-day entry says so in place of a range.
 
-### 3.2 Figures the app can answer
+### 4.2 Figures the app can answer
 
 - The two figures below the header are drawn from the item itself — length and
   time-to-start for an event, reward and step progress for a task.
@@ -2273,7 +2303,7 @@ way everywhere.
 - A countdown reads in the largest unit that still says something useful, and an
   item that has begun reads as happening or ended rather than as negative time.
 
-### 3.3 One attribute per row
+### 4.3 One attribute per row
 
 - Each attribute is a single pill: an icon, the value in plain words.
 - A pill tints itself only when the attribute carries meaning — the category's
@@ -2281,7 +2311,7 @@ way everywhere.
 - Attributes with no value are omitted rather than shown as an em dash, so the
   view length reflects how much is actually known.
 
-### 3.4 A task detail is a working document
+### 4.4 A task detail is a working document
 
 - A task opens left-aligned, not centred. Its checklist is a list to act on
   rather than a title card to read.
@@ -2294,20 +2324,20 @@ way everywhere.
 - Any relationship that can be created from this view MUST also be removable from
   it.
 
-## 4. Surfaces and density
+## 5. Surfaces and density
 
-### 4.1 Three depths only
+### 5.1 Three depths only
 
 - Page, day surface, and card. Additional depths make the hierarchy ambiguous.
 - Sheets sit above all three on a scrim.
 
-### 4.2 Quiet chrome
+### 5.2 Quiet chrome
 
 - Hour rules, free-slot hints, and empty states use the faint token, never the
   body colour. They orient without competing with content.
 - The events lane is inset from the hour gutter so cards never touch the rules.
 
-### 4.3 Now, and the passage of time
+### 5.3 Now, and the passage of time
 
 - The current time is a rule in the theme accent, not a separate signal colour.
 - A live event fills with the accent as it elapses, so "now" is expressed in the
@@ -2315,29 +2345,29 @@ way everywhere.
 - Elapsed fill and the now rule move on the same easing, so the two never appear
   to disagree about the time.
 
-### 4.4 Density is countable
+### 5.4 Density is countable
 
 - A day cell shows its load as a small number of marks, capped, not as a wash of
   colour. A wash tints the whole strip and leaves the selected day competing with
   its neighbours.
 - Selection is a filled cell; today, when not selected, is an outlined one.
 
-### 4.5 Theme integrity
+### 5.5 Theme integrity
 
 - Every colour resolves from the active theme except the category hues and the
   now colour, which are deliberately constant.
 - The page background, browser chrome colour, and `color-scheme` follow the
   active theme so native controls match the page.
 
-## 5. Type
+## 6. Type
 
-### 5.1 Three faces, fixed roles
+### 6.1 Three faces, fixed roles
 
 - Sans carries titles and body.
 - Mono carries times, labels, counts, and any value read as data.
 - Serif italic carries written reflection: notes and empty-state prose.
 
-### 5.2 Labels
+### 6.2 Labels
 
 - Section and metadata labels are uppercase mono with wide tracking.
 - Labels name what follows; they never repeat a value shown beside them.
@@ -2372,3 +2402,6 @@ way everywhere.
 | 2026-08-09 | Express "now" in the theme accent rather than a separate signal colour. |
 | 2026-08-09 | Show day density as countable marks, not a colour wash across the strip. |
 | 2026-08-09 | Give tasks their own detail layout: left-aligned, checklist-led, with grouped governing facts. |
+| 2026-08-09 | Treat timeline and agenda as view modes over the same queries, not as separate zoom levels. |
+| 2026-08-09 | Draw empty days in the agenda, because the gap is what shows the shape of a week. |
+| 2026-08-09 | Require that any relationship creatable from a view is removable from it. |
