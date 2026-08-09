@@ -2324,20 +2324,40 @@ way everywhere.
 - Any relationship that can be created from this view MUST also be removable from
   it.
 
-## 5. Surfaces and density
+## 5. Selection and bulk action
 
-### 5.1 Three depths only
+### 5.1 Selection reuses the completion control
+
+- Entering selection turns each row's completion control into its selection
+  control. No second checkbox appears and nothing changes position, so the list
+  does not reflow under the pointer as the mode changes.
+- Selection is entered explicitly and left explicitly. It never begins by
+  accident from an ordinary tap.
+
+### 5.2 A bulk action is many single actions
+
+- Each selected task runs through the same command a single task would use, so a
+  bulk run cannot bypass a rule that a single run enforces — a blocked task is
+  still blocked when it is one of twenty.
+- The result MUST report what actually changed and what refused, naming the
+  reason. Reporting a clean total when part of the run was rejected is the
+  failure mode bulk action exists to avoid, because the user's whole reason for
+  operating on many things at once is that they are not watching each one.
+
+## 6. Surfaces and density
+
+### 6.1 Three depths only
 
 - Page, day surface, and card. Additional depths make the hierarchy ambiguous.
 - Sheets sit above all three on a scrim.
 
-### 5.2 Quiet chrome
+### 6.2 Quiet chrome
 
 - Hour rules, free-slot hints, and empty states use the faint token, never the
   body colour. They orient without competing with content.
 - The events lane is inset from the hour gutter so cards never touch the rules.
 
-### 5.3 Now, and the passage of time
+### 6.3 Now, and the passage of time
 
 - The current time is a rule in the theme accent, not a separate signal colour.
 - A live event fills with the accent as it elapses, so "now" is expressed in the
@@ -2345,29 +2365,29 @@ way everywhere.
 - Elapsed fill and the now rule move on the same easing, so the two never appear
   to disagree about the time.
 
-### 5.4 Density is countable
+### 6.4 Density is countable
 
 - A day cell shows its load as a small number of marks, capped, not as a wash of
   colour. A wash tints the whole strip and leaves the selected day competing with
   its neighbours.
 - Selection is a filled cell; today, when not selected, is an outlined one.
 
-### 5.5 Theme integrity
+### 6.5 Theme integrity
 
 - Every colour resolves from the active theme except the category hues and the
   now colour, which are deliberately constant.
 - The page background, browser chrome colour, and `color-scheme` follow the
   active theme so native controls match the page.
 
-## 6. Type
+## 7. Type
 
-### 6.1 Three faces, fixed roles
+### 7.1 Three faces, fixed roles
 
 - Sans carries titles and body.
 - Mono carries times, labels, counts, and any value read as data.
 - Serif italic carries written reflection: notes and empty-state prose.
 
-### 6.2 Labels
+### 7.2 Labels
 
 - Section and metadata labels are uppercase mono with wide tracking.
 - Labels name what follows; they never repeat a value shown beside them.
@@ -2405,3 +2425,5 @@ way everywhere.
 | 2026-08-09 | Treat timeline and agenda as view modes over the same queries, not as separate zoom levels. |
 | 2026-08-09 | Draw empty days in the agenda, because the gap is what shows the shape of a week. |
 | 2026-08-09 | Require that any relationship creatable from a view is removable from it. |
+| 2026-08-09 | Run every bulk action through the single-task command and report refusals by name. |
+| 2026-08-09 | Reuse the completion control for selection so the list never reflows on entering the mode. |

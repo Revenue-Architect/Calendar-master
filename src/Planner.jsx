@@ -26,6 +26,10 @@ import {
   getOverdueForToday,
   getSubtasksOf,
   getTaskBlockers,
+  moveTaskToList,
+  renameTaskList,
+  setTaskReminders,
+  setTaskTags,
   getUpcomingRange,
   getUpcomingDeadlines,
   migrateV5ToV6,
@@ -418,6 +422,8 @@ export default function Planner() {
   const [dependencyPicker, setDependencyPicker] = useState(null);
   const [listManager, setListManager] = useState(false);
   const [viewMode, setViewMode] = useState("timeline");
+  const [listPicker, setListPicker] = useState(null);
+  const [selection, setSelection] = useState(null);
 
   const stripRef = useRef(null);
   const activeRef = useRef(null);
@@ -996,6 +1002,75 @@ export default function Planner() {
       }).tasks,
     }));
   };
+  const setList = (taskId, listId) => {
+    beep("tick");
+    const seriesId = parseTaskOccurrenceId(taskId).seriesId;
+    mutate((d) => ({ ...d, tasks: moveTaskToList(d.tasks, seriesId, listId, d.taskLists).tasks }));
+    setListPicker(null);
+  };
+  const setTags = (taskId, tags) => {
+    beep("tick");
+    const seriesId = parseTaskOccurrenceId(taskId).seriesId;
+    mutate((d) => ({ ...d, tasks: setTaskTags(d.tasks, seriesId, tags).tasks }));
+  };
+  /* One reminder per task for now, anchored to the planned time (§12.1). Offering a
+     list of offsets rather than a free field keeps it a single tap. */
+  const setReminder = (taskId, offsetMinutes) => {
+    beep(offsetMinutes == null ? "abort" : "schedule");
+    const seriesId = parseTaskOccurrenceId(taskId).seriesId;
+    mutate((d) => ({
+      ...d,
+      tasks: setTaskReminders(d.tasks, seriesId,
+        offsetMinutes == null ? [] : [{ id: uid(), anchor: "planned", offsetMinutes }],
+        { now: nowStamp() }).tasks,
+    }));
+  };
+  /* §11.3. Every bulk action runs each task through the same command a single task
+     would use, and counts what actually changed. A run that reports "5 completed"
+     when two were blocked is worse than no bulk action at all — the whole risk of
+     operating on many things at once is not noticing what refused. */
+  const runBulk = (action) => {
+    const ids = [...(selection ?? [])];
+    if (!ids.length) return;
+    let done = 0;
+    const failed = [];
+    mutate((d) => {
+      let tasks = d.tasks;
+      let taskExceptions = d.taskExceptions;
+      let xp = d.xp;
+      for (const id of ids) {
+        const seriesId = parseTaskOccurrenceId(id).seriesId;
+        const task = tasks.find((t) => t.id === seriesId);
+        if (!task) { failed.push({ id, why: "gone" }); continue; }
+        try {
+          if (action === "complete") {
+            if (blockingReasons(tasks, task).length) { failed.push({ id, why: "blocked", title: task.title }); continue; }
+            tasks = completeTaskCommand(tasks, seriesId, { now: nowStamp() }).tasks;
+            xp += task.reward || 0;
+          } else if (action === "defer") {
+            tasks = deferTaskCommand(tasks, seriesId, 1).tasks;
+          } else if (action === "today") {
+            tasks = planTaskCommand(tasks, seriesId, { date: todayKey, startMinute: task.planned.startMinute, estimateMinutes: task.planned.estimateMinutes }).tasks;
+          } else if (action === "delete") {
+            tasks = deleteTaskCommand(tasks, seriesId).tasks;
+            if (task.status === "completed") xp = Math.max(0, xp - (task.reward || 0));
+          }
+          done += 1;
+        } catch (error) {
+          failed.push({ id, why: "refused", title: task.title });
+        }
+      }
+      return { ...d, tasks, taskExceptions, xp };
+    });
+    beep(failed.length ? "abort" : "commit");
+    flash(
+      failed.length
+        ? `${done} of ${ids.length} — ${failed.length} ${failed[0].why === "blocked" ? "blocked" : "refused"}`
+        : `${done} ${action === "delete" ? "deleted" : action === "complete" ? "completed" : "moved"}`,
+      null,
+    );
+    setSelection(null);
+  };
   const promoteSub = (taskId, subId) => {
     beep("schedule");
     writeTask(taskId, (state, id) => promoteChecklistItemCommand(state.tasks, id, subId, uid(), { now: nowStamp() }));
@@ -1524,7 +1599,16 @@ export default function Planner() {
       T={T} listRef={listRef} tasks={shownTasks} notes={notes}
       smartView={smartView} viewCounts={viewCounts}
       onSmartView={(id) => { beep("tick"); setSmartView(id); }}
-      lists={db.taskLists} onManageLists={() => { beep("click"); setListManager(true); }} clock={clock} overdue={overdue} deadlines={deadlines} showOverdue={isToday}
+      lists={db.taskLists} onManageLists={() => { beep("click"); setListManager(true); }} clock={clock}
+      selection={selection}
+      onToggleSelect={(id) => setSelection((cur) => {
+        const next = new Set(cur ?? []);
+        if (next.has(id)) next.delete(id); else next.add(id);
+        return next;
+      })}
+      onStartSelect={(id) => { beep("lift"); buzz(8); setSelection(new Set(id ? [id] : [])); }}
+      onCancelSelect={() => { beep("click"); setSelection(null); }}
+      onBulk={runBulk} overdue={overdue} deadlines={deadlines} showOverdue={isToday}
       todayKey={todayKey} gesture={gesture} onPullOverdue={pullOverdue} beep={beep}
       onComplete={completeTask} onReopen={reopenTask} onDefer={deferTask}
       onInspect={(id) => setInspect({ kind: "task", id })} onToggleSub={toggleSub} onAddSub={addSub} onRemoveSub={removeSub}
@@ -1995,8 +2079,23 @@ export default function Planner() {
                 </DetailRow>
                 <DetailRow T={T} icon="◔" divider>
                   <span className="block text-sm">
-                    {inspectItem.planned.startMinute != null ? `On the day at ${tm(inspectItem.planned.startMinute)}` : "No reminder"}
+                    {(inspectItem.reminders ?? []).length
+                      ? (inspectItem.reminders[0].offsetMinutes === 0
+                        ? `When it starts${inspectItem.planned.startMinute != null ? `, ${tm(inspectItem.planned.startMinute)}` : ""}`
+                        : `${dur(inspectItem.reminders[0].offsetMinutes)} before`)
+                      : "No reminder"}
                   </span>
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {[[null, "OFF"], [0, "AT TIME"], [15, "15M"], [60, "1H"]].map(([offset, label]) => {
+                      const on = offset == null
+                        ? (inspectItem.reminders ?? []).length === 0
+                        : (inspectItem.reminders ?? [])[0]?.offsetMinutes === offset;
+                      return (
+                        <button key={label} onClick={() => setReminder(inspect.id, offset)} className="px-2 py-0.5 text-xs tracking-widest"
+                          style={{ fontFamily: MONO, borderRadius: 999, background: on ? T.accent : "transparent", color: on ? T.on : T.dim, border: `1px solid ${on ? T.accent : T.line}` }}>{label}</button>
+                      );
+                    })}
+                  </div>
                 </DetailRow>
                 <DetailRow T={T} icon="⌛" divider={inspectDependsOn.length > 0 || inspectItem.status === "waiting"}>
                   <span className="block text-sm" style={{ color: inspectItem.deadline.date && inspectItem.deadline.date < todayKey ? NOW_RED : T.text }}>
@@ -2010,6 +2109,15 @@ export default function Planner() {
                 )}
                 {/* Every edge is listed, satisfied or not, each removable — otherwise a
                     dependency could be added from here but never taken back. */}
+                <DetailRow T={T} icon="▤" divider>
+                  <button onClick={() => { beep("click"); setListPicker({ taskId: inspect.id }); }} className="text-left w-full">
+                    <span className="block text-sm">{(db.taskLists.find((l) => l.id === inspectItem.listId) || {}).name || "—"}</span>
+                    <span style={{ color: T.dim }} className="block text-xs mt-0.5">Tap to move to another list</span>
+                  </button>
+                </DetailRow>
+                <DetailRow T={T} icon="#" divider={inspectDependsOn.length > 0}>
+                  <TagField T={T} tags={inspectItem.tags} onChange={(next) => setTags(inspect.id, next)} />
+                </DetailRow>
                 {inspectDependsOn.map((blocker, i) => (
                   <DetailRow key={blocker.id} T={T} icon="⛌" divider={i < inspectDependsOn.length - 1}>
                     <div className="flex items-center gap-2">
@@ -2198,6 +2306,20 @@ export default function Planner() {
         </Sheet>
       )}
 
+      {listPicker && (
+        <Sheet T={T} onClose={() => { beep("click"); setListPicker(null); }} title="Move to list">
+          <div className="flex flex-col">
+            {db.taskLists.map((list) => (
+              <button key={list.id} onClick={() => setList(listPicker.taskId, list.id)}
+                className="nb-row flex items-center gap-2 py-2.5 text-left" style={{ borderBottom: `1px solid ${T.line}` }}>
+                <span className="flex-1 text-sm">{list.name}</span>
+                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">{getTasksByList(db.tasks, list.id).length}</span>
+              </button>
+            ))}
+          </div>
+        </Sheet>
+      )}
+
       {dependencyPicker && (
         <Sheet T={T} onClose={() => { beep("click"); setDependencyPicker(null); }} title="What has to happen first?">
           {dependencyPicker.error && (
@@ -2225,7 +2347,18 @@ export default function Planner() {
           <div className="flex flex-col mt-1">
             {db.taskLists.map((list) => (
               <div key={list.id} className="flex items-center gap-2 py-2" style={{ borderBottom: `1px solid ${T.line}` }}>
-                <span className="flex-1 text-sm">{list.name}</span>
+                {/* Editing in place: the name is the field, so there is no separate
+                    rename mode to enter and leave. */}
+                <input defaultValue={list.name} disabled={list.isSystem}
+                  onBlur={(e) => {
+                    const next = e.target.value.trim();
+                    if (!next || next === list.name) { e.target.value = list.name; return; }
+                    beep("tick");
+                    mutate((d) => ({ ...d, taskLists: renameTaskList(d.taskLists, list.id, next) }));
+                  }}
+                  onKeyDown={(e) => e.key === "Enter" && e.target.blur()}
+                  style={{ background: "transparent", border: "none", color: list.isSystem ? T.dim : T.text }}
+                  className="flex-1 text-sm py-0.5" />
                 <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">
                   {getTasksByList(db.tasks, list.id).length}
                 </span>
@@ -2403,7 +2536,7 @@ function nextCalendarOccurrence(item, fromKey) {
 
 /* ═══════════════════════ ACTIONS ═══════════════════════ */
 
-function ActionsPanel({ T, listRef, tasks, notes, overdue, deadlines, showOverdue, todayKey, gesture, blockersFor, onPromoteSub, smartView, viewCounts, onSmartView, lists, onManageLists, clock = "12", onPullOverdue, beep, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onAddTask, onEditNote, onUnschedule, onJump }) {
+function ActionsPanel({ T, listRef, tasks, notes, overdue, deadlines, showOverdue, todayKey, gesture, blockersFor, onPromoteSub, smartView, viewCounts, onSmartView, lists, onManageLists, clock = "12", selection, onToggleSelect, onStartSelect, onCancelSelect, onBulk, onPullOverdue, beep, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onAddTask, onEditNote, onUnschedule, onJump }) {
   const open = tasks.filter((t) => t.status !== "completed");
   const done = tasks.filter((t) => t.status === "completed");
   return (
@@ -2411,10 +2544,22 @@ function ActionsPanel({ T, listRef, tasks, notes, overdue, deadlines, showOverdu
       <div className="hidden lg:flex items-baseline justify-between mb-3">
         <h2 className="text-2xl font-bold tracking-tight">Actions</h2>
         <div className="flex items-center gap-3">
+          <button onClick={() => (selection ? onCancelSelect() : onStartSelect(null))} style={{ fontFamily: MONO, color: T.dim }} className="nb-tap text-xs tracking-widest">SELECT</button>
           <button onClick={onManageLists} style={{ fontFamily: MONO, color: T.dim }} className="nb-tap text-xs tracking-widest">LISTS</button>
           <button onClick={onAddTask} style={{ fontFamily: MONO, color: T.accent }} className="nb-tap text-xs tracking-widest">+ ADD</button>
         </div>
       </div>
+
+      {selection && (
+        <div className="flex flex-wrap items-center gap-1 mb-2 px-2 py-2" style={{ boxShadow: `inset 0 0 0 1px ${T.accent}`, borderRadius: CARD_R }}>
+          <span style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest mr-1">{selection.size} SELECTED</span>
+          {[["complete", "COMPLETE"], ["today", "TODAY"], ["defer", "TOMORROW"], ["delete", "DELETE"]].map(([action, label]) => (
+            <button key={action} onClick={() => onBulk(action)} className="px-2 py-1 text-xs tracking-widest"
+              style={{ fontFamily: MONO, borderRadius: 999, color: action === "delete" ? NOW_RED : T.text, border: `1px solid ${T.line}` }}>{label}</button>
+          ))}
+          <button onClick={onCancelSelect} style={{ fontFamily: MONO, color: T.dim }} className="ml-auto text-xs tracking-widest">CANCEL</button>
+        </div>
+      )}
 
       <div className="nb-x flex gap-1 overflow-x-auto mb-3 -mx-1 px-1">
         {SMART_VIEWS.map((view) => {
@@ -2463,7 +2608,7 @@ function ActionsPanel({ T, listRef, tasks, notes, overdue, deadlines, showOverdu
 
       <div className="flex flex-col gap-2">
         {open.map((t) => (
-          <TaskCard key={t.id} T={T} t={t} beep={beep} target={gesture && gesture.overTask === t.id} todayKey={todayKey} blockers={blockersFor(t)} onPromoteSub={onPromoteSub} clock={clock}
+          <TaskCard key={t.id} T={T} t={t} beep={beep} target={gesture && gesture.overTask === t.id} todayKey={todayKey} blockers={blockersFor(t)} onPromoteSub={onPromoteSub} clock={clock} selection={selection} onToggleSelect={onToggleSelect} onStartSelect={onStartSelect}
             onComplete={onComplete} onReopen={onReopen} onDefer={onDefer} onInspect={onInspect} onToggleSub={onToggleSub} onAddSub={onAddSub} onRemoveSub={onRemoveSub} onDragStart={onDragStart} onUnschedule={onUnschedule} />
         ))}
       </div>
@@ -2473,7 +2618,7 @@ function ActionsPanel({ T, listRef, tasks, notes, overdue, deadlines, showOverdu
           <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">DONE · {done.length}</span>
           <div className="flex flex-col gap-2 mt-2">
             {done.map((t) => (
-              <TaskCard key={t.id} T={T} t={t} beep={beep} todayKey={todayKey} blockers={blockersFor(t)} onPromoteSub={onPromoteSub} clock={clock}
+              <TaskCard key={t.id} T={T} t={t} beep={beep} todayKey={todayKey} blockers={blockersFor(t)} onPromoteSub={onPromoteSub} clock={clock} selection={selection} onToggleSelect={onToggleSelect} onStartSelect={onStartSelect}
                 onComplete={onComplete} onReopen={onReopen} onDefer={onDefer} onInspect={onInspect} onToggleSub={onToggleSub} onAddSub={onAddSub} onRemoveSub={onRemoveSub} onDragStart={onDragStart} onUnschedule={onUnschedule} />
             ))}
           </div>
@@ -2498,7 +2643,7 @@ function ActionsPanel({ T, listRef, tasks, notes, overdue, deadlines, showOverdu
   );
 }
 
-function TaskCard({ T, t, beep, target, todayKey, blockers = [], onPromoteSub, clock = "12", onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onUnschedule }) {
+function TaskCard({ T, t, beep, target, todayKey, blockers = [], onPromoteSub, clock = "12", selection = null, onToggleSelect, onStartSelect, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onUnschedule }) {
   const [prog, setProg] = useState(0);
   const [dx, setDx] = useState(0);
   const [burst, setBurst] = useState(null);
@@ -2565,14 +2710,22 @@ function TaskCard({ T, t, beep, target, todayKey, blockers = [], onPromoteSub, c
       <article className="relative" style={{ background: surface, borderRadius: CARD_R, transform: `translateX(${dx}px)`, transition: dx === 0 ? "transform 220ms cubic-bezier(.2,.8,.25,1)" : "none", opacity: isDone ? 0.55 : 1, touchAction: "pan-y", userSelect: "none", WebkitUserSelect: "none" }}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
         <div className="flex items-start gap-3 p-3 pl-4">
-          <button onPointerDown={(e) => { e.stopPropagation(); if (!isDone) startHold(); }} onPointerUp={(e) => { e.stopPropagation(); if (isDone) onReopen(t.id); else stopHold(true); }}
+          <button onPointerDown={(e) => { e.stopPropagation(); if (selection) return; if (!isDone) startHold(); }}
+            onPointerUp={(e) => {
+              e.stopPropagation();
+              /* While selecting, the same control toggles membership — no second
+                 checkbox appears and nothing shifts position. */
+              if (selection) { onToggleSelect(t.id); return; }
+              if (isDone) onReopen(t.id); else stopHold(true);
+            }}
             onPointerLeave={() => stopHold(true)} onPointerCancel={() => stopHold(true)}
-            className="relative mt-0.5 w-8 h-8 shrink-0 flex items-center justify-center" aria-label={isDone ? "Reopen" : "Hold to complete"} style={{ touchAction: "none" }}>
+            className="relative mt-0.5 w-8 h-8 shrink-0 flex items-center justify-center"
+            aria-label={selection ? (selection.has(t.id) ? "Deselect" : "Select") : isDone ? "Reopen" : "Hold to complete"} style={{ touchAction: "none" }}>
             <svg width="32" height="32" viewBox="0 0 32 32" className="absolute inset-0">
-              <circle cx="16" cy="16" r="13" fill="none" stroke={T.faint} strokeWidth="2" />
+              <circle cx="16" cy="16" r="13" fill="none" stroke={selection && selection.has(t.id) ? T.accent : T.faint} strokeWidth="2" />
               <circle cx="16" cy="16" r="13" fill="none" stroke={T.accent} strokeWidth="3" strokeDasharray={2 * Math.PI * 13} strokeDashoffset={2 * Math.PI * 13 * (1 - (isDone ? 1 : prog))} transform="rotate(-90 16 16)" />
             </svg>
-            <span className="relative" style={{ width: 10, height: 10, background: isDone ? T.accent : "transparent", transform: `scale(${1 + prog * 0.5})` }} />
+            <span className="relative" style={{ width: 10, height: 10, borderRadius: selection ? 2 : 0, background: (isDone || (selection && selection.has(t.id))) ? T.accent : "transparent", transform: `scale(${1 + prog * 0.5})` }} />
             {burst && Array.from({ length: 10 }).map((_, i) => {
               const a = (i / 10) * Math.PI * 2;
               return <span key={burst + i} className="nb-p absolute" style={{ width: 4, height: 4, background: T.accent, "--tx": `${Math.cos(a) * 34}px`, "--ty": `${Math.sin(a) * 34}px` }} />;
@@ -2605,7 +2758,9 @@ function TaskCard({ T, t, beep, target, todayKey, blockers = [], onPromoteSub, c
             )}
           </div>
 
-          <button onPointerDown={(e) => { e.stopPropagation(); onDragStart(t.id, e.clientX, e.clientY); }} style={{ color: T.dim, touchAction: "none" }}
+          <button onPointerDown={(e) => { e.stopPropagation(); onDragStart(t.id, e.clientX, e.clientY); }}
+            onContextMenu={(e) => { e.preventDefault(); if (!selection) onStartSelect(t.id); }}
+            style={{ color: T.dim, touchAction: "none" }}
             className="nb-tap shrink-0 w-7 h-8 text-xs" aria-label="Drag to schedule, reorder, or move to another day">⣿</button>
         </div>
 
@@ -2692,6 +2847,28 @@ function Agenda({ T, surface, days, dateKey, todayKey, clock, onOpenEvent, onOpe
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/* Tags are added by typing and removed by tapping the tag itself — a chip that is
+   its own delete control, so there is no second affordance to hunt for. */
+function TagField({ T, tags, onChange }) {
+  const [v, setV] = useState("");
+  const add = () => {
+    const value = v.trim().replace(/^#/, "");
+    if (value) { onChange([...tags, value]); setV(""); }
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {tags.map((tag) => (
+        <button key={tag} onClick={() => onChange(tags.filter((x) => x !== tag))}
+          className="px-2 py-0.5 text-xs tracking-widest" title="Remove tag"
+          style={{ fontFamily: MONO, borderRadius: 999, color: T.dim, border: `1px solid ${T.line}` }}>{tag} ✕</button>
+      ))}
+      <input value={v} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} onBlur={add}
+        placeholder={tags.length ? "Add tag" : "No tags"} style={{ background: "transparent", border: "none" }}
+        className="text-sm py-0.5 flex-1 min-w-20" />
     </div>
   );
 }

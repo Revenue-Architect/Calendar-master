@@ -29,24 +29,21 @@ Complete. This closes the Tasks domain against the approved specification.
   state updater runs during render and escapes the caller's `try`, so an invalid
   edge would have crashed the screen instead of explaining itself.
 
-## Modelled and tested, not yet reachable from the interface
+## Reachable from the interface
 
-These are complete and covered in the domain, but no screen calls them. Recorded
-here so the gap is visible rather than discovered later.
+Every Tasks capability now has a control behind it.
 
-- [ ] `moveTaskToList` — lists can be created and deleted, but a task cannot yet
-      be moved between them from the interface.
-- [ ] `setTaskTags` — tags render and rename correctly, but there is no field to
-      put a tag on a task.
-- [ ] `renameTaskList` — lists can be created and deleted, not renamed.
-- [ ] `setTaskReminders` — task reminders fire correctly when present, but there
-      is no control to add one.
+- [x] `moveTaskToList` — list row in the task detail opens a picker.
+- [x] `setTaskTags` — tag chips in the task detail; typing adds, tapping removes.
+- [x] `renameTaskList` — the list name is the field, edited in place.
+- [x] `setTaskReminders` — offset chips on the reminder row.
 
 ## Not in the Tasks domain
 
-- [ ] Bulk selection and partial-failure reporting (§11.3). Deliberately deferred:
-      it is an interaction pattern that should be designed alongside the frontend
-      pass rather than bolted onto the current list.
+- [x] Bulk selection and partial-failure reporting (§11.3). Selection reuses each
+      row's completion control, and every bulk action runs through the single-task
+      command so a blocked task is still blocked in a run of twenty. Results name
+      what refused: "3 of 4 — 1 blocked".
 - [ ] Collaboration fields (§3.4) remain modelled and unused until sharing exists.
 - [ ] Provider integration stays out of scope per the standing decision.
 
