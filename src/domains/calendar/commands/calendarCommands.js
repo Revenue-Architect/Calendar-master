@@ -1,5 +1,41 @@
-import { normalizeEventInput } from "../model/event.js";
+import { legacyEventInputToCanonical, normalizeEventInput } from "../model/event.js";
 import { occursOn, splitOccurrenceId } from "../recurrence/recurrence.js";
+import {
+  addMinutesToLocalDateTime,
+  localDateTimeToEpochMinutes,
+} from "../../../shared/time/localDateTime.js";
+import { addDaysToKey } from "../../../shared/time/dateKey.js";
+import { timingLocalBounds } from "../model/timing.js";
+
+function minuteOf(localDateTime) {
+  const [hour, minute] = localDateTime.slice(11).split(":").map(Number);
+  return hour * 60 + minute;
+}
+
+function timingFromLegacyPatch(baseTiming, patch) {
+  if (!Object.keys(patch).some((key) => ["date", "start", "dur", "allDay", "endDate"].includes(key))) {
+    return null;
+  }
+  const bounds = timingLocalBounds(baseTiming);
+  const currentDate = bounds.start.slice(0, 10);
+  const currentStart = minuteOf(bounds.start);
+  const currentDuration = localDateTimeToEpochMinutes(bounds.end) - localDateTimeToEpochMinutes(bounds.start);
+  const allDay = patch.allDay ?? baseTiming.kind === "all-day";
+  const date = patch.date || currentDate;
+  if (allDay) {
+    const currentEnd = baseTiming.kind === "all-day" ? addDaysToKey(baseTiming.endDateExclusive, -1) : date;
+    return { kind: "all-day", startDate: date, endDateExclusive: addDaysToKey(patch.endDate || currentEnd, 1) };
+  }
+  const start = patch.start ?? currentStart;
+  const duration = patch.dur ?? currentDuration;
+  const startLocal = addMinutesToLocalDateTime(`${date}T00:00`, start);
+  return {
+    kind: "timed", timeZoneMode: baseTiming.timeZoneMode === "zoned" ? "zoned" : "floating",
+    startLocal,
+    endLocal: addMinutesToLocalDateTime(startLocal, duration),
+    ...(baseTiming.timeZoneMode === "zoned" ? { timeZone: baseTiming.timeZone } : {}),
+  };
+}
 
 function commandState(state) {
   return {
@@ -63,7 +99,7 @@ export function createEvent(state, input, options = {}) {
     throw new Error(`calendar event ${id} already exists`);
   }
 
-  const event = { ...normalizeEventInput(input), id };
+  const event = { ...legacyEventInputToCanonical(input), id };
   next.events = [...next.events, event];
   return result(next, event, null, [eventNotice("EventCreated", event)]);
 }
@@ -73,6 +109,41 @@ export function updateEvent(state, eventId, patch, options = {}) {
   const { seriesId, recurrenceDate } = splitOccurrenceId(eventId);
   const base = baseEvent(next, seriesId);
   const scope = recurrenceDate && options.scope !== "series" ? "occurrence" : "series";
+
+  if (base.timing) {
+    if (scope === "occurrence") {
+      throw new Error("canonical occurrence edits require the typed occurrence command");
+    }
+    let timing = patch.timing || timingFromLegacyPatch(base.timing, patch) || base.timing;
+    if (patch.startLocal && base.timing.kind === "timed") {
+      const duration = localDateTimeToEpochMinutes(base.timing.endLocal)
+        - localDateTimeToEpochMinutes(base.timing.startLocal);
+      timing = {
+        ...base.timing,
+        startLocal: patch.startLocal,
+        endLocal: addMinutesToLocalDateTime(patch.startLocal, duration),
+      };
+    }
+    const {
+      startLocal, date, start, dur, allDay, endDate,
+      repeat, ...metadataPatch
+    } = patch;
+    if (repeat !== undefined) {
+      metadataPatch.recurrence = repeat ? {
+        frequency: repeat.freq, interval: repeat.interval || 1, weekStart: 0,
+        ...(repeat.byDay ? { byWeekday: [...repeat.byDay] } : {}),
+        ...(repeat.until ? { until: repeat.until } : {}),
+        missingDatePolicy: "skip",
+      } : null;
+    }
+    const event = {
+      ...normalizeEventInput({ ...base, ...metadataPatch, timing }),
+      id: seriesId,
+      revision: (base.revision || 1) + 1,
+    };
+    next.events = next.events.map((candidate) => candidate.id === seriesId ? event : candidate);
+    return result(next, event, null, [eventNotice("EventChanged", event)]);
+  }
 
   if (scope === "occurrence") {
     if (!base.repeat || !occursOn(base, recurrenceDate)) {
@@ -110,6 +181,17 @@ export function moveEvent(state, eventId, target, options = {}) {
 }
 
 export function resizeEvent(state, eventId, duration, options = {}) {
+  const { seriesId } = splitOccurrenceId(eventId);
+  const event = state.events.find((candidate) => candidate.id === seriesId);
+  if (event?.timing?.kind === "timed") {
+    if (!Number.isInteger(duration) || duration <= 0) throw new RangeError("duration must be positive minutes");
+    return updateEvent(state, eventId, {
+      timing: {
+        ...event.timing,
+        endLocal: addMinutesToLocalDateTime(event.timing.startLocal, duration),
+      },
+    }, options);
+  }
   const updated = updateEvent(state, eventId, { dur: duration }, options);
   return {
     ...updated,
@@ -132,6 +214,15 @@ export function deleteEvent(state, eventId, options = {}) {
     next.overrides[eventId] = { ...(next.overrides[eventId] || {}), deleted: true };
     const removed = { kind: "occurrence", occurrenceId: eventId, hadOverride, previousOverride };
     return result(next, null, removed, [eventNotice("EventDeleted", event, eventId)]);
+  }
+
+  if (event.timing) {
+    const eventExceptions = Array.isArray(next.eventExceptions) ? next.eventExceptions : [];
+    const removedExceptions = eventExceptions.filter((item) => item.seriesId === seriesId);
+    next.events = next.events.filter((candidate) => candidate.id !== seriesId);
+    next.eventExceptions = eventExceptions.filter((item) => item.seriesId !== seriesId);
+    const removed = { kind: "canonical-series", event: structuredClone(event), eventExceptions: structuredClone(removedExceptions) };
+    return result(next, null, removed, [eventNotice("EventDeleted", event)]);
   }
 
   const seriesOverrides = {};
@@ -163,6 +254,15 @@ export function restoreEvent(state, snapshot) {
     }
     next.events = [...next.events, { ...snapshot.event }];
     next.overrides = { ...next.overrides, ...snapshot.overrides };
+    return result(next, snapshot.event, null, [eventNotice("EventCreated", snapshot.event)]);
+  }
+
+  if (snapshot?.kind === "canonical-series" && snapshot.event) {
+    if (next.events.some((event) => event.id === snapshot.event.id)) {
+      throw new Error(`calendar event ${snapshot.event.id} already exists`);
+    }
+    next.events = [...next.events, structuredClone(snapshot.event)];
+    next.eventExceptions = [...(next.eventExceptions || []), ...structuredClone(snapshot.eventExceptions || [])];
     return result(next, snapshot.event, null, [eventNotice("EventCreated", snapshot.event)]);
   }
 

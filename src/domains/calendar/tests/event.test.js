@@ -68,3 +68,18 @@ test("unsupported recurrence rules fail with structured issues", () => {
       && error.issues.some((issue) => issue.field === "repeat.freq"),
   );
 });
+
+test("canonical event input stores timing without legacy date fields", () => {
+  const event = normalizeEventInput({
+    title: " Overnight ",
+    calendarId: "calendar-default",
+    timing: {
+      kind: "timed", timeZoneMode: "floating",
+      startLocal: "2026-08-09T23:30", endLocal: "2026-08-10T01:00",
+    },
+    alerts: [15],
+  });
+  assert.equal(event.title, "Overnight");
+  assert.equal(event.timing.endLocal, "2026-08-10T01:00");
+  assert.equal("date" in event, false);
+});

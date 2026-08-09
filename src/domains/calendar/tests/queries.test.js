@@ -61,3 +61,14 @@ test("range queries reject an end before the start", () => {
     /end date must be on or after start date/,
   );
 });
+
+test("day queries include canonical events that started yesterday", () => {
+  const event = {
+    id: "overnight", title: "Overnight", calendarId: "calendar-default",
+    timing: { kind: "timed", timeZoneMode: "floating", startLocal: "2026-08-09T23:30", endLocal: "2026-08-10T01:00" },
+  };
+  const [segment] = getEventsForDay([event], "2026-08-10");
+  assert.equal(segment.id, "overnight");
+  assert.equal(segment.start, 0);
+  assert.equal(segment.dur, 60);
+});

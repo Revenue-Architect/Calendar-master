@@ -39,3 +39,10 @@ export async function set(key, value) {
   if (!local) throw new Error("No writable storage on this device");
   local.setItem(key, value);
 }
+
+export async function remove(key) {
+  if (host?.remove) return host.remove(key);
+  if (host) return host.set(key, null);
+  if (!local) throw new Error("No writable storage on this device");
+  local.removeItem(key);
+}

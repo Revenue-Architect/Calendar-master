@@ -3,6 +3,7 @@ import {
   assertDateKey,
 } from "../../../shared/time/dateKey.js";
 import { expandEventOnDay } from "../recurrence/recurrence.js";
+import { segmentOccurrence } from "../segmentation/segmentOccurrence.js";
 
 function compareEvents(left, right) {
   if (left.date !== right.date) return left.date < right.date ? -1 : 1;
@@ -12,10 +13,12 @@ function compareEvents(left, right) {
   return String(left.id).localeCompare(String(right.id));
 }
 
-export function getEventsForDay(events, dateKey, overrides = {}) {
+export function getEventsForDay(events, dateKey, overrides = {}, options = {}) {
   assertDateKey(dateKey);
   return events
-    .flatMap((event) => expandEventOnDay(event, dateKey, overrides))
+    .flatMap((event) => event.timing
+      ? segmentOccurrence(event, dateKey, addDaysToKey(dateKey, 1), options.viewerTimeZone)
+      : expandEventOnDay(event, dateKey, overrides))
     .sort(compareEvents);
 }
 
@@ -41,4 +44,19 @@ export function getNextEvent(events, dateKey, minute, overrides = {}) {
   }
   return getEventsForDay(events, dateKey, overrides)
     .find((event) => !event.allDay && event.start >= minute) || null;
+}
+
+export function getEventSegmentsForDay(events, dateKey, options = {}) {
+  return getEventsForDay(events, dateKey, options.overrides || {}, options);
+}
+
+export function getEventSegmentsForRange(events, startDate, endDateExclusive, options = {}) {
+  assertDateKey(startDate, "start date");
+  assertDateKey(endDateExclusive, "end date");
+  if (endDateExclusive <= startDate) throw new RangeError("end date must be after start date");
+  return events
+    .flatMap((event) => event.timing
+      ? segmentOccurrence(event, startDate, endDateExclusive, options.viewerTimeZone)
+      : getEventsForRange([event], startDate, addDaysToKey(endDateExclusive, -1), options.overrides || {}))
+    .sort(compareEvents);
 }

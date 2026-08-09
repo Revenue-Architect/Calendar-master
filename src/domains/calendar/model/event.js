@@ -1,4 +1,6 @@
-import { assertDateKey } from "../../../shared/time/dateKey.js";
+import { addDaysToKey, assertDateKey } from "../../../shared/time/dateKey.js";
+import { addMinutesToLocalDateTime } from "../../../shared/time/localDateTime.js";
+import { normalizeTiming } from "./timing.js";
 
 const SUPPORTED_FREQUENCIES = new Set(["daily", "weekly", "monthly"]);
 
@@ -74,6 +76,30 @@ export function normalizeEventInput(input) {
   const title = typeof input?.title === "string" ? input.title.trim() : "";
   if (!title) issue(issues, "title", "is required");
 
+  if (input?.timing) {
+    let timing = input.timing;
+    try {
+      timing = normalizeTiming(input.timing);
+    } catch (error) {
+      issue(issues, "timing", error.message);
+    }
+    const alerts = normalizeAlerts(input?.alerts, issues);
+    if (issues.length) throw new CalendarValidationError(issues);
+    const {
+      date, start, dur, allDay, endDate, repeat,
+      ...canonical
+    } = input;
+    return {
+      ...canonical,
+      title,
+      calendarId: input.calendarId || "calendar-default",
+      timing,
+      recurrence: input.recurrence ?? null,
+      alerts,
+      revision: Number.isInteger(input.revision) && input.revision > 0 ? input.revision : 1,
+    };
+  }
+
   const date = validDate(input?.date, "date", issues);
   const allDay = Boolean(input?.allDay);
   let start = Number(input?.start);
@@ -114,4 +140,29 @@ export function normalizeEventInput(input) {
     alerts,
     repeat,
   };
+}
+
+export function legacyEventInputToCanonical(input) {
+  if (input?.timing) return normalizeEventInput(input);
+  const legacy = normalizeEventInput(input);
+  const {
+    date, start, dur, allDay, endDate, repeat,
+    ...metadata
+  } = legacy;
+  const timing = allDay
+    ? { kind: "all-day", startDate: date, endDateExclusive: addDaysToKey(endDate || date, 1) }
+    : {
+      kind: "timed", timeZoneMode: "floating",
+      startLocal: addMinutesToLocalDateTime(`${date}T00:00`, start),
+      endLocal: addMinutesToLocalDateTime(`${date}T00:00`, start + dur),
+    };
+  const recurrence = repeat ? {
+    frequency: repeat.freq,
+    interval: repeat.interval || 1,
+    weekStart: 0,
+    ...(repeat.byDay ? { byWeekday: [...repeat.byDay] } : {}),
+    ...(repeat.until ? { until: repeat.until } : {}),
+    missingDatePolicy: "skip",
+  } : null;
+  return normalizeEventInput({ ...metadata, timing, recurrence });
 }

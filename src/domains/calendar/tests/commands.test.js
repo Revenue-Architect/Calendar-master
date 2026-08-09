@@ -142,3 +142,16 @@ test("commands preserve unrelated planner state", () => {
   assert.equal(result.state.tasks, before.tasks);
   assert.equal(result.state.xp, 90);
 });
+
+test("canonical move preserves duration across midnight", () => {
+  const state = {
+    events: [{
+      id: "event-1", title: "Late", calendarId: "calendar-default", alerts: [],
+      timing: { kind: "timed", timeZoneMode: "floating", startLocal: "2026-08-09T23:30", endLocal: "2026-08-10T01:00" },
+    }],
+    overrides: {}, eventExceptions: [],
+  };
+  const result = moveEvent(state, "event-1", { startLocal: "2026-08-10T23:30" });
+  assert.equal(result.event.timing.startLocal, "2026-08-10T23:30");
+  assert.equal(result.event.timing.endLocal, "2026-08-11T01:00");
+});
