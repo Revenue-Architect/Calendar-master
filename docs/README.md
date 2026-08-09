@@ -26,6 +26,9 @@ are too detailed for the repository README.
 - [`superpowers/plans/2026-08-09-tasks-phase-1.md`](superpowers/plans/2026-08-09-tasks-phase-1.md)
   establishes the Tasks domain: model, hierarchy, dependencies, planning semantics,
   commands, queries, and events, and records what carries into Tasks Phase 2.
+- [`superpowers/plans/2026-08-09-tasks-phase-2.md`](superpowers/plans/2026-08-09-tasks-phase-2.md)
+  cuts persistence over to schema v6, expands recurring tasks through the domain,
+  adopts the Tasks API in the interface, and surfaces dependencies.
 
 ## Architecture decisions
 

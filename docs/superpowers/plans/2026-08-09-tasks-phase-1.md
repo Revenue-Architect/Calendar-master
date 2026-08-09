@@ -51,16 +51,10 @@ Complete, with one deliberate carry-over recorded below.
 
 ## Carried into Tasks Phase 2
 
-These are intentionally not in this phase, and the app is unaffected because the
-stored task shape has not changed yet.
+All of the following were completed in
+[Tasks Phase 2](2026-08-09-tasks-phase-2.md); remaining work is recorded there.
 
-- [ ] Persistence cutover: `migrateV5ToV6` plus a v6 validator promoting stored tasks
-      to the canonical shape, following the confirmed-write policy used for v5.
-- [ ] `Planner.jsx` adoption of the Tasks public API, replacing the legacy
-      `done` / `subs` / `at` / `due` / `order` fields at the call sites.
-- [ ] Task recurrence expansion and occurrence identity (§9.1–9.5), mirroring
-      Calendar Phase 2B, including `roll_forward` behavior.
-- [ ] Task lists and tags as first-class records (§4.1, §4.2).
-- [ ] Bulk selection and partial-failure reporting (§11.3).
-- [ ] Dependency surfacing in the interface: blocker chips, an unblock affordance,
-      and the §15.6 earliest-responsible-start warning.
+- [x] Persistence cutover to schema v6 under the confirmed-write policy.
+- [x] `Planner.jsx` adoption of the Tasks public API.
+- [x] Task recurrence expansion, occurrence identity, and missed-occurrence policies.
+- [x] Dependency surfacing in the interface.

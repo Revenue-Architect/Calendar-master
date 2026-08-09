@@ -9,7 +9,7 @@ themes. All state is local to the device.
 ```bash
 npm install
 npm run dev      # dev server
-npm test         # Calendar domain and shared time tests
+npm test         # Calendar, Tasks, and shared time domain tests
 npm run build    # production bundle into dist/
 npm run preview  # serve the built bundle
 ```
@@ -18,29 +18,31 @@ npm run preview  # serve the built bundle
 
 | Path | What it is |
 | --- | --- |
-| `src/Planner.jsx` | Current presentation tree and temporary Task/Note orchestration |
+| `src/Planner.jsx` | Presentation tree and temporary Note orchestration |
 | `src/domains/calendar/` | Calendar timing, recurrence, commands, queries, migrations, layout, and tests |
 | `src/domains/tasks/` | Task model, hierarchy, dependencies, planning semantics, commands, queries, and tests |
 | `src/shared/time/` | Date, local date-time, interval, and IANA timezone primitives |
-| `src/platform/persistence/` | Validated planner-state loading, saving, and v4-to-v5 cutover |
+| `src/platform/persistence/` | Validated planner-state loading, saving, and the v6 cutover |
 | `src/storage.js` | Browser/host storage adapter and the only browser storage I/O |
 | `src/main.jsx` | Entry point: mounts `Planner` |
 | `src/index.css` | Tailwind import plus page-level resets |
 
 Calendar event reads and writes pass through `src/domains/calendar/index.js`.
 Canonical events use all-day, floating-time, or IANA-zoned timing; recurrence and
-typed exceptions remain provider-neutral. Task recurrence temporarily retains its
-legacy representation until the Tasks domain is extracted.
+typed exceptions remain provider-neutral.
 
 ## Storage
 
 `src/storage.js` prefers a host-provided `window.storage` when embedded and falls
-back to `localStorage`. Planner state is schema version 5 under `nbmp:state:v5`.
-On first load, a complete v4 state is validated and migrated in memory, written to
-v5, read back and validated, and only then is `nbmp:state:v4` removed. There is no
-dual-write period. A failed v5 write or confirmation leaves v4 untouched.
+back to `localStorage`. Planner state is schema version 6 under `nbmp:state:v6`.
+On first load an older notebook is validated and migrated in memory, written to v6,
+read back and validated, and only then is the older key removed. A v4 notebook
+upgrades straight to v6 in a single confirmed write rather than stopping at v5, so
+an interrupted upgrade never strands an intermediate version on the device. There is
+no dual-write period, and a failed write or confirmation leaves the previous version
+untouched.
 
-Missing storage seeds a new validated v5 notebook. Malformed or failed migration
+Missing storage seeds a new validated v6 notebook. Malformed or failed migration
 does not seed over existing data. Writes reject on storage failure so Settings can
 warn the user and preserve export as a recovery path.
 
@@ -78,17 +80,24 @@ completed, cancelled, or archived, so abandoned work cannot deadlock what follow
 Blocking is advisory: completing past an unmet blocker takes an explicit override and
 is recorded on the task.
 
-`Planner.jsx` still reads the legacy task fields; the persistence cutover and
-interface adoption are Tasks Phase 2.
+Recurring tasks are expanded on read rather than stored. Completing or reopening a
+single occurrence records a typed exception so the series and its earlier history
+stay intact; any other edit to one occurrence detaches it into a real one-off task.
+A missed occurrence follows the series' policy — `skip` by default, so habits never
+accumulate overdue debt.
 
-## Overdue vs. recurring
+## Overdue
 
-Overdue means unfinished work that still carries a debt, so it counts one-off tasks
-only. A missed day of a recurring task is not a debt — you don't owe yesterday's walk
-on top of today's, and today's instance is already on the page — so recurring
-instances are excluded, matching how deadlines already treat them. The streak carries
-the "did you keep it up" signal instead. This also keeps the OVERDUE count and the
-PULL IN button in agreement: everything counted is something the button can move.
+Overdue is a fact about a deadline, not about a plan. A one-off task becomes overdue
+once its deadline has passed; a task with no deadline never does, because moving
+planned work is ordinary replanning rather than failure. A recurring task defers to
+its missed-occurrence policy, which defaults to `skip`, so a daily habit never turns
+into a column of overdue rows.
+
+Because overdue is a deadline fact, planning overdue work for today makes it
+actionable but cannot un-miss the deadline — which is why that action reads
+`PLAN TODAY` and the flag persists until the task is completed or the deadline
+moves.
 
 ## Keyboard
 

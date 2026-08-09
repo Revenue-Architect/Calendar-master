@@ -2,6 +2,31 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from "react"
 import * as storage from "./storage.js";
 import { migrateV4ToV5 } from "./domains/calendar/migrations/migrateV4ToV5.js";
 import { validatePlannerStateV5 } from "./domains/calendar/migrations/validatePlannerStateV5.js";
+import {
+  blockingReasons,
+  completeTask as completeTaskCommand,
+  completedOn,
+  countOpen,
+  createTask as createTaskCommand,
+  deferTask as deferTaskCommand,
+  deleteTask as deleteTaskCommand,
+  getBlockedTasks,
+  getDayTasks,
+  getOverdueForToday,
+  getSubtasksOf,
+  getTaskBlockers,
+  getUpcomingDeadlines,
+  migrateV5ToV6,
+  normalizeTaskInput,
+  parseTaskOccurrenceId,
+  planTask as planTaskCommand,
+  promoteChecklistItem as promoteChecklistItemCommand,
+  removeTaskException,
+  reopenTask as reopenTaskCommand,
+  scheduleTask as scheduleTaskCommand,
+  updateTask as updateTaskCommand,
+  upsertTaskException,
+} from "./domains/tasks/index.js";
 import { loadPlannerState, savePlannerState } from "./platform/persistence/plannerStateStore.js";
 import {
   createEvent as createCalendarEvent,
@@ -340,6 +365,7 @@ export default function Planner() {
   const [pendingImport, setPendingImport] = useState(null);
   const [storageBad, setStorageBad] = useState(!storage.writable);
   const [saveBlocked, setSaveBlocked] = useState(false);
+  const [confirmComplete, setConfirmComplete] = useState(null);
 
   const stripRef = useRef(null);
   const activeRef = useRef(null);
@@ -364,7 +390,7 @@ export default function Planner() {
     (async () => {
       try {
         const loaded = await loadPlannerState(storage);
-        const state = loaded.state || migrateV4ToV5(seed());
+        const state = loaded.state || migrateV5ToV6(migrateV4ToV5(seed()));
         if (!loaded.state) await savePlannerState(storage, state);
         if (!dead) { setDb(state); setStorageBad(false); setReady(true); }
       } catch (error) {
@@ -373,7 +399,7 @@ export default function Planner() {
            without it `ready` flips while `db` stays null and the loader never
            clears — but leave autosave off. Overwriting here would seed straight over
            data that is damaged rather than gone, and export stays the way out. */
-        if (!dead) { setDb(migrateV4ToV5(seed())); setSaveBlocked(true); setStorageBad(true); setReady(true); }
+        if (!dead) { setDb(migrateV5ToV6(migrateV4ToV5(seed()))); setSaveBlocked(true); setStorageBad(true); setReady(true); }
       }
     })();
     return () => { dead = true; };
@@ -424,35 +450,26 @@ export default function Planner() {
     : []), [db, dateKey]);
   const timed = useMemo(() => dayEvents.filter((e) => !e.allDay), [dayEvents]);
   const allDay = useMemo(() => dayEvents.filter((e) => e.allDay), [dayEvents]);
-  const dayTasks = useMemo(() => {
-    const list = db ? expandTasks(db.tasks, dateKey, ov) : [];
-    return list.sort((a, b) => (a.order || 0) - (b.order || 0));
-  }, [db, dateKey, ov]);
+  /* All task reads go through the Tasks domain. Recurring series are expanded into
+     occurrences here rather than stored, so the screen never sees an exception. */
+  const dayTasks = useMemo(() => (db ? getDayTasks(db, dateKey) : []), [db, dateKey]);
   const notes = useMemo(() => (db ? db.notes.filter((n) => n.date === dateKey) : []), [db, dateKey]);
-  const openCount = dayTasks.filter((t) => !t.done).length;
+  const openCount = countOpen(dayTasks);
 
-  /* Overdue means unfinished work that still needs doing — a debt. A missed day of a
-     recurring task isn't one: you don't owe yesterday's walk on top of today's, and
-     today's instance is already on the page. So recurring instances are left out, the
-     same way deadlines already skip them, and the streak carries the "did you keep it
-     up" signal instead. Without this a single daily habit reads as 14 overdue items
-     that PULL IN can't clear. */
-  const overdue = useMemo(() => {
-    if (!db) return [];
-    const out = [];
-    for (let i = 1; i <= 14; i++) {
-      const k = keyOf(addDays(now, -i));
-      expandTasks(db.tasks, k, ov).forEach((t) => { if (!t.done && !t.instance) out.push(t); });
-    }
-    return out;
-  }, [db, todayKey, ov]);
+  /* §5.5 and §9.3 now decide this: a one-off task is overdue once its deadline has
+     passed, and a series contributes only what its missed-occurrence policy still
+     considers owed — nothing at all under the default `skip`. */
+  const overdue = useMemo(() => (db ? getOverdueForToday(db, todayKey) : []), [db, todayKey]);
 
-  const deadlines = useMemo(() => {
-    if (!db) return [];
-    return db.tasks
-      .filter((t) => t.due && !t.done && !t.repeat && t.due >= todayKey && diffDays(t.due, todayKey) <= 10)
-      .sort((a, b) => (a.due < b.due ? -1 : 1));
-  }, [db, todayKey]);
+  const deadlines = useMemo(
+    () => (db ? getUpcomingDeadlines(db.tasks, todayKey, 10) : []),
+    [db, todayKey],
+  );
+
+  const blockedIds = useMemo(() => {
+    if (!db) return new Set();
+    return new Set(getBlockedTasks(db.tasks).map((task) => task.id));
+  }, [db]);
 
   const events = useMemo(() => {
     const g = gesture;
@@ -466,7 +483,7 @@ export default function Planner() {
 
   const streak = useMemo(() => {
     if (!db) return 0;
-    const doneOn = (k) => expandTasks(db.tasks, k, ov).some((t) => t.done);
+    const doneOn = (k) => completedOn(db, k);
     let n = 0, cur = new Date(now);
     if (!doneOn(keyOf(cur))) cur = addDays(cur, -1);
     while (n < 60 && doneOn(keyOf(cur))) { n++; cur = addDays(cur, -1); }
@@ -536,13 +553,13 @@ export default function Planner() {
   const densityOf = useCallback((d) => {
     if (!db) return 0;
     const k = keyOf(d);
-    return getOccurrencesForRange(db, k, addDaysToKey(k, 1)).length + expandTasks(db.tasks, k, ov).filter((t) => !t.done).length;
+    return getOccurrencesForRange(db, k, addDaysToKey(k, 1)).length + getDayTasks(db, k).filter((t) => t.status !== "completed").length;
   }, [db, ov]);
 
   const briefing = useMemo(() => {
     if (!db) return "";
     const sorted = timed.slice().sort((a, b) => a.start - b.start);
-    if (dateKey < todayKey) return `Archive · ${sorted.length} events, ${dayTasks.filter((t) => t.done).length} done`;
+    if (dateKey < todayKey) return `Archive · ${sorted.length} events, ${dayTasks.filter((t) => t.status === "completed").length} done`;
     if (dateKey > todayKey) return sorted.length ? `${sorted.length} events · first at ${hhmm(sorted[0].start)}` : `${openCount} actions waiting, nothing scheduled`;
     const live = sorted.find((e) => nowMin >= e.start && nowMin < e.start + e.dur);
     if (live) return `${live.title} · ${dur(live.start + live.dur - nowMin)} left`;
@@ -552,7 +569,7 @@ export default function Planner() {
   }, [db, dateKey, todayKey, nowMin, timed, openCount, dayTasks]);
 
   const suggested = useMemo(() => {
-    const busy = [...timed.map((e) => [e.start, e.start + e.dur]), ...dayTasks.filter((t) => t.at != null).map((t) => [t.at, t.at + 30])];
+    const busy = [...timed.map((e) => [e.start, e.start + e.dur]), ...dayTasks.filter((t) => t.planned.startMinute != null).map((t) => [t.planned.startMinute, t.planned.startMinute + 30])];
     const free = [];
     for (let h = 6; h <= 22; h++) {
       const s = h * 60, e = s + 60;
@@ -640,38 +657,86 @@ export default function Planner() {
   };
 
   const findTask = (id) => dayTasks.find((t) => t.id === id) || (db && db.tasks.find((t) => t.id === id));
+  const nowStamp = () => new Date().toISOString().slice(0, 16);
 
-  const completeTask = (id) => {
+  /* One write path for both plain tasks and series occurrences.
+     An occurrence id is `series@date`. Completing or reopening one records a typed
+     exception so the series definition and its earlier completion history stay
+     intact (§9.4/§9.5). Any other edit detaches that single occurrence into a real
+     one-off task and cancels it on the series, which is how "just this one" edits
+     avoid rewriting the whole series. */
+  const writeTask = (id, command, intent = {}) => {
+    mutate((d) => {
+      const { seriesId, occurrenceDate } = parseTaskOccurrenceId(id);
+      const series = occurrenceDate ? d.tasks.find((t) => t.id === seriesId && t.recurrence) : null;
+      if (!series) return { ...d, tasks: command(d, id).tasks };
+
+      if (intent.completed) {
+        return {
+          ...d,
+          taskExceptions: upsertTaskException(d.taskExceptions, {
+            id: uid(), seriesId, occurrenceDate, kind: "completed", completedAt: nowStamp(),
+          }),
+        };
+      }
+      if (intent.reopened) {
+        return { ...d, taskExceptions: removeTaskException(d.taskExceptions, seriesId, occurrenceDate) };
+      }
+      const detachedId = uid();
+      const detached = normalizeTaskInput({
+        ...series,
+        id: detachedId,
+        recurrence: null,
+        planned: { ...series.planned, date: occurrenceDate },
+      });
+      const staged = {
+        ...d,
+        tasks: [...d.tasks, detached],
+        taskExceptions: upsertTaskException(d.taskExceptions, {
+          id: uid(), seriesId, occurrenceDate, kind: "cancelled",
+        }),
+      };
+      return { ...staged, tasks: command(staged, detachedId).tasks };
+    });
+  };
+
+  const completeTask = (id, force = false) => {
     const t = findTask(id);
-    if (!t || t.done) return;
+    if (!t || t.status === "completed") return;
+
+    /* §15.4/§7.4. Blocking is advisory, so the domain reports what stands in the way
+       and the screen decides. Rather than silently forcing it through, name the
+       blocker and let the user confirm. */
+    const reasons = blockingReasons(db.tasks, t);
+    if (reasons.length && !force) {
+      beep("abort");
+      setConfirmComplete({ id, reasons });
+      return;
+    }
     beep("commit"); buzz([8, 30, 14]);
-    setReward({ xp: t.xp, k: uid() });
+    setReward({ xp: t.reward, k: uid() });
     setTimeout(() => setReward(null), 900);
-    patchItem("task", id, { done: true });
-    mutate((d) => ({ ...d, xp: d.xp + t.xp }));
+    writeTask(id, (state, taskId) => completeTaskCommand(state.tasks, taskId, {
+      now: new Date().toISOString().slice(0, 16),
+      override: true,
+    }), { completed: true });
+    mutate((d) => ({ ...d, xp: d.xp + (t.reward || 0) }));
+    setConfirmComplete(null);
   };
   const reopenTask = (id) => {
     const t = findTask(id);
-    if (!t || !t.done) return;
+    if (!t || t.status !== "completed") return;
     beep("click");
-    patchItem("task", id, { done: false });
-    mutate((d) => ({ ...d, xp: Math.max(0, d.xp - t.xp) }));
+    writeTask(id, (state, taskId) => reopenTaskCommand(state.tasks, taskId), { reopened: true });
+    mutate((d) => ({ ...d, xp: Math.max(0, d.xp - (t.reward || 0)) }));
   };
   const deferTask = (id, n = 1) => {
     const t = findTask(id);
     if (!t) return;
     beep("defer"); buzz(10);
-    const { base, date } = splitId(id);
-    if (date) {
-      mutate((d) => {
-        d.overrides = { ...d.overrides, [`${base}@${date}`]: { ...(d.overrides[`${base}@${date}`] || {}), deleted: true } };
-        d.tasks = [...d.tasks, { ...t, id: uid(), repeat: null, instance: false, seriesId: undefined, date: keyOf(addDays(parseKey(date), n)) }];
-        return d;
-      });
-    } else {
-      patchItem("task", id, { date: keyOf(addDays(parseKey(t.date), n)) });
-      flash(n > 0 ? "Moved to tomorrow" : "Moved back", { type: "task-date", id, n: -n });
-    }
+    /* §5.4 keeps the deadline where it is; only the plan moves. */
+    writeTask(id, (state, taskId) => deferTaskCommand(state.tasks, taskId, n));
+    flash(n > 0 ? "Moved to tomorrow" : "Moved back", { type: "task-defer", id, n: -n });
   };
   const moveToDay = (kind, id, targetKey) => {
     beep("drop"); buzz(8);
@@ -696,22 +761,25 @@ export default function Planner() {
       });
       return;
     }
-    if (date) {
-      mutate((d) => {
-        d.overrides = { ...d.overrides, [`${base}@${date}`]: { ...(d.overrides[`${base}@${date}`] || {}), deleted: true } };
-        d.tasks = [...d.tasks, { ...item, id: uid(), repeat: null, seriesId: undefined, instance: false, date: targetKey }];
-        return d;
-      });
-    } else {
-      patchItem(kind, id, { date: targetKey });
-      flash(`Moved to ${fmtDay(targetKey)}`, { type: "back-date", kind, id, date: item.date });
-    }
+    writeTask(id, (state, taskId) => planTaskCommand(state.tasks, taskId, {
+      date: targetKey,
+      startMinute: item.planned?.startMinute ?? null,
+      estimateMinutes: item.planned?.estimateMinutes ?? null,
+    }));
+    flash(`Moved to ${fmtDay(targetKey)}`, { type: "back-date", kind, id, date: item.planned?.date });
   };
   const pullOverdue = () => {
     beep("schedule");
-    const ids = overdue.map((t) => ({ id: t.id, date: t.date }));
-    mutate((d) => { d.tasks = d.tasks.map((t) => (ids.find((x) => x.id === t.id) ? { ...t, date: todayKey } : t)); return d; });
-    flash(`${ids.length} pulled to today`, { type: "task-restore-dates", ids });
+    /* Everything counted as overdue is a real one-off task, so everything counted is
+       something this button can actually move — the count always clears. */
+    const ids = overdue.map((t) => ({ id: t.id, date: t.planned.date }));
+    mutate((d) => ({
+      ...d,
+      tasks: d.tasks.map((t) => (ids.some((x) => x.id === t.id)
+        ? { ...t, planned: { ...t.planned, date: todayKey } }
+        : t)),
+    }));
+    flash(`${ids.length} planned for today`, { type: "task-restore-dates", ids });
   };
   const duplicateEvent = (id) => {
     const e = dayEvents.find((x) => x.id === id);
@@ -736,39 +804,53 @@ export default function Planner() {
     setInspect(null);
     flash("Duplicated", { type: "drop-event", id: nid });
   };
-  const scheduleTask = (id, at) => { beep("schedule"); buzz(8); patchItem("task", id, { at }); };
+  const scheduleTask = (id, at) => {
+    beep("schedule"); buzz(8);
+    writeTask(id, (state, taskId) => scheduleTaskCommand(state.tasks, taskId, at));
+  };
   const reorderTask = (id, targetId) => {
     beep("tick");
+    /* §11.1. Rank is explicit and dense, so a reload cannot reshuffle the list. */
     mutate((d) => {
-      const list = [...d.tasks].sort((a, b) => (a.order || 0) - (b.order || 0));
-      const from = list.findIndex((t) => t.id === splitId(id).base);
-      const to = list.findIndex((t) => t.id === splitId(targetId).base);
-      if (from === -1 || to === -1 || from === to) return d;
-      const [moved] = list.splice(from, 1);
-      list.splice(to, 0, moved);
-      const orderMap = {};
-      list.forEach((t, i) => { orderMap[t.id] = i; });
-      d.tasks = d.tasks.map((t) => ({ ...t, order: orderMap[t.id] != null ? orderMap[t.id] : t.order }));
-      return d;
+      const { seriesId: from } = parseTaskOccurrenceId(id);
+      const { seriesId: to } = parseTaskOccurrenceId(targetId);
+      const list = [...d.tasks].sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
+      const fromIndex = list.findIndex((t) => t.id === from);
+      const toIndex = list.findIndex((t) => t.id === to);
+      if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) return d;
+      const [moved] = list.splice(fromIndex, 1);
+      list.splice(toIndex, 0, moved);
+      const ranks = new Map(list.map((t, i) => [t.id, i]));
+      return { ...d, tasks: d.tasks.map((t) => ({ ...t, rank: ranks.get(t.id) ?? t.rank })) };
     });
   };
+  const patchChecklist = (taskId, next) => {
+    writeTask(taskId, (state, id) => updateTaskCommand(state.tasks, id, {
+      checklist: next(state.tasks.find((t) => t.id === id).checklist ?? []),
+    }));
+  };
   const toggleSub = (taskId, subId) => {
-    const t = findTask(taskId);
-    if (!t) return;
     beep("tick");
-    patchItem("task", taskId, { subs: t.subs.map((s) => (s.id === subId ? { ...s, done: !s.done } : s)) });
+    patchChecklist(taskId, (checklist) => checklist.map((item) => (
+      item.id === subId
+        ? { ...item, done: !item.done, completedAt: item.done ? null : nowStamp() }
+        : item
+    )));
   };
   const addSub = (taskId, title) => {
-    const t = findTask(taskId);
-    if (!t) return;
     beep("tick");
-    patchItem("task", taskId, { subs: [...t.subs, { id: uid(), title, done: false }] }, "all");
+    patchChecklist(taskId, (checklist) => [...checklist, { id: uid(), title, done: false, order: checklist.length }]);
   };
   const removeSub = (taskId, subId) => {
-    const t = findTask(taskId);
-    if (!t) return;
     beep("delete");
-    patchItem("task", taskId, { subs: t.subs.filter((s) => s.id !== subId) }, "all");
+    patchChecklist(taskId, (checklist) => checklist.filter((item) => item.id !== subId));
+  };
+  /* §8.4. A step that needs its own planning stops being a checklist line and
+     becomes a real subtask, keeping its title, state and place in the order. */
+  const promoteSub = (taskId, subId) => {
+    beep("schedule");
+    writeTask(taskId, (state, id) => promoteChecklistItemCommand(state.tasks, id, subId, uid(), { now: nowStamp() }));
+    flash("Promoted to a subtask", null);
   };
 
   const doDelete = (kind, id, scope) => {
@@ -811,8 +893,12 @@ export default function Planner() {
       }
       if (kind === "task") {
         removed = d.tasks.find((x) => x.id === base);
-        if (removed && removed.done) d.xp = Math.max(0, d.xp - removed.xp);
-        d.tasks = d.tasks.filter((x) => x.id !== base);
+        if (removed && removed.status === "completed") d.xp = Math.max(0, d.xp - (removed.reward || 0));
+        /* §15.5. Strips every dependency edge pointing at what is going away, so no
+           survivor is left permanently and invisibly blocked by a ghost. */
+        const result = deleteTaskCommand(d.tasks, base);
+        d.tasks = result.tasks;
+        removed = { ...removed, detachedFrom: result.events[0]?.detachedFrom ?? [] };
       }
       if (kind === "note") { removed = d.notes.find((n) => n.id === base); d.notes = d.notes.filter((n) => n.id !== base); }
       return d;
@@ -833,7 +919,7 @@ export default function Planner() {
     beep("click");
     mutate((d) => {
       if (p.type === "restore" && p.item) {
-        if (p.kind === "task") { d.tasks = [...d.tasks, p.item]; if (p.item.done) d.xp += p.item.xp; }
+        if (p.kind === "task") { d.tasks = [...d.tasks, p.item]; if (p.item.status === "completed") d.xp += p.item.reward || 0; }
         if (p.kind === "note") d.notes = [...d.notes, p.item];
       }
       if (p.type === "restore-calendar-event") return restoreCalendarEvent(d, p.snapshot).state;
@@ -855,7 +941,15 @@ export default function Planner() {
     beep(p.id ? "click" : "schedule");
     const patch = p.kind === "event"
       ? { title: p.title, start: p.start, dur: p.dur, cat: p.cat, place: p.place, note: p.note, allDay: p.allDay, endDate: p.endDate || null, repeat: p.repeat, recurrence: p.recurrence, timing: p.timing, alerts: p.alerts }
-      : { title: p.title, cat: p.cat, xp: p.xp, at: p.at, due: p.due, note: p.note, repeat: p.repeat };
+      : {
+        title: p.title,
+        category: p.cat,
+        reward: p.xp,
+        note: p.note,
+        planned: { date: p.date || dateKey, startMinute: p.at ?? null, estimateMinutes: null },
+        deadline: { date: p.due || null, minute: null },
+        recurrence: p.repeat ? { ...p.repeat, frequency: p.repeat.freq ?? p.repeat.frequency, missedPolicy: p.repeat.missedPolicy ?? "skip" } : null,
+      };
     if (p.date && scope !== "one") patch.date = p.date;
     if (p.id && p.kind === "event") {
       const canonical = canonicalOccurrenceIdentity(p.id);
@@ -891,6 +985,8 @@ export default function Planner() {
         }
         return updateCalendarEvent(d, canonical.seriesId, { ...patch, date: undefined, timing: seriesTiming }, { scope: "series" }).state;
       });
+    } else if (p.id && p.kind === "task") {
+      writeTask(p.id, (state, taskId) => updateTaskCommand(state.tasks, taskId, patch, { now: nowStamp() }));
     } else if (p.id) patchItem(p.kind, p.id, patch, scope);
     else {
       mutate((d) => {
@@ -899,11 +995,7 @@ export default function Planner() {
           ...patch,
           alerts: p.alerts || [],
         }, { id: uid() }).state;
-        else {
-          const maxOrder = d.tasks.reduce((m, t) => Math.max(m, t.order || 0), 0);
-          d.tasks = [...d.tasks, { id: uid(), date: p.date || dateKey, done: false, subs: [], order: maxOrder + 1, ...patch }];
-        }
-        return d;
+        return { ...d, tasks: createTaskCommand(d.tasks, { id: uid(), ...patch }, { now: nowStamp() }).tasks };
       });
     }
     setComposer(null); setInspect(null); setScopeAsk(null);
@@ -971,7 +1063,7 @@ export default function Planner() {
     r.onload = () => {
       try {
         const parsed = JSON.parse(r.result);
-        if (parsed && parsed.events) setPendingImport(parsed.schemaVersion === 5 ? validatePlannerStateV5(parsed) : migrateV4ToV5(parsed));
+        if (parsed && parsed.events) setPendingImport(parsed.schemaVersion === 6 ? parsed : migrateV5ToV6(parsed.schemaVersion === 5 ? validatePlannerStateV5(parsed) : migrateV4ToV5(parsed)));
         else beep("abort");
       } catch (e) { beep("abort"); }
     };
@@ -1249,6 +1341,12 @@ export default function Planner() {
   dateKeyRef.current = dateKey;
 
   const inspectItem = inspect && (inspect.kind === "event" ? dayEvents.find((e) => e.id === inspect.id) : dayTasks.find((t) => t.id === inspect.id));
+  const inspectBlockers = inspect && inspect.kind === "task" && db
+    ? getTaskBlockers(db.tasks, parseTaskOccurrenceId(inspect.id).seriesId)
+    : [];
+  const inspectSubtasks = inspect && inspect.kind === "task" && db
+    ? getSubtasksOf(db, parseTaskOccurrenceId(inspect.id).seriesId)
+    : [];
   const draggingTask = gesture && gesture.mode === "task" ? dayTasks.find((t) => t.id === gesture.id) : null;
   const dropMin = gesture && gesture.mode === "task" && !gesture.overDay && !gesture.overTask && streamRef.current
     ? (() => {
@@ -1268,6 +1366,8 @@ export default function Planner() {
       onAddTask={() => { beep("click"); setComposer({ kind: "task" }); }}
       onEditNote={(n) => { beep("click"); setNoteEdit(n || { text: "" }); }}
       onUnschedule={(id) => scheduleTask(id, null)}
+      blockersFor={(t) => (db ? getTaskBlockers(db.tasks, parseTaskOccurrenceId(t.id).seriesId) : [])}
+      onPromoteSub={promoteSub}
       onJump={jumpTo}
     />
   );
@@ -1527,13 +1627,13 @@ export default function Planner() {
                     </div>
                   )}
 
-                  {dayTasks.filter((t) => t.at != null).map((t) => (
+                  {dayTasks.filter((t) => t.planned.startMinute != null).map((t) => (
                     <button key={t.id} onClick={() => { beep("click"); setInspect({ kind: "task", id: t.id }); }} className="nb-tap absolute left-0 right-2 text-left overflow-hidden"
-                      style={{ top: (t.at / 1440) * DAY_H + 2, height: 26, border: `1px dashed ${T.faint}`, opacity: t.done ? 0.4 : 1, zIndex: 5, pointerEvents: "auto" }}>
+                      style={{ top: (t.planned.startMinute / 1440) * DAY_H + 2, height: 26, border: `1px dashed ${T.faint}`, opacity: t.status === "completed" ? 0.4 : 1, zIndex: 5, pointerEvents: "auto" }}>
                       <span className="flex items-center gap-2 px-2 py-0.5">
-                        <span className="w-2 h-2 shrink-0" style={{ background: t.done ? T.accent : "transparent", boxShadow: `inset 0 0 0 1px ${T.accent}` }} />
-                        <span className="text-xs font-semibold truncate" style={{ textDecoration: t.done ? "line-through" : "none" }}>{t.title}</span>
-                        <span style={{ fontFamily: MONO, color: T.dim }} className="ml-auto text-xs tracking-widest">{hhmm(t.at)}</span>
+                        <span className="w-2 h-2 shrink-0" style={{ background: t.status === "completed" ? T.accent : "transparent", boxShadow: `inset 0 0 0 1px ${T.accent}` }} />
+                        <span className="text-xs font-semibold truncate" style={{ textDecoration: t.status === "completed" ? "line-through" : "none" }}>{t.title}</span>
+                        <span style={{ fontFamily: MONO, color: T.dim }} className="ml-auto text-xs tracking-widest">{hhmm(t.planned.startMinute)}</span>
                       </span>
                     </button>
                   ))}
@@ -1607,7 +1707,7 @@ export default function Planner() {
       {/* ══ INSPECTOR ══ */}
       {inspectItem && (
         <Sheet T={T} title={inspect.kind === "event" ? "EVENT" : "ACTION"} onClose={() => { beep("click"); setInspect(null); }}>
-          <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">{inspect.kind === "event" ? "EVENT" : "ACTION"} · {inspectItem.cat}{inspectItem.repeat ? " · ↻" : ""}</span>
+          <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">{inspect.kind === "event" ? "EVENT" : "ACTION"} · {inspect.kind === "event" ? inspectItem.cat : inspectItem.category}{(inspect.kind === "event" ? inspectItem.repeat : inspectItem.recurrence) ? " · ↻" : ""}</span>
           <h2 className="text-2xl font-bold tracking-tight leading-tight mt-2">{inspectItem.title}</h2>
           <div className="mt-4">
             {inspect.kind === "event" ? (
@@ -1620,29 +1720,48 @@ export default function Planner() {
               </>
             ) : (
               <>
-                <Row T={T} k="REWARD" v={`+${inspectItem.xp} XP`} />
-                <Row T={T} k="STATE" v={inspectItem.done ? "DONE" : "OPEN"} />
-                <Row T={T} k="SCHEDULED" v={inspectItem.at != null ? hhmm(inspectItem.at) : "UNSCHEDULED"} />
-                <Row T={T} k="DUE" v={inspectItem.due ? fmtDay(inspectItem.due) : "NO DEADLINE"} />
-                <Row T={T} k="STEPS" v={`${inspectItem.subs.filter((s) => s.done).length}/${inspectItem.subs.length}`} />
+                <Row T={T} k="REWARD" v={`+${inspectItem.reward} XP`} />
+                <Row T={T} k="STATE" v={inspectItem.status.replace("_", " ").toUpperCase()} />
+                <Row T={T} k="PLANNED" v={inspectItem.planned.date ? `${fmtDay(inspectItem.planned.date)}${inspectItem.planned.startMinute != null ? ` · ${hhmm(inspectItem.planned.startMinute)}` : ""}` : "UNPLANNED"} />
+                <Row T={T} k="DUE" v={inspectItem.deadline.date ? fmtDay(inspectItem.deadline.date) : "NO DEADLINE"} />
+                <Row T={T} k="STEPS" v={`${(inspectItem.checklist ?? []).filter((s) => s.done).length}/${(inspectItem.checklist ?? []).length}`} />
+                <Row T={T} k="BLOCKED BY" v={inspectBlockers.length ? inspectBlockers.map((b) => b.title).join(", ") : "NOTHING"} />
               </>
             )}
-            <Row T={T} k="REPEATS" v={inspectItem.repeat ? repeatLabel(inspectItem.repeat).toUpperCase() : "ONCE"} />
+            <Row T={T} k="REPEATS" v={(inspect.kind === "event" ? inspectItem.repeat : inspectItem.recurrence) ? repeatLabel(inspect.kind === "event" ? inspectItem.repeat : { ...inspectItem.recurrence, freq: inspectItem.recurrence.frequency, byDay: inspectItem.recurrence.byWeekday }).toUpperCase() : "ONCE"} />
             <Row T={T} k="DATE" v={fmtDay(dateKey)} />
           </div>
           {inspectItem.note && <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic leading-relaxed mt-4">{inspectItem.note}</p>}
           <div className="flex gap-2 mt-5">
             <button onClick={() => removeItem(inspect.kind, inspect.id)} style={{ fontFamily: MONO, color: NOW_RED, border: `1px solid ${T.line}` }} className="nb-tap flex-1 py-3 text-xs tracking-widest">DELETE</button>
-            <button onClick={() => { beep("click"); setComposer({ ...inspectItem, kind: inspect.kind, id: inspectItem.id }); }} style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="nb-tap flex-1 py-3 text-xs font-bold tracking-widest">EDIT</button>
+            <button onClick={() => { beep("click"); setComposer(inspect.kind === "task" ? { kind: "task", id: inspectItem.id, title: inspectItem.title, cat: inspectItem.category, xp: inspectItem.reward, at: inspectItem.planned.startMinute, due: inspectItem.deadline.date || "", date: inspectItem.planned.date || dateKey, note: inspectItem.note, repeat: inspectItem.recurrence ? { ...inspectItem.recurrence, freq: inspectItem.recurrence.frequency, byDay: inspectItem.recurrence.byWeekday } : null } : { ...inspectItem, kind: inspect.kind, id: inspectItem.id }); }} style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="nb-tap flex-1 py-3 text-xs font-bold tracking-widest">EDIT</button>
           </div>
           <button
             onClick={() => {
               if (inspect.kind === "event") duplicateEvent(inspect.id);
-              else { inspectItem.done ? reopenTask(inspect.id) : completeTask(inspect.id); setInspect(null); }
+              else { inspectItem.status === "completed" ? reopenTask(inspect.id) : completeTask(inspect.id); setInspect(null); }
             }}
             style={{ fontFamily: MONO, border: `1px solid ${T.line}`, color: T.text }} className="nb-tap w-full py-3 mt-2 text-xs tracking-widest">
-            {inspect.kind === "event" ? "DUPLICATE" : inspectItem.done ? "REOPEN" : "MARK COMPLETE"}
+            {inspect.kind === "event" ? "DUPLICATE" : inspectItem.status === "completed" ? "REOPEN" : "MARK COMPLETE"}
           </button>
+        </Sheet>
+      )}
+
+      {/* §15.4/§7.4. Blocking is advisory: name what is in the way and let the user
+          decide, rather than silently completing or flatly refusing. */}
+      {confirmComplete && (
+        <Sheet T={T} onClose={() => { beep("click"); setConfirmComplete(null); }} title="Still blocked">
+          <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic mt-1 mb-3">
+            {confirmComplete.reasons.map((reason) => (reason.kind === "dependencies"
+              ? `Waiting on ${reason.blockers.map((b) => b.title).join(", ")}.`
+              : `${reason.remaining} step${reason.remaining === 1 ? "" : "s"} still open.`)).join(" ")}
+          </p>
+          <div className="flex flex-col gap-2">
+            <button onClick={() => completeTask(confirmComplete.id, true)}
+              style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="nb-tap py-3 text-xs font-bold tracking-widest">COMPLETE ANYWAY</button>
+            <button onClick={() => { beep("click"); setConfirmComplete(null); }}
+              style={{ fontFamily: MONO, border: `1px solid ${T.line}` }} className="nb-tap py-3 text-xs tracking-widest">KEEP IT OPEN</button>
+          </div>
         </Sheet>
       )}
 
@@ -1794,9 +1913,9 @@ function nextCalendarOccurrence(item, fromKey) {
 
 /* ═══════════════════════ ACTIONS ═══════════════════════ */
 
-function ActionsPanel({ T, listRef, tasks, notes, overdue, deadlines, showOverdue, todayKey, gesture, onPullOverdue, beep, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onAddTask, onEditNote, onUnschedule, onJump }) {
-  const open = tasks.filter((t) => !t.done);
-  const done = tasks.filter((t) => t.done);
+function ActionsPanel({ T, listRef, tasks, notes, overdue, deadlines, showOverdue, todayKey, gesture, blockersFor, onPromoteSub, onPullOverdue, beep, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onAddTask, onEditNote, onUnschedule, onJump }) {
+  const open = tasks.filter((t) => t.status !== "completed");
+  const done = tasks.filter((t) => t.status === "completed");
   return (
     <div ref={listRef}>
       <div className="hidden lg:flex items-baseline justify-between mb-3">
@@ -1808,7 +1927,7 @@ function ActionsPanel({ T, listRef, tasks, notes, overdue, deadlines, showOverdu
         <button onClick={onPullOverdue} className="w-full flex items-center gap-2 px-3 py-2 mb-2 text-left" style={{ boxShadow: `inset 0 0 0 1px ${NOW_RED}` }}>
           <span style={{ fontFamily: MONO, color: NOW_RED }} className="text-xs tracking-widest shrink-0">{overdue.length} OVERDUE</span>
           <span className="flex-1 text-xs truncate" style={{ color: T.dim }}>{overdue.map((t) => t.title).join(" · ")}</span>
-          <span style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest shrink-0">PULL IN</span>
+          <span style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest shrink-0">PLAN TODAY</span>
         </button>
       )}
 
@@ -1817,7 +1936,7 @@ function ActionsPanel({ T, listRef, tasks, notes, overdue, deadlines, showOverdu
           <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">DEADLINES</span>
           <div className="flex flex-col mt-1">
             {deadlines.slice(0, 4).map((t) => {
-              const dLeft = diffDays(t.due, todayKey);
+              const dLeft = diffDays(t.deadline.date, todayKey);
               return (
                 <button key={t.id} onClick={() => onJump(t.date)} className="nb-row flex items-center gap-2 py-1.5 text-left" style={{ borderBottom: `1px solid ${T.line}` }}>
                   <span style={{ fontFamily: MONO, color: dLeft <= 1 ? NOW_RED : T.dim }} className="text-xs tracking-widest shrink-0 w-14">{dLeft === 0 ? "TODAY" : dLeft === 1 ? "TOMORROW" : `${dLeft}D`}</span>
@@ -1837,7 +1956,7 @@ function ActionsPanel({ T, listRef, tasks, notes, overdue, deadlines, showOverdu
 
       <div className="flex flex-col gap-2">
         {open.map((t) => (
-          <TaskCard key={t.id} T={T} t={t} beep={beep} target={gesture && gesture.overTask === t.id} todayKey={todayKey}
+          <TaskCard key={t.id} T={T} t={t} beep={beep} target={gesture && gesture.overTask === t.id} todayKey={todayKey} blockers={blockersFor(t)} onPromoteSub={onPromoteSub}
             onComplete={onComplete} onReopen={onReopen} onDefer={onDefer} onInspect={onInspect} onToggleSub={onToggleSub} onAddSub={onAddSub} onRemoveSub={onRemoveSub} onDragStart={onDragStart} onUnschedule={onUnschedule} />
         ))}
       </div>
@@ -1847,7 +1966,7 @@ function ActionsPanel({ T, listRef, tasks, notes, overdue, deadlines, showOverdu
           <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">DONE · {done.length}</span>
           <div className="flex flex-col gap-2 mt-2">
             {done.map((t) => (
-              <TaskCard key={t.id} T={T} t={t} beep={beep} todayKey={todayKey}
+              <TaskCard key={t.id} T={T} t={t} beep={beep} todayKey={todayKey} blockers={blockersFor(t)} onPromoteSub={onPromoteSub}
                 onComplete={onComplete} onReopen={onReopen} onDefer={onDefer} onInspect={onInspect} onToggleSub={onToggleSub} onAddSub={onAddSub} onRemoveSub={onRemoveSub} onDragStart={onDragStart} onUnschedule={onUnschedule} />
             ))}
           </div>
@@ -1872,7 +1991,7 @@ function ActionsPanel({ T, listRef, tasks, notes, overdue, deadlines, showOverdu
   );
 }
 
-function TaskCard({ T, t, beep, target, todayKey, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onUnschedule }) {
+function TaskCard({ T, t, beep, target, todayKey, blockers = [], onPromoteSub, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onUnschedule }) {
   const [prog, setProg] = useState(0);
   const [dx, setDx] = useState(0);
   const [burst, setBurst] = useState(null);
@@ -1886,7 +2005,7 @@ function TaskCard({ T, t, beep, target, todayKey, onComplete, onReopen, onDefer,
     setProg(0);
   };
   const startHold = () => {
-    if (t.done) return;
+    if (t.status === "completed") return;
     holding.current = true;
     t0.current = performance.now();
     lastTick.current = 0;
@@ -1912,16 +2031,18 @@ function TaskCard({ T, t, beep, target, todayKey, onComplete, onReopen, onDefer,
   };
   const onUp = () => {
     if (sw.current && sw.current.live) {
-      if (dx > 96 && !t.done) fire();
+      if (dx > 96 && t.status !== "completed") fire();
       else if (dx < -96) onDefer(t.id, 1);
     }
     sw.current = null;
     setDx(0);
   };
 
-  const subDone = t.subs.filter((s) => s.done).length;
-  const subPct = t.subs.length ? (subDone / t.subs.length) * 100 : 0;
-  const dueLeft = t.due ? diffDays(t.due, todayKey) : null;
+  const checklist = t.checklist ?? [];
+  const subDone = checklist.filter((s) => s.done).length;
+  const subPct = checklist.length ? (subDone / checklist.length) * 100 : 0;
+  const dueLeft = t.deadline.date ? diffDays(t.deadline.date, todayKey) : null;
+  const isDone = t.status === "completed";
 
   return (
     <div data-task={t.id} className="relative overflow-hidden" style={{ background: T.bg, boxShadow: target ? `inset 0 2px 0 ${T.accent}` : "none" }}>
@@ -1930,19 +2051,19 @@ function TaskCard({ T, t, beep, target, todayKey, onComplete, onReopen, onDefer,
         <span className="text-xs tracking-widest" style={{ color: T.dim, opacity: dx < -20 ? 1 : 0 }}>TOMORROW</span>
       </div>
 
-      <article className="relative" style={{ background: T.card, transform: `translateX(${dx}px)`, transition: dx === 0 ? "transform 220ms cubic-bezier(.2,.8,.25,1)" : "none", opacity: t.done ? 0.55 : 1, touchAction: "pan-y", userSelect: "none", WebkitUserSelect: "none" }}
+      <article className="relative" style={{ background: T.card, transform: `translateX(${dx}px)`, transition: dx === 0 ? "transform 220ms cubic-bezier(.2,.8,.25,1)" : "none", opacity: isDone ? 0.55 : 1, touchAction: "pan-y", userSelect: "none", WebkitUserSelect: "none" }}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
-        <span className="absolute inset-y-0 left-0 w-0.5" style={{ background: t.done ? T.accent : T.faint }} />
+        <span className="absolute inset-y-0 left-0 w-0.5" style={{ background: isDone ? T.accent : T.faint }} />
 
         <div className="flex items-start gap-3 p-3 pl-4">
-          <button onPointerDown={(e) => { e.stopPropagation(); if (!t.done) startHold(); }} onPointerUp={(e) => { e.stopPropagation(); if (t.done) onReopen(t.id); else stopHold(true); }}
+          <button onPointerDown={(e) => { e.stopPropagation(); if (!isDone) startHold(); }} onPointerUp={(e) => { e.stopPropagation(); if (isDone) onReopen(t.id); else stopHold(true); }}
             onPointerLeave={() => stopHold(true)} onPointerCancel={() => stopHold(true)}
-            className="relative mt-0.5 w-8 h-8 shrink-0 flex items-center justify-center" aria-label={t.done ? "Reopen" : "Hold to complete"} style={{ touchAction: "none" }}>
+            className="relative mt-0.5 w-8 h-8 shrink-0 flex items-center justify-center" aria-label={isDone ? "Reopen" : "Hold to complete"} style={{ touchAction: "none" }}>
             <svg width="32" height="32" viewBox="0 0 32 32" className="absolute inset-0">
               <circle cx="16" cy="16" r="13" fill="none" stroke={T.faint} strokeWidth="2" />
-              <circle cx="16" cy="16" r="13" fill="none" stroke={T.accent} strokeWidth="3" strokeDasharray={2 * Math.PI * 13} strokeDashoffset={2 * Math.PI * 13 * (1 - (t.done ? 1 : prog))} transform="rotate(-90 16 16)" />
+              <circle cx="16" cy="16" r="13" fill="none" stroke={T.accent} strokeWidth="3" strokeDasharray={2 * Math.PI * 13} strokeDashoffset={2 * Math.PI * 13 * (1 - (isDone ? 1 : prog))} transform="rotate(-90 16 16)" />
             </svg>
-            <span className="relative" style={{ width: 10, height: 10, background: t.done ? T.accent : "transparent", transform: `scale(${1 + prog * 0.5})` }} />
+            <span className="relative" style={{ width: 10, height: 10, background: isDone ? T.accent : "transparent", transform: `scale(${1 + prog * 0.5})` }} />
             {burst && Array.from({ length: 10 }).map((_, i) => {
               const a = (i / 10) * Math.PI * 2;
               return <span key={burst + i} className="nb-p absolute" style={{ width: 4, height: 4, background: T.accent, "--tx": `${Math.cos(a) * 34}px`, "--ty": `${Math.sin(a) * 34}px` }} />;
@@ -1951,16 +2072,21 @@ function TaskCard({ T, t, beep, target, todayKey, onComplete, onReopen, onDefer,
 
           <div className="flex-1 min-w-0">
             <button onClick={() => onInspect(t.id)} className="text-left w-full">
-              <span className="block text-sm font-semibold leading-snug" style={{ textDecoration: t.done ? "line-through" : "none", color: t.done ? T.dim : T.text }}>{t.title}</span>
+              <span className="block text-sm font-semibold leading-snug" style={{ textDecoration: isDone ? "line-through" : "none", color: isDone ? T.dim : T.text }}>{t.title}</span>
             </button>
             <div className="flex flex-wrap items-center gap-2 mt-1" style={{ fontFamily: MONO }}>
-              <span style={{ color: T.dim }} className="text-xs tracking-widest">{t.cat}</span>
-              {t.repeat && <span style={{ color: T.dim }} className="text-xs">↻</span>}
-              {t.at != null && <button onClick={() => onUnschedule(t.id)} style={{ color: T.accent }} className="text-xs tracking-widest">{hhmm(t.at)}</button>}
+              <span style={{ color: T.dim }} className="text-xs tracking-widest">{t.category}</span>
+              {t.recurrence && <span style={{ color: T.dim }} className="text-xs">↻</span>}
+              {t.planned.startMinute != null && <button onClick={() => onUnschedule(t.id)} style={{ color: T.accent }} className="text-xs tracking-widest">{hhmm(t.planned.startMinute)}</button>}
               {dueLeft != null && <span style={{ color: dueLeft <= 0 ? NOW_RED : T.dim }} className="text-xs tracking-widest">DUE {dueLeft === 0 ? "TODAY" : dueLeft < 0 ? `${-dueLeft}D LATE` : `${dueLeft}D`}</span>}
-              {t.subs.length > 0 && <span style={{ color: T.dim }} className="text-xs tracking-widest">{subDone}/{t.subs.length}</span>}
+              {checklist.length > 0 && <span style={{ color: T.dim }} className="text-xs tracking-widest">{subDone}/{checklist.length}</span>}
+              {blockers.length > 0 && (
+                <span title={blockers.map((b) => b.title).join(", ")} style={{ color: NOW_RED }} className="text-xs tracking-widest">
+                  ⛌ BLOCKED BY {blockers.length === 1 ? blockers[0].title : `${blockers.length} TASKS`}
+                </span>
+              )}
             </div>
-            {t.subs.length > 0 && (
+            {checklist.length > 0 && (
               <div className="h-0.5 mt-2" style={{ background: T.faint }}>
                 <div className="h-full" style={{ background: T.accent, width: `${subPct}%`, transition: "width 220ms ease" }} />
               </div>
@@ -1971,15 +2097,16 @@ function TaskCard({ T, t, beep, target, todayKey, onComplete, onReopen, onDefer,
             className="nb-tap shrink-0 w-7 h-8 text-xs" aria-label="Drag to schedule, reorder, or move to another day">⣿</button>
         </div>
 
-        {t.subs.length > 0 && !t.done && (
+        {checklist.length > 0 && !isDone && (
           <div className="pl-8 pr-3 pb-3">
             <div className="pl-3" style={{ borderLeft: `2px solid ${T.faint}` }}>
-              {t.subs.map((s) => (
+              {checklist.map((s) => (
                 <div key={s.id} className="nb-row flex items-center gap-2 w-full py-1.5">
                   <button onClick={() => onToggleSub(t.id, s.id)} className="flex items-center gap-2 flex-1 text-left">
                     <span className="w-3 h-3 shrink-0" style={{ background: s.done ? T.accent : "transparent", boxShadow: `inset 0 0 0 1px ${s.done ? T.accent : T.faint}` }} />
                     <span className="text-xs" style={{ textDecoration: s.done ? "line-through" : "none", color: s.done ? T.dim : T.text }}>{s.title}</span>
                   </button>
+                  <button onClick={() => onPromoteSub(t.id, s.id)} style={{ color: T.dim }} className="text-xs px-1" aria-label="Promote step to a subtask" title="Needs its own planning? Promote to a subtask">↥</button>
                   <button onClick={() => onRemoveSub(t.id, s.id)} style={{ color: T.dim }} className="text-xs px-1" aria-label="Remove step">✕</button>
                 </div>
               ))}

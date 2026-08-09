@@ -88,3 +88,23 @@ export {
   searchTasks,
 } from "./queries/taskQueries.js";
 export { TASK_EVENT_TYPES, taskEvent } from "./events/taskEvents.js";
+export {
+  expandTaskOccurrences,
+  makeTaskOccurrenceId,
+  materializeOccurrence,
+  occursOn,
+  parseTaskOccurrenceId,
+  removeTaskException,
+  unfinishedBefore,
+  upsertTaskException,
+} from "./recurrence/taskRecurrence.js";
+export {
+  completedOn,
+  countOpen,
+  getDayTasks,
+  getOverdueForToday,
+  getSubtasksOf,
+  getUpcomingRange,
+} from "./queries/dayView.js";
+export { DEFAULT_TASK_LISTS, migrateV5ToV6 } from "./migrations/migrateV5ToV6.js";
+export { validatePlannerStateV6 } from "./migrations/validatePlannerStateV6.js";
