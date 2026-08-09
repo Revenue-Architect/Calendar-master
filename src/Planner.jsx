@@ -97,15 +97,14 @@ const THEMES = [
   { id: "cream-slate", name: "Cream / Slate", bg: "#F1F2F4", card: "#FFFFFF", line: "#E1E3E7", text: "#14141A", dim: "#71757C", faint: "#D8DBE0", accent: "#5B7C99", on: "#FFFFFF" },
   { id: "linen-dusty", name: "Linen / Dusty Rose", bg: "#F7F3F4", card: "#FFFFFF", line: "#E9E0E2", text: "#1A1418", dim: "#7C7074", faint: "#E0D4D7", accent: "#C48B9F", on: "#000000" },
 
-  /* The Moleskine set commits to a saturated ground rather than tinting a dark one.
-     A coloured page is the notebook's own identity, so here the accent is the light
-     that sits on it and every neutral is mixed from the same hue — a grey borrowed
-     from a different theme reads as dirt on a coloured page. */
-  { id: "moleskine-red", name: "Moleskine / Red", bg: "#7E1A17", card: "#93211D", line: "#A93430", text: "#FFF3F0", dim: "#E4ADA6", faint: "#B4443F", accent: "#FFFFFF", on: "#7E1A17" },
-  { id: "actions-blue", name: "Moleskine / Actions Blue", bg: "#065F73", card: "#0A7288", line: "#128AA3", text: "#FFFFFF", dim: "#C3E7EF", faint: "#1E97B0", accent: "#FFFFFF", on: "#065F73" },
-  { id: "timepage-indigo", name: "Moleskine / Indigo", bg: "#141B3D", card: "#1D264F", line: "#2C3766", text: "#EEF0FF", dim: "#8189B5", faint: "#333F73", accent: "#FFC24B", on: "#141B3D" },
-  { id: "moleskine-forest", name: "Moleskine / Forest", bg: "#0F2E22", card: "#163B2C", line: "#224E3B", text: "#EDF6F1", dim: "#7FA593", faint: "#2A5A45", accent: "#F2E2C4", on: "#0F2E22" },
-  { id: "moleskine-sand", name: "Moleskine / Sand", bg: "#EDE4D3", card: "#F8F2E7", line: "#DCCFB8", text: "#241D14", dim: "#7D7161", faint: "#D2C3A8", accent: "#1F5C4D", on: "#FFFFFF" },
+
+  /* Same neutrals as the sets above, new accents only. A theme here is a ground plus
+     one colour, so a new accent is a new theme rather than a new palette. */
+  { id: "obsidian-red", name: "Obsidian / Timepage Red", bg: "#0A0A0C", card: "#121216", line: "#1E1E26", text: "#F2F2F5", dim: "#797987", faint: "#2A2A34", accent: "#E23B2E", on: "#FFFFFF" },
+  { id: "obsidian-blue", name: "Obsidian / Actions Blue", bg: "#0A0A0C", card: "#121216", line: "#1E1E26", text: "#F2F2F5", dim: "#797987", faint: "#2A2A34", accent: "#1BA3C4", on: "#00161C" },
+  { id: "obsidian-forest", name: "Obsidian / Forest", bg: "#0A0A0C", card: "#121216", line: "#1E1E26", text: "#F2F2F5", dim: "#797987", faint: "#2A2A34", accent: "#34C77B", on: "#03210F" },
+  { id: "cream-red", name: "Cream / Timepage Red", bg: "#F4F1EA", card: "#FFFFFF", line: "#E4DED2", text: "#14141A", dim: "#79736A", faint: "#DED7C9", accent: "#C8221B", on: "#FFFFFF" },
+  { id: "cream-blue", name: "Cream / Actions Blue", bg: "#F1F2F4", card: "#FFFFFF", line: "#E1E3E7", text: "#14141A", dim: "#71757C", faint: "#D8DBE0", accent: "#0E7F99", on: "#FFFFFF" },
 ];
 
 const CATS = ["DEEP WORK", "ADMIN", "BODY", "PEOPLE", "RITUAL"];

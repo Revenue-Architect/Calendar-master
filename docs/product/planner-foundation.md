@@ -2426,9 +2426,8 @@ way everywhere.
   now colour, which are deliberately constant.
 - The page background, browser chrome colour, and `color-scheme` follow the
   active theme so native controls match the page.
-- A theme MAY commit to a saturated ground rather than tinting a neutral one. On a
-  coloured page every neutral is mixed from the same hue — a grey borrowed from a
-  different palette reads as dirt.
+- A theme is a ground plus one accent. A new colour is a new theme on an existing
+  ground, not a new palette, so the neutrals stay shared and comparable.
 - Body text MUST reach 4.5:1 against the surface behind it, and a label on a
   filled control MUST reach 4:1 against its accent. The label on a primary button
   is the last text that should be hard to read.
@@ -2514,5 +2513,4 @@ and resurfacing behaviors. These remain specified above and unimplemented.
 | 2026-08-09 | Give every frequent action a keyboard path; a hold or swipe is never the only way. |
 | 2026-08-09 | Require that a row naming an entry opens it, rather than only displaying it. |
 | 2026-08-09 | Guard date navigation at its entry point so a bad key cannot take the screen down. |
-| 2026-08-09 | Allow themes with a saturated ground, mixing every neutral from the same hue. |
 | 2026-08-09 | Hold body text to 4.5:1 and filled-control labels to 4:1 against their accent. |
