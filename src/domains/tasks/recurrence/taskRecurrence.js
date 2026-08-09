@@ -148,6 +148,19 @@ export function upsertTaskException(exceptions, exception) {
   return next;
 }
 
+/* Exceptions belong to a series and cannot outlive it: a stored exception whose
+   series is missing fails whole-notebook validation, and once validation fails
+   nothing saves at all. Deleting a series must take its exceptions with it. */
+export function removeTaskExceptionsForSeries(exceptions, seriesIds) {
+  const gone = seriesIds instanceof Set ? seriesIds : new Set(seriesIds ?? []);
+  return (exceptions ?? []).filter((entry) => !gone.has(entry.seriesId));
+}
+
+export function taskExceptionsForSeries(exceptions, seriesIds) {
+  const gone = seriesIds instanceof Set ? seriesIds : new Set(seriesIds ?? []);
+  return (exceptions ?? []).filter((entry) => gone.has(entry.seriesId));
+}
+
 export function removeTaskException(exceptions, seriesId, occurrenceDate) {
   return exceptions.filter(
     (entry) => !(entry.seriesId === seriesId && entry.occurrenceDate === occurrenceDate),

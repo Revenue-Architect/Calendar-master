@@ -55,6 +55,8 @@ import {
   planTask as planTaskCommand,
   promoteChecklistItem as promoteChecklistItemCommand,
   removeTaskException,
+  removeTaskExceptionsForSeries,
+  taskExceptionsForSeries,
   reopenTask as reopenTaskCommand,
   scheduleTask as scheduleTaskCommand,
   updateTask as updateTaskCommand,
@@ -1206,8 +1208,26 @@ export default function Planner() {
         /* §15.5. Strips every dependency edge pointing at what is going away, so no
            survivor is left permanently and invisibly blocked by a ghost. */
         const result = deleteTaskCommand(d.tasks, base);
+        const goneIds = new Set((result.events[0]?.removed ?? [removed]).filter(Boolean).map((x) => x.id));
+        /* An occurrence exception outlives the series it belongs to unless it is
+           taken with it, and a stored exception whose series is missing makes the
+           whole notebook fail validation — after which nothing saves at all. The
+           dropped exceptions travel in the undo payload so completion history is
+           restored with the task rather than reconstructed. */
+        const droppedExceptions = taskExceptionsForSeries(d.taskExceptions, goneIds);
+        d.taskExceptions = removeTaskExceptionsForSeries(d.taskExceptions, goneIds);
+        /* A note line that produced one of these tasks must be able to produce one
+           again, so its extraction marker is cleared with the task (§7.2). */
+        d.notes = d.notes.map((note) => (note.blocks.some((blk) => goneIds.has(blk.extractedTaskId))
+          ? { ...note, blocks: note.blocks.map((blk) => (goneIds.has(blk.extractedTaskId) ? { ...blk, extractedTaskId: null } : blk)) }
+          : note));
         d.tasks = result.tasks;
-        removed = { ...removed, detachedFrom: result.events[0]?.detachedFrom ?? [] };
+        removed = {
+          ...removed,
+          detachedFrom: result.events[0]?.detachedFrom ?? [],
+          alsoRemoved: (result.events[0]?.removed ?? []).filter((x) => x.id !== base),
+          droppedExceptions,
+        };
       }
       if (kind === "note") { removed = d.notes.find((n) => n.id === base); d.notes = d.notes.filter((n) => n.id !== base); }
       return d;
@@ -1228,7 +1248,15 @@ export default function Planner() {
     beep("click");
     mutate((d) => {
       if (p.type === "restore" && p.item) {
-        if (p.kind === "task") { d.tasks = [...d.tasks, p.item]; if (p.item.status === "completed") d.xp += p.item.reward || 0; }
+        if (p.kind === "task") {
+          const { detachedFrom, alsoRemoved, droppedExceptions, ...task } = p.item;
+          d.tasks = [...d.tasks, task, ...(alsoRemoved ?? [])];
+          d.taskExceptions = [...(d.taskExceptions ?? []), ...(droppedExceptions ?? [])];
+          for (const entry of detachedFrom ?? []) {
+            d.tasks = d.tasks.map((x) => (x.id === entry.taskId ? { ...x, dependsOn: [...entry.dependsOn] } : x));
+          }
+          if (task.status === "completed") d.xp += task.reward || 0;
+        }
         if (p.kind === "note") d.notes = [...d.notes, p.item];
       }
       if (p.type === "restore-calendar-event") return restoreCalendarEvent(d, p.snapshot).state;
@@ -2175,6 +2203,21 @@ export default function Planner() {
         </div>
       )}
 
+      {/* A failed write is silent otherwise: everything keeps working on screen while
+          nothing reaches the device, and the only sign of it is a line in Settings
+          the user has no reason to open. */}
+      {storageBad && (
+        <div className="fixed inset-x-0 top-14 z-50 flex justify-center px-3 pointer-events-none">
+          <div className="nb-up flex items-center gap-3 px-3 py-2 w-full sm:w-auto pointer-events-auto"
+            style={{ background: NOW_RED, color: "#FFFFFF", borderRadius: CARD_R }}>
+            <span style={{ fontFamily: MONO }} className="text-xs tracking-widest shrink-0">NOT SAVING</span>
+            <span className="text-sm truncate">Changes are staying in this tab only.</span>
+            <button onClick={() => { beep("click"); setSettings(true); }}
+              style={{ fontFamily: MONO }} className="text-xs font-bold tracking-widest shrink-0 underline">EXPORT</button>
+          </div>
+        </div>
+      )}
+
       {alertToast && (
         <div className="fixed inset-x-0 top-16 z-50 flex justify-center px-3 pointer-events-none">
           <div className="nb-up flex items-center gap-3 px-3 py-2 w-full sm:w-auto" style={{ background: NOW_RED, color: "#FFFFFF" }}>
@@ -2600,7 +2643,16 @@ export default function Planner() {
         </Sheet>
       )}
 
+      {composer && (
+        <Sheet T={T} title={composer.id ? "EDIT" : "NEW"} onClose={() => { beep("click"); setComposer(null); }}>
+          <Composer T={T} initial={composer} dateLabel={fmtDay(dateKey)} dateKey={dateKey} onSubmit={saveEntry} onTick={() => beep("tick")} />
+        </Sheet>
+      )}
+
       {/* ══ SCOPE ASK ══ */}
+      {/* Rendered after the composer so it stacks above it: the question is asked
+          while the form is still open, and underneath the form its buttons cannot be
+          reached at all. Cancelling returns to the form with the edit intact. */}
       {scopeAsk && (
         <Sheet T={T} title="REPEATING ITEM" onClose={() => { beep("click"); setScopeAsk(null); }}>
           <h2 className="text-xl font-bold tracking-tight">This repeats</h2>
@@ -2617,12 +2669,6 @@ export default function Planner() {
             <button onClick={() => (scopeAsk.action === "delete" ? doDelete(scopeAsk.kind, scopeAsk.id, "all") : commitSave(scopeAsk.payload, "all"))}
               style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="nb-tap py-3 text-xs font-bold tracking-widest">THE WHOLE SERIES</button>
           </div>
-        </Sheet>
-      )}
-
-      {composer && (
-        <Sheet T={T} title={composer.id ? "EDIT" : "NEW"} onClose={() => { beep("click"); setComposer(null); }}>
-          <Composer T={T} initial={composer} dateLabel={fmtDay(dateKey)} dateKey={dateKey} onSubmit={saveEntry} onTick={() => beep("tick")} />
         </Sheet>
       )}
 

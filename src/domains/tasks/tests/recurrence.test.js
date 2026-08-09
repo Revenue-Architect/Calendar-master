@@ -122,3 +122,45 @@ test("expansion covers a half-open range", () => {
   const occurrences = expandTaskOccurrences(task, "2026-08-01", "2026-08-04", []);
   assert.deepEqual(occurrences.map((entry) => entry.occurrenceDate), ["2026-08-01", "2026-08-02", "2026-08-03"]);
 });
+
+/* An exception cannot outlive the series that owns it: a stored exception whose
+   series is gone fails whole-notebook validation, and a notebook that fails
+   validation stops saving entirely. */
+
+test("exceptions for a removed series are separable and removable", async () => {
+  const { removeTaskExceptionsForSeries, taskExceptionsForSeries } = await import("../recurrence/taskRecurrence.js");
+  const exceptions = [
+    { id: "a", seriesId: "gone", occurrenceDate: "2026-08-05", kind: "completed", patch: {} },
+    { id: "b", seriesId: "kept", occurrenceDate: "2026-08-05", kind: "cancelled", patch: {} },
+  ];
+  assert.deepEqual(taskExceptionsForSeries(exceptions, ["gone"]).map((x) => x.id), ["a"]);
+  assert.deepEqual(removeTaskExceptionsForSeries(exceptions, ["gone"]).map((x) => x.id), ["b"]);
+  assert.deepEqual(removeTaskExceptionsForSeries(exceptions, new Set(["gone", "kept"])), []);
+  assert.deepEqual(removeTaskExceptionsForSeries(undefined, ["gone"]), [], "tolerates a notebook with no exceptions");
+});
+
+test("deleting a series and its exceptions leaves a state that still validates", async () => {
+  const { validatePlannerStateV7 } = await import("../../notes/migrations/validatePlannerStateV7.js");
+  const { deleteTask } = await import("../index.js");
+  const { removeTaskExceptionsForSeries } = await import("../recurrence/taskRecurrence.js");
+
+  const series = normalizeTaskInput({ id: "s", title: "Habit", planned: { date: "2026-08-01" }, recurrence: { frequency: "daily", interval: 1 } });
+  const exceptions = upsertTaskException([], { id: "x", seriesId: "s", occurrenceDate: "2026-08-05", kind: "completed", completedAt: "2026-08-05T09:00" });
+  const removed = deleteTask([series], "s");
+
+  const shell = {
+    schemaVersion: 7,
+    calendars: [{ id: "c", name: "C", status: "active", role: "owner", isDefault: true, isVisible: true, includeInAvailability: true }],
+    events: [], eventExceptions: [], occurrenceAliases: [], overrides: {},
+    taskLists: [{ id: "list-default", name: "Actions", isDefault: true }],
+    notebooks: [{ id: "notebook-default", name: "Notes", isDefault: true }], notes: [],
+  };
+  assert.throws(
+    () => validatePlannerStateV7({ ...shell, tasks: removed.tasks, taskExceptions: exceptions }),
+    /exception/,
+    "keeping the exception is exactly what breaks the notebook",
+  );
+  assert.doesNotThrow(
+    () => validatePlannerStateV7({ ...shell, tasks: removed.tasks, taskExceptions: removeTaskExceptionsForSeries(exceptions, ["s"]) }),
+  );
+});

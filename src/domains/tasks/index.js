@@ -97,6 +97,8 @@ export {
   occursOn,
   parseTaskOccurrenceId,
   removeTaskException,
+  removeTaskExceptionsForSeries,
+  taskExceptionsForSeries,
   unfinishedBefore,
   upsertTaskException,
 } from "./recurrence/taskRecurrence.js";

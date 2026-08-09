@@ -2395,7 +2395,26 @@ way everywhere.
 - Listeners bound to an element MUST be rebound when that element is replaced. A
   view that unmounts and returns leaves an inert copy behind otherwise.
 
-### 6.5 Undo must actually reverse
+### 6.5 A surface that asks must be reachable
+
+- A surface raising a question MUST stack above whatever prompted it. A question
+  rendered beneath its own form cannot be answered, and the work that prompted it
+  is lost on the way out.
+- Cancelling a question returns to the surface that raised it with its state
+  intact.
+
+### 6.6 Deleting must not strand what referenced it
+
+- Deleting a record MUST take its dependent records with it, or clear the
+  references pointing at it. A stored child whose parent is gone fails
+  whole-notebook validation, and once validation fails nothing saves at all —
+  the interface keeps working while every change is silently discarded.
+- What is removed travels in the command result so undo restores it rather than
+  reconstructing it.
+- A failed write MUST be visible on the surface the user is already looking at.
+  A warning only reachable from a settings screen is not a warning.
+
+### 6.7 Undo must actually reverse
 
 - Every action that offers undo MUST be reversible by the payload it recorded.
 - An undo affordance that does nothing is worse than none, because it is trusted.
@@ -2540,3 +2559,6 @@ and resurfacing behaviors. These remain specified above and unimplemented.
 | 2026-08-09 | Hold body text to 4.5:1 and filled-control labels to 4:1 against their accent. |
 | 2026-08-09 | Hand a committed swipe straight to the page turn; never animate two transforms against each other. |
 | 2026-08-09 | Suppress the compatibility click after a touch opens a surface, and ignore same-tap dismissals. |
+| 2026-08-09 | Take dependent records with a deletion, and carry them in the result so undo restores them. |
+| 2026-08-09 | Surface a failed write where the user already is, not only in settings. |
+| 2026-08-09 | Stack a question above the surface that raised it, so it can be answered. |
