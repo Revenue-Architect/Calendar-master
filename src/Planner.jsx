@@ -264,6 +264,25 @@ const startSlot = (m, s = 15) => Math.min(snapTo(m, s), 1440 - s);
 const hhmm = (m) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
 const fromHhmm = (s) => { const [h, m] = s.split(":").map(Number); return h * 60 + m; };
 const buzzDevice = (p) => { try { navigator.vibrate && navigator.vibrate(p); } catch (e) {} };
+/* Sheets morph open from the control that opened them. Focus alone cannot always
+   say which control that was — iOS Safari does not focus a tapped button — so the
+   last pressed trigger is remembered here and consulted when a sheet mounts. */
+let lastFluidTrigger = null;
+let lastFluidTriggerAt = 0;
+if (typeof window !== "undefined") {
+  window.addEventListener("pointerdown", (event) => {
+    const el = event.target instanceof Element
+      ? event.target.closest("button,[role='button'],summary,label,[data-event-id],[data-task-chip]")
+      : null;
+    if (el) { lastFluidTrigger = el; lastFluidTriggerAt = Date.now(); }
+  }, true);
+}
+function recentFluidTriggerRect() {
+  if (!lastFluidTrigger || !lastFluidTrigger.isConnected) return null;
+  if (Date.now() - lastFluidTriggerAt > 1200) return null;
+  const rect = lastFluidTrigger.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0 ? rect : null;
+}
 const splitId = (id) => { const i = String(id).indexOf("@"); return i === -1 ? { base: id, date: null } : { base: id.slice(0, i), date: id.slice(i + 1) }; };
 /* "STARTS" reads in the largest unit that still says something useful — days for
    next week, hours today, minutes when it is imminent, and past tense once gone. */
@@ -2035,6 +2054,13 @@ export default function Planner() {
     };
   }, [gesture && gesture.mode, gesture && gesture.id]);
 
+  /* Toasts and inline confirmations hold their content for one beat after they are
+     dismissed, so they can animate out instead of vanishing on the spot. */
+  const [undoShown, undoLeaving] = usePresence(undo);
+  const [alertShown, alertLeaving] = usePresence(alertToast);
+  const [levelShown, levelLeaving] = usePresence(levelFlash);
+  const [pendingImportShown] = usePresence(pendingImport, 320);
+
   if (!ready || !db) {
     return (
       <div style={{ background: THEMES[0].bg, color: THEMES[0].dim, fontFamily: MONO, minHeight: "100vh" }} className="flex items-center justify-center text-xs tracking-widest">
@@ -2084,7 +2110,11 @@ export default function Planner() {
   const editEntry = (patch) => {
     if (!inspect || !inspectItem) return;
     setDraft((current) => ({ ...(current ?? {}), ...patch }));
+    /* §4.6. Touching a field is what starts editing — the pill follows the record
+       into its editing state rather than gatekeeping it. */
+    setDetailEditing(true);
   };
+  const beginDetailEdit = () => setDetailEditing(true);
 
   /* The record as it currently reads, draft included, so the view shows what will
      be saved rather than what is stored. */
@@ -2251,7 +2281,18 @@ export default function Planner() {
         .nb-scrim.nb-fluid-closing{animation:nbscrimout 230ms ease forwards}
         @keyframes nbscrimout{to{opacity:0;backdrop-filter:blur(0)}}
         .nb-edit-actions{transition:width 420ms cubic-bezier(.22,1.12,.28,1),background-color 260ms ease,box-shadow 260ms ease}
-        .nb-edit-actions>button,.nb-edit-actions>div{transition:opacity 180ms ease}
+        .nb-edit-liquid{transition:left 420ms cubic-bezier(.22,1.12,.28,1)}
+        .nb-edit-face{transition:opacity 200ms ease,transform 420ms cubic-bezier(.22,1.12,.28,1)}
+        /* A multi-select pill has no single selection to slide, so its fill grows in
+           and shrinks out with the same spring the traveling pill uses. */
+        .nb-chip-fill{transition:transform 320ms cubic-bezier(.2,1.4,.3,1),opacity 200ms ease}
+        /* Toasts leave the way they came instead of vanishing on the frame they are
+           dismissed. */
+        .nb-toast-out{animation:nbtoastout 200ms cubic-bezier(.4,0,.65,1) forwards;pointer-events:none}
+        @keyframes nbtoastout{to{opacity:0;transform:translateY(14px) scale(.96)}}
+        /* The mobile sheet's spring overshoots its resting place; the extension below
+           keeps the overshoot from showing a gap under the bottom edge. */
+        .nb-msheet::after{content:"";position:absolute;top:100%;left:0;right:0;height:40px;background:inherit}
         .nb-detail-editor{animation:nbrise 300ms cubic-bezier(.22,1.12,.28,1)}
         /* A primary action gets a little more weight under the finger than a
            secondary one — the difference is felt before it is read. */
@@ -2624,8 +2665,8 @@ export default function Planner() {
       </main>
 
       {/* ══ MOBILE SHEET ══ */}
-      <div className="lg:hidden fixed inset-x-0 bottom-0 z-40 flex flex-col"
-        style={{ height: "76vh", background: T.card, borderTop: `1px solid ${T.line}`, transform: sheet ? "translateY(0)" : "translateY(calc(100% - 52px))", transition: "transform 260ms cubic-bezier(.2,.8,.25,1)" }}>
+      <div className="nb-msheet lg:hidden fixed inset-x-0 bottom-0 z-40 flex flex-col"
+        style={{ height: "76vh", background: T.card, borderTop: `1px solid ${T.line}`, transform: sheet ? "translateY(0)" : "translateY(calc(100% - 52px))", transition: "transform 420ms cubic-bezier(.22,1.12,.28,1)" }}>
         <div className="flex items-center gap-3 px-3 shrink-0" style={{ height: 52 }}>
           <button onClick={() => { beep("tick"); setSheet(!sheet); }} className="flex-1 flex items-center gap-2 text-left" aria-label="Toggle actions">
             <span style={{ background: T.faint }} className="w-8 h-0.5" />
@@ -2659,13 +2700,13 @@ export default function Planner() {
         </div>
       )}
 
-      {alertToast && (
+      {alertShown && (
         <div className="fixed inset-x-0 top-16 z-50 flex justify-center px-3 pointer-events-none">
-          <div role="alert" className="nb-up flex items-center gap-3 px-3 py-2 w-full sm:w-auto pointer-events-auto" style={{ background: NOW_RED, color: "#FFFFFF" }}>
+          <div role="alert" className={`${alertLeaving ? "nb-toast-out" : "nb-up"} flex items-center gap-3 px-3 py-2 w-full sm:w-auto ${alertLeaving ? "" : "pointer-events-auto"}`} style={{ background: NOW_RED, color: "#FFFFFF" }}>
             <span style={{ fontFamily: MONO }} className="text-xs tracking-widest shrink-0">REMINDER</span>
-            <span className="text-sm font-semibold truncate">{alertToast.title}</span>
-            <span style={{ fontFamily: MONO }} className="text-xs tracking-widest shrink-0">{alertToast.body}</span>
-            {alertToast.reminderId && <>
+            <span className="text-sm font-semibold truncate">{alertShown.title}</span>
+            <span style={{ fontFamily: MONO }} className="text-xs tracking-widest shrink-0">{alertShown.body}</span>
+            {alertShown.reminderId && <>
               <button onClick={snoozeAlert} style={{ fontFamily: MONO }} className="text-xs font-bold tracking-widest underline shrink-0">SNOOZE 10M</button>
               <button onClick={dismissAlert} style={{ fontFamily: MONO }} className="text-xs font-bold tracking-widest underline shrink-0">DISMISS</button>
             </>}
@@ -2673,11 +2714,11 @@ export default function Planner() {
         </div>
       )}
 
-      {undo && (
+      {undoShown && (
         <div className="fixed inset-x-0 z-50 flex justify-center pointer-events-none" style={{ bottom: 68 }}>
-          <div role="status" aria-live="polite" className="nb-up flex items-center gap-3 px-3 py-2 pointer-events-auto" style={{ background: T.text, color: T.bg }}>
-            <span style={{ fontFamily: MONO }} className="text-xs tracking-widest">{undo.label}</span>
-            {undo.payload && <button onClick={runUndo} style={{ fontFamily: MONO, color: T.accent }} className="text-xs font-bold tracking-widest">UNDO</button>}
+          <div role="status" aria-live="polite" className={`${undoLeaving ? "nb-toast-out" : "nb-up"} flex items-center gap-3 px-3 py-2 ${undoLeaving ? "" : "pointer-events-auto"}`} style={{ background: T.text, color: T.bg }}>
+            <span style={{ fontFamily: MONO }} className="text-xs tracking-widest">{undoShown.label}</span>
+            {undoShown.payload && <button onClick={runUndo} style={{ fontFamily: MONO, color: T.accent }} className="text-xs font-bold tracking-widest">UNDO</button>}
           </div>
         </div>
       )}
@@ -2687,9 +2728,9 @@ export default function Planner() {
           <span key={reward.k} className="nb-rw text-7xl font-bold tracking-tighter" style={{ fontFamily: MONO, color: T.accent }}>+{reward.xp}</span>
         </div>
       )}
-      {levelFlash && (
+      {levelShown && (
         <div className="fixed inset-x-0 top-20 z-50 flex justify-center pointer-events-none">
-          <span style={{ background: T.accent, color: T.on, fontFamily: MONO }} className="nb-up px-3 py-1.5 text-xs font-bold tracking-widest">LEVEL {levelFlash}</span>
+          <span style={{ background: T.accent, color: T.on, fontFamily: MONO }} className={`${levelLeaving ? "nb-toast-out" : "nb-up"} px-3 py-1.5 text-xs font-bold tracking-widest`}>LEVEL {levelShown}</span>
         </div>
       )}
 
@@ -2712,7 +2753,7 @@ export default function Planner() {
             <div>
               <InlineText T={T} value={inspectDraft.title} ariaLabel="Action title"
                 onCommit={(title) => editEntry({ title })}
-                editable={detailEditing}
+                onBeginEdit={beginDetailEdit}
                 className="text-2xl font-bold tracking-tight leading-tight" />
               <div className="flex items-center gap-2 mt-1.5">
                 <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: catColor(inspectDraft.category) }} />
@@ -2734,6 +2775,9 @@ export default function Planner() {
                       }} />
                     </button>
                     <span className="flex-1 text-sm truncate" style={{ textDecoration: item.done ? "line-through" : "none", color: item.done ? T.dim : T.text }}>{item.title}</span>
+                    {/* Structure edits write to the record immediately rather than the
+                        draft, so they stay behind the editing state — otherwise Revert
+                        would appear to cover a change it cannot take back. */}
                     {detailEditing && <button onClick={() => promoteSub(inspect.id, item.id)} style={{ color: T.dim }} className="text-xs px-1" aria-label="Promote step to a subtask">↥</button>}
                     {detailEditing && <button onClick={() => removeSub(inspect.id, item.id)} style={{ color: T.dim }} className="text-xs px-1" aria-label="Remove step">✕</button>}
                   </div>
@@ -2757,7 +2801,7 @@ export default function Planner() {
 
               <div className="flex items-start gap-3 px-3 py-3 mt-4" style={{ background: surface, borderRadius: CARD_R }}>
                 <InlineText T={T} value={inspectDraft.note} placeholder="Add a note" ariaLabel="Note" multiline
-                  onCommit={(note) => editEntry({ note })} editable={detailEditing} className="text-sm leading-relaxed" />
+                  onCommit={(note) => editEntry({ note })} onBeginEdit={beginDetailEdit} className="text-sm leading-relaxed" />
                 <span style={{ color: T.dim }} className="text-sm shrink-0 pt-0.5">≡</span>
               </div>
 
@@ -2801,17 +2845,17 @@ export default function Planner() {
                       </label>
                     </div>
                   ) : (
-                    <div>
+                    <button onClick={() => { beep("click"); beginDetailEdit(); }} className="block w-full text-left" aria-label="Edit planning">
                       <span className="block text-sm">{inspectDraft.planned.date ? plannedLabel(inspectDraft.planned.date, todayKey) : "Unplanned"}</span>
                       <span style={{ color: T.dim }} className="block text-xs mt-0.5">
                         {inspectDraft.planned.startMinute != null ? tm(inspectDraft.planned.startMinute) : "Any time"}
                         {inspectDraft.planned.estimateMinutes ? ` · ${dur(inspectDraft.planned.estimateMinutes)} estimate` : " · No estimate"}
                         {` · ${inspectDraft.recurrence ? repeatLabel({ ...inspectDraft.recurrence, freq: inspectDraft.recurrence.frequency, byDay: inspectDraft.recurrence.byWeekday }) : "Does not repeat"}`}
                       </span>
-                    </div>
+                    </button>
                   )}
                 </DetailRow>
-                <InlineChoiceRow T={T} icon="◔" divider editable={detailEditing}
+                <InlineChoiceRow T={T} icon="◔" divider onBeginEdit={beginDetailEdit}
                   label={(inspectDraft.reminders ?? []).length
                     ? (inspectDraft.reminders[0].offsetMinutes === 0
                       ? `When it starts${inspectDraft.planned.startMinute != null ? `, ${tm(inspectDraft.planned.startMinute)}` : ""}`
@@ -2828,17 +2872,17 @@ export default function Planner() {
                     <InlineStamp T={T} dark={dark} type="date" ariaLabel="Deadline"
                       value={inspectDraft.deadline.date || ""} onCommit={(v) => editEntry({ due: v })}
                       display={inspectDraft.deadline.date ? fmtDay(inspectDraft.deadline.date) : "No deadline"}
-                      editable={detailEditing}
+                      onBeginEdit={beginDetailEdit}
                       style={{ color: inspectDraft.deadline.date && inspectDraft.deadline.date < todayKey ? NOW_RED : T.text }}
                       className="text-sm" />
-                    {detailEditing && inspectDraft.deadline.date && (
+                    {inspectDraft.deadline.date && (
                       <button onClick={() => editEntry({ due: "" })} style={{ color: T.dim }} className="nb-tap text-xs px-1" aria-label="Clear deadline">✕</button>
                     )}
                   </div>
                 </DetailRow>
                 {/* §8.2. The label names the attribute; it does not repeat the value
                     the selected chip already carries. */}
-                <InlineChoiceRow T={T} icon="◈" divider editable={detailEditing} label={`Worth ${inspectDraft.reward}`}
+                <InlineChoiceRow T={T} icon="◈" divider onBeginEdit={beginDetailEdit} label={`Worth ${inspectDraft.reward}`}
                   value={inspectDraft.reward} options={[20, 30, 40, 60].map((xp) => [xp, String(xp)])}
                   onPick={(xp) => editEntry({ xp })} />
                 {inspectDraft.status === "waiting" && (
@@ -2849,17 +2893,17 @@ export default function Planner() {
                 {/* Every edge is listed, satisfied or not, each removable — otherwise a
                     dependency could be added from here but never taken back. */}
                 <DetailRow T={T} icon="▤" divider>
-                  <button disabled={!detailEditing}
-                    onClick={() => { beep("click"); setListPicker({ taskId: inspect.id, draft: true }); }} className="text-left w-full disabled:opacity-100">
+                  <button
+                    onClick={() => { beep("click"); beginDetailEdit(); setListPicker({ taskId: inspect.id, draft: true }); }} className="text-left w-full">
                     <span className="block text-sm">{(db.taskLists.find((l) => l.id === inspectDraft.listId) || {}).name || "—"}</span>
-                    <span style={{ color: T.dim }} className="block text-xs mt-0.5">{detailEditing ? "Tap to move to another list" : "List"}</span>
+                    <span style={{ color: T.dim }} className="block text-xs mt-0.5">Tap to move to another list</span>
                   </button>
                 </DetailRow>
-                <InlineChoiceRow T={T} icon="◑" divider editable={detailEditing} label={inspectDraft.category} dot={catColor}
+                <InlineChoiceRow T={T} icon="◑" divider onBeginEdit={beginDetailEdit} label={inspectDraft.category} dot={catColor}
                   value={inspectDraft.category} options={CATS.map((c) => [c, c])}
                   onPick={(cat) => editEntry({ cat })} />
                 <DetailRow T={T} icon="#" divider={inspectDependsOn.length > 0}>
-                  <TagField T={T} tags={inspectDraft.tags} editable={detailEditing} onChange={(tags) => editEntry({ tags })} />
+                  <TagField T={T} tags={inspectDraft.tags} onBeginEdit={beginDetailEdit} onChange={(tags) => editEntry({ tags })} />
                 </DetailRow>
                 {inspectDependsOn.map((blocker, i) => (
                   <DetailRow key={blocker.id} T={T} icon="⛌" divider={i < inspectDependsOn.length - 1}>
@@ -2875,15 +2919,15 @@ export default function Planner() {
               </div>
 
               <div className="flex items-center justify-between gap-2 mt-4">
-                {detailEditing ? (
+                {inspectDraft.status === "completed" ? (
+                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">COMPLETED</span>
+                ) : (
                   <PillNav T={T} ariaLabel="Action status" value={inspectDraft.status}
                     options={[["open", "OPEN"], ["in_progress", "DOING"], ["waiting", "WAITING"]]}
                     onPick={(status) => editEntry({ status })} style={{ border: `1px solid ${T.line}` }} />
-                ) : (
-                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">
-                    {inspectDraft.status.replace("_", " ").toUpperCase()}
-                  </span>
                 )}
+                {/* Dependency edits also write immediately, so the affordance belongs
+                    to the editing state rather than the read view. */}
                 {detailEditing && <button onClick={() => { beep("click"); setDependencyPicker({ taskId: parseTaskOccurrenceId(inspect.id).seriesId }); }}
                   style={{ fontFamily: MONO, color: T.accent }} className="nb-tap text-xs tracking-widest shrink-0">+ BLOCK ON</button>}
               </div>
@@ -2901,14 +2945,14 @@ export default function Planner() {
           <div className="text-center pt-1 pb-4">
             <InlineText T={T} value={inspectDraft.title} ariaLabel="Event title"
               onCommit={(title) => editEntry({ title })}
-              editable={detailEditing}
+              onBeginEdit={beginDetailEdit}
               className="text-2xl font-bold tracking-tight leading-tight" style={{ textAlign: "center" }} />
             {inspectDraft.allDay ? (
               <p className="text-base font-semibold mt-1.5">All day</p>
             ) : (
               <div className="flex items-center justify-center gap-1.5 mt-1.5">
                 <InlineStamp T={T} dark={dark} type="time" ariaLabel="Starts" value={hhmm(inspectDraft.start)}
-                  display={tm(inspectDraft.start)} onCommit={(v) => v && editEntry({ start: fromHhmm(v) })} editable={false}
+                  display={tm(inspectDraft.start)} onCommit={(v) => v && editEntry({ start: fromHhmm(v) })} onBeginEdit={beginDetailEdit}
                   className="text-base font-semibold" />
                 <span style={{ color: T.dim }} className="text-base">–</span>
                 <InlineStamp T={T} dark={dark} type="time" ariaLabel="Ends" value={hhmm((inspectDraft.start + inspectDraft.dur) % 1440)}
@@ -2917,14 +2961,14 @@ export default function Planner() {
                     if (!v) return;
                     const end = fromHhmm(v);
                     editEntry({ dur: durationFromClockRange(inspectDraft.start, end) });
-                  }} editable={false} className="text-base font-semibold" />
+                  }} onBeginEdit={beginDetailEdit} className="text-base font-semibold" />
               </div>
             )}
             <InlineStamp T={T} dark={dark} type="date" ariaLabel="Day"
               value={splitId(inspect.id).date || inspectDraft.date || dateKey}
               display={fmtDay(splitId(inspect.id).date || inspectDraft.date || dateKey)}
               onCommit={(v) => v && editEntry({ date: v })}
-              editable={false}
+              onBeginEdit={beginDetailEdit}
               style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest mt-1" />
           </div>
 
@@ -2959,11 +3003,11 @@ export default function Planner() {
           {/* One row per attribute, each one the control for it (§4.6). Collapsed it
               costs a line; touched, it grows the alternatives underneath. */}
           <div className="flex flex-col gap-2">
-            <InlineChoice T={T} surface={surface} icon="◑" tint={catColor(inspectDraft.cat)} editable={detailEditing}
+            <InlineChoice T={T} surface={surface} icon="◑" tint={catColor(inspectDraft.cat)} onBeginEdit={beginDetailEdit}
               label={inspectDraft.cat || "—"} value={inspectDraft.cat} dot={catColor}
               options={CATS.map((c) => [c, c])} onPick={(cat) => editEntry({ cat })} />
 
-            <InlineChoice T={T} surface={surface} icon="◷" label={inspectDraft.allDay ? "All day" : "At a time"} editable={detailEditing}
+            <InlineChoice T={T} surface={surface} icon="◷" label={inspectDraft.allDay ? "All day" : "At a time"} onBeginEdit={beginDetailEdit}
               value={inspectDraft.allDay ? "all" : "timed"} options={[["timed", "AT A TIME"], ["all", "ALL DAY"]]}
               onPick={(v) => editEntry({ allDay: v === "all", ...(v === "all" ? {} : { start: inspectDraft.start || 540, dur: inspectDraft.dur || 60 }) })} />
 
@@ -2974,7 +3018,7 @@ export default function Planner() {
                   value={inspectDraft.endDate || inspectDraft.date || dateKey} min={inspectDraft.date || dateKey}
                   display={fmtDay(inspectDraft.endDate || inspectDraft.date || dateKey)}
                   onCommit={(v) => v && editEntry({ endDate: v })}
-                  editable={detailEditing}
+                  onBeginEdit={beginDetailEdit}
                   style={{ fontFamily: MONO }} className="text-sm" />
               </InlineField>
             )}
@@ -2985,13 +3029,13 @@ export default function Planner() {
                 chosen here rather than in a form somewhere else. The safety was never
                 the separate surface — it is the scope question, which the save still
                 asks. */}
-            <InlineChoice T={T} surface={surface} icon="↻" editable={detailEditing}
+            <InlineChoice T={T} surface={surface} icon="↻" onBeginEdit={beginDetailEdit}
               label={inspectDraft.repeat ? repeatLabel(inspectDraft.repeat) : "Does not repeat"}
               value={inspectDraft.repeat?.freq ?? "never"}
               options={REPEATS}
               onPick={(freq) => editEntry({ repeat: repeatFor(freq, inspectDraft.repeat, inspectDraft.date || dateKey) })} />
 
-            <InlineChoice T={T} surface={surface} icon="◔" editable={detailEditing}
+            <InlineChoice T={T} surface={surface} icon="◔" onBeginEdit={beginDetailEdit}
               label={(inspectDraft.alerts || []).length
                 ? inspectDraft.alerts.map((a) => (a === 0 ? "When it starts" : `${dur(a)} before`)).join(", ")
                 : "No reminder"}
@@ -3001,7 +3045,7 @@ export default function Planner() {
 
             <InlineField T={T} surface={surface} icon="⌖">
               <InlineText T={T} value={inspectDraft.place} placeholder="Add a place" ariaLabel="Place"
-                onCommit={(place) => editEntry({ place })} editable={detailEditing} className="text-sm" />
+                onCommit={(place) => editEntry({ place })} onBeginEdit={beginDetailEdit} className="text-sm" />
             </InlineField>
 
             {conflictIds.has(inspect.id) && (
@@ -3011,7 +3055,7 @@ export default function Planner() {
             <div className="flex items-start gap-3 px-3 py-2.5" style={{ background: surface, borderRadius: CARD_R }}>
               <span style={{ color: T.dim }} className="text-sm shrink-0 w-4 text-center pt-0.5">≡</span>
               <InlineText T={T} value={inspectDraft.note} placeholder="Add a note" ariaLabel="Note" multiline
-                onCommit={(note) => editEntry({ note })} editable={detailEditing} className="text-sm leading-relaxed" />
+                onCommit={(note) => editEntry({ note })} onBeginEdit={beginDetailEdit} className="text-sm leading-relaxed" />
             </div>
           </div>
 
@@ -3287,7 +3331,7 @@ export default function Planner() {
                     <span className="w-4 h-6" style={{ background: th.accent }} />
                   </span>
                   <span className="flex-1 text-sm font-semibold">{th.name}</span>
-                  {th.id === T.id && <span style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest">ON</span>}
+                  {th.id === T.id && <span className="nb-pop text-xs tracking-widest" style={{ fontFamily: MONO, color: T.accent }}>ON</span>}
                 </button>
               ))}
             </div>
@@ -3315,20 +3359,23 @@ export default function Planner() {
             {storageBad && (
               <p style={{ fontFamily: MONO, color: NOW_RED }} className="text-xs tracking-widest mb-2">SAVING TO THIS DEVICE FAILED — EXPORT A COPY</p>
             )}
-            {pendingImport && (
-              <div className="flex items-center gap-2 mb-2 p-2" style={{ boxShadow: `inset 0 0 0 1px ${NOW_RED}` }}>
-                <span className="flex-1 text-xs">Replace everything on this device?</span>
-                <button onClick={() => { setPendingImport(null); beep("abort"); }} style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">CANCEL</button>
-                <button onClick={() => {
-                  setDb(pendingImport);
-                  setReminderRecords([]);
-                  setMotivationLedger(createMotivationLedger({ openingBalance: pendingImport.xp ?? 0 }));
-                  setPendingImport(null);
-                  beep("commit");
-                  setSettings(false);
-                }} style={{ fontFamily: MONO, color: NOW_RED }} className="text-xs font-bold tracking-widest">REPLACE</button>
-              </div>
-            )}
+            <Reveal open={Boolean(pendingImport)}>
+              {pendingImportShown && (
+                <div className="flex items-center gap-2 mb-2 p-2" style={{ boxShadow: `inset 0 0 0 1px ${NOW_RED}` }}>
+                  <span className="flex-1 text-xs">Replace everything on this device?</span>
+                  <button onClick={() => { setPendingImport(null); beep("abort"); }} style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">CANCEL</button>
+                  <button onClick={() => {
+                    if (!pendingImport) return;
+                    setDb(pendingImport);
+                    setReminderRecords([]);
+                    setMotivationLedger(createMotivationLedger({ openingBalance: pendingImport.xp ?? 0 }));
+                    setPendingImport(null);
+                    beep("commit");
+                    setSettings(false);
+                  }} style={{ fontFamily: MONO, color: NOW_RED }} className="text-xs font-bold tracking-widest">REPLACE</button>
+                </div>
+              )}
+            </Reveal>
             <div className="flex flex-wrap gap-2">
               <button onClick={exportIcs} style={{ fontFamily: MONO, border: `1px solid ${T.line}` }} className="nb-tap px-3 py-2 text-xs tracking-widest">EXPORT .ICS</button>
               <button onClick={exportJson} style={{ fontFamily: MONO, border: `1px solid ${T.line}` }} className="nb-tap px-3 py-2 text-xs tracking-widest">EXPORT .JSON</button>
@@ -3340,15 +3387,16 @@ export default function Planner() {
           </div>
 
           <div className="mt-4">
-            {confirmWipe ? (
+            <Reveal open={confirmWipe}>
               <div className="flex items-center gap-2 p-2" style={{ boxShadow: `inset 0 0 0 1px ${NOW_RED}` }}>
                 <span className="flex-1 text-xs">Erase every event, action and note?</span>
                 <button onClick={() => setConfirmWipe(false)} style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">KEEP</button>
                 <button onClick={wipeAll} style={{ fontFamily: MONO, color: NOW_RED }} className="text-xs font-bold tracking-widest">ERASE</button>
               </div>
-            ) : (
+            </Reveal>
+            <Reveal open={!confirmWipe}>
               <button onClick={() => { beep("click"); setConfirmWipe(true); }} style={{ fontFamily: MONO, color: T.dim, border: `1px solid ${T.line}` }} className="nb-tap px-3 py-2 text-xs tracking-widest">START A BLANK NOTEBOOK</button>
-            )}
+            </Reveal>
           </div>
 
           <div className="mt-5">
@@ -3781,7 +3829,7 @@ function Agenda({ T, surface, days, dateKey, todayKey, clock, onOpenEvent, onOpe
 
 /* Tags are added by typing and removed by tapping the tag itself — a chip that is
    its own delete control, so there is no second affordance to hunt for. */
-function TagField({ T, tags, onChange, editable = true }) {
+function TagField({ T, tags, onChange, editable = true, onBeginEdit = null }) {
   const [v, setV] = useState("");
   const add = () => {
     const value = v.trim().replace(/^#/, "");
@@ -3801,9 +3849,41 @@ function TagField({ T, tags, onChange, editable = true }) {
       ))}
       {editable ? (
         <input value={v} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} onBlur={add}
+          onFocus={() => onBeginEdit?.()}
           placeholder={tags.length ? "Add tag" : "No tags"} style={{ background: "transparent", border: "none" }}
           className="text-sm py-0.5 flex-1 min-w-20" />
       ) : !tags.length ? <span style={{ color: T.dim }} className="text-sm">No tags</span> : null}
+    </div>
+  );
+}
+
+/* Presence with an exit: the value is held for one beat after it clears so the
+   surface can animate out instead of vanishing on the frame it was dismissed. */
+function usePresence(value, exitMs = 220) {
+  const present = value != null && value !== false;
+  const [held, setHeld] = useState(present ? value : null);
+  const [leaving, setLeaving] = useState(false);
+  const heldRef = useRef(held);
+  heldRef.current = held;
+  useEffect(() => {
+    if (present) { setHeld(value); setLeaving(false); return undefined; }
+    if (heldRef.current == null) return undefined;
+    setLeaving(true);
+    const reduced = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const t = setTimeout(() => { setHeld(null); setLeaving(false); }, reduced ? 0 : exitMs);
+    return () => clearTimeout(t);
+  }, [present, present ? value : null]);
+  return [held, leaving && !present];
+}
+
+/* An inline surface that grows open and folds closed instead of popping — the same
+   grid-rows idiom the choice rows use, shared by the Settings confirmations. */
+function Reveal({ open, children }) {
+  return (
+    <div style={{ display: "grid", gridTemplateRows: open ? "1fr" : "0fr", transition: "grid-template-rows 300ms cubic-bezier(.22,1.12,.28,1)" }}>
+      <div className="overflow-hidden" inert={!open} style={{ minHeight: 0, visibility: open ? "visible" : "hidden", transition: `visibility 0s linear ${open ? 0 : 300}ms` }}>
+        {children}
+      </div>
     </div>
   );
 }
@@ -3848,7 +3928,7 @@ function Pill({ T, surface, icon, label, tint = null }) {
 /* §4.6. A title or a line of prose commits when it is left or confirmed, never per
    keystroke: a half-typed title is not a title, and committing one would put it
    through the scope question a character at a time. */
-function InlineText({ T, value, onCommit, placeholder = "Untitled", multiline = false, className = "", style = {}, ariaLabel, editable = true }) {
+function InlineText({ T, value, onCommit, placeholder = "Untitled", multiline = false, className = "", style = {}, ariaLabel, editable = true, onBeginEdit = null }) {
   const [draft, setDraft] = useState(value ?? "");
   const [live, setLive] = useState(false);
   /* Escape blurs the field, and blur is what commits — so the abandonment has to be
@@ -3874,7 +3954,7 @@ function InlineText({ T, value, onCommit, placeholder = "Untitled", multiline = 
   const shared = {
     value: draft,
     onChange: (e) => setDraft(e.target.value),
-    onFocus: () => setLive(true),
+    onFocus: () => { setLive(true); onBeginEdit?.(); },
     onBlur: commit,
     onKeyDown: keys,
     placeholder,
@@ -3905,12 +3985,14 @@ function InlineText({ T, value, onCommit, placeholder = "Untitled", multiline = 
 
 /* §4.6. Collapsed, an attribute costs one line. Tapping it grows the alternatives
    underneath rather than showing every choice all the time. */
-function InlineChoice({ T, surface, icon, label, options, value, onPick, tint = null, dot = null, children = null, editable = true }) {
+function InlineChoice({ T, surface, icon, label, options, value, onPick, tint = null, dot = null, children = null, editable = true, onBeginEdit = null }) {
   const [open, setOpen] = useState(false);
+  const optionsRef = useRef(null);
+  const { box, stretch } = useLiquidPill(optionsRef, [value, options.length, open]);
   useEffect(() => { if (!editable) setOpen(false); }, [editable]);
   return (
     <div style={{ background: tint ? `${tint}22` : surface, borderRadius: CARD_R }} className="overflow-hidden">
-      <button disabled={!editable} onClick={() => setOpen(!open)} className="nb-tap flex items-center gap-3 px-3 py-2.5 w-full text-left disabled:opacity-100">
+      <button disabled={!editable} onClick={() => { if (!open) onBeginEdit?.(); setOpen(!open); }} className="nb-tap flex items-center gap-3 px-3 py-2.5 w-full text-left disabled:opacity-100">
         <span style={{ color: tint || T.dim }} className="text-sm shrink-0 w-4 text-center">{icon}</span>
         <span className="flex-1 text-sm truncate" style={{ color: tint || T.text }}>{label}</span>
         {editable && <span style={{ color: T.dim, transform: open ? "rotate(180deg)" : "none", transition: "transform 200ms cubic-bezier(.2,.8,.25,1)" }}
@@ -3927,18 +4009,20 @@ function InlineChoice({ T, surface, icon, label, options, value, onPick, tint = 
             the animation still plays. */}
         <div className="overflow-hidden" inert={!open}
           style={{ visibility: open ? "visible" : "hidden", transition: `visibility 0s linear ${open ? 0 : 240}ms` }}>
-          <div className="flex flex-wrap gap-1 px-3 pb-2.5">
+          <div ref={optionsRef} className="relative flex flex-wrap gap-1 px-3 pb-2.5">
+            <LiquidPillIndicator T={T} box={box} stretch={stretch} />
             {options.map(([key, text]) => {
               const on = key === value;
               return (
-                <button key={String(key)} onClick={() => { onPick(key); setOpen(false); }}
-                  className="nb-tap inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs tracking-widest"
+                <button key={String(key)} data-active={on ? "true" : "false"}
+                  onClick={() => { onPick(key); setOpen(false); }}
+                  className="nb-tap relative inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs tracking-widest"
                   style={{
-                    fontFamily: MONO, borderRadius: 999,
-                    background: on ? T.accent : "transparent",
+                    fontFamily: MONO, borderRadius: 999, zIndex: 1,
+                    background: "transparent",
                     color: on ? T.on : T.dim,
-                    border: `1px solid ${on ? T.accent : T.line}`,
-                    transition: "background 180ms ease, color 180ms ease",
+                    border: `1px solid ${on ? "transparent" : T.line}`,
+                    transition: "border-color 180ms ease, color 260ms ease",
                   }}>
                   {dot && <span className="rounded-full shrink-0" style={{ width: 7, height: 7, background: on ? T.on : dot(key) }} />}
                   {text}
@@ -3957,7 +4041,7 @@ function InlineChoice({ T, surface, icon, label, options, value, onPick, tint = 
    recurring entry through the scope question once per arrow press. The value is
    held here and written when the field is left or confirmed — the same rule the
    text fields follow, so no control in the view behaves differently from another. */
-function InlineNative({ T, type, value, onCommit, ariaLabel, className = "", style = {}, min, dark = false }) {
+function InlineNative({ T, type, value, onCommit, ariaLabel, className = "", style = {}, min, dark = false, onBeginEdit = null }) {
   const [draft, setDraft] = useState(value ?? "");
   const [live, setLive] = useState(false);
   const abandoned = useRef(false);
@@ -3970,7 +4054,7 @@ function InlineNative({ T, type, value, onCommit, ariaLabel, className = "", sty
   return (
     <input type={type} min={min} aria-label={ariaLabel} value={draft}
       onChange={(e) => setDraft(e.target.value)}
-      onFocus={() => setLive(true)}
+      onFocus={() => { setLive(true); onBeginEdit?.(); }}
       onBlur={commit}
       onKeyDown={(e) => {
         if (e.key === "Escape") { e.stopPropagation(); abandoned.current = true; setDraft(value ?? ""); e.target.blur(); return; }
@@ -4058,20 +4142,26 @@ function FluidEditActions({ T, editing, dirty, label, onEdit, onRevert, onSave }
         width: editing ? 176 : 104,
         height: 34,
         borderRadius: 999,
-        background: editing ? T.faint : T.accent,
-        boxShadow: editing ? `inset 0 0 0 1px ${T.line}` : "none",
+        background: editing ? T.faint : "transparent",
+        boxShadow: editing ? `inset 0 0 0 1px ${T.line}` : "inset 0 0 0 1px transparent",
       }}>
+      {/* One accent surface lives two lives — the whole EDIT pill at rest, the SAVE
+          half while editing. It travels between them rather than swapping, which is
+          what makes the control read as a single object morphing. */}
+      <span aria-hidden="true" className="nb-edit-liquid absolute"
+        style={{ top: 0, bottom: 0, right: 0, left: editing ? "50%" : 0, background: T.accent, borderRadius: 999 }} />
       <button onClick={onEdit} disabled={editing} aria-hidden={editing}
-        className="absolute inset-0 text-xs font-bold tracking-widest"
-        style={{ fontFamily: MONO, color: T.on, opacity: editing ? 0 : 1, pointerEvents: editing ? "none" : "auto" }}>
+        className="nb-edit-face absolute inset-0 text-xs font-bold tracking-widest"
+        style={{ fontFamily: MONO, color: T.on, opacity: editing ? 0 : 1,
+          transform: editing ? "scale(.85)" : "none", pointerEvents: editing ? "none" : "auto" }}>
         {label}
       </button>
-      <div className="absolute inset-0 grid grid-cols-2" inert={!editing}
-        style={{ opacity: editing ? 1 : 0, pointerEvents: editing ? "auto" : "none" }}>
+      <div className="nb-edit-face absolute inset-0 grid grid-cols-2" inert={!editing}
+        style={{ opacity: editing ? 1 : 0, transform: editing ? "none" : "scale(.9)", pointerEvents: editing ? "auto" : "none" }}>
         <button onClick={onRevert} disabled={!editing} className="text-xs tracking-widest"
           style={{ fontFamily: MONO, color: T.dim }}>{dirty ? "REVERT" : "CANCEL"}</button>
         <button onClick={onSave} disabled={!editing} className="relative text-xs font-bold tracking-widest"
-          style={{ fontFamily: MONO, color: T.on, background: T.accent, borderRadius: 999 }}>
+          style={{ fontFamily: MONO, color: T.on, borderRadius: 999 }}>
           {dirty ? "SAVE" : "DONE"}
           {dirty && <span aria-label="Unsaved changes" className="absolute rounded-full" style={{ width: 5, height: 5, right: 7, top: 6, background: T.on }} />}
         </button>
@@ -4087,8 +4177,7 @@ function FluidEditActions({ T, editing, dirty, label, onEdit, onRevert, onSave }
 
    Built natively: the reference implementations are Framer components, and a
    published page here cannot load anything off-host anyway. */
-function PillNav({ T, value, options, onPick, ariaLabel, surface = "transparent", className = "", style = {} }) {
-  const wrapRef = useRef(null);
+function useLiquidPill(wrapRef, deps) {
   const [box, setBox] = useState(null);
   const [stretch, setStretch] = useState(1);
   const boxRef = useRef(null);
@@ -4099,7 +4188,7 @@ function PillNav({ T, value, options, onPick, ariaLabel, surface = "transparent"
     if (!wrap) return undefined;
     const move = () => {
       const active = wrap.querySelector('[data-active="true"]');
-      if (!active) return;
+      if (!active) { boxRef.current = null; setBox(null); return; }
       const next = fluidPillBox(wrap.getBoundingClientRect(), active.getBoundingClientRect());
       const previous = boxRef.current;
       if (previous && Math.abs(previous.left - next.left) > 1) {
@@ -4115,20 +4204,42 @@ function PillNav({ T, value, options, onPick, ariaLabel, surface = "transparent"
     observer?.observe(wrap);
     window.addEventListener("resize", move);
     return () => { observer?.disconnect(); window.removeEventListener("resize", move); clearTimeout(settle.current); };
-  }, [value, options.length]);
+  }, deps);
+
+  return { box, stretch };
+}
+
+function LiquidPillIndicator({ T, box, stretch, z = 0 }) {
+  if (!box) return null;
+  return (
+    <span aria-hidden="true" className="absolute" style={{
+      left: box.left, width: box.width, top: box.top, height: box.height,
+      background: T.accent, borderRadius: 999, zIndex: z,
+      transform: `scaleX(${stretch})`, transformOrigin: "center",
+      transition: "left 420ms cubic-bezier(.22,1.1,.28,1), width 420ms cubic-bezier(.22,1.1,.28,1), height 300ms ease, top 300ms ease, transform 210ms cubic-bezier(.3,1.4,.4,1)",
+      pointerEvents: "none",
+    }} />
+  );
+}
+
+/* The liquid idiom for a multi-select pill: there is no single selection to slide,
+   so each pill's fill grows in and shrinks out with the same spring instead. */
+function LiquidFill({ T, on, radius = 999 }) {
+  return (
+    <span aria-hidden="true" className="nb-chip-fill absolute inset-0"
+      style={{ background: T.accent, borderRadius: radius,
+        transform: on ? "scale(1)" : "scale(.55)", opacity: on ? 1 : 0 }} />
+  );
+}
+
+function PillNav({ T, value, options, onPick, ariaLabel, surface = "transparent", className = "", style = {} }) {
+  const wrapRef = useRef(null);
+  const { box, stretch } = useLiquidPill(wrapRef, [value, options.length]);
 
   return (
     <div ref={wrapRef} role="tablist" aria-label={ariaLabel} className={`relative flex ${className}`}
       style={{ background: surface, borderRadius: 999, ...style }}>
-      {box && (
-        <span aria-hidden="true" className="absolute" style={{
-          left: box.left, width: box.width, top: box.top, height: box.height,
-          background: T.accent, borderRadius: 999,
-          transform: `scaleX(${stretch})`, transformOrigin: "center",
-          transition: "left 420ms cubic-bezier(.22,1.1,.28,1), width 420ms cubic-bezier(.22,1.1,.28,1), height 300ms ease, top 300ms ease, transform 210ms cubic-bezier(.3,1.4,.4,1)",
-          pointerEvents: "none",
-        }} />
-      )}
+      <LiquidPillIndicator T={T} box={box} stretch={stretch} />
       {options.map(([key, label]) => {
         const on = key === value;
         return (
@@ -4147,12 +4258,14 @@ function PillNav({ T, value, options, onPick, ariaLabel, surface = "transparent"
 /* §4.4/§4.6. The same expansion inside the task's grouped rules card, which reads as
    one block of rules with its icons on the right — so the choices cannot bring their
    own surface without breaking the group. */
-function InlineChoiceRow({ T, icon, label, sub, options, value, onPick, dot = null, divider = false, editable = true }) {
+function InlineChoiceRow({ T, icon, label, sub, options, value, onPick, dot = null, divider = false, editable = true, onBeginEdit = null }) {
   const [open, setOpen] = useState(false);
+  const optionsRef = useRef(null);
+  const { box, stretch } = useLiquidPill(optionsRef, [value, options.length, open]);
   useEffect(() => { if (!editable) setOpen(false); }, [editable]);
   return (
     <div style={{ borderBottom: divider ? `1px solid ${T.line}` : "none" }}>
-      <button disabled={!editable} onClick={() => setOpen(!open)} className="nb-tap flex items-center gap-3 px-3 py-3 w-full text-left disabled:opacity-100">
+      <button disabled={!editable} onClick={() => { if (!open) onBeginEdit?.(); setOpen(!open); }} className="nb-tap flex items-center gap-3 px-3 py-3 w-full text-left disabled:opacity-100">
         <span className="flex-1 min-w-0">
           <span className="flex items-center gap-2">
             {dot && <span className="rounded-full shrink-0" style={{ width: 8, height: 8, background: dot(value) }} />}
@@ -4167,17 +4280,19 @@ function InlineChoiceRow({ T, icon, label, sub, options, value, onPick, dot = nu
       <div style={{ display: "grid", gridTemplateRows: open ? "1fr" : "0fr", transition: "grid-template-rows 240ms cubic-bezier(.2,.8,.25,1)" }}>
         <div className="overflow-hidden" inert={!open}
           style={{ visibility: open ? "visible" : "hidden", transition: `visibility 0s linear ${open ? 0 : 240}ms` }}>
-          <div className="flex flex-wrap gap-1 px-3 pb-3">
+          <div ref={optionsRef} className="relative flex flex-wrap gap-1 px-3 pb-3">
+            <LiquidPillIndicator T={T} box={box} stretch={stretch} />
             {options.map(([key, text]) => {
               const on = key === value;
               return (
-                <button key={String(key)} onClick={() => { onPick(key); setOpen(false); }}
-                  className="nb-tap inline-flex items-center gap-1.5 px-2.5 py-1 text-xs tracking-widest"
+                <button key={String(key)} data-active={on ? "true" : "false"}
+                  onClick={() => { onPick(key); setOpen(false); }}
+                  className="nb-tap relative inline-flex items-center gap-1.5 px-2.5 py-1 text-xs tracking-widest"
                   style={{
-                    fontFamily: MONO, borderRadius: 999,
-                    background: on ? T.accent : "transparent", color: on ? T.on : T.dim,
-                    border: `1px solid ${on ? T.accent : T.line}`,
-                    transition: "background 180ms ease, color 180ms ease",
+                    fontFamily: MONO, borderRadius: 999, zIndex: 1,
+                    background: "transparent", color: on ? T.on : T.dim,
+                    border: `1px solid ${on ? "transparent" : T.line}`,
+                    transition: "border-color 180ms ease, color 260ms ease",
                   }}>
                   {dot && <span className="rounded-full shrink-0" style={{ width: 6, height: 6, background: on ? T.on : dot(key) }} />}
                   {text}
@@ -4196,11 +4311,11 @@ function InlineChoiceRow({ T, icon, label, sub, options, value, onPick, dot = nu
    would read "08/10/2026 📅" in the middle of a page that says "MON 10 AUG". The
    value keeps the product's own formatting and the real control lies invisibly on
    top of it, so the picker is still exactly where the value is. */
-function InlineStamp({ T, type, value, display, onCommit, ariaLabel, min, className = "", style = {}, dark = false, editable = true }) {
+function InlineStamp({ T, type, value, display, onCommit, ariaLabel, min, className = "", style = {}, dark = false, editable = true, onBeginEdit = null }) {
   return (
     <span className="nb-stamp relative inline-flex items-center">
       <span aria-hidden="true" className={className} style={{ ...style, pointerEvents: "none" }}>{display}</span>
-      {editable && <InlineNative T={T} dark={dark} type={type} value={value} min={min} onCommit={onCommit} ariaLabel={ariaLabel}
+      {editable && <InlineNative T={T} dark={dark} type={type} value={value} min={min} onCommit={onCommit} ariaLabel={ariaLabel} onBeginEdit={onBeginEdit}
         className="absolute inset-0 w-full h-full"
         style={{ opacity: 0, cursor: "pointer", padding: 0, margin: 0 }} />}
     </span>
@@ -4273,17 +4388,22 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
     openerRef.current = document.activeElement;
     const panel = dialogRef.current;
     const opener = openerRef.current;
-    if (panel && opener instanceof HTMLElement && opener !== document.body && opener.isConnected) {
-      const triggerRect = opener.getBoundingClientRect();
+    /* The pressed control is the truer origin: on touch the opener never receives
+       focus, and a confirmation raised from inside another sheet should grow from
+       the button that asked for it, not from whatever still holds focus. */
+    let triggerRect = recentFluidTriggerRect();
+    if (!triggerRect && opener instanceof HTMLElement && opener !== document.body && opener.isConnected) {
+      const rect = opener.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) triggerRect = rect;
+    }
+    if (panel && triggerRect) {
       const panelRect = panel.getBoundingClientRect();
-      if (triggerRect.width > 0 && triggerRect.height > 0) {
-        const morph = fluidMorphFromRects(triggerRect, panelRect);
-        panel.dataset.fluidOrigin = "trigger";
-        panel.style.setProperty("--fluid-x", `${morph.translateX}px`);
-        panel.style.setProperty("--fluid-y", `${morph.translateY}px`);
-        panel.style.setProperty("--fluid-sx", String(morph.scaleX));
-        panel.style.setProperty("--fluid-sy", String(morph.scaleY));
-      }
+      const morph = fluidMorphFromRects(triggerRect, panelRect);
+      panel.dataset.fluidOrigin = "trigger";
+      panel.style.setProperty("--fluid-x", `${morph.translateX}px`);
+      panel.style.setProperty("--fluid-y", `${morph.translateY}px`);
+      panel.style.setProperty("--fluid-sx", String(morph.scaleX));
+      panel.style.setProperty("--fluid-sy", String(morph.scaleY));
     }
     const frame = window.requestAnimationFrame(() => focusDialogOnOpen(dialogRef.current));
     return () => {
@@ -4711,8 +4831,12 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
                   {DAY_LETTERS.map((d, i) => {
                     const on = (repeat.byDay || []).includes(i);
                     return (
-                      <button key={d} onClick={() => toggleDay(i)} className="nb-tap flex-1 py-1 text-xs tracking-widest"
-                        style={{ fontFamily: MONO, borderRadius: 999, background: on ? T.accent : "transparent", color: on ? T.on : T.dim, border: `1px solid ${on ? T.accent : T.line}` }}>{d[0]}</button>
+                      <button key={d} onClick={() => toggleDay(i)} className="nb-tap relative flex-1 py-1 text-xs tracking-widest"
+                        style={{ fontFamily: MONO, borderRadius: 999, background: "transparent", color: on ? T.on : T.dim,
+                          border: `1px solid ${on ? "transparent" : T.line}`, transition: "color 260ms ease, border-color 180ms ease" }}>
+                        <LiquidFill T={T} on={on} />
+                        <span className="relative" style={{ zIndex: 2 }}>{d[0]}</span>
+                      </button>
                     );
                   })}
                 </div>
@@ -4738,6 +4862,8 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
    look like different kinds of thing, so everything selectable here is a pill. */
 function Chips({ T, surface, label, value, onChange, options, multi = false, wrap = false, dot = null }) {
   const selected = (key) => (multi ? (value ?? []).includes(key) : value === key);
+  const wrapRef = useRef(null);
+  const { box, stretch } = useLiquidPill(wrapRef, [multi ? -1 : value, options.length]);
   const pick = (key) => {
     if (!multi) return onChange(key);
     const set = new Set(value ?? []);
@@ -4747,20 +4873,24 @@ function Chips({ T, surface, label, value, onChange, options, multi = false, wra
   return (
     <div>
       {label && <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest mb-1">{label}</span>}
-      <div className={`flex gap-1 ${wrap ? "flex-wrap" : ""}`}>
+      <div ref={wrapRef} className={`relative flex gap-1 ${wrap ? "flex-wrap" : ""}`}>
+        {!multi && <LiquidPillIndicator T={T} box={box} stretch={stretch} z={1} />}
         {options.map(([key, text]) => {
           const on = selected(key);
           return (
-            <button key={String(key)} onClick={() => pick(key)}
-              className={`nb-tap ${wrap ? "" : "flex-1"} inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs tracking-widest`}
+            <button key={String(key)} onClick={() => pick(key)} data-active={!multi && on ? "true" : "false"}
+              className={`nb-tap relative ${wrap ? "" : "flex-1"} inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs tracking-widest`}
               style={{
                 fontFamily: MONO, borderRadius: 999,
-                background: on ? T.accent : surface,
+                background: multi || !on ? surface : "transparent",
                 color: on ? T.on : T.dim,
-                transition: "background 180ms ease, color 180ms ease, transform 120ms ease",
+                transition: "background 180ms ease, color 260ms ease, transform 120ms ease",
               }}>
-              {dot && <span className="rounded-full shrink-0" style={{ width: 7, height: 7, background: on ? T.on : dot(key) }} />}
-              {text}
+              {multi && <LiquidFill T={T} on={on} />}
+              <span className="relative inline-flex items-center gap-1.5" style={{ zIndex: 2 }}>
+                {dot && <span className="rounded-full shrink-0" style={{ width: 7, height: 7, background: on ? T.on : dot(key) }} />}
+                {text}
+              </span>
             </button>
           );
         })}
