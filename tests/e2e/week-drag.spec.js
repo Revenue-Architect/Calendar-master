@@ -59,9 +59,13 @@ test.describe("dragging in the week view", () => {
     const originalDay = before.events[0].timing.startLocal.slice(0, 10);
     const targetKey = keys.find((key) => key !== originalDay);
 
-    /* Same movement, no hold: the week must stay readable by dragging across it. */
-    await pressHoldAndDrag(page, card, columnFor(page, targetKey), { holdMs: 60 });
-    await page.waitForTimeout(500);
+    /* Same movement, no hold: the week must stay readable by dragging across it.
+       `steps` is deliberately large so the travel outlasts the lift threshold —
+       the pending lift has to be cancelled by the movement, not merely outrun by
+       a short gesture. Without that cancellation the card lifts mid-travel under
+       a cursor that has already left it. */
+    await pressHoldAndDrag(page, card, columnFor(page, targetKey), { holdMs: 40, steps: 40 });
+    await page.waitForTimeout(600);
 
     const after = await settledState(page, (s) => s.events.length === 1);
     expect(after.events[0].timing.startLocal).toBe(before.events[0].timing.startLocal);

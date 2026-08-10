@@ -13,7 +13,10 @@ test.describe("the actions column", () => {
     const column = page.getByTestId("actions-column");
     await expect(column).toBeVisible();
 
-    await page.getByTestId("actions-collapse").click();
+    /* The panel is rendered twice — the desktop column and the mobile sheet —
+       and only one is ever visible. Scope to the column so the test targets what
+       a person at this viewport can actually click. */
+    await column.getByTestId("actions-collapse").click();
     await expect(column).toBeHidden();
     await expect(page.getByTestId("actions-restore")).toBeVisible();
 
@@ -36,7 +39,7 @@ test.describe("the actions column", () => {
     const stream = page.getByTestId("day-stream");
     const narrow = (await stream.boundingBox()).width;
 
-    await page.getByTestId("actions-collapse").click();
+    await page.getByTestId("actions-column").getByTestId("actions-collapse").click();
     await expect(page.getByTestId("actions-column")).toBeHidden();
     const wide = (await stream.boundingBox()).width;
     expect(wide).toBeGreaterThan(narrow);

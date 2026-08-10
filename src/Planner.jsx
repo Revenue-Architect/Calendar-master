@@ -1145,7 +1145,10 @@ export default function Planner() {
       if (e.key === "ArrowRight") goDay(1);
       if (e.key === "ArrowLeft") goDay(-1);
       if (e.key === "t" || e.key === "T") jumpTo(todayKey);
-      if (e.key === "n" || e.key === "N") setComposer({ kind: "event", start: startSlot(nowMin), dur: 60 });
+      /* N and A open a sheet whose first field autofocuses. Without
+         preventDefault the same keystroke then lands in that field, so the
+         composer opened with "n" already typed into the title. */
+      if (e.key === "n" || e.key === "N") { e.preventDefault(); setComposer({ kind: "event", start: startSlot(nowMin), dur: 60 }); }
       /* Completion, deferral and inspection were pointer-only — a hold, a swipe and a
          tap with no keyboard path. These act on the first open action of the day. */
       if (e.key === "c" || e.key === "C") {
@@ -1156,7 +1159,7 @@ export default function Planner() {
         const next = dayTasks.find((t) => t.status !== "completed");
         if (next && next.planned.date) deferTask(next.id, 1);
       }
-      if (e.key === "a" || e.key === "A") setComposer({ kind: "task" });
+      if (e.key === "a" || e.key === "A") { e.preventDefault(); setComposer({ kind: "task" }); }
       if ((e.key === "z" && (e.metaKey || e.ctrlKey)) && undo) { e.preventDefault(); runUndo(); }
     };
     window.addEventListener("keydown", h);
@@ -2510,6 +2513,7 @@ export default function Planner() {
         startGesture({ mode: "task", kind: "task", id, x, y }); setSheet(false); buzz(6); beep("lift");
       }}
       onAddTask={() => { beep("click"); setComposer({ kind: "task" }); }}
+      onCollapse={viewMode === "actions" ? null : () => setActionsOpen(false)}
       onEditNote={(n) => { beep("click"); setNoteEdit(n || { kind: "daily", date: dateKey, blocks: [] }); }}
       onToggleNoteCheck={toggleNoteCheck}
       onExtract={extractTask}
@@ -2532,8 +2536,14 @@ export default function Planner() {
     <div className="nb-root flex flex-col" style={{ background: T.bg, color: T.text, fontFamily: SANS }}>
       <style>{`
         .nb-s::-webkit-scrollbar{width:5px;height:5px}
-        .nb-s::-webkit-scrollbar-thumb{background:${T.faint}}
+        .nb-s::-webkit-scrollbar-thumb{background:${T.faint};border-radius:999px}
         .nb-s::-webkit-scrollbar-track{background:transparent}
+        /* A scrollbar is drawn in the padding box, which is square, so on a panel
+           with a 24px radius it runs straight through the curve and reads as a
+           sliver sitting outside the sheet. Holding the track back past the
+           corners keeps the whole bar inside the shape it belongs to. */
+        .nb-sheet-scroll::-webkit-scrollbar-track{margin:22px 0}
+        .nb-sheet-scroll{scrollbar-width:thin;scrollbar-color:${T.faint} transparent}
         .nb-x::-webkit-scrollbar{display:none}
         .nb-x{-ms-overflow-style:none;scrollbar-width:none}
         /* The page is exactly one viewport tall at every width, so the day surface
@@ -2950,18 +2960,31 @@ export default function Planner() {
                         zIndex: 6,
                         transition: "top 600ms cubic-bezier(.2,.8,.25,1), width 600ms cubic-bezier(.2,.8,.25,1)",
                       }} />
+                      {/* With nothing live the rule crosses empty grid, so the time
+                          can sit at the end of it. While an event is live the whole
+                          lane is card, and a chip anywhere in it lands on the title,
+                          the times, or the elapsed fill it is meant to be reading —
+                          so it steps out into the hour gutter, which is where every
+                          other time label on this surface already lives. */}
                       <span className="absolute px-1.5 py-0.5 text-xs tracking-widest pointer-events-none"
                         style={{
                           fontFamily: MONO, background: T.accent, color: T.on, borderRadius: 4,
-                          /* The card's own elapsed chip is right-aligned, so when an
-                             event is live the time moves to the left edge instead of
-                             landing on top of it. */
-                          ...(liveEvent ? { left: 0 } : { right: 0 }),
+                          /* Opaque, because in the gutter it lands on whichever hour
+                             label is nearest and has to replace it rather than
+                             overprint it. */
+                          ...(liveEvent
+                            /* Wide enough to cover the whole hour label it replaces,
+                               not just overlap part of it and leave a stray digit. */
+                            ? { right: "100%", marginRight: 4, whiteSpace: "nowrap", minWidth: 54, textAlign: "right" }
+                            : { right: 0 }),
                           top: mounted ? (nowMin / 1440) * DAY_H - 9 : -9,
                           zIndex: 7,
                           transition: "top 600ms cubic-bezier(.2,.8,.25,1)",
                         }}>
-                        {tm(nowMin)}
+                        {/* In the gutter it drops the meridiem: the hour labels it
+                            sits among already say which half of the day this is, and
+                            the full form does not fit the rail. */}
+                        {liveEvent ? tm(nowMin).replace(/\s*[AP]M$/i, "") : tm(nowMin)}
                       </span>
                     </>
                   )}
@@ -3072,7 +3095,6 @@ export default function Planner() {
 
         {viewMode !== "actions" && actionsOpen && (
           <section data-test="actions-column" className="nb-s hidden lg:block lg:col-span-5 min-h-0 overflow-y-auto relative">
-            <button data-test="actions-collapse" onClick={() => setActionsOpen(false)} style={{ fontFamily: MONO, color: T.dim }} className="nb-tap sticky top-0 z-10 float-right px-2 py-1 text-xs tracking-widest" aria-label="Collapse Actions column">COLLAPSE ›</button>
             {actionsPanel}
           </section>
         )}
@@ -3905,7 +3927,7 @@ export default function Planner() {
 
 /* ═══════════════════════ ACTIONS ═══════════════════════ */
 
-function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, onOpenDeadline, overdue, deadlines, showOverdue, todayKey, gesture, blockersFor, onPromoteSub, smartView, viewCounts, onSmartView, lists, onManageLists, clock = "12", selection, onToggleSelect, onStartSelect, onCancelSelect, onBulk, onPullOverdue, beep, buzz, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onAddTask, onEditNote, onUnschedule, onJump }) {
+function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, onOpenDeadline, overdue, deadlines, showOverdue, todayKey, gesture, blockersFor, onPromoteSub, smartView, viewCounts, onSmartView, lists, onManageLists, clock = "12", selection, onToggleSelect, onStartSelect, onCancelSelect, onBulk, onPullOverdue, beep, buzz, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onAddTask, onEditNote, onUnschedule, onJump, onCollapse = null }) {
   const pullable = overdue.filter((t) => t.planned?.date !== todayKey);
   const open = tasks.filter((t) => t.status !== "completed");
   const done = tasks.filter((t) => t.status === "completed");
@@ -3917,6 +3939,10 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
           <button onClick={() => (selection ? onCancelSelect() : onStartSelect(null))} style={{ fontFamily: MONO, color: T.dim }} className="nb-tap text-xs tracking-widest">SELECT</button>
           <button onClick={onManageLists} style={{ fontFamily: MONO, color: T.dim }} className="nb-tap text-xs tracking-widest">LISTS</button>
           <button onClick={onAddTask} style={{ fontFamily: MONO, color: T.accent }} className="nb-tap text-xs tracking-widest">+ ADD</button>
+          {onCollapse && (
+            <button data-test="actions-collapse" onClick={onCollapse} style={{ fontFamily: MONO, color: T.dim }}
+              className="nb-tap text-xs tracking-widest" aria-label="Collapse Actions column">COLLAPSE ›</button>
+          )}
         </div>
       </div>
 
@@ -4379,26 +4405,49 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
     holdRef.current = setTimeout(() => beginDrag(event, day, clientX, clientY), LIFT_MS);
   };
   const touchMove = (e) => {
-    if (!dragRef.current) { clearTimeout(holdRef.current); tapRef.current = false; return; }
+    if (!dragRef.current) { disarm(); tapRef.current = false; return; }
     e.preventDefault();
     updateDrag(e.touches[0].clientX, e.touches[0].clientY);
   };
   const touchEnd = (e, event, day) => {
-    clearTimeout(holdRef.current);
+    disarm();
     if (dragRef.current) { endDrag(); return; }
     if (tapRef.current) { tapRef.current = false; e.preventDefault(); onOpenEvent(event.id, day); }
   };
+
+  /* A press that moves before it lifts was never a press. Without this the hold
+     timer keeps running while the pointer travels, and the card lifts under a
+     cursor that had already left it — turning a scroll or a stray drag across the
+     week into a move nobody asked for. The day timeline cancels its hold the same
+     way; the week grid was missing it. */
+  const armedRef = useRef(null);
+  const disarm = () => { clearTimeout(holdRef.current); armedRef.current = null; };
+
+  useEffect(() => {
+    const move = (e) => {
+      const armed = armedRef.current;
+      if (!armed || dragRef.current) return;
+      if (Math.hypot(e.clientX - armed.x, e.clientY - armed.y) > 8) { disarm(); tapRef.current = false; }
+    };
+    window.addEventListener("pointermove", move);
+    return () => window.removeEventListener("pointermove", move);
+  }, []);
 
   const pointerDown = (e, event, day) => {
     if (e.pointerType === "touch" || e.button === 2) return;
     e.stopPropagation();
     tapRef.current = true;
-    clearTimeout(holdRef.current);
-    holdRef.current = setTimeout(() => beginDrag(event, day, e.clientX, e.clientY), LIFT_MS);
+    const { clientX, clientY } = e;
+    disarm();
+    armedRef.current = { x: clientX, y: clientY };
+    holdRef.current = setTimeout(() => {
+      armedRef.current = null;
+      beginDrag(event, day, clientX, clientY);
+    }, LIFT_MS);
   };
   const pointerUp = (e, event, day) => {
     if (e.pointerType === "touch") return;
-    clearTimeout(holdRef.current);
+    disarm();
     if (dragRef.current) return;
     if (tapRef.current) { tapRef.current = false; e.stopPropagation(); onOpenEvent(event.id, day); }
   };
@@ -4486,7 +4535,7 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
                         onTouchStart={(ev) => touchStart(ev, e, day.key)}
                         onTouchMove={touchMove}
                         onTouchEnd={(ev) => touchEnd(ev, e, day.key)}
-                        onTouchCancel={() => { clearTimeout(holdRef.current); endDrag(); }}
+                        onTouchCancel={() => { disarm(); endDrag(); }}
                         onClick={(ev) => ev.stopPropagation()}
                         className="absolute text-left overflow-hidden"
                         style={{
@@ -5249,7 +5298,7 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
     <div className={`nb-scrim ${closing ? "nb-fluid-closing" : ""} fixed inset-0 z-50 flex items-end sm:items-center justify-center`} style={{ background: "rgba(0,0,0,0.72)" }} onClick={guardedClose}>
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId.current} data-test="sheet" data-sheet-title={title || "Details"}
         onKeyDown={(event) => trapDialogTab(event, dialogRef.current)} onClick={(e) => e.stopPropagation()}
-        className={`nb-fluid ${heightReady ? "nb-sheet-h" : ""} ${closing ? "nb-fluid-closing" : ""} w-full sm:max-w-md overflow-y-auto nb-s`} style={{ background: T.card, color: T.text, maxHeight: "88vh", height: sheetHeight == null ? "auto" : sheetHeight }}>
+        className={`nb-fluid nb-sheet-scroll ${heightReady ? "nb-sheet-h" : ""} ${closing ? "nb-fluid-closing" : ""} w-full sm:max-w-md overflow-y-auto nb-s`} style={{ background: T.card, color: T.text, maxHeight: "88vh", height: sheetHeight == null ? "auto" : sheetHeight }}>
         <div ref={contentRef}>
         <div className="sticky top-0 flex items-center justify-between px-4 sm:px-5 pt-3 pb-2" style={{ background: T.card, zIndex: 3 }}>
           <span id={titleId.current} style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">{title || "Details"}</span>
@@ -5258,7 +5307,17 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
             <button onClick={requestClose} aria-label="Close" style={{ color: T.dim, fontFamily: MONO }} className="nb-tap -mr-1 px-2 py-1 text-sm">✕</button>
           </div>
         </div>
-        <div className="px-4 sm:px-5 pb-5">{children}</div>
+        {/* Padding deeper than the panel's 24px corner radius, so the last row
+            ends on straight edge instead of dying into the curve. */}
+        <div className="px-4 sm:px-5" style={{ paddingBottom: 28 }}>{children}</div>
+        {/* A sheet capped at 88vh cuts its last row mid-height with no sign that
+            there is more. This rides the bottom of the scroll box and fades the
+            cut into the panel, so "there is more below" is visible rather than
+            inferred. It is inert, and it disappears when nothing is clipped. */}
+        <div aria-hidden="true" className="sticky bottom-0 pointer-events-none" style={{
+          height: 24, marginTop: -24,
+          background: `linear-gradient(to bottom, transparent, ${T.card})`,
+        }} />
         </div>
       </div>
     </div>
