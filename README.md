@@ -14,6 +14,7 @@ npm run test:e2e  # browser regression suite (Playwright, against the built bund
 npm run test:all  # both
 npm run build     # production bundle into dist/
 npm run preview   # serve the built bundle
+npm run build:artifact  # one self-contained HTML file of the whole app
 ```
 
 The browser suite needs Chromium once: `npx playwright install chromium`. Where an
@@ -35,6 +36,7 @@ image already ships one that this Playwright did not install, point at it with
 | `src/main.jsx` | Entry point: mounts `Planner` |
 | `src/index.css` | Tailwind import plus page-level resets |
 | `tests/e2e/` | Browser regression suite for the flows unit tests cannot reach |
+| `build-artifact.mjs` | Inlines the built bundle into a single shareable HTML file |
 
 Calendar event reads and writes pass through `src/domains/calendar/index.js`.
 Canonical events use all-day, floating-time, or IANA-zoned timing; recurrence and

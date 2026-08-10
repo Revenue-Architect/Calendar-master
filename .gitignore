@@ -9,3 +9,6 @@ dist/
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+
+# Single-file artifact build output
+/artifact/
