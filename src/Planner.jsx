@@ -527,7 +527,7 @@ export default function Planner() {
   const [ready, setReady] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [now, setNow] = useState(new Date());
-  const [zoom, setZoom] = useState("week");
+  const [zoom, setZoom] = useState("day");
   const [dateKey, setDateKey] = useState(keyOf(new Date()));
   const [monthCursor, setMonthCursor] = useState(new Date());
   const [sheet, setSheet] = useState(false);
@@ -567,6 +567,17 @@ export default function Planner() {
   const [dependencyPicker, setDependencyPicker] = useState(null);
   const [listManager, setListManager] = useState(false);
   const [viewMode, setViewMode] = useState("timeline");
+  const [actionsOpen, setActionsOpen] = useState(() => {
+    try {
+      const stored = window.localStorage.getItem("nbmp:ui:actionsOpen");
+      return stored == null ? true : stored === "true";
+    } catch {
+      return true;
+    }
+  });
+  useEffect(() => {
+    try { window.localStorage.setItem("nbmp:ui:actionsOpen", String(actionsOpen)); } catch { /* UI preference is best-effort. */ }
+  }, [actionsOpen]);
   /* Week view's "find a slot": a chosen duration highlights the next open gaps. */
   const [slotDur, setSlotDur] = useState(null);
   /* Month peek: press-and-hold (or a long hover) on a month day opens its agenda
@@ -2231,7 +2242,16 @@ export default function Planner() {
        into its editing state rather than gatekeeping it. */
     setDetailEditing(true);
   };
-  const beginDetailEdit = () => setDetailEditing(true);
+  const beginDetailEdit = (element = null) => {
+    setDetailEditing(true);
+    if (!(element instanceof HTMLElement)) return;
+    window.setTimeout(() => {
+      if (!element.isConnected) return;
+      const reduced = preferences?.display?.reducedMotion
+        || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+      element.scrollIntoView({ block: "center", behavior: reduced ? "auto" : "smooth" });
+    }, 280);
+  };
 
   /* The record as it currently reads, draft included, so the view shows what will
      be saved rather than what is stored. */
@@ -2321,7 +2341,10 @@ export default function Planner() {
       todayKey={todayKey} gesture={gesture} onPullOverdue={pullOverdue} beep={beep} buzz={buzz}
       onComplete={completeTask} onReopen={reopenTask} onDefer={deferTask}
       onInspect={(id) => setInspect({ kind: "task", id })} onToggleSub={toggleSub} onAddSub={addSub} onRemoveSub={removeSub}
-      onDragStart={(id, x, y) => { startGesture({ mode: "task", kind: "task", id, x, y }); setSheet(false); buzz(6); beep("lift"); }}
+      onDragStart={(id, x, y) => {
+        if (viewMode === "actions") return;
+        startGesture({ mode: "task", kind: "task", id, x, y }); setSheet(false); buzz(6); beep("lift");
+      }}
       onAddTask={() => { beep("click"); setComposer({ kind: "task" }); }}
       onEditNote={(n) => { beep("click"); setNoteEdit(n || { kind: "daily", date: dateKey, blocks: [] }); }}
       onToggleNoteCheck={toggleNoteCheck}
@@ -2386,15 +2409,19 @@ export default function Planner() {
           52%{opacity:1}
           100%{opacity:1;transform:translate(0,0) scale(1);border-radius:24px}
         }
-        .nb-fluid.nb-fluid-closing{animation:nbfluidout 230ms cubic-bezier(.4,0,.65,1) forwards;pointer-events:none}
+        .nb-fluid.nb-fluid-closing{animation:nbfluidout 240ms cubic-bezier(.4,0,.4,1) forwards;pointer-events:none}
         .nb-fluid.nb-fluid-closing[data-fluid-origin="trigger"]{animation-name:nbfluidoriginout}
-        @keyframes nbfluidout{to{opacity:0;transform:translateY(18px) scale(.97)}}
-        @keyframes nbfluidoriginout{to{opacity:0;transform:translate(var(--fluid-x),var(--fluid-y)) scale(var(--fluid-sx),var(--fluid-sy));border-radius:999px}}
+        @keyframes nbfluidout{0%,30%{opacity:1}100%{opacity:0;transform:translateY(12px) scale(.97);border-radius:30px}}
+        @keyframes nbfluidoriginout{
+          0%,30%{opacity:1}
+          100%{opacity:0;transform:translate(calc(var(--fluid-x) * .24),calc(var(--fluid-y) * .24)) scale(.88);border-radius:32px}
+        }
         @media(min-width:640px){.nb-fluid{transform-origin:center;border-radius:24px}}
         .nb-scrim{animation:nbscrim 300ms ease forwards}
         @keyframes nbscrim{from{opacity:0;backdrop-filter:blur(0)}to{opacity:1;backdrop-filter:blur(3px)}}
-        .nb-scrim.nb-fluid-closing{animation:nbscrimout 230ms ease forwards}
-        @keyframes nbscrimout{to{opacity:0;backdrop-filter:blur(0)}}
+        .nb-scrim.nb-fluid-closing{animation:nbscrimout 240ms ease forwards}
+        @keyframes nbscrimout{0%,25%{opacity:1}100%{opacity:0;backdrop-filter:blur(0)}}
+        .nb-sheet-h{transition:height 320ms cubic-bezier(.2,.8,.25,1)}
         .nb-edit-actions{transition:width 420ms cubic-bezier(.22,1.12,.28,1),background-color 260ms ease,box-shadow 260ms ease}
         .nb-edit-liquid{transition:left 420ms cubic-bezier(.22,1.12,.28,1)}
         .nb-edit-face{transition:opacity 200ms ease,transform 420ms cubic-bezier(.22,1.12,.28,1)}
@@ -2487,7 +2514,7 @@ export default function Planner() {
             {/* Timeline answers "when, and for how long"; agenda answers "what is
                 coming". Same days, same data, two questions. */}
             <PillNav T={T} ariaLabel="View mode" value={viewMode}
-              options={[["timeline", "TIMELINE"], ["agenda", "AGENDA"]]}
+              options={[["timeline", "TIMELINE"], ["agenda", "AGENDA"], ["actions", "ACTIONS"]]}
               onPick={(mode) => { beep("tick"); setViewMode(mode); }}
               style={{ border: `1px solid ${T.line}` }} />
             {zoom === "month" && (
@@ -2615,14 +2642,22 @@ export default function Planner() {
       {/* ══ BODY ══ */}
       <main className="nb-main px-3 sm:px-5 grid grid-cols-1 lg:grid-cols-12 gap-5 flex-1 min-h-0"
         style={{ "--sheet-pad": sheetPad }}>
-        <section className="lg:col-span-7 flex flex-col min-h-0" onTouchStart={onSwipeStart} onTouchMove={onSwipeMove} onTouchEnd={onSwipeEnd} onTouchCancel={onSwipeEnd}
+        <section className={`${viewMode === "actions" || !actionsOpen ? "lg:col-span-12" : "lg:col-span-7"} flex flex-col min-h-0`} onTouchStart={onSwipeStart} onTouchMove={onSwipeMove} onTouchEnd={onSwipeEnd} onTouchCancel={onSwipeEnd}
           style={{
             transform: swipe === 0 ? "none" : `translateX(${swipe * 0.32}px)`,
             transition: snapping || swipe !== 0 ? "none" : "transform 260ms cubic-bezier(.2,.8,.25,1)",
           }}>
           <div key={turn ? turn.k : "first"} className={`nb-page flex flex-col min-h-0 flex-1 ${turn ? (turn.dir > 0 ? "nb-turn-next" : "nb-turn-prev") : ""}`}>
 
-            {viewMode === "agenda" ? (
+            {viewMode === "actions" ? (
+              <div className="nb-s overflow-y-auto min-h-0 flex-1">
+                <div className="flex items-center justify-between pb-2">
+                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">ALL ACTIONS</span>
+                  <button onClick={() => setViewMode("timeline")} style={{ fontFamily: MONO, color: T.accent }} className="nb-tap text-xs tracking-widest">BACK TO DAY</button>
+                </div>
+                {actionsPanel}
+              </div>
+            ) : viewMode === "agenda" ? (
               <Agenda
                 T={T} surface={surface} days={agenda} dateKey={dateKey} todayKey={todayKey} clock={clock}
                 onOpenEvent={(id, key) => { beep("click"); if (key !== dateKey) jumpTo(key); setTimeout(() => setInspect({ kind: "event", id }), key !== dateKey ? 80 : 0); }}
@@ -2667,9 +2702,9 @@ export default function Planner() {
               </>
             ) : (
             <>
-            {allDay.length > 0 && (
+            {(allDay.length > 0 || dayTasks.some((task) => task.planned.startMinute == null)) && (
               <div style={{ background: T.card, borderTopLeftRadius: 16, borderTopRightRadius: 16, borderBottom: `1px solid ${T.line}` }} className="px-3 pt-3 pb-2 flex flex-col gap-1.5">
-                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">ALL DAY</span>
+                {allDay.length > 0 && <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">ALL DAY</span>}
                 {allDay.map((e) => {
                   const span = e.endDate ? diffDays(e.endDate, e.date) + 1 : 1;
                   const idx = diffDays(dateKey, e.date) + 1;
@@ -2683,10 +2718,30 @@ export default function Planner() {
                     </button>
                   );
                 })}
+                {dayTasks.some((task) => task.planned.startMinute == null) && (
+                  <>
+                    <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest mt-1">ANY TIME</span>
+                    <div className="flex gap-1.5 overflow-x-auto nb-x pb-0.5">
+                      {dayTasks.filter((task) => task.planned.startMinute == null).map((task) => (
+                        <button key={task.id}
+                          onClick={() => { beep("click"); setInspect({ kind: "task", id: task.id }); }}
+                          onPointerDown={(event) => {
+                            if (event.pointerType === "mouse" && event.button !== 0) return;
+                            startGesture({ mode: "task", kind: "task", id: task.id, x: event.clientX, y: event.clientY });
+                          }}
+                          className="nb-tap shrink-0 flex items-center gap-2 px-2.5 py-1.5 text-left"
+                          style={{ background: surface, borderRadius: 999, opacity: task.status === "completed" ? .55 : 1 }}>
+                          <span className="rounded-full shrink-0" style={{ width: 7, height: 7, background: task.status === "completed" ? T.accent : "transparent", boxShadow: `inset 0 0 0 1.5px ${T.accent}` }} />
+                          <span className="text-xs font-semibold max-w-48 truncate" style={{ textDecoration: task.status === "completed" ? "line-through" : "none" }}>{task.title}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
             )}
 
-            <div ref={streamRef} className="nb-s nb-stream overflow-y-auto relative" style={{ background: T.card, borderTopLeftRadius: allDay.length ? 0 : 16, userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}>
+            <div ref={streamRef} className="nb-s nb-stream overflow-y-auto relative" style={{ background: T.card, borderTopLeftRadius: allDay.length || dayTasks.some((task) => task.planned.startMinute == null) ? 0 : 16, userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}>
               <div className="relative" style={{ height: DAY_H }}>
                 {Array.from({ length: 24 }).map((_, h) => (
                   <div key={h} className="absolute left-0 right-0 flex items-start pointer-events-none"
@@ -2760,10 +2815,10 @@ export default function Planner() {
                           style={{
                             background: surface,
                             borderRadius: CARD_R,
-                            opacity: past ? 0.45 : 1,
+                            opacity: past ? 0.74 : 1,
                             boxShadow: held
                               ? `0 10px 28px rgba(0,0,0,.45), inset 0 0 0 2px ${T.accent}`
-                              : live ? `inset 0 0 0 1.5px ${T.accent}` : "none",
+                              : live ? `inset 0 0 0 1.5px ${T.accent}` : past ? `inset 0 0 0 1px ${T.line}` : "none",
                             transform: held ? "scale(1.02)" : "none",
                             transition: "transform 120ms ease, box-shadow 120ms ease, background 200ms ease",
                             touchAction: "pan-y", cursor: "grab",
@@ -2850,7 +2905,19 @@ export default function Planner() {
           </div>
         </section>
 
-        <section className="nb-s hidden lg:block lg:col-span-5 min-h-0 overflow-y-auto">{actionsPanel}</section>
+        {viewMode !== "actions" && actionsOpen && (
+          <section className="nb-s hidden lg:block lg:col-span-5 min-h-0 overflow-y-auto relative">
+            <button onClick={() => setActionsOpen(false)} style={{ fontFamily: MONO, color: T.dim }} className="nb-tap sticky top-0 z-10 float-right px-2 py-1 text-xs tracking-widest" aria-label="Collapse Actions column">COLLAPSE ›</button>
+            {actionsPanel}
+          </section>
+        )}
+        {viewMode !== "actions" && !actionsOpen && (
+          <button onClick={() => setActionsOpen(true)}
+            className="nb-tap hidden lg:block fixed right-0 top-1/2 -translate-y-1/2 z-20 px-2 py-4 text-xs font-bold tracking-widest"
+            style={{ fontFamily: MONO, background: T.accent, color: T.on, borderRadius: "12px 0 0 12px", writingMode: "vertical-rl" }}>
+            ACTIONS
+          </button>
+        )}
       </main>
 
       {/* ══ MOBILE SHEET ══ */}
@@ -4125,7 +4192,8 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
                           top: top + 1, height: h,
                           left: `calc(${(e.lane / e.cols) * 100}% + 2px)`, width: `calc(${100 / e.cols}% - 4px)`,
                           background: surface, borderRadius: CARD_R,
-                          opacity: past ? 0.45 : 1, zIndex: 2,
+                          opacity: past ? 0.74 : 1, zIndex: 2,
+                          boxShadow: past ? `inset 0 0 0 1px ${T.line}` : "none",
                         }}>
                         <span className="flex items-center gap-1 px-1.5 pt-0.5 min-w-0">
                           <span className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: catColor(e.cat) }} />
@@ -4242,7 +4310,7 @@ function TagField({ T, tags, onChange, editable = true, onBeginEdit = null }) {
       ))}
       {editable ? (
         <input value={v} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} onBlur={add}
-          onFocus={() => onBeginEdit?.()}
+          onFocus={(event) => onBeginEdit?.(event.currentTarget)}
           placeholder={tags.length ? "Add tag" : "No tags"} style={{ background: "transparent", border: "none" }}
           className="text-sm py-0.5 flex-1 min-w-20" />
       ) : !tags.length ? <span style={{ color: T.dim }} className="text-sm">No tags</span> : null}
@@ -4347,7 +4415,7 @@ function InlineText({ T, value, onCommit, placeholder = "Untitled", multiline = 
   const shared = {
     value: draft,
     onChange: (e) => setDraft(e.target.value),
-    onFocus: () => { setLive(true); onBeginEdit?.(); },
+    onFocus: (event) => { setLive(true); onBeginEdit?.(event.currentTarget); },
     onBlur: commit,
     onKeyDown: keys,
     placeholder,
@@ -4381,11 +4449,11 @@ function InlineText({ T, value, onCommit, placeholder = "Untitled", multiline = 
 function InlineChoice({ T, surface, icon, label, options, value, onPick, tint = null, dot = null, children = null, editable = true, onBeginEdit = null }) {
   const [open, setOpen] = useState(false);
   const optionsRef = useRef(null);
-  const { box, stretch } = useLiquidPill(optionsRef, [value, options.length, open]);
+  const { box, stretch, settled } = useLiquidPill(optionsRef, [value, options.length, open]);
   useEffect(() => { if (!editable) setOpen(false); }, [editable]);
   return (
     <div style={{ background: tint ? `${tint}22` : surface, borderRadius: CARD_R }} className="overflow-hidden">
-      <button disabled={!editable} onClick={() => { if (!open) onBeginEdit?.(); setOpen(!open); }} className="nb-tap flex items-center gap-3 px-3 py-2.5 w-full text-left disabled:opacity-100">
+      <button disabled={!editable} onClick={(event) => { if (!open) onBeginEdit?.(event.currentTarget); setOpen(!open); }} className="nb-tap flex items-center gap-3 px-3 py-2.5 w-full text-left disabled:opacity-100">
         <span style={{ color: tint || T.dim }} className="text-sm shrink-0 w-4 text-center">{icon}</span>
         <span className="flex-1 text-sm truncate" style={{ color: tint || T.text }}>{label}</span>
         {editable && <span style={{ color: T.dim, transform: open ? "rotate(180deg)" : "none", transition: "transform 200ms cubic-bezier(.2,.8,.25,1)" }}
@@ -4403,7 +4471,7 @@ function InlineChoice({ T, surface, icon, label, options, value, onPick, tint = 
         <div className="overflow-hidden" inert={!open}
           style={{ visibility: open ? "visible" : "hidden", transition: `visibility 0s linear ${open ? 0 : 240}ms` }}>
           <div ref={optionsRef} className="relative flex flex-wrap gap-1 px-3 pb-2.5">
-            <LiquidPillIndicator T={T} box={box} stretch={stretch} />
+            <LiquidPillIndicator T={T} box={box} stretch={stretch} settled={settled} />
             {options.map(([key, text]) => {
               const on = key === value;
               return (
@@ -4447,7 +4515,7 @@ function InlineNative({ T, type, value, onCommit, ariaLabel, className = "", sty
   return (
     <input type={type} min={min} aria-label={ariaLabel} value={draft}
       onChange={(e) => setDraft(e.target.value)}
-      onFocus={() => { setLive(true); onBeginEdit?.(); }}
+      onFocus={(event) => { setLive(true); onBeginEdit?.(event.currentTarget); }}
       onBlur={commit}
       onKeyDown={(e) => {
         if (e.key === "Escape") { e.stopPropagation(); abandoned.current = true; setDraft(value ?? ""); e.target.blur(); return; }
@@ -4573,16 +4641,24 @@ function FluidEditActions({ T, editing, dirty, label, onEdit, onRevert, onSave }
 function useLiquidPill(wrapRef, deps) {
   const [box, setBox] = useState(null);
   const [stretch, setStretch] = useState(1);
+  const [settled, setSettled] = useState(false);
   const boxRef = useRef(null);
   const settle = useRef(null);
 
   useLayoutEffect(() => {
     const wrap = wrapRef.current;
     if (!wrap) return undefined;
+    setSettled(false);
+    let settleFrame = null;
     const move = () => {
       const active = wrap.querySelector('[data-active="true"]');
       if (!active) { boxRef.current = null; setBox(null); return; }
-      const next = fluidPillBox(wrap.getBoundingClientRect(), active.getBoundingClientRect());
+      const next = {
+        left: active.offsetLeft,
+        top: active.offsetTop,
+        width: active.offsetWidth,
+        height: active.offsetHeight,
+      };
       const previous = boxRef.current;
       if (previous && Math.abs(previous.left - next.left) > 1) {
         setStretch(fluidPillStretch(previous, next));
@@ -4591,25 +4667,32 @@ function useLiquidPill(wrapRef, deps) {
       }
       boxRef.current = next;
       setBox(next);
+      window.cancelAnimationFrame(settleFrame);
+      settleFrame = window.requestAnimationFrame(() => setSettled(true));
     };
     move();
     const observer = typeof ResizeObserver === "function" ? new ResizeObserver(move) : null;
     observer?.observe(wrap);
     window.addEventListener("resize", move);
-    return () => { observer?.disconnect(); window.removeEventListener("resize", move); clearTimeout(settle.current); };
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", move);
+      clearTimeout(settle.current);
+      window.cancelAnimationFrame(settleFrame);
+    };
   }, deps);
 
-  return { box, stretch };
+  return { box, stretch, settled };
 }
 
-function LiquidPillIndicator({ T, box, stretch, z = 0 }) {
+function LiquidPillIndicator({ T, box, stretch, settled = true, z = 0 }) {
   if (!box) return null;
   return (
     <span aria-hidden="true" className="absolute" style={{
       left: box.left, width: box.width, top: box.top, height: box.height,
       background: T.accent, borderRadius: 999, zIndex: z,
       transform: `scaleX(${stretch})`, transformOrigin: "center",
-      transition: "left 420ms cubic-bezier(.22,1.1,.28,1), width 420ms cubic-bezier(.22,1.1,.28,1), height 300ms ease, top 300ms ease, transform 210ms cubic-bezier(.3,1.4,.4,1)",
+       transition: settled ? "left 420ms cubic-bezier(.22,1.1,.28,1), width 420ms cubic-bezier(.22,1.1,.28,1), height 300ms ease, top 300ms ease, transform 210ms cubic-bezier(.3,1.4,.4,1)" : "none",
       pointerEvents: "none",
     }} />
   );
@@ -4627,12 +4710,12 @@ function LiquidFill({ T, on, radius = 999 }) {
 
 function PillNav({ T, value, options, onPick, ariaLabel, surface = "transparent", className = "", style = {} }) {
   const wrapRef = useRef(null);
-  const { box, stretch } = useLiquidPill(wrapRef, [value, options.length]);
+  const { box, stretch, settled } = useLiquidPill(wrapRef, [value, options.length]);
 
   return (
     <div ref={wrapRef} role="tablist" aria-label={ariaLabel} className={`relative flex ${className}`}
       style={{ background: surface, borderRadius: 999, ...style }}>
-      <LiquidPillIndicator T={T} box={box} stretch={stretch} />
+      <LiquidPillIndicator T={T} box={box} stretch={stretch} settled={settled} />
       {options.map(([key, label]) => {
         const on = key === value;
         return (
@@ -4654,11 +4737,11 @@ function PillNav({ T, value, options, onPick, ariaLabel, surface = "transparent"
 function InlineChoiceRow({ T, icon, label, sub, options, value, onPick, dot = null, divider = false, editable = true, onBeginEdit = null }) {
   const [open, setOpen] = useState(false);
   const optionsRef = useRef(null);
-  const { box, stretch } = useLiquidPill(optionsRef, [value, options.length, open]);
+  const { box, stretch, settled } = useLiquidPill(optionsRef, [value, options.length, open]);
   useEffect(() => { if (!editable) setOpen(false); }, [editable]);
   return (
     <div style={{ borderBottom: divider ? `1px solid ${T.line}` : "none" }}>
-      <button disabled={!editable} onClick={() => { if (!open) onBeginEdit?.(); setOpen(!open); }} className="nb-tap flex items-center gap-3 px-3 py-3 w-full text-left disabled:opacity-100">
+      <button disabled={!editable} onClick={(event) => { if (!open) onBeginEdit?.(event.currentTarget); setOpen(!open); }} className="nb-tap flex items-center gap-3 px-3 py-3 w-full text-left disabled:opacity-100">
         <span className="flex-1 min-w-0">
           <span className="flex items-center gap-2">
             {dot && <span className="rounded-full shrink-0" style={{ width: 8, height: 8, background: dot(value) }} />}
@@ -4674,7 +4757,7 @@ function InlineChoiceRow({ T, icon, label, sub, options, value, onPick, dot = nu
         <div className="overflow-hidden" inert={!open}
           style={{ visibility: open ? "visible" : "hidden", transition: `visibility 0s linear ${open ? 0 : 240}ms` }}>
           <div ref={optionsRef} className="relative flex flex-wrap gap-1 px-3 pb-3">
-            <LiquidPillIndicator T={T} box={box} stretch={stretch} />
+            <LiquidPillIndicator T={T} box={box} stretch={stretch} settled={settled} />
             {options.map(([key, text]) => {
               const on = key === value;
               return (
@@ -4741,12 +4824,15 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
      opens a sheet from a touch inherits the protection. */
   const openedAt = useRef(Date.now());
   const dialogRef = useRef(null);
+  const contentRef = useRef(null);
   const openerRef = useRef(null);
   const closeTimer = useRef(null);
   const closingRef = useRef(false);
   const onCloseRef = useRef(onClose);
   const beforeCloseRef = useRef(beforeClose);
   const [closing, setClosing] = useState(false);
+  const [sheetHeight, setSheetHeight] = useState(null);
+  const [heightReady, setHeightReady] = useState(false);
   const titleId = useRef(`sheet-title-${Math.random().toString(36).slice(2, 9)}`);
   useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
   useEffect(() => { beforeCloseRef.current = beforeClose; }, [beforeClose]);
@@ -4760,7 +4846,21 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
       window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
       || (panel && window.getComputedStyle(panel).animationName === "none")
     );
-    closeTimer.current = window.setTimeout(() => onCloseRef.current(), reduced ? 0 : 230);
+    closeTimer.current = window.setTimeout(() => onCloseRef.current(), reduced ? 0 : 240);
+  }, []);
+  useLayoutEffect(() => {
+    const content = contentRef.current;
+    if (!content) return undefined;
+    const measure = () => {
+      const next = Math.min(content.scrollHeight, Math.round(window.innerHeight * .88));
+      setSheetHeight(next);
+      window.requestAnimationFrame(() => setHeightReady(true));
+    };
+    measure();
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
+    observer?.observe(content);
+    window.addEventListener("resize", measure);
+    return () => { observer?.disconnect(); window.removeEventListener("resize", measure); };
   }, []);
   const guardedClose = useCallback(() => {
     if (Date.now() - openedAt.current < 350) return;
@@ -4808,7 +4908,8 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
     <div className={`nb-scrim ${closing ? "nb-fluid-closing" : ""} fixed inset-0 z-50 flex items-end sm:items-center justify-center`} style={{ background: "rgba(0,0,0,0.72)" }} onClick={guardedClose}>
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId.current}
         onKeyDown={(event) => trapDialogTab(event, dialogRef.current)} onClick={(e) => e.stopPropagation()}
-        className={`nb-fluid ${closing ? "nb-fluid-closing" : ""} w-full sm:max-w-md overflow-y-auto nb-s`} style={{ background: T.card, color: T.text, maxHeight: "88vh" }}>
+        className={`nb-fluid ${heightReady ? "nb-sheet-h" : ""} ${closing ? "nb-fluid-closing" : ""} w-full sm:max-w-md overflow-y-auto nb-s`} style={{ background: T.card, color: T.text, maxHeight: "88vh", height: sheetHeight == null ? "auto" : sheetHeight }}>
+        <div ref={contentRef}>
         <div className="sticky top-0 flex items-center justify-between px-4 sm:px-5 pt-3 pb-2" style={{ background: T.card, zIndex: 3 }}>
           <span id={titleId.current} style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">{title || "Details"}</span>
           <div className="flex items-center gap-1.5">
@@ -4817,6 +4918,7 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
           </div>
         </div>
         <div className="px-4 sm:px-5 pb-5">{children}</div>
+        </div>
       </div>
     </div>
   );
@@ -5268,7 +5370,7 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
 function Chips({ T, surface, label, value, onChange, options, multi = false, wrap = false, dot = null }) {
   const selected = (key) => (multi ? (value ?? []).includes(key) : value === key);
   const wrapRef = useRef(null);
-  const { box, stretch } = useLiquidPill(wrapRef, [multi ? -1 : value, options.length]);
+  const { box, stretch, settled } = useLiquidPill(wrapRef, [multi ? -1 : value, options.length]);
   const pick = (key) => {
     if (!multi) return onChange(key);
     const set = new Set(value ?? []);
@@ -5279,7 +5381,7 @@ function Chips({ T, surface, label, value, onChange, options, multi = false, wra
     <div>
       {label && <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest mb-1">{label}</span>}
       <div ref={wrapRef} className={`relative flex gap-1 ${wrap ? "flex-wrap" : ""}`}>
-        {!multi && <LiquidPillIndicator T={T} box={box} stretch={stretch} z={1} />}
+        {!multi && <LiquidPillIndicator T={T} box={box} stretch={stretch} settled={settled} z={1} />}
         {options.map(([key, text]) => {
           const on = selected(key);
           return (
