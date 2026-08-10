@@ -88,6 +88,8 @@ import {
 } from "./features/planner/taskMutations.js";
 import { resolveTaskForInspection } from "./features/planner/taskInspection.js";
 import { projectPlannerDay } from "./features/planner/dayProjection.js";
+import { findOpenSlots } from "./features/planner/slotSearch.js";
+import { busyFractionForDay, projectDayPeek, projectPlannerWeek } from "./features/planner/weekProjection.js";
 import {
   applyDetailDraft,
   buildDetailEntryPayload,
@@ -130,6 +132,7 @@ import {
   createEvent as createCalendarEvent,
   deleteEvent as deleteCalendarEvent,
   getOccurrencesForRange,
+  getVisibleOccurrencesForRange,
   legacyEventInputToCanonical,
   parseOccurrenceId,
   previewRecurrence,
@@ -564,6 +567,11 @@ export default function Planner() {
   const [dependencyPicker, setDependencyPicker] = useState(null);
   const [listManager, setListManager] = useState(false);
   const [viewMode, setViewMode] = useState("timeline");
+  /* Week view's "find a slot": a chosen duration highlights the next open gaps. */
+  const [slotDur, setSlotDur] = useState(null);
+  /* Month peek: press-and-hold (or a long hover) on a month day opens its agenda
+     in a morph sheet without leaving month view. */
+  const [peekDay, setPeekDay] = useState(null);
   const [listPicker, setListPicker] = useState(null);
   const [selection, setSelection] = useState(null);
   const [firstRun, setFirstRun] = useState(false);
@@ -593,6 +601,9 @@ export default function Planner() {
   const holdRef = useRef(null);
   const gestureRef = useRef(null);
   const tappedRef = useRef(false);
+  const monthHoldT = useRef(null);
+  const monthHeldRef = useRef(false);
+  const monthHoverT = useRef(null);
 
   const storageBad = storageFailures.size > 0;
   const reportStorage = useCallback((scope, failed, errorCode = "write-failed") => {
@@ -828,6 +839,23 @@ export default function Planner() {
     });
   }, [db, dateKey]);
 
+  /* The true week: 7 columns from the Sunday of the selected day's week. Reads go
+     through the calendar domain's visible-occurrence projection, so a hidden or
+     inactive calendar is as absent here as everywhere else. */
+  const weekStartKey = useMemo(() => keyOf(addDays(activeDate, -activeDate.getDay())), [dateKey]);
+  const week = useMemo(() => (db ? projectPlannerWeek(db, {
+    weekStart: weekStartKey,
+    mapEvent: eventForUi,
+  }) : []), [db, weekStartKey]);
+
+  /* "Find a slot" reads free/busy through the calendar domain's availability
+     projection plus timed actions as blockers — see slotSearch.js. */
+  const slotMatches = useMemo(() => (db && slotDur ? findOpenSlots(db, {
+    fromDate: todayKey,
+    currentMinute: nowMin,
+    durationMinutes: slotDur,
+  }) : []), [db, slotDur, todayKey, nowMin]);
+
   /* §1.1. The visible day is composed once from the three source domains. The
      timeline still owns its layout and gestures, but it no longer reimplements
      domain queries independently from Actions, notes, and briefing. */
@@ -952,8 +980,13 @@ export default function Planner() {
   const densityOf = useCallback((d) => {
     if (!db) return 0;
     const k = keyOf(d);
-    return getOccurrencesForRange(db, k, addDaysToKey(k, 1)).length + getDayTasks(db, k).filter((t) => t.status !== "completed").length;
+    return getVisibleOccurrencesForRange(db, k, addDaysToKey(k, 1)).length + getDayTasks(db, k).filter((t) => t.status !== "completed").length;
   }, [db, ov]);
+
+  /* Booked minutes inside the 6:00–22:00 working window, as a fraction of it —
+     the month view's free/busy signal, read through the calendar domain's
+     availability projection. */
+  const busyFractionOf = useCallback((d) => (db ? busyFractionForDay(db, keyOf(d)) : 0), [db]);
 
   const briefing = useMemo(() => {
     if (!db) return "";
@@ -1042,7 +1075,7 @@ export default function Planner() {
          on the page behind them — arrow keys turned days while the first-run choice
          was still up. */
       if (inspect || composer || settings || noteEdit || noteHistory || notebook || scopeAsk
-        || firstRun || confirmComplete || dependencyPicker || listPicker || pendingImport) return;
+        || firstRun || confirmComplete || dependencyPicker || listPicker || pendingImport || peekDay) return;
       if (e.key === "/" || (e.key === "k" && (e.metaKey || e.ctrlKey))) { e.preventDefault(); setSearchQuery(""); setSearch(true); return; }
       if (search) return;
       if (e.key === "ArrowRight") goDay(1);
@@ -1064,7 +1097,7 @@ export default function Planner() {
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [dateKey, inspect, composer, settings, noteEdit, noteHistory, notebook, search, scopeAsk, goDay, todayKey, nowMin, dayTasks, undo, firstRun, confirmComplete, dependencyPicker, listPicker, pendingImport]);
+  }, [dateKey, inspect, composer, settings, noteEdit, noteHistory, notebook, search, scopeAsk, goDay, todayKey, nowMin, dayTasks, undo, firstRun, confirmComplete, dependencyPicker, listPicker, pendingImport, peekDay]);
 
   /* ─── writes (series-aware) ─── */
   const flash = (label, payload) => {
@@ -2448,7 +2481,7 @@ export default function Planner() {
       <div onTouchStart={onTouchStartNav} onTouchMove={onTouchMoveNav} style={{ borderBottom: `1px solid ${T.line}` }}>
         <div className="flex items-center justify-between px-3 sm:px-5 py-1.5">
           <button onClick={zoomOut} style={{ fontFamily: MONO, color: T.dim }} className="nb-tap text-xs tracking-widest" disabled={zoom === "month"}>
-            {zoom === "day" ? "◂ 14 DAYS" : zoom === "week" ? "◂ MONTH" : `${MO[monthCursor.getMonth()]} ${monthCursor.getFullYear()}`}
+            {zoom === "day" ? "◂ WEEK" : zoom === "week" ? "◂ MONTH" : `${MO[monthCursor.getMonth()]} ${monthCursor.getFullYear()}`}
           </button>
           <div className="flex items-center gap-2">
             {/* Timeline answers "when, and for how long"; agenda answers "what is
@@ -2464,7 +2497,7 @@ export default function Planner() {
               </>
             )}
             <button onClick={zoomIn} style={{ fontFamily: MONO, color: T.dim }} className="nb-tap text-xs tracking-widest" disabled={zoom === "day"}>
-              {zoom === "month" ? "14 DAYS ▸" : zoom === "week" ? "DAY ▸" : ""}
+              {zoom === "month" ? "WEEK ▸" : zoom === "week" ? "DAY ▸" : ""}
             </button>
           </div>
         </div>
@@ -2476,13 +2509,42 @@ export default function Planner() {
               {monthGrid.map((d, i) => {
                 const k = keyOf(d);
                 const n = densityOf(d);
+                const bf = busyFractionOf(d);
                 const inMonth = d.getMonth() === monthCursor.getMonth();
                 const sel = k === dateKey;
+                /* The tint is the heat — how much of the working day is booked —
+                   and the bar underneath is the same fact as a readable measure.
+                   An empty track is the free/busy signal for a clear day. */
+                const heat = Math.min(0.8, bf * 0.9 + (n ? 0.1 : 0));
                 return (
-                  <button key={k} data-day={k} onClick={() => { jumpTo(k); setZoom("week"); }} className="nb-cell relative py-2.5"
+                  <button key={k} data-day={k}
+                    onClick={() => {
+                      if (monthHeldRef.current) { monthHeldRef.current = false; return; }
+                      jumpTo(k); setZoom("week");
+                    }}
+                    onPointerDown={() => {
+                      monthHeldRef.current = false;
+                      clearTimeout(monthHoldT.current);
+                      monthHoldT.current = setTimeout(() => { monthHeldRef.current = true; beep("lift"); buzz(8); setPeekDay(k); }, HOLD_MS);
+                    }}
+                    onPointerUp={() => clearTimeout(monthHoldT.current)}
+                    onPointerLeave={() => clearTimeout(monthHoldT.current)}
+                    onPointerCancel={() => clearTimeout(monthHoldT.current)}
+                    onMouseEnter={() => {
+                      if (!window.matchMedia?.("(hover:hover)").matches) return;
+                      clearTimeout(monthHoverT.current);
+                      monthHoverT.current = setTimeout(() => setPeekDay((cur) => cur ?? k), 650);
+                    }}
+                    onMouseLeave={() => clearTimeout(monthHoverT.current)}
+                    onContextMenu={(e) => e.preventDefault()}
+                    className="nb-cell relative pt-2 pb-3.5"
                     style={{ background: T.bg, opacity: mounted ? (inMonth ? 1 : 0.32) : 0, transitionDelay: `${Math.min(i, 24) * 8}ms` }}>
-                    <span className="absolute inset-0" style={{ background: T.accent, opacity: n ? Math.min(0.75, 0.14 + n * 0.13) : 0 }} />
-                    <span className="relative text-xs font-semibold" style={{ fontFamily: MONO, color: n > 2 ? T.on : T.text }}>{d.getDate()}</span>
+                    <span className="absolute inset-0" style={{ background: T.accent, opacity: heat }} />
+                    <span className="relative text-xs font-semibold" style={{ fontFamily: MONO, color: heat > 0.4 ? T.on : T.text }}>{d.getDate()}</span>
+                    {n > 0 && <span className="absolute right-1 top-1 rounded-full" style={{ width: 4, height: 4, background: heat > 0.4 ? T.on : T.accent, opacity: 0.9 }} />}
+                    <span className="absolute left-1.5 right-1.5 bottom-1.5 rounded-full overflow-hidden" style={{ height: 3, background: heat > 0.4 ? `${T.on}33` : T.faint }}>
+                      <span className="block h-full rounded-full" style={{ width: `${Math.round(bf * 100)}%`, background: heat > 0.4 ? T.on : T.accent }} />
+                    </span>
                     {sel && <span className="absolute inset-0" style={{ boxShadow: `inset 0 0 0 2px ${T.accent}` }} />}
                     {k === todayKey && <span className="absolute left-1 top-1 w-1 h-1" style={{ background: NOW_RED }} />}
                   </button>
@@ -2567,6 +2629,42 @@ export default function Planner() {
                 onOpenTask={(id, key) => { beep("click"); if (key !== dateKey) jumpTo(key); setTimeout(() => setInspect({ kind: "task", id }), key !== dateKey ? 80 : 0); }}
                 onJump={jumpTo}
               />
+            ) : zoom === "week" ? (
+              <>
+                {/* "Find a slot": pick a duration and the next open gaps across the
+                    coming days light up in the grid, ready to book. */}
+                <div className="flex items-center gap-1.5 flex-wrap pb-2 shrink-0">
+                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest mr-0.5">FIND A SLOT</span>
+                  {[30, 60, 120].map((d) => (
+                    <button key={d} onClick={() => { beep("tick"); setSlotDur((cur) => (cur === d ? null : d)); }}
+                      className="nb-tap px-2 py-0.5 text-xs font-bold tracking-widest"
+                      style={{ fontFamily: MONO, borderRadius: 999, background: slotDur === d ? T.accent : "transparent", color: slotDur === d ? T.on : T.dim, border: `1px solid ${slotDur === d ? T.accent : T.line}` }}>
+                      {d >= 60 ? `${d / 60}H` : `${d}M`}
+                    </button>
+                  ))}
+                  {slotDur != null && (slotMatches.length === 0 ? (
+                    <span style={{ fontFamily: MONO, color: NOW_RED }} className="text-xs tracking-widest">NO OPEN GAPS IN 14 DAYS</span>
+                  ) : (
+                    slotMatches.slice(0, 3).map((s) => (
+                      <button key={`${s.date}-${s.start}`}
+                        onClick={() => { beep("click"); if (s.date !== dateKey) jumpTo(s.date); setComposer({ kind: "event", date: s.date, start: s.start, dur: s.dur }); }}
+                        className="nb-tap px-2 py-0.5 text-xs tracking-widest"
+                        style={{ fontFamily: MONO, color: T.accent, borderRadius: 999, border: `1.5px dashed ${T.accent}` }}>
+                        {plannedLabel(s.date, todayKey).toUpperCase()} {tm(s.start)}
+                      </button>
+                    ))
+                  ))}
+                </div>
+                <WeekGrid
+                  T={T} surface={surface} hourRule={hourRule} hourBand={hourBand}
+                  week={week} dateKey={dateKey} todayKey={todayKey} nowMin={nowMin} clock={clock}
+                  slots={slotMatches}
+                  onOpenDay={(k) => { beep("tick"); if (k !== dateKey) jumpTo(k); setZoom("day"); }}
+                  onOpenEvent={(id, key) => { beep("click"); if (key !== dateKey) jumpTo(key); setTimeout(() => setInspect({ kind: "event", id }), key !== dateKey ? 80 : 0); }}
+                  onOpenTask={(id, key) => { beep("click"); if (key !== dateKey) jumpTo(key); setTimeout(() => setInspect({ kind: "task", id }), key !== dateKey ? 80 : 0); }}
+                  onSlotPick={(s) => { beep("click"); if (s.date !== dateKey) jumpTo(s.date); setComposer({ kind: "event", date: s.date, start: s.start, dur: s.dur }); }}
+                />
+              </>
             ) : (
             <>
             {allDay.length > 0 && (
@@ -2824,6 +2922,53 @@ export default function Planner() {
           <span style={{ background: T.accent, color: T.on, fontFamily: MONO }} className={`${levelLeaving ? "nb-toast-out" : "nb-up"} px-3 py-1.5 text-xs font-bold tracking-widest`}>LEVEL {levelShown}</span>
         </div>
       )}
+
+      {/* ══ MONTH PEEK ══ */}
+      {peekDay && db && (() => {
+        const { allDay: allDayP, timed: timedP, tasks: tasksP } = projectDayPeek(db, peekDay, { mapEvent: eventForUi });
+        const openFrom = (kind, id) => {
+          setPeekDay(null); beep("click");
+          if (peekDay !== dateKey) jumpTo(peekDay);
+          setTimeout(() => setInspect({ kind, id }), peekDay !== dateKey ? 80 : 0);
+        };
+        return (
+          <Sheet T={T} title={fmtDay(peekDay)} onClose={() => setPeekDay(null)}
+            headerAction={(
+              <button onClick={() => { setPeekDay(null); beep("tick"); jumpTo(peekDay); setZoom("day"); }}
+                style={{ fontFamily: MONO, color: T.accent }} className="nb-tap px-2 py-1 text-xs font-bold tracking-widest">OPEN DAY ▸</button>
+            )}>
+            <div className="flex flex-col gap-1.5">
+              {allDayP.length + timedP.length + tasksP.length === 0 && (
+                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest py-3">NOTHING SCHEDULED — ALL FREE</span>
+              )}
+              {allDayP.map((e) => (
+                <button key={e.id} onClick={() => openFrom("event", e.id)} className="nb-tap flex items-center gap-2.5 px-3 py-2.5 text-left" style={{ background: surface, borderRadius: CARD_R }}>
+                  <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: catColor(e.cat) }} />
+                  <span className="flex-1 text-sm font-semibold truncate">{e.title}</span>
+                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">ALL DAY</span>
+                </button>
+              ))}
+              {timedP.map((e) => (
+                <button key={e.id} onClick={() => openFrom("event", e.id)} className="nb-tap flex items-center gap-2.5 px-3 py-2.5 text-left" style={{ background: surface, borderRadius: CARD_R }}>
+                  <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: catColor(e.cat) }} />
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-sm font-semibold truncate">{e.title}</span>
+                    {e.place && <span style={{ color: T.dim }} className="block text-xs truncate">{e.place}</span>}
+                  </span>
+                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">{tm(e.start)} · {dur(e.dur)}</span>
+                </button>
+              ))}
+              {tasksP.map((t) => (
+                <button key={t.id} onClick={() => openFrom("task", t.id)} className="nb-tap flex items-center gap-2.5 px-3 py-2.5 text-left" style={{ background: surface, borderRadius: CARD_R, opacity: t.status === "completed" ? 0.45 : 1 }}>
+                  <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, boxShadow: `inset 0 0 0 1.5px ${catColor(t.category)}`, background: t.status === "completed" ? catColor(t.category) : "transparent" }} />
+                  <span className="flex-1 text-sm font-semibold truncate" style={{ textDecoration: t.status === "completed" ? "line-through" : "none" }}>{t.title}</span>
+                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">{t.planned.startMinute != null ? tm(t.planned.startMinute) : "ACTION"}</span>
+                </button>
+              ))}
+            </div>
+          </Sheet>
+        );
+      })()}
 
       {/* ══ INSPECTOR ══ */}
       {inspectItem && (
@@ -3898,6 +4043,128 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromote
 /* The agenda: a continuous run of days down one rail. A day with nothing in it is
    still drawn, because the gap is the information — you can see the shape of a week
    without counting entries. */
+/* The true week: 7 day columns against one shared time axis. Events are blocks and
+   free time is the open space between them — the shape of the week is the point,
+   so the columns carry as little chrome as they can. */
+function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, nowMin, clock, slots, onOpenDay, onOpenEvent, onOpenTask, onSlotPick }) {
+  const scrollRef = useRef(null);
+  const weekKey = week[0]?.key;
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const firsts = week.flatMap((d) => d.timed.map((e) => e.start));
+    const anchor = week.some((d) => d.key === todayKey) ? nowMin : firsts.length ? Math.min(...firsts) : 480;
+    el.scrollTop = Math.max(0, (anchor / 1440) * DAY_H - 140);
+  }, [weekKey]);
+  const hasAllDay = week.some((d) => d.allDay.length > 0);
+  return (
+    <div className="nb-x flex-1 min-h-0 overflow-x-auto flex flex-col" style={{ background: T.card, borderRadius: 16 }}>
+      <div className="flex flex-col flex-1 min-h-0" style={{ minWidth: 620 }}>
+        <div className="flex shrink-0" style={{ borderBottom: `1px solid ${T.line}` }}>
+          <span className="w-12 shrink-0" />
+          {week.map((day) => {
+            const d = parseKey(day.key);
+            const isToday = day.key === todayKey;
+            const sel = day.key === dateKey;
+            return (
+              <button key={day.key} onClick={() => onOpenDay(day.key)} className="nb-tap flex-1 min-w-0 py-1.5 text-center" style={{ borderLeft: `1px solid ${hourRule}` }} aria-label={`Open ${fmtDay(day.key)}`}>
+                <span style={{ fontFamily: MONO, color: sel ? T.accent : T.dim }} className="block text-xs tracking-widest">{WD[d.getDay()]}</span>
+                <span className="inline-flex items-center justify-center w-7 h-7 text-sm font-bold" style={{
+                  fontFamily: MONO, borderRadius: 999,
+                  background: isToday ? T.accent : "transparent",
+                  color: isToday ? T.on : T.text,
+                  boxShadow: sel && !isToday ? `inset 0 0 0 1.5px ${T.accent}` : "none",
+                }}>{pad(d.getDate())}</span>
+              </button>
+            );
+          })}
+        </div>
+        {hasAllDay && (
+          <div className="flex shrink-0" style={{ borderBottom: `1px solid ${T.line}` }}>
+            <span className="w-12 shrink-0 self-center pr-2 text-right text-xs tracking-widest" style={{ fontFamily: MONO, color: T.dim, fontSize: 9 }}>ALL DAY</span>
+            {week.map((day) => (
+              <div key={day.key} className="flex-1 min-w-0 px-0.5 py-1 flex flex-col gap-0.5" style={{ borderLeft: `1px solid ${hourRule}` }}>
+                {day.allDay.map((e) => (
+                  <button key={e.segmentId ?? e.id} onClick={() => onOpenEvent(e.id, day.key)} className="nb-tap flex items-center gap-1 px-1.5 py-0.5 text-left overflow-hidden"
+                    style={{ background: surface, borderRadius: 6 }}>
+                    <span className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: catColor(e.cat) }} />
+                    <span className="font-semibold truncate" style={{ fontSize: 10 }}>{e.title}</span>
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+        <div ref={scrollRef} className="nb-s flex-1 min-h-0 overflow-y-auto">
+          <div className="relative flex" style={{ height: DAY_H, userSelect: "none", WebkitUserSelect: "none" }}>
+            <div className="relative w-12 shrink-0">
+              {Array.from({ length: 24 }).map((_, h) => h > 0 && (
+                <span key={h} className="absolute right-2 tracking-widest" style={{ top: h * HOUR_H, transform: "translateY(-50%)", fontFamily: MONO, color: T.dim, fontSize: 9 }}>{fmtHour(h, clock)}</span>
+              ))}
+            </div>
+            {week.map((day) => {
+              const isToday = day.key === todayKey;
+              const daySlots = slots.filter((s) => s.date === day.key);
+              return (
+                <div key={day.key} className="relative flex-1 min-w-0" style={{ borderLeft: `1px solid ${hourRule}`, background: day.key === dateKey ? `${T.accent}08` : "transparent" }}
+                  onClick={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    onSlotPick({ date: day.key, start: startSlot(((e.clientY - rect.top) / DAY_H) * 1440, 30), dur: 60 });
+                  }}>
+                  {Array.from({ length: 24 }).map((_, h) => (
+                    <div key={h} className="absolute left-0 right-0 pointer-events-none" style={{ top: h * HOUR_H, height: HOUR_H, borderTop: `1px solid ${hourRule}`, background: h % 2 ? hourBand : "transparent" }} />
+                  ))}
+                  {day.timed.map((e) => {
+                    const top = (e.start / 1440) * DAY_H;
+                    const h = Math.max(16, (e.dur / 1440) * DAY_H) - 2;
+                    const past = day.key < todayKey || (isToday && nowMin >= e.start + e.dur);
+                    return (
+                      <button key={e.segmentId ?? `${e.id}-${e.start}`} onClick={(ev) => { ev.stopPropagation(); onOpenEvent(e.id, day.key); }}
+                        className="absolute text-left overflow-hidden"
+                        style={{
+                          top: top + 1, height: h,
+                          left: `calc(${(e.lane / e.cols) * 100}% + 2px)`, width: `calc(${100 / e.cols}% - 4px)`,
+                          background: surface, borderRadius: CARD_R,
+                          opacity: past ? 0.45 : 1, zIndex: 2,
+                        }}>
+                        <span className="flex items-center gap-1 px-1.5 pt-0.5 min-w-0">
+                          <span className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: catColor(e.cat) }} />
+                          <span className="font-semibold leading-tight truncate" style={{ fontSize: 10 }}>{e.title}</span>
+                        </span>
+                        {h >= 30 && <span className="block truncate tracking-widest" style={{ fontFamily: MONO, color: T.dim, fontSize: 9, paddingLeft: 15 }}>{fmtTime(e.start, clock)}</span>}
+                      </button>
+                    );
+                  })}
+                  {day.tasks.map((t) => (
+                    <button key={t.id} onClick={(ev) => { ev.stopPropagation(); onOpenTask(t.id, day.key); }}
+                      className="absolute left-0.5 right-0.5 text-left overflow-hidden"
+                      style={{ top: (t.planned.startMinute / 1440) * DAY_H + 1, height: 16, borderRadius: 6, border: `1px dashed ${T.faint}`, opacity: t.status === "completed" ? 0.4 : 1, zIndex: 3, background: T.card }}>
+                      <span className="block px-1 font-semibold truncate" style={{ fontSize: 9, textDecoration: t.status === "completed" ? "line-through" : "none" }}>{t.title}</span>
+                    </button>
+                  ))}
+                  {daySlots.map((s) => (
+                    <button key={`slot-${s.start}`} onClick={(ev) => { ev.stopPropagation(); onSlotPick(s); }}
+                      className="absolute flex items-start justify-center"
+                      style={{ left: 2, right: 2, top: (s.start / 1440) * DAY_H + 1, height: (s.dur / 1440) * DAY_H - 2, borderRadius: 6, border: `1.5px dashed ${T.accent}`, background: `${T.accent}14`, zIndex: 4 }}
+                      aria-label={`Book ${fmtTime(s.start, clock)} on ${fmtDay(s.date)}`}>
+                      <span className="tracking-widest pt-0.5" style={{ fontFamily: MONO, color: T.accent, fontSize: 9 }}>{fmtTime(s.start, clock)}</span>
+                    </button>
+                  ))}
+                  {isToday && (
+                    <div className="absolute left-0 right-0 pointer-events-none" style={{ top: (nowMin / 1440) * DAY_H, height: 2, background: T.accent, zIndex: 6 }}>
+                      <span className="absolute left-0 -top-0.5 w-1.5 h-1.5 rounded-full" style={{ background: T.accent }} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Agenda({ T, surface, days, dateKey, todayKey, clock, onOpenEvent, onOpenTask, onJump }) {
   return (
     <div className="nb-s overflow-y-auto flex-1 min-h-0" style={{ background: T.card, borderRadius: 16 }}>
