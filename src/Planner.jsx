@@ -200,6 +200,9 @@ const snapTo = (m, s = SNAP) => Math.max(0, Math.min(1440, Math.round(m / s) * s
    inside render, so the whole page went blank. A new entry begins in the last slot
    the day actually has. */
 const startSlot = (m, s = 15) => Math.min(snapTo(m, s), 1440 - s);
+/* The wire form a native time input speaks, independent of the 12/24 display clock. */
+const hhmm = (m) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
+const fromHhmm = (s) => { const [h, m] = s.split(":").map(Number); return h * 60 + m; };
 const buzz = (p) => { try { navigator.vibrate && navigator.vibrate(p); } catch (e) {} };
 const splitId = (id) => { const i = String(id).indexOf("@"); return i === -1 ? { base: id, date: null } : { base: id.slice(0, i), date: id.slice(i + 1) }; };
 /* "STARTS" reads in the largest unit that still says something useful — days for
@@ -904,6 +907,11 @@ export default function Planner() {
       const series = occurrenceDate ? d.tasks.find((t) => t.id === seriesId && t.recurrence) : null;
       if (!series) return { ...d, tasks: command(d, id).tasks };
 
+      /* "The whole series" edits the series definition itself. The answer used to be
+         discarded here, so choosing the series still detached a single day — the
+         scope sheet asked a question and then ignored it. */
+      if (intent.scope === "all") return { ...d, tasks: command(d, seriesId, series).tasks };
+
       if (intent.completed) {
         return {
           ...d,
@@ -1350,7 +1358,18 @@ export default function Planner() {
         return updateCalendarEvent(d, canonical.seriesId, { ...patch, date: undefined, timing: seriesTiming }, { scope: "series" }).state;
       });
     } else if (p.id && p.kind === "task") {
-      writeTask(p.id, (state, taskId) => updateTaskCommand(state.tasks, taskId, patch, { now: nowStamp() }));
+      const { occurrenceDate } = parseTaskOccurrenceId(p.id);
+      writeTask(p.id, (state, taskId, series) => updateTaskCommand(
+        state.tasks, taskId,
+        /* Editing the whole series must not drag its anchor to whichever day you
+           happened to open. The planned date moves only when that field itself
+           moved — otherwise renaming Thursday's instance would re-anchor the rule
+           to Thursday and change which days it lands on. */
+        series && p.date === occurrenceDate
+          ? { ...patch, planned: { ...patch.planned, date: series.planned.date } }
+          : patch,
+        { now: nowStamp() },
+      ), { scope });
     } else if (p.id) patchItem(p.kind, p.id, patch, scope);
     else {
       mutate((d) => {
@@ -1362,13 +1381,31 @@ export default function Planner() {
         return { ...d, tasks: createTaskCommand(d.tasks, { id: uid(), ...patch }, { now: nowStamp() }).tasks };
       });
     }
-    setComposer(null); setInspect(null); setScopeAsk(null);
+    setScopeAsk(null);
+    /* §4.6. A composer has done its job once it writes and gets out of the way. An
+       inline edit has not: closing the record you are editing after every field
+       would make editing in place worse than the form it replaced. */
+    if (!p.inline) { setComposer(null); setInspect(null); }
   };
   const saveEntry = (p) => {
     const { date } = splitId(p.id || "");
     if (p.id && (date || canonicalOccurrenceIdentity(p.id))) setScopeAsk({ action: "save", payload: p });
     else commitSave(p, "all");
   };
+
+  /* §4.5/§4.8. One shape describes a record for writing, whichever surface asked.
+     The composer builds it from its fields; the detail view builds it from the
+     record. Because both hand the same payload to the same write, an inline title
+     change takes exactly the path the composer's does — including the scope
+     question a recurring entry has to ask. */
+  const entryPayload = (kind, item) => (kind === "task"
+    ? {
+      kind: "task", id: item.id, title: item.title, cat: item.category, xp: item.reward,
+      at: item.planned.startMinute, due: item.deadline.date || "", date: item.planned.date || dateKey,
+      unplanned: !item.planned.date, note: item.note,
+      repeat: item.recurrence ? { ...item.recurrence, freq: item.recurrence.frequency, byDay: item.recurrence.byWeekday } : null,
+    }
+    : { ...item, kind, id: item.id });
 
   const saveNote = (id, text) => {
     beep("click");
@@ -1794,6 +1831,34 @@ export default function Planner() {
   const earliestStart = inspect && inspect.kind === "task" && db
     ? getEarliestResponsibleStart(db.tasks, parseTaskOccurrenceId(inspect.id).seriesId)
     : null;
+  /* §4.6/§4.8. Changing one attribute is the same write as changing all of them,
+     with the rest of the record supplied unchanged. Nothing here decides scope —
+     that stays with saveEntry, so one question has one answer. */
+  const editEntry = (patch) => {
+    if (!inspect || !inspectItem) return;
+    const next = { ...entryPayload(inspect.kind, inspectItem), ...patch, inline: true };
+    if (inspect.kind === "event") {
+      /* The record carries the timing it was read with. An inline change to the
+         time, the day, or all-day has to rebuild it — passing the old timing
+         through would quietly overwrite the very field that was just edited. */
+      const day = next.date || dateKey;
+      try {
+        next.timing = next.allDay
+          ? { kind: "all-day", startDate: day, endDateExclusive: addDaysToKey(next.endDate && next.endDate >= day ? next.endDate : day, 1) }
+          : inspectItem.allDay
+            ? { kind: "timed", timeZoneMode: "floating", startLocal: addMinutesToLocalDateTime(`${day}T00:00`, next.start), endLocal: addMinutesToLocalDateTime(`${day}T00:00`, next.start + next.dur) }
+            : eventTimingFromPosition(inspectItem, day, next.start, next.dur);
+      } catch {
+        /* A zoned time that lands in a gap or a fold cannot be resolved without
+           being asked which one — that question belongs to the composer, which
+           owns the offset picker. */
+        beep("abort");
+        setComposer({ ...next, inline: undefined });
+        return;
+      }
+    }
+    saveEntry(next);
+  };
   const draggingTask = gesture && gesture.mode === "task" ? dayTasks.find((t) => t.id === gesture.id) : null;
   const dropMin = gesture && gesture.mode === "task" && !gesture.overDay && !gesture.overTask && streamRef.current
     ? (() => {
@@ -1867,6 +1932,10 @@ export default function Planner() {
         @media(min-width:1024px){.nb-stream{flex:none;height:auto;max-height:620px}}
         .nb-tap{transition:transform 90ms ease,opacity 120ms ease}
         .nb-tap:active{transform:scale(0.96)}
+        /* A stamp hides its native control, so the focus it takes has to be drawn
+           on the wrapper instead — otherwise a keyboard user sees nothing. */
+        .nb-stamp{transition:box-shadow 160ms ease}
+        .nb-stamp:focus-within{box-shadow:0 1px 0 0 ${T.accent}}
         .nb-row:hover{background:${T.faint}55}
         .nb-cell{transition:opacity 420ms cubic-bezier(.2,.7,.3,1),transform 420ms cubic-bezier(.2,.7,.3,1)}
         .nb-page{transform-origin:left center;backface-visibility:hidden}
@@ -2285,7 +2354,9 @@ export default function Planner() {
                facts that govern it. Nothing is centred, because the checklist is a
                list you act on rather than a title card you read. */
             <div>
-              <h2 className="text-2xl font-bold tracking-tight leading-tight">{inspectItem.title}</h2>
+              <InlineText T={T} value={inspectItem.title} ariaLabel="Action title"
+                onCommit={(title) => editEntry({ title })}
+                className="text-2xl font-bold tracking-tight leading-tight" />
               <div className="flex items-center gap-2 mt-1.5">
                 <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: catColor(inspectItem.category) }} />
                 <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">
@@ -2325,49 +2396,69 @@ export default function Planner() {
                 </div>
               )}
 
-              {inspectItem.note && (
-                <div className="flex items-center gap-3 px-3 py-3 mt-4" style={{ background: surface, borderRadius: CARD_R }}>
-                  <span className="flex-1 text-sm">{inspectItem.note}</span>
-                  <span style={{ color: T.dim }} className="text-sm shrink-0">≡</span>
-                </div>
-              )}
+              <div className="flex items-start gap-3 px-3 py-3 mt-4" style={{ background: surface, borderRadius: CARD_R }}>
+                <InlineText T={T} value={inspectItem.note} placeholder="Add a note" ariaLabel="Note" multiline
+                  onCommit={(note) => editEntry({ note })} className="text-sm leading-relaxed" />
+                <span style={{ color: T.dim }} className="text-sm shrink-0 pt-0.5">≡</span>
+              </div>
 
               {/* The governing facts, grouped as one card so they read as a block of
                   rules rather than a run of unrelated rows. */}
               <div className="mt-4 overflow-hidden" style={{ background: surface, borderRadius: CARD_R }}>
+                {/* §4.6. When it is planned, and when it is due, are edited where
+                    they are read. §4.7 keeps the repeat rule behind its own gesture. */}
                 <DetailRow T={T} icon="▦" divider>
-                  <span className="block text-sm">{inspectItem.planned.date ? plannedLabel(inspectItem.planned.date, todayKey) : "Unplanned"}</span>
-                  <span style={{ color: T.dim }} className="block text-xs mt-0.5">
-                    {inspectItem.recurrence
-                      ? repeatLabel({ ...inspectItem.recurrence, freq: inspectItem.recurrence.frequency, byDay: inspectItem.recurrence.byWeekday })
-                      : "Does not repeat"}
-                  </span>
-                </DetailRow>
-                <DetailRow T={T} icon="◔" divider>
-                  <span className="block text-sm">
-                    {(inspectItem.reminders ?? []).length
-                      ? (inspectItem.reminders[0].offsetMinutes === 0
-                        ? `When it starts${inspectItem.planned.startMinute != null ? `, ${tm(inspectItem.planned.startMinute)}` : ""}`
-                        : `${dur(inspectItem.reminders[0].offsetMinutes)} before`)
-                      : "No reminder"}
-                  </span>
-                  <div className="flex flex-wrap gap-1 mt-1.5">
-                    {[[null, "OFF"], [0, "AT TIME"], [15, "15M"], [60, "1H"]].map(([offset, label]) => {
-                      const on = offset == null
-                        ? (inspectItem.reminders ?? []).length === 0
-                        : (inspectItem.reminders ?? [])[0]?.offsetMinutes === offset;
-                      return (
-                        <button key={label} onClick={() => setReminder(inspect.id, offset)} className="px-2 py-0.5 text-xs tracking-widest"
-                          style={{ fontFamily: MONO, borderRadius: 999, background: on ? T.accent : "transparent", color: on ? T.on : T.dim, border: `1px solid ${on ? T.accent : T.line}` }}>{label}</button>
-                      );
-                    })}
+                  <div className="flex items-center gap-2">
+                    <InlineStamp T={T} dark={dark} type="date" ariaLabel="Planned day"
+                      value={inspectItem.planned.date || ""}
+                      display={inspectItem.planned.date ? plannedLabel(inspectItem.planned.date, todayKey) : "Unplanned"}
+                      onCommit={(v) => editEntry({ date: v, unplanned: !v })} className="text-sm" />
+                    {inspectItem.planned.date && (
+                      <button onClick={() => editEntry({ unplanned: true })} style={{ fontFamily: MONO, color: T.dim }}
+                        className="nb-tap text-xs tracking-widest shrink-0">INBOX</button>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <InlineStamp T={T} dark={dark} type="time" ariaLabel="Planned time"
+                      value={inspectItem.planned.startMinute != null ? hhmm(inspectItem.planned.startMinute) : ""}
+                      display={inspectItem.planned.startMinute != null ? tm(inspectItem.planned.startMinute) : "Any time"}
+                      onCommit={(v) => editEntry({ at: v ? fromHhmm(v) : null })}
+                      style={{ color: T.dim }} className="text-xs" />
+                    <button onClick={() => { beep("click"); setComposer({ ...entryPayload("task", inspectItem), openRepeat: true }); }}
+                      style={{ color: T.dim }} className="nb-tap text-xs text-left flex-1 truncate">
+                      {inspectItem.recurrence
+                        ? repeatLabel({ ...inspectItem.recurrence, freq: inspectItem.recurrence.frequency, byDay: inspectItem.recurrence.byWeekday })
+                        : "Does not repeat"}
+                    </button>
                   </div>
                 </DetailRow>
-                <DetailRow T={T} icon="⌛" divider={inspectDependsOn.length > 0 || inspectItem.status === "waiting"}>
-                  <span className="block text-sm" style={{ color: inspectItem.deadline.date && inspectItem.deadline.date < todayKey ? NOW_RED : T.text }}>
-                    {inspectItem.deadline.date ? `Due ${fmtDay(inspectItem.deadline.date)}` : "No deadline"}
-                  </span>
+                <InlineChoiceRow T={T} icon="◔" divider
+                  label={(inspectItem.reminders ?? []).length
+                    ? (inspectItem.reminders[0].offsetMinutes === 0
+                      ? `When it starts${inspectItem.planned.startMinute != null ? `, ${tm(inspectItem.planned.startMinute)}` : ""}`
+                      : `${dur(inspectItem.reminders[0].offsetMinutes)} before`)
+                    : "No reminder"}
+                  value={(inspectItem.reminders ?? [])[0]?.offsetMinutes ?? "off"}
+                  options={[["off", "OFF"], [0, "AT TIME"], [15, "15M"], [60, "1H"]]}
+                  onPick={(v) => setReminder(inspect.id, v === "off" ? null : v)} />
+                <DetailRow T={T} icon="⌛" divider>
+                  <div className="flex items-center gap-2">
+                    <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">DUE</span>
+                    <InlineStamp T={T} dark={dark} type="date" ariaLabel="Deadline"
+                      value={inspectItem.deadline.date || ""} onCommit={(v) => editEntry({ due: v })}
+                      display={inspectItem.deadline.date ? fmtDay(inspectItem.deadline.date) : "No deadline"}
+                      style={{ color: inspectItem.deadline.date && inspectItem.deadline.date < todayKey ? NOW_RED : T.text }}
+                      className="text-sm" />
+                    {inspectItem.deadline.date && (
+                      <button onClick={() => editEntry({ due: "" })} style={{ color: T.dim }} className="nb-tap text-xs px-1" aria-label="Clear deadline">✕</button>
+                    )}
+                  </div>
                 </DetailRow>
+                {/* §8.2. The label names the attribute; it does not repeat the value
+                    the selected chip already carries. */}
+                <InlineChoiceRow T={T} icon="◈" divider label={`Worth ${inspectItem.reward}`}
+                  value={inspectItem.reward} options={[20, 30, 40, 60].map((xp) => [xp, String(xp)])}
+                  onPick={(xp) => editEntry({ xp })} />
                 {inspectItem.status === "waiting" && (
                   <DetailRow T={T} icon="◷" divider={inspectDependsOn.length > 0}>
                     <span className="block text-sm">{inspectItem.followUpDate ? `Follow up ${fmtDay(inspectItem.followUpDate)}` : "Waiting, no follow-up date"}</span>
@@ -2381,6 +2472,9 @@ export default function Planner() {
                     <span style={{ color: T.dim }} className="block text-xs mt-0.5">Tap to move to another list</span>
                   </button>
                 </DetailRow>
+                <InlineChoiceRow T={T} icon="◑" divider label={inspectItem.category} dot={catColor}
+                  value={inspectItem.category} options={CATS.map((c) => [c, c])}
+                  onPick={(cat) => editEntry({ cat })} />
                 <DetailRow T={T} icon="#" divider={inspectDependsOn.length > 0}>
                   <TagField T={T} tags={inspectItem.tags} onChange={(next) => setTags(inspect.id, next)} />
                 </DetailRow>
@@ -2419,15 +2513,33 @@ export default function Planner() {
           ) : (
           <>
           {/* Header reads as a title card: what, when, which day — centred, with the
-              detail rows below it. */}
+              detail rows below it. Every line of it is the field itself (§4.6). */}
           <div className="text-center pt-1 pb-4">
-            <h2 className="text-2xl font-bold tracking-tight leading-tight">{inspectItem.title}</h2>
-            <p className="text-base font-semibold mt-1.5">
-              {inspect.kind === "event"
-                ? (inspectItem.allDay ? "All day" : `${tm(inspectItem.start)} – ${tm(inspectItem.start + inspectItem.dur)}`)
-                : (inspectItem.planned.startMinute != null ? tm(inspectItem.planned.startMinute) : "Unscheduled")}
-            </p>
-            <p style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest mt-1">{fmtDay(dateKey)}</p>
+            <InlineText T={T} value={inspectItem.title} ariaLabel="Event title"
+              onCommit={(title) => editEntry({ title })}
+              className="text-2xl font-bold tracking-tight leading-tight" style={{ textAlign: "center" }} />
+            {inspectItem.allDay ? (
+              <p className="text-base font-semibold mt-1.5">All day</p>
+            ) : (
+              <div className="flex items-center justify-center gap-1.5 mt-1.5">
+                <InlineStamp T={T} dark={dark} type="time" ariaLabel="Starts" value={hhmm(inspectItem.start)}
+                  display={tm(inspectItem.start)} onCommit={(v) => v && editEntry({ start: fromHhmm(v) })}
+                  className="text-base font-semibold" />
+                <span style={{ color: T.dim }} className="text-base">–</span>
+                <InlineStamp T={T} dark={dark} type="time" ariaLabel="Ends" value={hhmm((inspectItem.start + inspectItem.dur) % 1440)}
+                  display={tm((inspectItem.start + inspectItem.dur) % 1440)}
+                  onCommit={(v) => {
+                    if (!v) return;
+                    const end = fromHhmm(v);
+                    editEntry({ dur: Math.max(5, (end > inspectItem.start ? end : end + 1440) - inspectItem.start) });
+                  }} className="text-base font-semibold" />
+              </div>
+            )}
+            <InlineStamp T={T} dark={dark} type="date" ariaLabel="Day"
+              value={splitId(inspect.id).date || inspectItem.date || dateKey}
+              display={fmtDay(splitId(inspect.id).date || inspectItem.date || dateKey)}
+              onCommit={(v) => v && editEntry({ date: v })}
+              style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest mt-1" />
           </div>
 
           {/* Two figures the app can actually answer, rather than borrowed metrics. */}
@@ -2452,88 +2564,62 @@ export default function Planner() {
             </div>
           </div>
 
-          {/* One pill per attribute, the category pill carrying its own colour. */}
+          {/* One row per attribute, each one the control for it (§4.6). Collapsed it
+              costs a line; touched, it grows the alternatives underneath. */}
           <div className="flex flex-col gap-2">
-            <Pill T={T} surface={surface} icon="◑" label={inspect.kind === "event" ? (inspectItem.cat || "—") : (inspectItem.category || "—")}
-              tint={catColor(inspect.kind === "event" ? inspectItem.cat : inspectItem.category)} />
-            <Pill T={T} surface={surface} icon="↻"
-              label={(inspect.kind === "event" ? inspectItem.repeat : inspectItem.recurrence)
-                ? repeatLabel(inspect.kind === "event" ? inspectItem.repeat : { ...inspectItem.recurrence, freq: inspectItem.recurrence.frequency, byDay: inspectItem.recurrence.byWeekday })
-                : "Never"} />
-            {inspect.kind === "event" ? (
-              <>
-                <Pill T={T} surface={surface} icon="◔"
-                  label={(inspectItem.alerts || []).length
-                    ? inspectItem.alerts.map((a) => (a === 0 ? "When it starts" : `${dur(a)} before`)).join(", ")
-                    : "No reminder"} />
-                {inspectItem.place && <Pill T={T} surface={surface} icon="⌖" label={inspectItem.place} />}
-                {inspectItem.allDay && inspectItem.endDate && <Pill T={T} surface={surface} icon="→" label={`Through ${fmtDay(inspectItem.endDate)}`} />}
-              </>
-            ) : (
-              <>
-                <Pill T={T} surface={surface} icon="✓" label={inspectItem.status.replace("_", " ").replace(/^./, (c) => c.toUpperCase())} />
-                <Pill T={T} surface={surface} icon="⌛"
-                  label={inspectItem.deadline.date ? `Due ${fmtDay(inspectItem.deadline.date)}` : "No deadline"}
-                  tint={inspectItem.deadline.date && inspectItem.deadline.date < todayKey ? NOW_RED : null} />
-                <Pill T={T} surface={surface} icon="▤" label={(db.taskLists.find((l) => l.id === inspectItem.listId) || {}).name || "—"} />
-                {inspectItem.status === "waiting" && (
-                  <Pill T={T} surface={surface} icon="◷" label={inspectItem.followUpDate ? `Follow up ${fmtDay(inspectItem.followUpDate)}` : "No follow-up date"} />
-                )}
-                {inspectBlockers.length > 0 && (
-                  <Pill T={T} surface={surface} icon="⛌" tint={NOW_RED} label={`Blocked by ${inspectBlockers.map((b) => b.title).join(", ")}`} />
-                )}
-                {inspectItem.tags.length > 0 && <Pill T={T} surface={surface} icon="#" label={inspectItem.tags.join(", ")} />}
-              </>
+            <InlineChoice T={T} surface={surface} icon="◑" tint={catColor(inspectItem.cat)}
+              label={inspectItem.cat || "—"} value={inspectItem.cat} dot={catColor}
+              options={CATS.map((c) => [c, c])} onPick={(cat) => editEntry({ cat })} />
+
+            <InlineChoice T={T} surface={surface} icon="◷" label={inspectItem.allDay ? "All day" : "At a time"}
+              value={inspectItem.allDay ? "all" : "timed"} options={[["timed", "AT A TIME"], ["all", "ALL DAY"]]}
+              onPick={(v) => editEntry({ allDay: v === "all", ...(v === "all" ? {} : { start: inspectItem.start || 540, dur: inspectItem.dur || 60 }) })} />
+
+            {inspectItem.allDay && (
+              <InlineField T={T} surface={surface} icon="→">
+                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">THROUGH</span>
+                <InlineStamp T={T} dark={dark} type="date" ariaLabel="Last day"
+                  value={inspectItem.endDate || inspectItem.date || dateKey} min={inspectItem.date || dateKey}
+                  display={fmtDay(inspectItem.endDate || inspectItem.date || dateKey)}
+                  onCommit={(v) => v && editEntry({ endDate: v })}
+                  style={{ fontFamily: MONO }} className="text-sm" />
+              </InlineField>
             )}
-            {inspect.kind === "event" && conflictIds.has(inspect.id) && (
+
+            {/* §4.7. Recurrence rewrites a series rather than an entry, so it stays
+                behind a deliberate gesture with room to explain itself. */}
+            <button onClick={() => { beep("click"); setComposer({ ...entryPayload("event", inspectItem), openRepeat: true }); }}
+              className="nb-tap flex items-center gap-3 px-3 py-2.5 text-left" style={{ background: surface, borderRadius: CARD_R }}>
+              <span style={{ color: T.dim }} className="text-sm shrink-0 w-4 text-center">↻</span>
+              <span className="flex-1 text-sm truncate">{inspectItem.repeat ? repeatLabel(inspectItem.repeat) : "Does not repeat"}</span>
+              <span style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest shrink-0">CHANGE</span>
+            </button>
+
+            <InlineChoice T={T} surface={surface} icon="◔"
+              label={(inspectItem.alerts || []).length
+                ? inspectItem.alerts.map((a) => (a === 0 ? "When it starts" : `${dur(a)} before`)).join(", ")
+                : "No reminder"}
+              value={(inspectItem.alerts || [])[0] ?? "off"}
+              options={[["off", "OFF"], [0, "AT TIME"], [5, "5M"], [15, "15M"], [30, "30M"], [60, "60M"]]}
+              onPick={(v) => editEntry({ alerts: v === "off" ? [] : [v] })} />
+
+            <InlineField T={T} surface={surface} icon="⌖">
+              <InlineText T={T} value={inspectItem.place} placeholder="Add a place" ariaLabel="Place"
+                onCommit={(place) => editEntry({ place })} className="text-sm" />
+            </InlineField>
+
+            {conflictIds.has(inspect.id) && (
               <Pill T={T} surface={surface} icon="⚠" tint={NOW_RED} label="Overlaps another event on this day" />
             )}
-            {inspectItem.note && (
-              <div className="px-3 py-2.5" style={{ background: surface, borderRadius: CARD_R }}>
-                <p className="text-sm leading-relaxed">{inspectItem.note}</p>
-              </div>
-            )}
+
+            <div className="flex items-start gap-3 px-3 py-2.5" style={{ background: surface, borderRadius: CARD_R }}>
+              <span style={{ color: T.dim }} className="text-sm shrink-0 w-4 text-center pt-0.5">≡</span>
+              <InlineText T={T} value={inspectItem.note} placeholder="Add a note" ariaLabel="Note" multiline
+                onCommit={(note) => editEntry({ note })} className="text-sm leading-relaxed" />
+            </div>
           </div>
 
-          {inspect.kind === "task" && (
-            <div className="mt-4">
-              <div className="flex items-baseline justify-between">
-                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">DEPENDENCIES</span>
-                <button onClick={() => { beep("click"); setDependencyPicker({ taskId: parseTaskOccurrenceId(inspect.id).seriesId }); }}
-                  style={{ fontFamily: MONO, color: T.accent }} className="nb-tap text-xs tracking-widest">+ BLOCK ON</button>
-              </div>
-              {inspectDependsOn.length === 0 && (
-                <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic mt-1">Nothing has to happen first.</p>
-              )}
-              {inspectDependsOn.map((blocker) => (
-                <div key={blocker.id} className="flex items-center gap-2 py-1.5" style={{ borderBottom: `1px solid ${T.line}` }}>
-                  <span style={{ fontFamily: MONO, color: blocker.status === "completed" ? T.dim : NOW_RED }} className="text-xs tracking-widest shrink-0">
-                    {blocker.status === "completed" ? "DONE" : "OPEN"}
-                  </span>
-                  <span className="flex-1 text-xs truncate" style={{ textDecoration: blocker.status === "completed" ? "line-through" : "none" }}>{blocker.title}</span>
-                  <button onClick={() => unblockTask(inspect.id, blocker.id)} style={{ color: T.dim }} className="text-xs px-1" aria-label="Remove dependency">✕</button>
-                </div>
-              ))}
-              {/* §15.6. Advisory only — the plan is allowed to stand. */}
-              {earliestStart && inspectItem.planned.date && inspectItem.planned.date < earliestStart && (
-                <p style={{ fontFamily: MONO, color: NOW_RED }} className="text-xs tracking-widest mt-2">
-                  PLANNED BEFORE ITS BLOCKERS LAND — EARLIEST {fmtDay(earliestStart)}
-                </p>
-              )}
-
-              <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest mt-4">STATE</span>
-              <div className="flex flex-wrap gap-1 mt-1">
-                {["open", "in_progress", "waiting"].map((next) => (
-                  <button key={next} onClick={() => changeStatus(inspect.id, next)} className="px-2 py-1 text-xs tracking-widest"
-                    style={{ fontFamily: MONO, background: inspectItem.status === next ? T.accent : "transparent", color: inspectItem.status === next ? T.on : T.dim, border: `1px solid ${inspectItem.status === next ? T.accent : T.line}` }}>
-                    {next.replace("_", " ").toUpperCase()}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {inspect.kind === "event" && !inspectItem.allDay && minutesUntil(dateKey, inspectItem.start, todayKey, nowMin) > 0 && (
+          {!inspectItem.allDay && minutesUntil(dateKey, inspectItem.start, todayKey, nowMin) > 0 && (
             <p className="text-center text-sm mt-5" style={{ color: T.dim }}>
               <span className="font-bold" style={{ color: T.text }}>{countdownLabel(dateKey, inspectItem.start, todayKey, nowMin, inspectItem.dur)}</span> away
             </p>
@@ -2542,18 +2628,18 @@ export default function Planner() {
           </>
           )}
 
-          <div className="flex gap-2 mt-5">
-            <button onClick={() => removeItem(inspect.kind, inspect.id)} style={{ fontFamily: MONO, color: NOW_RED, border: `1px solid ${T.line}` }} className="nb-tap flex-1 py-3 text-xs tracking-widest">DELETE</button>
-            <button onClick={() => { beep("click"); setComposer(inspect.kind === "task" ? { kind: "task", id: inspectItem.id, title: inspectItem.title, cat: inspectItem.category, xp: inspectItem.reward, at: inspectItem.planned.startMinute, due: inspectItem.deadline.date || "", date: inspectItem.planned.date || dateKey, note: inspectItem.note, repeat: inspectItem.recurrence ? { ...inspectItem.recurrence, freq: inspectItem.recurrence.frequency, byDay: inspectItem.recurrence.byWeekday } : null } : { ...inspectItem, kind: inspect.kind, id: inspectItem.id }); }} style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="nb-tap flex-1 py-3 text-xs font-bold tracking-widest">EDIT</button>
-          </div>
+          {/* §4.7. No generic "edit" — the view above already is the editor, so the
+              only actions left are the ones that do something other than change a
+              field. An action that leads elsewhere names what it is for. */}
           <button
             onClick={() => {
               if (inspect.kind === "event") duplicateEvent(inspect.id);
               else { inspectItem.status === "completed" ? reopenTask(inspect.id) : completeTask(inspect.id); setInspect(null); }
             }}
-            style={{ fontFamily: MONO, border: `1px solid ${T.line}`, color: T.text }} className="nb-tap w-full py-3 mt-2 text-xs tracking-widest">
+            style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="nb-tap w-full py-3 mt-5 text-xs font-bold tracking-widest">
             {inspect.kind === "event" ? "DUPLICATE" : inspectItem.status === "completed" ? "REOPEN" : "MARK COMPLETE"}
           </button>
+          <button onClick={() => removeItem(inspect.kind, inspect.id)} style={{ fontFamily: MONO, color: NOW_RED, border: `1px solid ${T.line}` }} className="nb-tap w-full py-3 mt-2 text-xs tracking-widest">DELETE</button>
         </Sheet>
       )}
 
@@ -3305,6 +3391,220 @@ function Pill({ T, surface, icon, label, tint = null }) {
   );
 }
 
+/* §4.6. The value is the field. These render as the record reads until they are
+   touched, then take the control in place — same surface, same box, so nothing
+   reflows and focusing a field never feels like arriving somewhere else. */
+
+/* §4.6. A title or a line of prose commits when it is left or confirmed, never per
+   keystroke: a half-typed title is not a title, and committing one would put it
+   through the scope question a character at a time. */
+function InlineText({ T, value, onCommit, placeholder = "Untitled", multiline = false, className = "", style = {}, ariaLabel }) {
+  const [draft, setDraft] = useState(value ?? "");
+  const [live, setLive] = useState(false);
+  /* Escape blurs the field, and blur is what commits — so the abandonment has to be
+     recorded somewhere the commit can read immediately. Resetting the draft is not
+     enough: state has not re-rendered by the time blur runs. */
+  const abandoned = useRef(false);
+  /* While the field is not being edited it follows the record, so a change made
+     anywhere else — a bulk action, an undo — shows here without a remount. */
+  useEffect(() => { if (!live) setDraft(value ?? ""); }, [value, live]);
+
+  const commit = () => {
+    setLive(false);
+    if (abandoned.current) { abandoned.current = false; setDraft(value ?? ""); return; }
+    const next = draft.trim();
+    if (next === (value ?? "").trim()) return;
+    if (!next && !multiline) { setDraft(value ?? ""); return; }
+    onCommit(next);
+  };
+  const keys = (e) => {
+    if (e.key === "Escape") { e.stopPropagation(); abandoned.current = true; setDraft(value ?? ""); e.target.blur(); return; }
+    if (e.key === "Enter" && !multiline) { e.preventDefault(); e.target.blur(); }
+  };
+  const shared = {
+    value: draft,
+    onChange: (e) => setDraft(e.target.value),
+    onFocus: () => setLive(true),
+    onBlur: commit,
+    onKeyDown: keys,
+    placeholder,
+    "aria-label": ariaLabel || placeholder,
+    className: `${className} w-full`,
+    style: {
+      background: "transparent",
+      border: "none",
+      outline: "none",
+      resize: "none",
+      /* The only thing focus changes is a hairline under the text, so the field
+         announces itself as editable without redrawing the row. */
+      boxShadow: live ? `0 1px 0 0 ${T.accent}` : "none",
+      transition: "box-shadow 160ms ease",
+      ...style,
+    },
+  };
+  return multiline
+    ? <textarea rows={Math.min(6, Math.max(1, draft.split("\n").length))} {...shared} />
+    : <input {...shared} />;
+}
+
+/* §4.6. Collapsed, an attribute costs one line. Tapping it grows the alternatives
+   underneath rather than showing every choice all the time. */
+function InlineChoice({ T, surface, icon, label, options, value, onPick, tint = null, dot = null, children = null }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ background: tint ? `${tint}22` : surface, borderRadius: CARD_R }} className="overflow-hidden">
+      <button onClick={() => setOpen(!open)} className="nb-tap flex items-center gap-3 px-3 py-2.5 w-full text-left">
+        <span style={{ color: tint || T.dim }} className="text-sm shrink-0 w-4 text-center">{icon}</span>
+        <span className="flex-1 text-sm truncate" style={{ color: tint || T.text }}>{label}</span>
+        <span style={{ color: T.dim, transform: open ? "rotate(180deg)" : "none", transition: "transform 200ms cubic-bezier(.2,.8,.25,1)" }}
+          className="text-xs shrink-0">▾</span>
+      </button>
+      <div style={{
+        display: "grid",
+        gridTemplateRows: open ? "1fr" : "0fr",
+        transition: "grid-template-rows 240ms cubic-bezier(.2,.8,.25,1)",
+      }}>
+        {/* Clipping alone only hides the choices from the eye — they stayed
+            focusable and clickable, so tabbing through a collapsed row landed on
+            controls nobody could see. Hiding waits for the collapse to finish so
+            the animation still plays. */}
+        <div className="overflow-hidden" inert={!open}
+          style={{ visibility: open ? "visible" : "hidden", transition: `visibility 0s linear ${open ? 0 : 240}ms` }}>
+          <div className="flex flex-wrap gap-1 px-3 pb-2.5">
+            {options.map(([key, text]) => {
+              const on = key === value;
+              return (
+                <button key={String(key)} onClick={() => { onPick(key); setOpen(false); }}
+                  className="nb-tap inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs tracking-widest"
+                  style={{
+                    fontFamily: MONO, borderRadius: 999,
+                    background: on ? T.accent : "transparent",
+                    color: on ? T.on : T.dim,
+                    border: `1px solid ${on ? T.accent : T.line}`,
+                    transition: "background 180ms ease, color 180ms ease",
+                  }}>
+                  {dot && <span className="rounded-full shrink-0" style={{ width: 7, height: 7, background: on ? T.on : dot(key) }} />}
+                  {text}
+                </button>
+              );
+            })}
+          </div>
+          {children && <div className="px-3 pb-2.5">{children}</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* §4.6. A native picker fires as it is spun, so committing on change would put a
+   recurring entry through the scope question once per arrow press. The value is
+   held here and written when the field is left or confirmed — the same rule the
+   text fields follow, so no control in the view behaves differently from another. */
+function InlineNative({ T, type, value, onCommit, ariaLabel, className = "", style = {}, min, dark = false }) {
+  const [draft, setDraft] = useState(value ?? "");
+  const [live, setLive] = useState(false);
+  const abandoned = useRef(false);
+  useEffect(() => { if (!live) setDraft(value ?? ""); }, [value, live]);
+  const commit = () => {
+    setLive(false);
+    if (abandoned.current) { abandoned.current = false; setDraft(value ?? ""); return; }
+    if ((draft ?? "") !== (value ?? "")) onCommit(draft);
+  };
+  return (
+    <input type={type} min={min} aria-label={ariaLabel} value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onFocus={() => setLive(true)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") { e.stopPropagation(); abandoned.current = true; setDraft(value ?? ""); e.target.blur(); return; }
+        if (e.key === "Enter") { e.preventDefault(); e.target.blur(); }
+      }}
+      className={className}
+      style={{
+        background: "transparent",
+        border: "none",
+        outline: "none",
+        colorScheme: dark ? "dark" : "light",
+        boxShadow: live ? `0 1px 0 0 ${T.accent}` : "none",
+        transition: "box-shadow 160ms ease",
+        ...style,
+      }} />
+  );
+}
+
+/* §4.4/§4.6. The same expansion inside the task's grouped rules card, which reads as
+   one block of rules with its icons on the right — so the choices cannot bring their
+   own surface without breaking the group. */
+function InlineChoiceRow({ T, icon, label, sub, options, value, onPick, dot = null, divider = false }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ borderBottom: divider ? `1px solid ${T.line}` : "none" }}>
+      <button onClick={() => setOpen(!open)} className="nb-tap flex items-center gap-3 px-3 py-3 w-full text-left">
+        <span className="flex-1 min-w-0">
+          <span className="flex items-center gap-2">
+            {dot && <span className="rounded-full shrink-0" style={{ width: 8, height: 8, background: dot(value) }} />}
+            <span className="block text-sm truncate">{label}</span>
+          </span>
+          {sub && <span style={{ color: T.dim }} className="block text-xs mt-0.5">{sub}</span>}
+        </span>
+        <span style={{ color: T.dim, transform: open ? "rotate(180deg)" : "none", transition: "transform 200ms cubic-bezier(.2,.8,.25,1)" }}
+          className="text-xs shrink-0">▾</span>
+        <span style={{ color: T.dim }} className="text-sm shrink-0">{icon}</span>
+      </button>
+      <div style={{ display: "grid", gridTemplateRows: open ? "1fr" : "0fr", transition: "grid-template-rows 240ms cubic-bezier(.2,.8,.25,1)" }}>
+        <div className="overflow-hidden" inert={!open}
+          style={{ visibility: open ? "visible" : "hidden", transition: `visibility 0s linear ${open ? 0 : 240}ms` }}>
+          <div className="flex flex-wrap gap-1 px-3 pb-3">
+            {options.map(([key, text]) => {
+              const on = key === value;
+              return (
+                <button key={String(key)} onClick={() => { onPick(key); setOpen(false); }}
+                  className="nb-tap inline-flex items-center gap-1.5 px-2.5 py-1 text-xs tracking-widest"
+                  style={{
+                    fontFamily: MONO, borderRadius: 999,
+                    background: on ? T.accent : "transparent", color: on ? T.on : T.dim,
+                    border: `1px solid ${on ? T.accent : T.line}`,
+                    transition: "background 180ms ease, color 180ms ease",
+                  }}>
+                  {dot && <span className="rounded-full shrink-0" style={{ width: 6, height: 6, background: on ? T.on : dot(key) }} />}
+                  {text}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* §4.6/§8. A native date or time control brings its own type and its own picker
+   glyph, which is a different visual language from everything around it — the day
+   would read "08/10/2026 📅" in the middle of a page that says "MON 10 AUG". The
+   value keeps the product's own formatting and the real control lies invisibly on
+   top of it, so the picker is still exactly where the value is. */
+function InlineStamp({ T, type, value, display, onCommit, ariaLabel, min, className = "", style = {}, dark = false }) {
+  return (
+    <span className="nb-stamp relative inline-flex items-center">
+      <span aria-hidden="true" className={className} style={{ ...style, pointerEvents: "none" }}>{display}</span>
+      <InlineNative T={T} dark={dark} type={type} value={value} min={min} onCommit={onCommit} ariaLabel={ariaLabel}
+        className="absolute inset-0 w-full h-full"
+        style={{ opacity: 0, cursor: "pointer", padding: 0, margin: 0 }} />
+    </span>
+  );
+}
+
+/* A native picker sitting on the row it describes, so a date reads as a date and
+   edits as one without a second surface. */
+function InlineField({ T, surface, icon, children, tint = null }) {
+  return (
+    <div className="flex items-center gap-3 px-3 py-2.5" style={{ background: tint ? `${tint}22` : surface, borderRadius: CARD_R }}>
+      <span style={{ color: tint || T.dim }} className="text-sm shrink-0 w-4 text-center">{icon}</span>
+      <div className="flex-1 min-w-0 flex items-center gap-2">{children}</div>
+    </div>
+  );
+}
+
 function Row({ T, k, v }) {
   return (
     <div className="flex items-center justify-between py-2" style={{ borderBottom: `1px solid ${T.line}`, fontFamily: MONO }}>
@@ -3482,7 +3782,9 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
   const [alerts, setAlerts] = useState(initial.alerts || []);
   const [repeat, setRepeat] = useState(initial.repeat || null);
   const [date, setDate] = useState(initial.date || dateKey);
-  const [more, setMore] = useState(false);
+  /* §4.7. Arriving here from a detail view's repeat row means the disclosure is
+     already the reason you came, so it opens with the panel showing. */
+  const [more, setMore] = useState(!!initial.openRepeat);
   /* §1.2. An action captured without a day is what makes the Inbox reachable. */
   const [unplanned, setUnplanned] = useState(initial.kind === "task" && initial.id ? !initial.date : false);
   const [timeZoneMode, setTimeZoneMode] = useState(initial.timeZoneMode || "floating");

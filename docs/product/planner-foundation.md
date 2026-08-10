@@ -2340,6 +2340,44 @@ way everywhere.
 - The disclosure animates open rather than appearing, so the form is understood as
   having grown rather than been replaced.
 
+### 4.6 The detail view is the editor
+
+- A detail view MUST be directly editable. Changing one attribute MUST NOT require
+  opening a second surface: the value shown is the field, and touching it edits it.
+- This applies to every attribute a person changes one at a time — title, time,
+  duration, day, category, place, note, deadline, reward, reminder, status, list,
+  tags, steps, and dependencies.
+- A field reads as its value until it is touched. The control appears in place on
+  the same surface the value occupied; nothing reflows around it, because a layout
+  that jumps on focus makes the field feel like a different screen.
+- A set of choices expands from the value rather than being permanently displayed.
+  Collapsed, an attribute costs one line; expanded, it shows what else it could be.
+- An edit commits when the field is left or confirmed, and is abandoned on escape.
+  A field MUST NOT commit per keystroke: a half-typed title is not a title.
+
+### 4.7 What stays behind a deliberate gesture
+
+- Recurrence and time zone are NOT inline fields. They do not change one entry —
+  they rewrite a series, or reinterpret every instant in it. They stay behind an
+  explicit gesture with room to explain themselves.
+- Creation stays a composer. Making a thing and refining a thing are different
+  decisions, and the composer's job is to ask only what the entry cannot exist
+  without (§4.5).
+- Consequently the detail view MUST NOT carry a general "edit" action that reopens
+  the record in another form. An action that leads elsewhere names what it is for.
+
+### 4.8 An inline edit is the same write
+
+- An inline edit MUST take the same write path as the same change made in the
+  composer. Two paths to one record drift, and the drift shows up as a rule that
+  is enforced on one route and not the other.
+- In particular, editing an occurrence of a recurring entry MUST ask the same scope
+  question (§6.5) — this day, this and following, or the whole series. Convenience
+  is not a reason to guess: renaming one standup MUST NOT silently rename every
+  standup.
+- A record MUST have exactly one rendering. Where a view shows an attribute the
+  editor does not, or the reverse, the two have already drifted.
+
 ## 5. Selection and bulk action
 
 ### 5.1 Selection reuses the completion control
@@ -2618,3 +2656,8 @@ resurfacing (§9.4), inbox processing states (§6.1), and the collaboration fiel
 | 2026-08-10 | Read what a deletion removes before the state updater runs, since the payload is built before it does. |
 | 2026-08-10 | Offer undo only where there is something to undo; a confirmation carries no button. |
 | 2026-08-10 | Clamp a new entry's start to a minute the day actually has, so "now" near midnight cannot leave the day. |
+| 2026-08-10 | Make the detail view the editor; changing one attribute never opens a second surface. |
+| 2026-08-10 | Keep recurrence and time zone behind a deliberate gesture, because they rewrite a series rather than an entry. |
+| 2026-08-10 | Route every inline edit through the composer's write path, so the scope question is asked identically. |
+| 2026-08-10 | Expand a choice set from its value rather than displaying it permanently. |
+| 2026-08-10 | Commit a field on leaving or confirming it, never per keystroke. |
