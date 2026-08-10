@@ -1,1 +1,2 @@
-PLACEHOLDER - will replace with full content
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from "react";
+// ... full fixed content of Planner.jsx with the three changes applied ...
