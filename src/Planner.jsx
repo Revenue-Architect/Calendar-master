@@ -6,13 +6,20 @@ import {
   blocksToText,
   createNote as createNoteCommand,
   deleteNote as deleteNoteCommand,
+  dropRevisionsFor,
   getDailyNote,
   getNotesForDate,
   isEmptyNote,
   markBlockExtracted,
   migrateV6ToV7,
   noteExcerpt,
+  parseInline,
+  plainText,
+  recordRevision,
   removeBlock as removeNoteBlock,
+  restoredNote,
+  revisionIsIntact,
+  revisionsFor,
   searchNotes,
   toggleChecklistBlock,
   updateBlock as updateNoteBlock,
@@ -188,6 +195,11 @@ const isDark = (hex) => {
 };
 const dur = (m) => (m >= 60 ? `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ""}` : `${Math.round(m)}m`);
 const snapTo = (m, s = SNAP) => Math.max(0, Math.min(1440, Math.round(m / s) * s));
+/* A start is a minute of the day, and a day has no minute 1440. Snapping "now" at
+   23:53 rounded up to it and built "…T24:00", which the time model rejects — from
+   inside render, so the whole page went blank. A new entry begins in the last slot
+   the day actually has. */
+const startSlot = (m, s = 15) => Math.min(snapTo(m, s), 1440 - s);
 const buzz = (p) => { try { navigator.vibrate && navigator.vibrate(p); } catch (e) {} };
 const splitId = (id) => { const i = String(id).indexOf("@"); return i === -1 ? { base: id, date: null } : { base: id.slice(0, i), date: id.slice(i + 1) }; };
 /* "STARTS" reads in the largest unit that still says something useful — days for
@@ -446,6 +458,7 @@ export default function Planner() {
   const [inspect, setInspect] = useState(null);
   const [composer, setComposer] = useState(null);
   const [noteEdit, setNoteEdit] = useState(null);
+  const [noteHistory, setNoteHistory] = useState(null);
   const [settings, setSettings] = useState(false);
   const [search, setSearch] = useState(false);
   const [scopeAsk, setScopeAsk] = useState(null);
@@ -822,14 +835,14 @@ export default function Planner() {
       /* Every modal counts. Leaving the newer sheets off this list let shortcuts act
          on the page behind them — arrow keys turned days while the first-run choice
          was still up. */
-      if (inspect || composer || settings || noteEdit || scopeAsk
+      if (inspect || composer || settings || noteEdit || noteHistory || scopeAsk
         || firstRun || confirmComplete || dependencyPicker || listPicker || pendingImport) return;
       if (e.key === "/" || (e.key === "k" && (e.metaKey || e.ctrlKey))) { e.preventDefault(); setSearch(true); return; }
       if (search) return;
       if (e.key === "ArrowRight") goDay(1);
       if (e.key === "ArrowLeft") goDay(-1);
       if (e.key === "t" || e.key === "T") jumpTo(todayKey);
-      if (e.key === "n" || e.key === "N") setComposer({ kind: "event", start: snapTo(nowMin, 15), dur: 60 });
+      if (e.key === "n" || e.key === "N") setComposer({ kind: "event", start: startSlot(nowMin), dur: 60 });
       /* Completion, deferral and inspection were pointer-only — a hold, a swipe and a
          tap with no keyboard path. These act on the first open action of the day. */
       if (e.key === "c" || e.key === "C") {
@@ -845,7 +858,7 @@ export default function Planner() {
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [dateKey, inspect, composer, settings, noteEdit, search, scopeAsk, goDay, todayKey, nowMin, dayTasks, undo, firstRun, confirmComplete, dependencyPicker, listPicker, pendingImport]);
+  }, [dateKey, inspect, composer, settings, noteEdit, noteHistory, search, scopeAsk, goDay, todayKey, nowMin, dayTasks, undo, firstRun, confirmComplete, dependencyPicker, listPicker, pendingImport]);
 
   /* ─── writes (series-aware) ─── */
   const flash = (label, payload) => {
@@ -1216,12 +1229,18 @@ export default function Planner() {
       });
       return;
     }
-    mutate((d) => {
-      if (kind === "note") { removed = d.notes.find((n) => n.id === base); d.notes = d.notes.filter((n) => n.id !== base); }
-      return d;
-    });
-    setInspect(null); setNoteEdit(null); setScopeAsk(null);
-    flash("Deleted", { type: "restore", kind, item: removed });
+    /* What is being deleted has to be read here, not inside the updater: React runs
+       the updater after the handler returns, so the old code handed flash a payload
+       that was still null and undoing a deleted note silently restored nothing. */
+    removed = kind === "note" ? db.notes.find((n) => n.id === base) ?? null : null;
+    /* A revision cannot outlive the note it snapshots — but undo has to be able to
+       put both back, so the history rides along in the undo payload. */
+    const removedRevisions = kind === "note" ? revisionsFor(db.noteRevisions, base) : [];
+    mutate((d) => (kind === "note" && removed
+      ? { ...d, notes: deleteNoteCommand(d.notes, base).notes, noteRevisions: dropRevisionsFor(d.noteRevisions, [base]) }
+      : d));
+    setInspect(null); setNoteEdit(null); setNoteHistory(null); setScopeAsk(null);
+    flash("Deleted", { type: "restore", kind, item: removed, revisions: removedRevisions });
   };
 
   const removeItem = (kind, id) => {
@@ -1231,12 +1250,22 @@ export default function Planner() {
   };
 
   const runUndo = () => {
-    if (!undo) return;
+    /* Some messages are just confirmations and carry nothing to reverse; reading
+       .type off a missing payload threw out of the state updater and blanked the
+       page. Those messages no longer offer the button either. */
+    if (!undo || !undo.payload) return;
     const p = undo.payload;
     beep("click");
     mutate((d) => {
       if (p.type === "restore" && p.item) {
-        if (p.kind === "note") d.notes = [...d.notes, p.item];
+        if (p.kind === "note") {
+          d.notes = [...d.notes, p.item];
+          /* revisionsFor hands back newest-first; the store keeps them oldest-first
+             so the head it compares against is the latest one. */
+          if (p.revisions?.length) {
+            d.noteRevisions = [...(d.noteRevisions ?? []), ...[...p.revisions].sort((a, b) => a.revision - b.revision)];
+          }
+        }
       }
       if (p.type === "restore-task-deletion" && p.removed) {
         const restored = restoreDeletedTaskInPlannerState(d, p.removed);
@@ -1350,7 +1379,17 @@ export default function Planner() {
       const targetId = id || getDailyNote(d.notes, dateKey)?.id || null;
       if (targetId) {
         const current = d.notes.find((n) => n.id === targetId);
-        return { ...d, notes: updateNoteCommand(d.notes, targetId, { blocks: textToNoteBlocks(text, current?.blocks ?? [], uid) }, { now: nowStamp() }).notes };
+        const saved = updateNoteCommand(d.notes, targetId, { blocks: textToNoteBlocks(text, current?.blocks ?? [], uid) }, { now: nowStamp() });
+        /* §10.2. A save that changed nothing returns the same collection and leaves
+           no revision behind, so reopening the editor cannot inflate the history. */
+        if (saved.notes === d.notes) return d;
+        return {
+          ...d,
+          notes: saved.notes,
+          /* History holds what the document was before this save; the live note is
+             always the head, so a restore goes back to a body someone actually saw. */
+          noteRevisions: recordRevision(d.noteRevisions, current, { at: nowStamp() }),
+        };
       }
       return {
         ...d,
@@ -1363,6 +1402,26 @@ export default function Planner() {
       };
     });
     setNoteEdit(null);
+  };
+
+  /* §10.2. Restoring is itself an edit: the body someone is leaving becomes the new
+     head of the history, so nothing is erased by going back. */
+  const restoreNoteRevision = (noteId, revision) => {
+    beep("commit");
+    mutate((d) => {
+      const current = d.notes.find((n) => n.id === noteId);
+      if (!current) return d;
+      const back = restoredNote(current, revision);
+      const saved = updateNoteCommand(d.notes, noteId, { title: back.title, blocks: back.blocks }, { now: nowStamp() });
+      if (saved.notes === d.notes) return d;
+      return {
+        ...d,
+        notes: saved.notes,
+        noteRevisions: recordRevision(d.noteRevisions, current, { at: nowStamp(), source: "restore" }),
+      };
+    });
+    setNoteHistory(null); setNoteEdit(null);
+    flash("Went back to an earlier version", null);
   };
 
   const toggleNoteCheck = (noteId, blockId) => {
@@ -1569,7 +1628,7 @@ export default function Planner() {
     if (tappedRef.current) {
       tappedRef.current = false;
       beep("click");
-      setComposer({ kind: "event", start: snapTo(minutesAt(e.clientY), 15), dur: 60 });
+      setComposer({ kind: "event", start: startSlot(minutesAt(e.clientY)), dur: 60 });
     }
   };
   const eventDown = (e, ev) => {
@@ -1656,7 +1715,7 @@ export default function Planner() {
         if (e.cancelable) e.preventDefault();
         if (p.ev) { beep("click"); setInspect({ kind: "event", id: p.ev.id }); }
         else if (p.chipId) { beep("click"); setInspect({ kind: "task", id: p.chipId }); }
-        else { beep("click"); setComposer({ kind: "event", start: snapTo(p.startMin, 15), dur: 60 }); }
+        else { beep("click"); setComposer({ kind: "event", start: startSlot(p.startMin), dur: 60 }); }
       }
     };
 
@@ -1841,7 +1900,7 @@ export default function Planner() {
           <button onClick={() => { jumpTo(todayKey); setMonthCursor(new Date()); }} style={{ fontFamily: MONO, color: T.dim }} className="nb-tap px-2 py-1 text-xs tracking-widest">TODAY</button>
           <button onClick={() => { beep("click"); setSearch(true); }} style={{ color: T.dim }} className="nb-tap w-8 h-8 text-sm" aria-label="Search">⌕</button>
           <button onClick={() => { beep("click"); setSettings(true); }} style={{ color: T.dim }} className="nb-tap w-8 h-8 text-sm" aria-label="Settings">⋯</button>
-          <button onClick={() => { beep("click"); setComposer({ kind: "event", start: snapTo(nowMin, 15), dur: 60 }); }} style={{ background: T.accent, color: T.on, fontFamily: MONO }} className="nb-tap px-2 py-1.5 text-xs font-bold tracking-widest">NEW</button>
+          <button onClick={() => { beep("click"); setComposer({ kind: "event", start: startSlot(nowMin), dur: 60 }); }} style={{ background: T.accent, color: T.on, fontFamily: MONO }} className="nb-tap px-2 py-1.5 text-xs font-bold tracking-widest">NEW</button>
         </div>
       </header>
 
@@ -2202,7 +2261,7 @@ export default function Planner() {
         <div className="fixed inset-x-0 z-50 flex justify-center pointer-events-none" style={{ bottom: 68 }}>
           <div className="nb-up flex items-center gap-3 px-3 py-2 pointer-events-auto" style={{ background: T.text, color: T.bg }}>
             <span style={{ fontFamily: MONO }} className="text-xs tracking-widest">{undo.label}</span>
-            <button onClick={runUndo} style={{ fontFamily: MONO, color: T.accent }} className="text-xs font-bold tracking-widest">UNDO</button>
+            {undo.payload && <button onClick={runUndo} style={{ fontFamily: MONO, color: T.accent }} className="text-xs font-bold tracking-widest">UNDO</button>}
           </div>
         </div>
       )}
@@ -2644,7 +2703,16 @@ export default function Planner() {
 
       {noteEdit && (
         <Sheet T={T} title="NOTE" onClose={() => { beep("click"); setNoteEdit(null); }}>
-          <NoteEditor T={T} note={noteEdit} onSave={(text) => saveNote(noteEdit.id, text)} onDelete={() => noteEdit.id && doDelete("note", noteEdit.id, "all")} />
+          <NoteEditor T={T} note={noteEdit} onSave={(text) => saveNote(noteEdit.id, text)} onDelete={() => noteEdit.id && doDelete("note", noteEdit.id, "all")}
+            history={noteEdit.id ? revisionsFor(db.noteRevisions, noteEdit.id).length : 0}
+            onHistory={() => { beep("click"); setNoteHistory(noteEdit.id); }} />
+        </Sheet>
+      )}
+
+      {noteHistory && (
+        <Sheet T={T} title="HISTORY" onClose={() => { beep("click"); setNoteHistory(null); }}>
+          <NoteHistory T={T} clock={clock} revisions={revisionsFor(db.noteRevisions, noteHistory)}
+            onRestore={(revision) => restoreNoteRevision(noteHistory, revision)} />
         </Sheet>
       )}
 
@@ -2895,22 +2963,22 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
         <div className="flex flex-col gap-3 mt-2">
           {notes.map((n) => (
             <div key={n.id} className="pl-3" style={{ borderLeft: `2px solid ${T.faint}` }}>
-              {n.blocks.map((block) => (block.type === "checklist" ? (
+              {n.blocks.map((block, i, all) => (block.type === "checklist" ? (
                 <div key={block.id} className="flex items-center gap-2 py-1">
                   <button onClick={() => onToggleNoteCheck(n.id, block.id)} className="shrink-0" aria-label={block.done ? "Reopen line" : "Complete line"}>
                     <span className="block rounded-full" style={{ width: 14, height: 14, background: block.done ? T.accent : "transparent", boxShadow: `inset 0 0 0 1.5px ${block.done ? T.accent : T.faint}` }} />
                   </button>
-                  <span className="flex-1 text-sm" style={{ textDecoration: block.done ? "line-through" : "none", color: block.done ? T.dim : T.text }}>{block.text}</span>
+                  <span className="flex-1 text-sm" style={{ textDecoration: block.done ? "line-through" : "none", color: block.done ? T.dim : T.text }}>
+                    <Inline T={T} text={block.text} />
+                  </span>
                   {/* §7.2. Once a line has become a task the affordance goes away, so
                       the same line cannot be turned into a second one. */}
                   {!block.extractedTaskId
-                    ? <button onClick={() => onExtract(n.id, block.id, block.text)} style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest shrink-0">+ ACTION</button>
+                    ? <button onClick={() => onExtract(n.id, block.id, plainText(block.text))} style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest shrink-0">+ ACTION</button>
                     : <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">TRACKED</span>}
                 </div>
               ) : (
-                <button key={block.id} onClick={() => onEditNote(n)} className="text-left w-full">
-                  <p style={{ fontFamily: SERIF }} className="text-sm italic leading-relaxed py-0.5">{block.text}</p>
-                </button>
+                <NoteBlock key={block.id} T={T} block={block} ordinal={orderedIndex(all, i)} onOpen={() => onEditNote(n)} />
               )))}
             </div>
           ))}
@@ -2919,6 +2987,59 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
       </div>
     </div>
   );
+}
+
+/* §3.5. Marks are stored as the punctuation people typed, so a note stays legible
+   anywhere. Rendering the mark instead of its punctuation is what makes typing it
+   worth doing — the stored text is never rewritten. */
+function Inline({ T, text }) {
+  return parseInline(text).map((run, i) => {
+    if (run.mark === "strong") return <strong key={i} className="font-bold not-italic">{run.text}</strong>;
+    if (run.mark === "em") return <em key={i} className="italic">{run.text}</em>;
+    if (run.mark === "strike") return <span key={i} style={{ textDecoration: "line-through", color: T.dim }}>{run.text}</span>;
+    if (run.mark === "code") {
+      return <code key={i} style={{ fontFamily: MONO, background: T.faint, color: T.text }} className="text-xs not-italic px-1 py-0.5">{run.text}</code>;
+    }
+    return <React.Fragment key={i}>{run.text}</React.Fragment>;
+  });
+}
+
+/* A numbered line counts from the start of its own run, not from its position in
+   the document, so a list that follows prose still begins at one. */
+function orderedIndex(blocks, i) {
+  let n = 1;
+  for (let j = i - 1; j >= 0 && blocks[j].type === "numbered"; j -= 1) n += 1;
+  return n;
+}
+
+/* §3.2. Every block type the document model holds now reads as itself on the page.
+   Before this the seven types all rendered as the same italic paragraph, so typing
+   a heading looked identical to typing prose and the shorthand bought nothing. */
+function NoteBlock({ T, block, ordinal, onOpen }) {
+  if (block.type === "divider") {
+    return <div className="my-2.5" style={{ borderTop: `1px solid ${T.faint}` }} aria-hidden="true" />;
+  }
+  const marked = <Inline T={T} text={block.text} />;
+  const body = block.type === "heading" ? (
+    <p style={{ fontFamily: MONO, color: T.text }}
+      className={`${block.level === 1 ? "text-sm" : "text-xs"} font-bold tracking-widest uppercase pt-2 pb-0.5`}>{marked}</p>
+  ) : block.type === "quote" ? (
+    <p style={{ fontFamily: SERIF, color: T.dim, borderLeft: `2px solid ${T.accent}` }}
+      className="text-sm italic leading-relaxed py-0.5 pl-2.5 my-1">{marked}</p>
+  ) : block.type === "code" ? (
+    <span style={{ fontFamily: MONO, background: T.faint, color: T.text, display: "block", whiteSpace: "pre-wrap" }}
+      className="text-xs leading-relaxed p-2.5 my-1 overflow-x-auto">{block.text}</span>
+  ) : block.type === "bulleted" || block.type === "numbered" ? (
+    <span className="flex gap-2 py-0.5">
+      <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs shrink-0 pt-1 tabular-nums">
+        {block.type === "numbered" ? `${ordinal}.` : "—"}
+      </span>
+      <span style={{ fontFamily: SERIF }} className="flex-1 text-sm italic leading-relaxed">{marked}</span>
+    </span>
+  ) : (
+    <p style={{ fontFamily: SERIF }} className="text-sm italic leading-relaxed py-0.5">{marked}</p>
+  );
+  return <button onClick={onOpen} className="text-left w-full">{body}</button>;
 }
 
 function TaskCard({ T, t, beep, target, todayKey, blockers = [], onPromoteSub, clock = "12", selection = null, onToggleSelect, onStartSelect, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onUnschedule }) {
@@ -3250,7 +3371,41 @@ function SubComposer({ T, onAdd }) {
   );
 }
 
-function NoteEditor({ T, note, onSave, onDelete }) {
+/* §10.2. History is browsable, not just recorded. A revision that no longer matches
+   its own checksum is shown but cannot be restored — putting damaged text back in
+   place of a good document would be worse than losing the snapshot. */
+function NoteHistory({ T, clock, revisions, onRestore }) {
+  if (!revisions.length) {
+    return <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic py-4">No earlier versions yet. Every save from here keeps one.</p>;
+  }
+  return (
+    <div className="flex flex-col">
+      <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic pb-3">
+        {revisions.length === 1 ? "One earlier version" : `${revisions.length} earlier versions`}, newest first. Going back keeps the current one too.
+      </p>
+      {revisions.map((r) => {
+        const intact = revisionIsIntact(r);
+        const stamp = r.at ? `${fmtDay(r.at.slice(0, 10))} · ${fmtTime(Number(r.at.slice(11, 13)) * 60 + Number(r.at.slice(14, 16)), clock)}` : "UNDATED";
+        return (
+          <div key={r.id} className="flex items-center gap-3 py-3" style={{ borderBottom: `1px solid ${T.line}` }}>
+            <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0 w-10 tabular-nums">v{r.revision}</span>
+            <div className="flex-1 min-w-0">
+              <p style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">{stamp}</p>
+              <p style={{ fontFamily: SERIF }} className="text-sm italic truncate">
+                {r.blocks.map((b) => plainText(b.text)).filter(Boolean).join(" · ") || "Empty page"}
+              </p>
+            </div>
+            {intact
+              ? <button onClick={() => onRestore(r)} style={{ fontFamily: MONO, color: T.accent }} className="nb-tap text-xs tracking-widest shrink-0">GO BACK</button>
+              : <span style={{ fontFamily: MONO, color: NOW_RED }} className="text-xs tracking-widest shrink-0">DAMAGED</span>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function NoteEditor({ T, note, onSave, onDelete, history = 0, onHistory }) {
   /* The document is edited as text and stored as blocks. Round-tripping through
      blank-line separated paragraphs keeps typing fast without inventing structure. */
   /* The editor shows the document as shorthand, not as bare text. Round-tripping
@@ -3260,8 +3415,13 @@ function NoteEditor({ T, note, onSave, onDelete }) {
   const [v, setV] = useState(() => blocksToShorthand(note.blocks ?? []));
   return (
     <div>
-      <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">{note.id ? "EDIT NOTE" : "NEW NOTE"}</span>
-      <textarea autoFocus value={v} onChange={(e) => setV(e.target.value)} rows={6} placeholder="What was this day actually like?&#10;&#10;Blank line starts a new paragraph."
+      <div className="flex items-baseline justify-between">
+        <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">{note.id ? "EDIT NOTE" : "NEW NOTE"}</span>
+        {history > 0 && (
+          <button onClick={onHistory} style={{ fontFamily: MONO, color: T.accent }} className="nb-tap text-xs tracking-widest">HISTORY · {history}</button>
+        )}
+      </div>
+      <textarea autoFocus value={v} onChange={(e) => setV(e.target.value)} rows={6} placeholder="What was this day actually like?&#10;&#10;# Heading   - list   [ ] to-do   > quote&#10;**bold**  *italic*  `code`"
         style={{ background: "transparent", border: `1px solid ${T.line}`, fontFamily: SERIF, resize: "none", width: "100%" }} className="text-sm italic leading-relaxed p-3 mt-2" />
       <div className="flex gap-2 mt-4">
         {note.id && <button onClick={onDelete} style={{ fontFamily: MONO, color: NOW_RED, border: `1px solid ${T.line}` }} className="nb-tap flex-1 py-3 text-xs tracking-widest">DELETE</button>}
@@ -3307,7 +3467,10 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
   const [kind, setKind] = useState(initial.kind || "event");
   const [title, setTitle] = useState(initial.title || "");
   const [cat, setCat] = useState(initial.cat || CATS[0]);
-  const [start, setStart] = useState(initial.start != null ? initial.start : 540);
+  /* Clamped here too, so no caller — a drag that reached the bottom of the grid, an
+     imported entry, a stale draft — can hand the editor a start the day has no room
+     for and take the page down with it. */
+  const [start, setStart] = useState(initial.start != null ? startSlot(initial.start, 1) : 540);
   const [len, setLen] = useState(initial.dur != null && initial.dur > 0 ? initial.dur : 60);
   const [xp, setXp] = useState(initial.xp || 30);
   const [place, setPlace] = useState(initial.place || "");

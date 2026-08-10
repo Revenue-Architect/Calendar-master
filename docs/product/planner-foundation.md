@@ -2488,6 +2488,43 @@ way everywhere.
 - Section and metadata labels are uppercase mono with wide tracking.
 - Labels name what follows; they never repeat a value shown beside them.
 
+## 9. Written pages
+
+### 9.1 A block reads as what it is
+
+- Every block type the document model holds (§Notes 3.2) MUST render distinguishably
+  on the page. A heading, a quote, a list line and prose MUST NOT share one style:
+  if typing shorthand changes nothing visible, the shorthand is not worth typing.
+- Headings take the label face (uppercase mono) rather than a larger body size, so a
+  written page keeps the same typographic system as the rest of the product.
+- A quote carries an accent rule down its left edge; a divider draws a hairline and
+  no text; code keeps its own whitespace in mono on a raised surface.
+- A numbered line counts from the start of its own run, not from its position in the
+  document, so a list that follows prose still begins at one.
+
+### 9.2 Marks render, source is preserved
+
+- Inline marks (§Notes 3.5) MUST render as the mark, not as the punctuation that
+  declares it. `**bold**` reads as bold.
+- The stored text keeps the punctuation. Rendering MUST NOT rewrite what was typed:
+  search indexes readable text, and the note stays legible outside this product.
+- Anything derived from a line for another domain — a task extracted from a checklist
+  — takes the readable text, not the punctuation.
+
+### 9.3 History is reachable
+
+- A note with earlier versions (§Notes 10.2) MUST offer a way into them from its
+  editor, labelled with how many exist.
+- History lists versions newest first, each with when it was taken and enough of its
+  body to recognise. Going back to one MUST be a single action from that list.
+- Going back is itself an edit: the version being left becomes the newest earlier
+  version. Nothing in the history is erased by returning to an earlier point.
+- A version whose checksum no longer matches its content is shown as damaged and
+  cannot be restored. Putting corrupted text over a good document is worse than
+  losing the snapshot.
+- Deleting a note takes its history with it, and undoing the deletion MUST bring both
+  back (§6.6, §6.7).
+
 # Notes implementation status
 
 The Notes domain foundation is implemented under `src/domains/notes`. What is built,
@@ -2500,9 +2537,17 @@ body and tags; revision counting that ignores no-op saves; checklist blocks with
 task extraction guarded against duplication; and the v6 to v7 migration that turns
 each legacy text note into a daily note of paragraph blocks.
 
-Not yet built: inline formatting, revision history browsing, conflict resolution,
-attachments, notebooks and folders as user-facing features, and the note templates
-and resurfacing behaviors. These remain specified above and unimplemented.
+Reachable from the interface: every block type through line shorthand, both to write
+(`#`, `-`, `1.`, `[ ]`, `>`, `---`, fenced code) and to read back, since the editor
+shows the same notation it parses; inline marks rendered as marks while the typed
+punctuation stays in storage; and revision history, browsable from the note editor
+with a single action to return to an earlier version. Revisions are recorded on save,
+dropped with the note, and restored by undoing the deletion.
+
+Not yet built: conflict resolution (§10.3), attachments (§11), notebooks and folders
+as user-facing features (§8.4, §8.5), note templates and daily prompts (§4.3),
+resurfacing (§9.4), inbox processing states (§6.1), and the collaboration fields
+(§3.4). These remain specified above and unimplemented.
 
 # Decision log
 
@@ -2565,3 +2610,11 @@ and resurfacing behaviors. These remain specified above and unimplemented.
 | 2026-08-09 | Let a note line declare its own block type through shorthand rather than a toolbar. |
 | 2026-08-09 | Show the editor the same notation it parses, so a type is never lost by editing. |
 | 2026-08-09 | Record note revisions at checkpoints with a checksum, capped per note. |
+| 2026-08-10 | Render each block type distinguishably; shorthand that changes nothing visible is not worth typing. |
+| 2026-08-10 | Render inline marks while keeping the typed punctuation in storage, so a note stays legible elsewhere. |
+| 2026-08-10 | Derive anything handed to another domain from the readable text, never the mark punctuation. |
+| 2026-08-10 | Make going back to a version an edit of its own, so history is never erased by returning to it. |
+| 2026-08-10 | Show a revision whose checksum fails as damaged rather than restoring corrupted text over a good page. |
+| 2026-08-10 | Read what a deletion removes before the state updater runs, since the payload is built before it does. |
+| 2026-08-10 | Offer undo only where there is something to undo; a confirmation carries no button. |
+| 2026-08-10 | Clamp a new entry's start to a minute the day actually has, so "now" near midnight cannot leave the day. |

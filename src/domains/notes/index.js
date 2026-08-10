@@ -10,7 +10,7 @@ export {
 } from "./queries/noteQueries.js";
 export { blocksToShorthand, parseInline, plainText, textToBlocks } from "./documents/shorthand.js";
 export {
-  MAX_REVISIONS, makeRevision, recordRevision, restoredNote, revisionIsIntact, revisionsFor,
+  MAX_REVISIONS, dropRevisionsFor, makeRevision, recordRevision, restoredNote, revisionIsIntact, revisionsFor,
 } from "./revisions/noteRevisions.js";
 export { migrateV6ToV7 } from "./migrations/migrateV6ToV7.js";
 export { validatePlannerStateV7 } from "./migrations/validatePlannerStateV7.js";
