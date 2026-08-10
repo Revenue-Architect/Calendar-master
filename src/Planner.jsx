@@ -77,6 +77,8 @@ import {
 import { QUICK_ADD_SYNTAX, describeQuickAdd, parseQuickAdd, quickAddToEntry } from "./features/planner/quickAdd.js";
 import { matchCommands } from "./features/planner/commandPalette.js";
 import { getDayTasksWithCarry } from "./features/planner/carryForward.js";
+import { planOverdueForToday, pullableOverdue } from "./features/planner/overduePull.js";
+import { AUTO_COMPLETE_DELAY_MS, autoCompleteStillValid, togglesLastOpenStep } from "./features/planner/autoComplete.js";
 import { textToNoteBlocks } from "./features/notes/noteText.js";
 import { eventNoteLink, taskNoteLink } from "./features/notes/contextLink.js";
 import {
@@ -1302,9 +1304,7 @@ export default function Planner() {
      was true when it was scheduled. */
   const autoCompleteRef = useRef(null);
   autoCompleteRef.current = (id) => {
-    const t = findTask(id);
-    const checklist = t?.checklist ?? [];
-    if (!t || t.status === "completed" || !checklist.length || !checklist.every((s) => s.done)) return;
+    if (!autoCompleteStillValid(findTask(id))) return;
     completeTask(id);
   };
   const reopenTask = (id) => {
@@ -1382,59 +1382,16 @@ export default function Planner() {
     }));
     flash(`Moved to ${fmtDay(targetKey)}`, undoPayload);
   };
+  /* PLAN TODAY. The decision of what can actually move, and the state transition
+     that moves it, both live in features/planner/overduePull.js so they can be
+     asserted without a render — including the awkward case, a missed occurrence
+     of an accumulating series, whose id is not a row any command can find. */
   const pullOverdue = () => {
-    /* Overdue is deadline-driven, so a task already planned onto today stays in the
-       overdue list — pulling it again would be a visible no-op. Only what can
-       actually move is counted, both here and on the banner that calls this. */
-    const entries = overdue.filter((t) => t.planned.date !== todayKey);
+    const entries = pullableOverdue(overdue, todayKey);
     if (!entries.length) return;
     beep("schedule");
     const before = structuredClone(db);
-    mutate((d) => {
-      let staged = d;
-      for (const entry of entries) {
-        const { seriesId, occurrenceDate } = parseTaskOccurrenceId(entry.id);
-        const series = occurrenceDate ? staged.tasks.find((x) => x.id === seriesId && x.recurrence) : null;
-        if (series) {
-          /* A missed occurrence of an accumulating series is not a row
-             planTaskCommand can find — its id is `series@date`. Detach it into a
-             real one-off first, exactly like any other single-occurrence edit,
-             then plan the detached task onto today. */
-          const detachedId = uid();
-          const detached = normalizeTaskInput({
-            ...series,
-            id: detachedId,
-            recurrence: null,
-            planned: { ...series.planned, date: occurrenceDate },
-          });
-          staged = {
-            ...staged,
-            tasks: [...staged.tasks, detached],
-            taskExceptions: upsertTaskException(staged.taskExceptions, {
-              id: uid(), seriesId, occurrenceDate, kind: "cancelled",
-            }),
-          };
-          staged = {
-            ...staged,
-            tasks: planTaskCommand(staged.tasks, detachedId, {
-              date: todayKey,
-              startMinute: detached.planned.startMinute ?? null,
-              estimateMinutes: detached.planned.estimateMinutes ?? null,
-            }).tasks,
-          };
-          continue;
-        }
-        staged = {
-          ...staged,
-          tasks: planTaskCommand(staged.tasks, entry.id, {
-            date: todayKey,
-            startMinute: entry.planned.startMinute ?? null,
-            estimateMinutes: entry.planned.estimateMinutes ?? null,
-          }).tasks,
-        };
-      }
-      return staged;
-    });
+    mutate((d) => planOverdueForToday(d, entries, todayKey, { makeId: uid }).state);
     flash(`${entries.length} planned for today`, { type: "restore-planner-state", snapshot: { state: before } });
   };
   const duplicateEvent = (id) => {
@@ -1507,10 +1464,7 @@ export default function Planner() {
        through the same completion flow as the hold — XP, streak, sound and the
        blocker confirmation all included. Only the check transition triggers it;
        unchecking a step never quietly reopens a completed parent. */
-    const t = findTask(taskId);
-    const item = t?.checklist?.find((s) => s.id === subId);
-    const lastStep = !!t && t.status !== "completed" && !!item && !item.done
-      && (t.checklist ?? []).every((s) => s.done || s.id === subId);
+    const lastStep = togglesLastOpenStep(findTask(taskId), subId);
     /* Editing a series occurrence detaches it (§9.5); pre-picking the detached id
        lets the delayed completion find the task this very tick creates. */
     const { occurrenceDate } = parseTaskOccurrenceId(taskId);
@@ -1524,7 +1478,7 @@ export default function Planner() {
       /* The beat of delay lets the tick and the progress bar land before the card
          completes; the ref revalidates at fire time, so unticking within the delay
          cancels the completion. */
-      setTimeout(() => autoCompleteRef.current?.(detachedId ?? taskId), 420);
+      setTimeout(() => autoCompleteRef.current?.(detachedId ?? taskId), AUTO_COMPLETE_DELAY_MS);
     }
   };
   const addSub = (taskId, title) => {
@@ -2920,13 +2874,13 @@ export default function Planner() {
                   const span = e.endDate ? diffDays(e.endDate, e.date) + 1 : 1;
                   const idx = diffDays(dateKey, e.date) + 1;
                   return (
-                    <button key={e.id} onClick={() => { beep("click"); setInspect({ kind: "event", id: e.id }); }}
-                      className="nb-tap flex items-center gap-2 px-2.5 py-2 text-left"
-                      style={{ background: surface, borderRadius: CARD_R }}>
+                    <RowWithJoin key={e.id} T={T} surface={surface} link={e.link} title={e.title}
+                      padding="px-2.5 py-2"
+                      onOpen={() => { beep("click"); setInspect({ kind: "event", id: e.id }); }}>
                       <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: catColor(e.cat) }} />
                       <span className="text-xs font-semibold truncate flex-1">{e.title}</span>
                       {span > 1 && <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">{idx}/{span}</span>}
-                    </button>
+                    </RowWithJoin>
                   );
                 })}
                 {dayTasks.some((task) => task.planned.startMinute == null) && (
@@ -3055,7 +3009,7 @@ export default function Planner() {
                               {normalizeMeetingLink(e.link) && (
                                 <a href={normalizeMeetingLink(e.link)} target="_blank" rel="noopener noreferrer" draggable={false}
                                   onPointerDown={(ev) => ev.stopPropagation()} onPointerUp={(ev) => ev.stopPropagation()} onClick={(ev) => ev.stopPropagation()}
-                                  aria-label="Join meeting"
+                                  aria-label={`Join ${e.title}`}
                                   style={{ fontFamily: MONO, color: T.accent }} className="text-xs font-bold tracking-widest shrink-0">JOIN ↗</a>
                               )}
                               {e.alerts && e.alerts.length > 0 && <span style={{ color: T.dim }} className="text-xs shrink-0">◔</span>}
@@ -4590,6 +4544,36 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
   );
 }
 
+/* A row that is one tap target, plus a second one for the link.
+ *
+ * A meeting link has to be reachable wherever the meeting appears, not only from
+ * the timed card that happened to get it first — living in the agenda should not
+ * cost two taps to join a call. But a row is already a button, and an anchor
+ * inside a button is invalid HTML that browsers and screen readers resolve
+ * differently.
+ *
+ * So the anchor is a *sibling* laid over the row's right edge, and the row
+ * reserves the width it occupies. Two real controls, no nesting, and the row's
+ * own tap target is unchanged everywhere the link is absent. */
+function RowWithJoin({ T, surface, link, title, onOpen, className = "", padding = "px-3 py-2.5", style = {}, children }) {
+  const href = normalizeMeetingLink(link);
+  return (
+    <div className="relative" style={{ background: surface, borderRadius: CARD_R, ...style }}>
+      <button onClick={onOpen} className={`nb-tap w-full flex items-center gap-2.5 text-left ${padding} ${className}`}
+        style={{ paddingRight: href ? 64 : undefined, background: "transparent", borderRadius: CARD_R }}>
+        {children}
+      </button>
+      {href && (
+        <a href={href} target="_blank" rel="noopener noreferrer" draggable={false}
+          onClick={(e) => e.stopPropagation()}
+          aria-label={`Join ${title}`}
+          style={{ fontFamily: MONO, color: T.accent }}
+          className="nb-tap absolute right-2 top-1/2 -translate-y-1/2 px-1.5 py-1 text-xs font-bold tracking-widest">JOIN ↗</a>
+      )}
+    </div>
+  );
+}
+
 function Agenda({ T, surface, days, dateKey, todayKey, clock, onOpenEvent, onOpenTask, onJump }) {
   return (
     <div className="nb-s overflow-y-auto flex-1 min-h-0" style={{ background: T.card, borderRadius: 16 }}>
@@ -4609,23 +4593,23 @@ function Agenda({ T, surface, days, dateKey, todayKey, clock, onOpenEvent, onOpe
             <div className="flex-1 min-w-0 flex flex-col gap-1.5 py-2 pr-2 pl-2">
               {count === 0 && <span style={{ fontFamily: MONO, color: T.faint }} className="text-xs tracking-widest py-2">—</span>}
               {day.allDay.map((e) => (
-                <button key={e.id} onClick={() => onOpenEvent(e.id, day.key)} className="nb-tap flex items-center gap-2.5 px-3 py-2.5 text-left"
-                  style={{ background: surface, borderRadius: CARD_R }}>
+                <RowWithJoin key={e.id} T={T} surface={surface} link={e.link} title={e.title}
+                  onOpen={() => onOpenEvent(e.id, day.key)}>
                   <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: catColor(e.cat) }} />
                   <span className="flex-1 text-sm font-semibold truncate">{e.title}</span>
                   <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">ALL DAY</span>
-                </button>
+                </RowWithJoin>
               ))}
               {day.timed.map((e) => (
-                <button key={e.id} onClick={() => onOpenEvent(e.id, day.key)} className="nb-tap flex items-center gap-2.5 px-3 py-2.5 text-left"
-                  style={{ background: surface, borderRadius: CARD_R }}>
+                <RowWithJoin key={e.id} T={T} surface={surface} link={e.link} title={e.title}
+                  onOpen={() => onOpenEvent(e.id, day.key)}>
                   <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: catColor(e.cat) }} />
                   <span className="flex-1 min-w-0">
                     <span className="block text-sm font-semibold truncate">{e.title}</span>
                     {e.place && <span style={{ color: T.dim }} className="block text-xs truncate">{e.place}</span>}
                   </span>
                   <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">{fmtTime(e.start, clock)}</span>
-                </button>
+                </RowWithJoin>
               ))}
               {day.tasks.map((t) => (
                 <button key={t.id} onClick={() => onOpenTask(t.id, day.key)} className="nb-tap flex items-center gap-2.5 px-3 py-2.5 text-left"
