@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   appendBlock, archiveNote, createNote, deleteNote, getBacklinks, getDailyNote,
-  getInboxNotes, getNotesForEntity, getPinnedNotes, isEmptyNote, linkNote,
+  getInboxNotes, getNotebookNotes, getNotesForEntity, getPinnedNotes, isEmptyNote, linkNote,
   markBlockExtracted, migrateV6ToV7, moveBlock, normalizeNote, noteExcerpt,
   pinNote, removeBlock, searchNotes, serializeBlocks, toggleChecklistBlock,
   updateBlock, updateNote,
@@ -120,6 +120,43 @@ test("entity notes are found from the entity side", () => {
     id: "n1", kind: "event", links: [{ type: "event", targetId: "evt-1" }],
   }, { now: NOW });
   assert.deepEqual(getNotesForEntity(notes, "event", "evt-1").map((n) => n.id), ["n1"]);
+});
+
+test("notebook views are derived from active, pinned, and archived note state", () => {
+  let notes = createNote([], daily(), { now: NOW }).notes;
+  notes = createNote(notes, { id: "standalone", kind: "standalone", title: "Idea" }, { now: NOW }).notes;
+  notes = pinNote(notes, "standalone", true, { now: NOW }).notes;
+  notes = createNote(notes, { id: "archived", kind: "standalone", title: "Old", archived: true }, { now: NOW }).notes;
+
+  assert.deepEqual(getNotebookNotes(notes, "all").map((note) => note.id).sort(), ["n1", "standalone"]);
+  assert.deepEqual(getNotebookNotes(notes, "pinned").map((note) => note.id), ["standalone"]);
+  assert.deepEqual(getNotebookNotes(notes, "archived").map((note) => note.id), ["archived"]);
+});
+
+test("event occurrence backlinks include series notes and only the selected occurrence", () => {
+  let notes = createNote([], {
+    id: "series", kind: "event", title: "Series context", links: [{ type: "event", targetId: "event-1" }],
+  }, { now: NOW }).notes;
+  notes = createNote(notes, {
+    id: "today", kind: "event", title: "Today only", links: [{ type: "event", targetId: "event-1", occurrenceDate: DAY }],
+  }, { now: NOW }).notes;
+  notes = createNote(notes, {
+    id: "tomorrow", kind: "event", title: "Tomorrow only", links: [{ type: "event", targetId: "event-1", occurrenceDate: "2026-08-10" }],
+  }, { now: NOW }).notes;
+
+  assert.deepEqual(getNotesForEntity(notes, "event", "event-1", { occurrenceDate: DAY }).map((note) => note.id).sort(), ["series", "today"]);
+  assert.deepEqual(getNotesForEntity(notes, "event", "event-1", { occurrenceDate: "2026-08-10" }).map((note) => note.id).sort(), ["series", "tomorrow"]);
+});
+
+test("a series link and an occurrence link are distinct relationships", () => {
+  let notes = createNote([], { id: "n1", kind: "standalone" }, { now: NOW }).notes;
+  notes = linkNote(notes, "n1", { type: "event", targetId: "event-1" }, { now: NOW }).notes;
+  notes = linkNote(notes, "n1", { type: "event", targetId: "event-1", occurrenceDate: DAY }, { now: NOW }).notes;
+
+  assert.deepEqual(notes[0].links, [
+    { type: "event", targetId: "event-1" },
+    { type: "event", targetId: "event-1", occurrenceDate: DAY },
+  ]);
 });
 
 test("system views separate inbox, pinned, daily and archived", () => {

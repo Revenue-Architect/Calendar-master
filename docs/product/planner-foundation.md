@@ -1653,6 +1653,59 @@ without re-identifying or rewriting existing notes.
 - Attachment retention
 - Ownership and permission enforcement
 
+## 15. Notes Phase 3: notebook and contextual writing
+
+**Status:** Approved for delivery on 2026-08-09
+
+This is the first user-facing organization slice. It deliberately exposes useful
+views over one existing system notebook instead of introducing notebook creation,
+folders, sharing, or storage-backed attachments. The user outcome is simple: a
+note can start on its own or in the context of work, and it remains easy to find
+from either direction.
+
+### 15.1 Notebook surface
+
+- Expose **All**, **Pinned**, and **Archived** as derived views over the same note
+  records. These views MUST NOT copy or move documents.
+- **All** includes every active note: daily, standalone, event-linked, and
+  task-linked. **Pinned** includes active pinned notes only. **Archived** includes
+  archived notes only.
+- The surface MUST create a standalone note with a durable ID and the default
+  system notebook. A title or document body is sufficient to save it.
+- A note row shows its title or excerpt, its context, and its pin/archive state;
+  opening it always edits the canonical note.
+- Pinning and archiving preserve note ID, block IDs, links, and revision history.
+  Archived notes leave All and Pinned immediately; restoring returns them to All.
+
+### 15.2 Contextual notes and backlinks
+
+- Event and task detail views expose a notes section and a **New note** action.
+- A note created from an event stores an `event` link. For a recurring event, the
+  current occurrence is represented by the series ID plus `occurrenceDate`; a
+  series-level note has no `occurrenceDate`.
+- A note created from a task stores the canonical task-series ID, never a rendered
+  recurring-occurrence ID. Subtasks use their own stable task ID when present.
+- Backlinks are derived from `NoteLink` records, not duplicated onto Calendar or
+  Tasks. Entity detail views query and render only matching notes.
+- Completing, deleting, moving, or rescheduling a task/event never deletes a
+  linked note. An unresolved target remains a recoverable note link.
+
+### 15.3 Boundaries and acceptance criteria
+
+- Notes remains the owner of documents, metadata, revisions, and link records;
+  Calendar and Tasks expose references only.
+- The Notes domain query layer owns view membership and contextual-link matching;
+  React supplies IDs, timestamps, and navigation effects.
+- Automated coverage proves view membership, archive/pin transitions, standalone
+  creation, recurring-event occurrence matching, task canonical-ID matching, and
+  block identity stability during shorthand edits.
+- Browser coverage proves standalone capture, all/pinned/archived transitions,
+  event/task note creation, backlink opening, reload persistence, and keyboard
+  isolation while each sheet is open.
+- Deferred: notebook CRUD/folders, inbox processing states, note tags UI,
+  templates, attachments, draft conflict resolution, collaboration, and provider
+  integration.
+
 ## Notes module target
 
 ```text

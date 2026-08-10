@@ -23,6 +23,9 @@ are too detailed for the repository README.
 - [`qa/2026-08-09-claude-implementation-pressure-test.md`](qa/2026-08-09-claude-implementation-pressure-test.md)
   records confirmed defects, repairs, browser flows, automated evidence, and the
   remaining physical-device checks.
+- [`qa/2026-08-09-notes-phase-3-pressure-test.md`](qa/2026-08-09-notes-phase-3-pressure-test.md)
+  records Phase 3 regression coverage and the environment-limited browser-run
+  evidence.
 
 ## Implementation plans
 
@@ -47,6 +50,9 @@ are too detailed for the repository README.
   system views, search, revisions, and the v7 migration.
 - [`superpowers/plans/2026-08-09-notes-phase-2.md`](superpowers/plans/2026-08-09-notes-phase-2.md)
   makes every block type reachable through line shorthand and adds note revisions.
+- [`superpowers/plans/2026-08-09-notes-phase-3.md`](superpowers/plans/2026-08-09-notes-phase-3.md)
+  delivers the notebook surface, standalone capture, contextual event/task notes,
+  and derived backlinks.
 - [`superpowers/plans/2026-08-09-planner-qa-repair.md`](superpowers/plans/2026-08-09-planner-qa-repair.md)
   implements the post-implementation persistence, search, notes, task-mutation,
   browser-pressure-test, and publication gates.

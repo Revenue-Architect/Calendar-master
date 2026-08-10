@@ -24,9 +24,15 @@ export function getNotesForDate(notes, dateKey) {
 
 /* §5.3. Backlinks are derived from the links already stored on each note, so the two
    directions cannot disagree. */
-export function getNotesForEntity(notes, type, targetId) {
+export function getNotesForEntity(notes, type, targetId, { occurrenceDate = null } = {}) {
   return notes
-    .filter((note) => active(note) && note.links.some((link) => link.type === type && link.targetId === targetId))
+    .filter((note) => active(note) && note.links.some((link) => (
+      link.type === type
+      && link.targetId === targetId
+      /* A series note has no occurrence date and therefore belongs on every
+         occurrence; a dated link is deliberately visible only on that one. */
+      && (occurrenceDate == null || !link.occurrenceDate || link.occurrenceDate === occurrenceDate)
+    )))
     .sort(byUpdated);
 }
 
@@ -45,6 +51,15 @@ export function getPinnedNotes(notes) {
 
 export function getArchivedNotes(notes) {
   return notes.filter((note) => note.archived).sort(byUpdated);
+}
+
+/* The notebook's tabs are views, not containers. Keeping membership in a query
+   means a pin or archive never copies a document or drifts from its backlinks. */
+export function getNotebookNotes(notes, view = "all") {
+  if (view === "pinned") return getPinnedNotes(notes);
+  if (view === "archived") return getArchivedNotes(notes);
+  if (view !== "all") throw new TypeError(`unknown note notebook view ${view}`);
+  return notes.filter(active).sort(byUpdated);
 }
 
 /* §9.1. Title, body text and tags are indexed; archived notes stay out unless asked

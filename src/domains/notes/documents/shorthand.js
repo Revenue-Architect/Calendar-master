@@ -55,17 +55,47 @@ export function textToBlocks(text, existing = [], newId = () => Math.random().to
   }
   if (fence) blocks.push(fence);
 
-  /* Identity is matched by position among blocks of the same kind, so editing one
-     line does not renumber every id after it and break links or extractions. */
-  const pool = new Map();
+  /* Match unchanged content first. Position-only reuse made an inserted checklist
+     inherit the task extracted from the line below it — a silent, dangerous link.
+     When exactly one same-type block remains on either side it is an edit, not an
+     insertion, so its stable identity can still follow a changed sentence. */
+  const signature = (block) => JSON.stringify({
+    type: block.type, text: block.text,
+    ...(block.type === "heading" ? { level: block.level ?? 2 } : {}),
+    ...(block.type === "checklist" ? { done: block.done === true } : {}),
+  });
+  const exact = new Map();
   for (const block of existing) {
-    const key = block.type;
-    if (!pool.has(key)) pool.set(key, []);
-    pool.get(key).push(block);
+    const key = signature(block);
+    if (!exact.has(key)) exact.set(key, []);
+    exact.get(key).push(block);
   }
+  const matched = new Map();
+  const used = new Set();
+  blocks.forEach((block, index) => {
+    const queue = exact.get(signature(block));
+    const reused = queue?.shift() ?? null;
+    if (reused) { matched.set(index, reused); used.add(reused.id); }
+  });
+  const freshByType = new Map();
+  const remainingByType = new Map();
+  blocks.forEach((block, index) => {
+    if (matched.has(index)) return;
+    if (!freshByType.has(block.type)) freshByType.set(block.type, []);
+    freshByType.get(block.type).push(index);
+  });
+  for (const block of existing) {
+    if (used.has(block.id)) continue;
+    if (!remainingByType.has(block.type)) remainingByType.set(block.type, []);
+    remainingByType.get(block.type).push(block);
+  }
+  for (const [type, indices] of freshByType) {
+    const remaining = remainingByType.get(type) ?? [];
+    if (indices.length === 1 && remaining.length === 1) matched.set(indices[0], remaining[0]);
+  }
+
   return normalizeBlocks(blocks.map((block, index) => {
-    const queue = pool.get(block.type);
-    const reused = queue && queue.length ? queue.shift() : null;
+    const reused = matched.get(index) ?? null;
     return {
       ...(reused ?? {}),
       ...block,

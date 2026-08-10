@@ -42,6 +42,18 @@ test("editing one line does not renumber the ids after it", () => {
   assert.deepEqual(edited.map((b) => b.id), existing.map((b) => b.id));
 });
 
+test("inserting a same-type line does not transfer an extracted task link", () => {
+  const nextId = ids();
+  const existing = textToBlocks("[ ] Alpha\n[ ] Beta", [], nextId).map((block, index) => ({
+    ...block, extractedTaskId: `task-${index + 1}`,
+  }));
+  const edited = textToBlocks("[ ] New\n[ ] Alpha\n[ ] Beta", existing, nextId);
+
+  assert.equal(edited[0].extractedTaskId, null, "new content cannot inherit Alpha's task");
+  assert.equal(edited[1].extractedTaskId, "task-1");
+  assert.equal(edited[2].extractedTaskId, "task-2");
+});
+
 test("inline marks parse to runs and reduce to readable text", () => {
   assert.deepEqual(parseInline("a **b** c").map((r) => [r.mark, r.text]),
     [[null, "a "], ["strong", "b"], [null, " c"]]);

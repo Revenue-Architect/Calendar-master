@@ -8,7 +8,9 @@ import {
   deleteNote as deleteNoteCommand,
   dropRevisionsFor,
   getDailyNote,
+  getNotebookNotes,
   getNotesForDate,
+  getNotesForEntity,
   isEmptyNote,
   markBlockExtracted,
   migrateV6ToV7,
@@ -21,6 +23,8 @@ import {
   revisionIsIntact,
   revisionsFor,
   searchNotes,
+  archiveNote as archiveNoteCommand,
+  pinNote as pinNoteCommand,
   toggleChecklistBlock,
   updateBlock as updateNoteBlock,
   updateNote as updateNoteCommand,
@@ -77,6 +81,7 @@ import {
   searchResultDateLabel,
 } from "./features/search/searchProjection.js";
 import { textToNoteBlocks } from "./features/notes/noteText.js";
+import { eventNoteLink, taskNoteLink } from "./features/notes/contextLink.js";
 import {
   applyBulkTaskAction,
   createTaskMutationUndoPayload,
@@ -462,6 +467,7 @@ export default function Planner() {
   const [composer, setComposer] = useState(null);
   const [noteEdit, setNoteEdit] = useState(null);
   const [noteHistory, setNoteHistory] = useState(null);
+  const [notebook, setNotebook] = useState(null);
   const [settings, setSettings] = useState(false);
   const [search, setSearch] = useState(false);
   const [scopeAsk, setScopeAsk] = useState(null);
@@ -838,7 +844,7 @@ export default function Planner() {
       /* Every modal counts. Leaving the newer sheets off this list let shortcuts act
          on the page behind them — arrow keys turned days while the first-run choice
          was still up. */
-      if (inspect || composer || settings || noteEdit || noteHistory || scopeAsk
+      if (inspect || composer || settings || noteEdit || noteHistory || notebook || scopeAsk
         || firstRun || confirmComplete || dependencyPicker || listPicker || pendingImport) return;
       if (e.key === "/" || (e.key === "k" && (e.metaKey || e.ctrlKey))) { e.preventDefault(); setSearch(true); return; }
       if (search) return;
@@ -861,7 +867,7 @@ export default function Planner() {
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [dateKey, inspect, composer, settings, noteEdit, noteHistory, search, scopeAsk, goDay, todayKey, nowMin, dayTasks, undo, firstRun, confirmComplete, dependencyPicker, listPicker, pendingImport]);
+  }, [dateKey, inspect, composer, settings, noteEdit, noteHistory, notebook, search, scopeAsk, goDay, todayKey, nowMin, dayTasks, undo, firstRun, confirmComplete, dependencyPicker, listPicker, pendingImport]);
 
   /* ─── writes (series-aware) ─── */
   const flash = (label, payload) => {
@@ -1407,16 +1413,21 @@ export default function Planner() {
     }
     : { ...item, kind, id: item.id });
 
-  const saveNote = (id, text) => {
+  const saveNote = (draft, text, title) => {
     beep("click");
     mutate((d) => {
+      const kind = draft.kind || "daily";
       /* §4.1. A day has one daily note, so writing on a day that already has one
-         edits it rather than making a second — two "notes for today" would make the
-         day's own note unanswerable, and the validator would reject the write. */
-      const targetId = id || getDailyNote(d.notes, dateKey)?.id || null;
+         edits it rather than making a second. Every other capture owns its own
+         durable identity; a standalone or contextual note must never be folded
+         into the day merely because it happened to be written there. */
+      const targetId = draft.id || (kind === "daily" ? getDailyNote(d.notes, draft.date || dateKey)?.id : null);
       if (targetId) {
         const current = d.notes.find((n) => n.id === targetId);
-        const saved = updateNoteCommand(d.notes, targetId, { blocks: textToNoteBlocks(text, current?.blocks ?? [], uid) }, { now: nowStamp() });
+        const saved = updateNoteCommand(d.notes, targetId, {
+          title,
+          blocks: textToNoteBlocks(text, current?.blocks ?? [], uid),
+        }, { now: nowStamp() });
         /* §10.2. A save that changed nothing returns the same collection and leaves
            no revision behind, so reopening the editor cannot inflate the history. */
         if (saved.notes === d.notes) return d;
@@ -1432,13 +1443,50 @@ export default function Planner() {
         ...d,
         notes: createNoteCommand(d.notes, {
           id: uid(),
-          kind: "daily",
-          date: dateKey,
+          kind,
+          ...(kind === "daily" ? { date: draft.date || dateKey } : {}),
+          title,
+          links: draft.links || [],
           blocks: textToNoteBlocks(text, [], uid),
         }, { now: nowStamp() }).notes,
       };
     });
     setNoteEdit(null);
+  };
+
+  const setNotePinned = (note) => {
+    beep("tick");
+    mutate((d) => ({
+      ...d,
+      notes: pinNoteCommand(d.notes, note.id, !note.pinned, { now: nowStamp() }).notes,
+    }));
+    setNoteEdit((current) => (current?.id === note.id ? { ...current, pinned: !note.pinned } : current));
+  };
+
+  const setNoteArchived = (note, archived) => {
+    beep(archived ? "delete" : "commit");
+    mutate((d) => ({
+      ...d,
+      notes: archiveNoteCommand(d.notes, note.id, archived, { now: nowStamp() }).notes,
+    }));
+    if (archived) setNoteEdit(null);
+    else setNoteEdit((current) => (current?.id === note.id ? { ...current, archived: false } : current));
+  };
+
+  const newContextualNote = () => {
+    if (!inspectNoteContext) return;
+    beep("click");
+    setInspect(null);
+    setNoteEdit({
+      kind: inspectNoteContext.type,
+      blocks: [],
+      links: [{
+        type: inspectNoteContext.type,
+        targetId: inspectNoteContext.targetId,
+        ...(inspectNoteContext.occurrenceDate ? { occurrenceDate: inspectNoteContext.occurrenceDate } : {}),
+      }],
+      contextLabel: inspectNoteContext.label,
+    });
   };
 
   /* §10.2. Restoring is itself an edit: the body someone is leaving becomes the new
@@ -1831,6 +1879,17 @@ export default function Planner() {
   const earliestStart = inspect && inspect.kind === "task" && db
     ? getEarliestResponsibleStart(db.tasks, parseTaskOccurrenceId(inspect.id).seriesId)
     : null;
+  /* Context links always target the durable owner, never a transient rendered card.
+     Event occurrences additionally retain their date so a meeting note does not
+     spill across every Tuesday; an undated event link is intentionally series-wide. */
+  const inspectNoteContext = inspect && inspectItem
+    ? (inspect.kind === "event" ? eventNoteLink(inspectItem) : taskNoteLink(inspectItem))
+    : null;
+  const linkedNotes = inspectNoteContext
+    ? getNotesForEntity(db.notes, inspectNoteContext.type, inspectNoteContext.targetId, {
+      occurrenceDate: inspectNoteContext.occurrenceDate,
+    })
+    : [];
   /* §4.6/§4.8. Changing one attribute is the same write as changing all of them,
      with the rest of the record supplied unchanged. Nothing here decides scope —
      that stays with saveEntry, so one question has one answer. */
@@ -1895,7 +1954,7 @@ export default function Planner() {
       onInspect={(id) => setInspect({ kind: "task", id })} onToggleSub={toggleSub} onAddSub={addSub} onRemoveSub={removeSub}
       onDragStart={(id, x, y) => { startGesture({ mode: "task", kind: "task", id, x, y }); setSheet(false); buzz(6); beep("lift"); }}
       onAddTask={() => { beep("click"); setComposer({ kind: "task" }); }}
-      onEditNote={(n) => { beep("click"); setNoteEdit(n || { blocks: [] }); }}
+      onEditNote={(n) => { beep("click"); setNoteEdit(n || { kind: "daily", date: dateKey, blocks: [] }); }}
       onToggleNoteCheck={toggleNoteCheck}
       onExtract={extractTask}
       onUnschedule={(id) => scheduleTask(id, null)}
@@ -1967,6 +2026,7 @@ export default function Planner() {
         </div>
         <div className="flex items-center gap-1">
           <button onClick={() => { jumpTo(todayKey); setMonthCursor(new Date()); }} style={{ fontFamily: MONO, color: T.dim }} className="nb-tap px-2 py-1 text-xs tracking-widest">TODAY</button>
+          <button onClick={() => { beep("click"); setNotebook("all"); }} style={{ fontFamily: MONO, color: T.dim }} className="nb-tap px-2 py-1 text-xs tracking-widest">NOTES</button>
           <button onClick={() => { beep("click"); setSearch(true); }} style={{ color: T.dim }} className="nb-tap w-8 h-8 text-sm" aria-label="Search">⌕</button>
           <button onClick={() => { beep("click"); setSettings(true); }} style={{ color: T.dim }} className="nb-tap w-8 h-8 text-sm" aria-label="Settings">⋯</button>
           <button onClick={() => { beep("click"); setComposer({ kind: "event", start: startSlot(nowMin), dur: 60 }); }} style={{ background: T.accent, color: T.on, fontFamily: MONO }} className="nb-tap px-2 py-1.5 text-xs font-bold tracking-widest">NEW</button>
@@ -2628,6 +2688,10 @@ export default function Planner() {
           </>
           )}
 
+          <EntityNotes T={T} notes={linkedNotes} kind={inspect.kind}
+            onNew={newContextualNote}
+            onOpen={(note) => { beep("click"); setInspect(null); setNoteEdit(note); }} />
+
           {/* §4.7. No generic "edit" — the view above already is the editor, so the
               only actions left are the ones that do something other than change a
               field. An action that leads elsewhere names what it is for. */}
@@ -2789,9 +2853,22 @@ export default function Planner() {
 
       {noteEdit && (
         <Sheet T={T} title="NOTE" onClose={() => { beep("click"); setNoteEdit(null); }}>
-          <NoteEditor T={T} note={noteEdit} onSave={(text) => saveNote(noteEdit.id, text)} onDelete={() => noteEdit.id && doDelete("note", noteEdit.id, "all")}
+          <NoteEditor T={T} note={noteEdit} onSave={(text, title) => saveNote(noteEdit, text, title)} onDelete={() => noteEdit.id && doDelete("note", noteEdit.id, "all")}
             history={noteEdit.id ? revisionsFor(db.noteRevisions, noteEdit.id).length : 0}
-            onHistory={() => { beep("click"); setNoteHistory(noteEdit.id); }} />
+            onHistory={() => { beep("click"); setNoteHistory(noteEdit.id); }}
+            onPin={() => noteEdit.id && setNotePinned(noteEdit)}
+            onArchive={() => noteEdit.id && setNoteArchived(noteEdit, !noteEdit.archived)} />
+        </Sheet>
+      )}
+
+      {notebook && (
+        <Sheet T={T} title="NOTEBOOK" onClose={() => { beep("click"); setNotebook(null); }}>
+          <NotebookPanel T={T} view={notebook} notes={getNotebookNotes(db.notes, notebook)}
+            onView={(view) => { beep("tick"); setNotebook(view); }}
+            onNew={() => { beep("click"); setNotebook(null); setNoteEdit({ kind: "standalone", blocks: [] }); }}
+            onOpen={(note) => { beep("click"); setNotebook(null); setNoteEdit(note); }}
+            onPin={setNotePinned}
+            onArchive={(note) => setNoteArchived(note, !note.archived)} />
         </Sheet>
       )}
 
@@ -3705,27 +3782,107 @@ function NoteHistory({ T, clock, revisions, onRestore }) {
   );
 }
 
-function NoteEditor({ T, note, onSave, onDelete, history = 0, onHistory }) {
-  /* The document is edited as text and stored as blocks. Round-tripping through
-     blank-line separated paragraphs keeps typing fast without inventing structure. */
-  /* The editor shows the document as shorthand, not as bare text. Round-tripping
-     through the same notation it parses is what makes the other block types usable:
-     a checklist reads back as "[ ] …", so retyping the line without its marker is a
-     deliberate change of type rather than a silent loss of one. */
-  const [v, setV] = useState(() => blocksToShorthand(note.blocks ?? []));
+function noteContextLabel(note) {
+  if (note.contextLabel) return note.contextLabel;
+  if (note.kind === "daily") return note.date ? fmtDay(note.date) : "DAILY NOTE";
+  if (note.kind === "event") return "EVENT NOTE";
+  if (note.kind === "task") return "TASK NOTE";
+  return "STANDALONE NOTE";
+}
+
+function EntityNotes({ T, notes, kind, onNew, onOpen }) {
+  return (
+    <div className="mt-5 pt-4" style={{ borderTop: `1px solid ${T.line}` }}>
+      <div className="flex items-baseline justify-between gap-3">
+        <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">
+          NOTES · {notes.length}
+        </span>
+        <button onClick={onNew} style={{ fontFamily: MONO, color: T.accent }} className="nb-tap text-xs tracking-widest">+ NEW NOTE</button>
+      </div>
+      {notes.length === 0 ? (
+        <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic mt-2">Keep the thinking beside this {kind}, not inside a field it will outgrow.</p>
+      ) : (
+        <div className="flex flex-col mt-2">
+          {notes.map((note) => (
+            <button key={note.id} onClick={() => onOpen(note)} className="nb-row text-left py-2.5" style={{ borderBottom: `1px solid ${T.line}` }}>
+              <span className="block text-sm truncate">{note.title || noteExcerpt(note, 90) || "Untitled note"}</span>
+              <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest mt-0.5">
+                {note.pinned ? "PINNED · " : ""}{note.updatedAt ? "UPDATED" : "NEW"}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NotebookPanel({ T, view, notes, onView, onNew, onOpen, onPin, onArchive }) {
+  const tabs = [["all", "ALL"], ["pinned", "PINNED"], ["archived", "ARCHIVED"]];
   return (
     <div>
-      <div className="flex items-baseline justify-between">
-        <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">{note.id ? "EDIT NOTE" : "NEW NOTE"}</span>
-        {history > 0 && (
-          <button onClick={onHistory} style={{ fontFamily: MONO, color: T.accent }} className="nb-tap text-xs tracking-widest">HISTORY · {history}</button>
-        )}
+      <div className="flex gap-1" role="tablist" aria-label="Notebook views">
+        {tabs.map(([id, label]) => {
+          const active = id === view;
+          return <button key={id} role="tab" aria-selected={active} onClick={() => onView(id)}
+            style={{ fontFamily: MONO, background: active ? T.accent : "transparent", color: active ? T.on : T.dim, border: `1px solid ${active ? T.accent : T.line}`, borderRadius: 999 }}
+            className="nb-tap flex-1 py-2 text-xs tracking-widest">{label}</button>;
+        })}
       </div>
-      <textarea autoFocus value={v} onChange={(e) => setV(e.target.value)} rows={6} placeholder="What was this day actually like?&#10;&#10;# Heading   - list   [ ] to-do   > quote&#10;**bold**  *italic*  `code`"
-        style={{ background: "transparent", border: `1px solid ${T.line}`, fontFamily: SERIF, resize: "none", width: "100%" }} className="text-sm italic leading-relaxed p-3 mt-2" />
-      <div className="flex gap-2 mt-4">
+      {view !== "archived" && (
+        <button onClick={onNew} style={{ fontFamily: MONO, color: T.on, background: T.accent }} className="nb-tap w-full py-3 mt-4 text-xs font-bold tracking-widest">+ NEW NOTE</button>
+      )}
+      <div className="flex flex-col mt-3">
+        {notes.map((note) => (
+          <div key={note.id} className="flex items-center gap-2 py-3" style={{ borderBottom: `1px solid ${T.line}` }}>
+            <button onClick={() => onOpen(note)} className="nb-row text-left flex-1 min-w-0">
+              <span className="block text-sm truncate">{note.title || noteExcerpt(note, 100) || "Untitled note"}</span>
+              <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest mt-0.5 truncate">
+                {noteContextLabel(note)}{note.pinned ? " · PINNED" : ""}
+              </span>
+            </button>
+            {view !== "archived" && <button onClick={() => onPin(note)} aria-label={note.pinned ? "Unpin note" : "Pin note"}
+              style={{ color: note.pinned ? T.accent : T.dim }} className="nb-tap p-2 text-sm">{note.pinned ? "★" : "☆"}</button>}
+            <button onClick={() => onArchive(note)} aria-label={note.archived ? "Restore note" : "Archive note"}
+              style={{ fontFamily: MONO, color: T.dim }} className="nb-tap p-2 text-xs tracking-widest">{note.archived ? "RESTORE" : "ARCHIVE"}</button>
+          </div>
+        ))}
+        {notes.length === 0 && <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic py-6 text-center">
+          {view === "pinned" ? "Pin the notes worth returning to." : view === "archived" ? "Nothing archived yet." : "A blank notebook is a good place to start."}
+        </p>}
+      </div>
+    </div>
+  );
+}
+
+function NoteEditor({ T, note, onSave, onDelete, history = 0, onHistory, onPin, onArchive }) {
+  /* The editor shows the same shorthand it parses, so a checklist remains a
+     checklist on the next save instead of being silently flattened to prose. */
+  const [v, setV] = useState(() => blocksToShorthand(note.blocks ?? []));
+  const [title, setTitle] = useState(() => note.title ?? "");
+  useEffect(() => {
+    setV(blocksToShorthand(note.blocks ?? []));
+    setTitle(note.title ?? "");
+  }, [note.id]);
+  const canSave = Boolean(title.trim() || v.trim());
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-3">
+        <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">{note.id ? "EDIT NOTE" : "NEW NOTE"}</span>
+        <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest truncate">{noteContextLabel(note)}</span>
+        {history > 0 && <button onClick={onHistory} style={{ fontFamily: MONO, color: T.accent }} className="nb-tap text-xs tracking-widest shrink-0">HISTORY · {history}</button>}
+      </div>
+      <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Untitled"
+        style={{ background: "transparent", borderBottom: `1px solid ${T.line}`, fontFamily: SANS, width: "100%" }} className="text-xl font-semibold py-3 mt-2" />
+      <textarea autoFocus value={v} onChange={(e) => setV(e.target.value)} rows={6} placeholder="Write it down.&#10;&#10;# Heading   - list   [ ] to-do   > quote&#10;**bold**  *italic*  `code`"
+        style={{ background: "transparent", border: `1px solid ${T.line}`, fontFamily: SERIF, resize: "none", width: "100%" }} className="text-sm italic leading-relaxed p-3 mt-3" />
+      {note.id && <div className="flex gap-2 mt-3">
+        <button onClick={onPin} style={{ fontFamily: MONO, color: note.pinned ? T.accent : T.dim, border: `1px solid ${T.line}` }} className="nb-tap flex-1 py-2 text-xs tracking-widest">{note.pinned ? "UNPIN" : "PIN"}</button>
+        <button onClick={onArchive} style={{ fontFamily: MONO, color: T.dim, border: `1px solid ${T.line}` }} className="nb-tap flex-1 py-2 text-xs tracking-widest">{note.archived ? "RESTORE" : "ARCHIVE"}</button>
+      </div>}
+      <div className="flex gap-2 mt-3">
         {note.id && <button onClick={onDelete} style={{ fontFamily: MONO, color: NOW_RED, border: `1px solid ${T.line}` }} className="nb-tap flex-1 py-3 text-xs tracking-widest">DELETE</button>}
-        <button onClick={() => v.trim() && onSave(v.trim())} disabled={!v.trim()} style={{ fontFamily: MONO, background: v.trim() ? T.accent : "transparent", color: v.trim() ? T.on : T.dim, border: `1px solid ${v.trim() ? T.accent : T.faint}` }} className="nb-tap flex-1 py-3 text-xs font-bold tracking-widest">SAVE</button>
+        <button onClick={() => canSave && onSave(v.trim(), title.trim())} disabled={!canSave} style={{ fontFamily: MONO, background: canSave ? T.accent : "transparent", color: canSave ? T.on : T.dim, border: `1px solid ${canSave ? T.accent : T.faint}` }} className="nb-tap flex-1 py-3 text-xs font-bold tracking-widest">SAVE</button>
       </div>
     </div>
   );

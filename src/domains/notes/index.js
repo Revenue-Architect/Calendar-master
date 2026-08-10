@@ -5,7 +5,7 @@ export {
   moveBlock, pinNote, removeBlock, toggleChecklistBlock, unlinkNote, updateBlock, updateNote,
 } from "./commands/noteCommands.js";
 export {
-  allNoteTags, getArchivedNotes, getBacklinks, getDailyNote, getInboxNotes,
+  allNoteTags, getArchivedNotes, getBacklinks, getDailyNote, getInboxNotes, getNotebookNotes,
   getNote, getNotesForDate, getNotesForEntity, getPinnedNotes, noteExcerpt, searchNotes,
 } from "./queries/noteQueries.js";
 export { blocksToShorthand, parseInline, plainText, textToBlocks } from "./documents/shorthand.js";

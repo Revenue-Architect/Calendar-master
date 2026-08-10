@@ -84,7 +84,11 @@ export function toggleChecklistBlock(notes, noteId, blockId, { now = null } = {}
 /* §5.2. Links are set-like: linking twice is the same as linking once. */
 export function linkNote(notes, noteId, link, { now = null } = {}) {
   const current = requireNote(notes, noteId);
-  const exists = current.links.some((entry) => entry.type === link.type && entry.targetId === link.targetId);
+  const exists = current.links.some((entry) => (
+    entry.type === link.type
+    && entry.targetId === link.targetId
+    && (entry.occurrenceDate ?? null) === (link.occurrenceDate ?? null)
+  ));
   if (exists) return { notes, events: [] };
   const result = updateNote(notes, noteId, { links: [...current.links, link] }, { now });
   return { ...result, events: [...result.events, noteEvent("NoteLinked", noteId, { link })] };
@@ -92,7 +96,11 @@ export function linkNote(notes, noteId, link, { now = null } = {}) {
 
 export function unlinkNote(notes, noteId, link, { now = null } = {}) {
   const current = requireNote(notes, noteId);
-  const links = current.links.filter((entry) => !(entry.type === link.type && entry.targetId === link.targetId));
+  const links = current.links.filter((entry) => !(
+    entry.type === link.type
+    && entry.targetId === link.targetId
+    && (entry.occurrenceDate ?? null) === (link.occurrenceDate ?? null)
+  ));
   if (links.length === current.links.length) return { notes, events: [] };
   const result = updateNote(notes, noteId, { links }, { now });
   return { ...result, events: [...result.events, noteEvent("NoteUnlinked", noteId, { link })] };
