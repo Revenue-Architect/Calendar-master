@@ -344,6 +344,20 @@ function eventForUi(event) {
   };
 }
 
+/* A meeting link is stored as a full URL. Bare domains get https:// prefixed;
+   anything that still fails to parse as http(s) yields "" so a Join affordance is
+   never rendered around a link it could not open. */
+const normalizeMeetingLink = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const candidate = /^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`;
+  try {
+    const url = new URL(candidate);
+    if ((url.protocol === "http:" || url.protocol === "https:") && url.hostname.includes(".")) return url.href;
+  } catch { /* not a URL */ }
+  return "";
+};
+
 function canonicalOccurrenceIdentity(id) {
   try { return parseOccurrenceId(id); } catch { return null; }
 }
@@ -469,7 +483,7 @@ function seed() {
     overrides: {},
     events: [
       { id: uid(), date: k(-30), title: "Morning pages", start: 420, dur: 30, cat: "RITUAL", place: "Kitchen table", note: "Three pages, longhand, no editing.", repeat: { freq: "daily", interval: 1 }, alerts: [] },
-      { id: uid(), date: k(-28), title: "Standup", start: 690, dur: 25, cat: "PEOPLE", place: "Video", note: "", repeat: { freq: "weekly", interval: 1, byDay: [1, 2, 3, 4, 5] }, alerts: [5] },
+      { id: uid(), date: k(-28), title: "Standup", start: 690, dur: 25, cat: "PEOPLE", place: "Video", link: "https://meet.google.com/nbp-demo-standup", note: "", repeat: { freq: "weekly", interval: 1, byDay: [1, 2, 3, 4, 5] }, alerts: [5] },
       { id: uid(), date: k(0), title: "Deep block — pricing model", start: 540, dur: 120, cat: "DEEP WORK", place: "Desk", note: "Rebuild the tiering sheet. No inbox until this ships.", alerts: [15] },
       { id: uid(), date: k(0), title: "Lunch and a walk", start: 780, dur: 55, cat: "BODY", place: "Riverside loop", note: "", alerts: [] },
       { id: uid(), date: k(0), title: "Client review — Nordwell", start: 900, dur: 90, cat: "PEOPLE", place: "Room 4", note: "Bring the migration timeline and the two open risks.", alerts: [30] },
@@ -1135,7 +1149,10 @@ export default function Planner() {
       if (intent.reopened) {
         return { ...d, taskExceptions: removeTaskException(d.taskExceptions, seriesId, occurrenceDate) };
       }
-      const detachedId = uid();
+      /* A caller may pre-pick the detached id when it needs to address the
+         detached task right after this write — e.g. the checklist tick that
+         completes the whole action. */
+      const detachedId = intent.detachedId ?? uid();
       const detached = normalizeTaskInput({
         ...series,
         id: detachedId,
@@ -1180,6 +1197,17 @@ export default function Planner() {
        is the one that most needs a way back. */
     flash("Completed", { type: "task-complete", id, rewardSources: rewardSource ? [rewardSource] : [] });
     setConfirmComplete(null);
+  };
+  /* The last-step auto-complete fires after a beat of delay, so it goes through a
+     render-fresh ref AND revalidates before acting: 420ms is long enough to untick
+     the step, and a completion must honour what is true when it fires, not what
+     was true when it was scheduled. */
+  const autoCompleteRef = useRef(null);
+  autoCompleteRef.current = (id) => {
+    const t = findTask(id);
+    const checklist = t?.checklist ?? [];
+    if (!t || t.status === "completed" || !checklist.length || !checklist.every((s) => s.done)) return;
+    completeTask(id);
   };
   const reopenTask = (id) => {
     const t = findTask(id);
@@ -1231,22 +1259,59 @@ export default function Planner() {
     flash(`Moved to ${fmtDay(targetKey)}`, undoPayload);
   };
   const pullOverdue = () => {
+    /* Overdue is deadline-driven, so a task already planned onto today stays in the
+       overdue list — pulling it again would be a visible no-op. Only what can
+       actually move is counted, both here and on the banner that calls this. */
+    const entries = overdue.filter((t) => t.planned.date !== todayKey);
+    if (!entries.length) return;
     beep("schedule");
-    /* Everything counted as overdue is a real one-off task, so everything counted is
-       something this button can actually move — the count always clears. */
-    const ids = overdue.map((t) => ({ id: t.id, date: t.planned.date }));
+    const before = structuredClone(db);
     mutate((d) => {
-      let tasks = d.tasks;
-      for (const entry of ids) {
-        tasks = planTaskCommand(tasks, entry.id, {
-          date: todayKey,
-          startMinute: tasks.find((task) => task.id === entry.id)?.planned.startMinute ?? null,
-          estimateMinutes: tasks.find((task) => task.id === entry.id)?.planned.estimateMinutes ?? null,
-        }).tasks;
+      let staged = d;
+      for (const entry of entries) {
+        const { seriesId, occurrenceDate } = parseTaskOccurrenceId(entry.id);
+        const series = occurrenceDate ? staged.tasks.find((x) => x.id === seriesId && x.recurrence) : null;
+        if (series) {
+          /* A missed occurrence of an accumulating series is not a row
+             planTaskCommand can find — its id is `series@date`. Detach it into a
+             real one-off first, exactly like any other single-occurrence edit,
+             then plan the detached task onto today. */
+          const detachedId = uid();
+          const detached = normalizeTaskInput({
+            ...series,
+            id: detachedId,
+            recurrence: null,
+            planned: { ...series.planned, date: occurrenceDate },
+          });
+          staged = {
+            ...staged,
+            tasks: [...staged.tasks, detached],
+            taskExceptions: upsertTaskException(staged.taskExceptions, {
+              id: uid(), seriesId, occurrenceDate, kind: "cancelled",
+            }),
+          };
+          staged = {
+            ...staged,
+            tasks: planTaskCommand(staged.tasks, detachedId, {
+              date: todayKey,
+              startMinute: detached.planned.startMinute ?? null,
+              estimateMinutes: detached.planned.estimateMinutes ?? null,
+            }).tasks,
+          };
+          continue;
+        }
+        staged = {
+          ...staged,
+          tasks: planTaskCommand(staged.tasks, entry.id, {
+            date: todayKey,
+            startMinute: entry.planned.startMinute ?? null,
+            estimateMinutes: entry.planned.estimateMinutes ?? null,
+          }).tasks,
+        };
       }
-      return { ...d, tasks };
+      return staged;
     });
-    flash(`${ids.length} planned for today`, { type: "task-restore-dates", ids });
+    flash(`${entries.length} planned for today`, { type: "restore-planner-state", snapshot: { state: before } });
   };
   const duplicateEvent = (id) => {
     const e = dayEvents.find((x) => x.id === id);
@@ -1291,18 +1356,36 @@ export default function Planner() {
       return { ...d, tasks: d.tasks.map((t) => ({ ...t, rank: ranks.get(t.id) ?? t.rank })) };
     });
   };
-  const patchChecklist = (taskId, next) => {
+  const patchChecklist = (taskId, next, intent = {}) => {
     writeTask(taskId, (state, id) => updateTaskCommand(state.tasks, id, {
       checklist: next(state.tasks.find((t) => t.id === id).checklist ?? []),
-    }));
+    }), intent);
   };
   const toggleSub = (taskId, subId) => {
     beep("tick");
-    patchChecklist(taskId, (checklist) => checklist.map((item) => (
-      item.id === subId
-        ? { ...item, done: !item.done, completedAt: item.done ? null : nowStamp() }
-        : item
-    )));
+    /* §8.2 extended: ticking the last open step finishes the action itself,
+       through the same completion flow as the hold — XP, streak, sound and the
+       blocker confirmation all included. Only the check transition triggers it;
+       unchecking a step never quietly reopens a completed parent. */
+    const t = findTask(taskId);
+    const item = t?.checklist?.find((s) => s.id === subId);
+    const lastStep = !!t && t.status !== "completed" && !!item && !item.done
+      && (t.checklist ?? []).every((s) => s.done || s.id === subId);
+    /* Editing a series occurrence detaches it (§9.5); pre-picking the detached id
+       lets the delayed completion find the task this very tick creates. */
+    const { occurrenceDate } = parseTaskOccurrenceId(taskId);
+    const detachedId = lastStep && occurrenceDate ? uid() : null;
+    patchChecklist(taskId, (checklist) => checklist.map((step) => (
+      step.id === subId
+        ? { ...step, done: !step.done, completedAt: step.done ? null : nowStamp() }
+        : step
+    )), detachedId ? { detachedId } : {});
+    if (lastStep) {
+      /* The beat of delay lets the tick and the progress bar land before the card
+         completes; the ref revalidates at fire time, so unticking within the delay
+         cancels the completion. */
+      setTimeout(() => autoCompleteRef.current?.(detachedId ?? taskId), 420);
+    }
   };
   const addSub = (taskId, title) => {
     beep("tick");
@@ -1527,7 +1610,7 @@ export default function Planner() {
   const commitSave = (p, scope) => {
     beep(p.id ? "click" : "schedule");
     const patch = p.kind === "event"
-      ? { title: p.title, start: p.start, dur: p.dur, cat: p.cat, place: p.place, note: p.note, allDay: p.allDay, endDate: p.endDate || null, repeat: p.repeat, recurrence: p.recurrence, timing: p.timing, alerts: p.alerts }
+      ? { title: p.title, start: p.start, dur: p.dur, cat: p.cat, place: p.place, note: p.note, link: normalizeMeetingLink(p.link) || String(p.link || "").trim(), allDay: p.allDay, endDate: p.endDate || null, repeat: p.repeat, recurrence: p.recurrence, timing: p.timing, alerts: p.alerts }
       : buildTaskWritePatch(p, dateKey);
     if (p.date && scope !== "one") patch.date = p.date;
     if (p.id && p.kind === "event") {
@@ -1767,6 +1850,7 @@ export default function Planner() {
         lines.push(`RRULE:${rule}`);
       }
       if (e.place) lines.push(`LOCATION:${esc(e.place)}`);
+      if (normalizeMeetingLink(e.link)) lines.push(`URL:${normalizeMeetingLink(e.link)}`);
       if (e.note) lines.push(`DESCRIPTION:${esc(e.note)}`);
       (e.alerts || []).forEach((a) => lines.push("BEGIN:VALARM", "ACTION:DISPLAY", `TRIGGER:-PT${a}M`, `DESCRIPTION:${esc(e.title)}`, "END:VALARM"));
       lines.push("END:VEVENT");
@@ -2232,15 +2316,13 @@ export default function Planner() {
         .nb-s::-webkit-scrollbar-track{background:transparent}
         .nb-x::-webkit-scrollbar{display:none}
         .nb-x{-ms-overflow-style:none;scrollbar-width:none}
-        .nb-root{min-height:100dvh}
-        /* Below the desktop breakpoint the page is exactly one viewport tall, so the
-           day surface can flex into the space that is left instead of overflowing
-           past the fold and leaving a dead gap under it. */
-        @media(max-width:1023px){.nb-root{height:100dvh;overflow:hidden}}
+        /* The page is exactly one viewport tall at every width, so the day surface
+           flexes into the space that is left instead of stopping at an arbitrary
+           cap partway down a large screen. Each pane scrolls inside itself. */
+        .nb-root{height:100dvh;overflow:hidden}
         .nb-main{padding-bottom:var(--sheet-pad);transition:padding-bottom 260ms cubic-bezier(.2,.8,.25,1)}
         @media(min-width:1024px){.nb-main{padding-bottom:2rem}}
         .nb-stream{flex:1 1 auto;min-height:0}
-        @media(min-width:1024px){.nb-stream{flex:none;height:auto;max-height:620px}}
         .nb-tap{transition:transform 90ms ease,opacity 120ms ease}
         .nb-tap:active{transform:scale(0.96)}
         /* A stamp hides its native control, so the focus it takes has to be drawn
@@ -2510,20 +2592,23 @@ export default function Planner() {
               <div className="relative" style={{ height: DAY_H }}>
                 {Array.from({ length: 24 }).map((_, h) => (
                   <div key={h} className="absolute left-0 right-0 flex items-start pointer-events-none"
-                    style={{
-                      top: h * HOUR_H,
-                      height: HOUR_H,
+                    style={{ top: h * HOUR_H, height: HOUR_H }}>
+                    {/* The label owns its gutter: rules and banding start after it, so
+                        the times read on clean card instead of sitting across the
+                        grid lines they annotate. */}
+                    <span style={{ fontFamily: MONO, color: T.dim, transform: h === 0 ? "none" : "translateY(-50%)" }}
+                      className="w-14 shrink-0 pr-3 text-right text-xs tracking-widest">{fmtHour(h, clock)}</span>
+                    <div className="flex-1 h-full" style={{
                       /* Depth comes from banding, not from rules. A hairline every hour
                          reads as a table; alternating fills give the same reading
                          without drawing 24 lines across the content. */
                       borderTop: `1px solid ${hourRule}`,
                       background: h % 2 ? hourBand : "transparent",
                     }}>
-                    <span style={{ fontFamily: MONO, color: T.dim, transform: h === 0 ? "none" : "translateY(-50%)" }}
-                      className="w-14 shrink-0 pr-3 text-right text-xs tracking-widest">{fmtHour(h, clock)}</span>
-                    {suggested.includes(h) && !gesture && (
-                      <span style={{ fontFamily: MONO, color: T.faint }} className="flex-1 mr-2 mt-1.5 text-xs tracking-widest">FREE</span>
-                    )}
+                      {suggested.includes(h) && !gesture && (
+                        <span style={{ fontFamily: MONO, color: T.faint }} className="block mr-2 mt-1.5 text-xs tracking-widest">FREE</span>
+                      )}
+                    </div>
                   </div>
                 ))}
 
@@ -2603,6 +2688,12 @@ export default function Planner() {
                               <span className="text-xs font-semibold truncate flex-1">{e.title}</span>
                               {conflictIds.has(e.id) && <span title="Overlaps another event" style={{ color: NOW_RED }} className="text-xs shrink-0">⚠</span>}
                               {e.repeat && <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs shrink-0">↻</span>}
+                              {normalizeMeetingLink(e.link) && (
+                                <a href={normalizeMeetingLink(e.link)} target="_blank" rel="noopener noreferrer" draggable={false}
+                                  onPointerDown={(ev) => ev.stopPropagation()} onPointerUp={(ev) => ev.stopPropagation()} onClick={(ev) => ev.stopPropagation()}
+                                  aria-label="Join meeting"
+                                  style={{ fontFamily: MONO, color: T.accent }} className="text-xs font-bold tracking-widest shrink-0">JOIN ↗</a>
+                              )}
                               {e.alerts && e.alerts.length > 0 && <span style={{ color: T.dim }} className="text-xs shrink-0">◔</span>}
                               {live && <span style={{ fontFamily: MONO, background: T.accent, color: T.on, borderRadius: 4 }} className="shrink-0 px-1 text-xs tracking-widest">{Math.round(pct)}%</span>}
                               {held && <span style={{ fontFamily: MONO, background: T.accent, color: T.on, borderRadius: 4 }} className="shrink-0 px-1 text-xs tracking-widest">{gesture.overDay ? fmtDay(gesture.overDay) : tm(e.start)}</span>}
@@ -2661,7 +2752,7 @@ export default function Planner() {
           </div>
         </section>
 
-        <section className="hidden lg:block lg:col-span-5">{actionsPanel}</section>
+        <section className="nb-s hidden lg:block lg:col-span-5 min-h-0 overflow-y-auto">{actionsPanel}</section>
       </main>
 
       {/* ══ MOBILE SHEET ══ */}
@@ -3048,6 +3139,20 @@ export default function Planner() {
                 onCommit={(place) => editEntry({ place })} onBeginEdit={beginDetailEdit} className="text-sm" />
             </InlineField>
 
+            <InlineField T={T} surface={surface} icon="⌁">
+              <InlineText T={T} value={inspectDraft.link || ""} placeholder="Add a meeting link" ariaLabel="Meeting link"
+                onCommit={(link) => editEntry({ link: normalizeMeetingLink(link) || link.trim() })} onBeginEdit={beginDetailEdit} className="text-sm" />
+              {normalizeMeetingLink(inspectDraft.link) && (
+                <a href={normalizeMeetingLink(inspectDraft.link)} target="_blank" rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  style={{ fontFamily: MONO, background: T.accent, color: T.on, borderRadius: 999 }}
+                  className="nb-tap px-2.5 py-1 text-xs font-bold tracking-widest shrink-0">JOIN</a>
+              )}
+              {inspectDraft.link && !normalizeMeetingLink(inspectDraft.link) && (
+                <span style={{ fontFamily: MONO, color: NOW_RED }} className="text-xs tracking-widest shrink-0">NOT A LINK</span>
+              )}
+            </InlineField>
+
             {conflictIds.has(inspect.id) && (
               <Pill T={T} surface={surface} icon="⚠" tint={NOW_RED} label="Overlaps another event on this day" />
             )}
@@ -3423,6 +3528,7 @@ export default function Planner() {
 /* ═══════════════════════ ACTIONS ═══════════════════════ */
 
 function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, onOpenDeadline, overdue, deadlines, showOverdue, todayKey, gesture, blockersFor, onPromoteSub, smartView, viewCounts, onSmartView, lists, onManageLists, clock = "12", selection, onToggleSelect, onStartSelect, onCancelSelect, onBulk, onPullOverdue, beep, buzz, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onAddTask, onEditNote, onUnschedule, onJump }) {
+  const pullable = overdue.filter((t) => t.planned?.date !== todayKey);
   const open = tasks.filter((t) => t.status !== "completed");
   const done = tasks.filter((t) => t.status === "completed");
   return (
@@ -3477,10 +3583,12 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
         })}
       </div>
 
-      {showOverdue && overdue.length > 0 && (
+      {/* Only what PLAN TODAY can actually move is offered: overdue work already
+          planned onto today would make the button a visible no-op. */}
+      {showOverdue && pullable.length > 0 && (
         <button onClick={onPullOverdue} className="w-full flex items-center gap-2 px-3 py-2 mb-2 text-left" style={{ boxShadow: `inset 0 0 0 1px ${NOW_RED}` }}>
-          <span style={{ fontFamily: MONO, color: NOW_RED }} className="text-xs tracking-widest shrink-0">{overdue.length} OVERDUE</span>
-          <span className="flex-1 text-xs truncate" style={{ color: T.dim }}>{overdue.map((t) => t.title).join(" · ")}</span>
+          <span style={{ fontFamily: MONO, color: NOW_RED }} className="text-xs tracking-widest shrink-0">{pullable.length} OVERDUE</span>
+          <span className="flex-1 text-xs truncate" style={{ color: T.dim }}>{pullable.map((t) => t.title).join(" · ")}</span>
           <span style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest shrink-0">PLAN TODAY</span>
         </button>
       )}
@@ -3717,6 +3825,15 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromote
                 <span className="shrink-0 rounded-full" style={{ width: 7, height: 7, background: catColor(t.category) }} />
                 <span style={{ color: T.dim }} className="text-xs tracking-widest">{t.category}</span>
               </span>
+              {/* Open is the default and stays quiet; the two states you set on
+                  purpose announce themselves, so changing status in the detail view
+                  has a visible effect out here on the row. */}
+              {!isDone && t.status === "in_progress" && (
+                <span style={{ color: T.accent, border: `1px solid ${T.accent}`, borderRadius: 999 }} className="px-1.5 py-0.5 text-xs tracking-widest shrink-0">DOING</span>
+              )}
+              {!isDone && t.status === "waiting" && (
+                <span style={{ color: T.dim, border: `1px solid ${T.line}`, borderRadius: 999 }} className="px-1.5 py-0.5 text-xs tracking-widest shrink-0">WAITING</span>
+              )}
               {t.recurrence && <span style={{ color: T.dim }} className="text-xs">↻</span>}
               {t.planned.startMinute != null && <button onClick={() => onUnschedule(t.id)} style={{ color: T.accent }} className="text-xs tracking-widest">{fmtTime(t.planned.startMinute, clock)}</button>}
               {dueLeft != null && <span style={{ color: dueLeft <= 0 ? NOW_RED : T.dim }} className="text-xs tracking-widest">DUE {dueLeft === 0 ? "TODAY" : dueLeft < 0 ? `${-dueLeft}D LATE` : `${dueLeft}D`}</span>}
@@ -3745,7 +3862,16 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromote
             <div className="pl-3" style={{ borderLeft: `2px solid ${T.faint}` }}>
               {checklist.map((s) => (
                 <div key={s.id} className="nb-row flex items-center gap-2 w-full py-1.5">
-                  <button onClick={() => onToggleSub(t.id, s.id)} className="flex items-center gap-2 flex-1 text-left">
+                  <button onClick={() => {
+                    /* The tick that finishes the last step is about to finish the
+                       whole action — burst here, where the circle is, so the
+                       celebration starts on the control the finger is on. A
+                       dependency-blocked task asks for confirmation instead. */
+                    if (!s.done && !blockers.length && checklist.every((x) => x.done || x.id === s.id)) {
+                      setBurst(uid()); setTimeout(() => setBurst(null), 640);
+                    }
+                    onToggleSub(t.id, s.id);
+                  }} className="flex items-center gap-2 flex-1 text-left">
                     <span className="w-3 h-3 shrink-0" style={{ background: s.done ? T.accent : "transparent", boxShadow: `inset 0 0 0 1px ${s.done ? T.accent : T.faint}` }} />
                     <span className="text-xs" style={{ textDecoration: s.done ? "line-through" : "none", color: s.done ? T.dim : T.text }}>{s.title}</span>
                   </button>
@@ -4620,6 +4746,7 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
   const [len, setLen] = useState(initial.dur != null && initial.dur > 0 ? initial.dur : 60);
   const [xp, setXp] = useState(initial.xp || 30);
   const [place, setPlace] = useState(initial.place || "");
+  const [link, setLink] = useState(initial.link || "");
   const [note, setNote] = useState(initial.note || "");
   const [at, setAt] = useState(initial.at != null ? initial.at : null);
   const [estimate, setEstimate] = useState(initial.estimate != null ? initial.estimate : null);
@@ -4673,7 +4800,13 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
         ...(offsetInfo.end.length > 1 ? { endOffset: endOffset || offsetInfo.end[0].offset } : {}),
       } : {}),
     };
-  const ok = title.trim().length > 0 && (allDay || offsetInfo.valid);
+  /* An empty link is fine; a non-empty one must be something a Join button could
+     actually open, so newly typed junk is caught here rather than silently dropped
+     on save. A stored value that was already unparseable is let through untouched —
+     an unrelated edit must not hold the whole save hostage or erase the field. */
+  const linkUntouched = link.trim() === String(initial.link || "").trim();
+  const linkOk = kind !== "event" || !link.trim() || !!normalizeMeetingLink(link) || linkUntouched;
+  const ok = title.trim().length > 0 && (allDay || offsetInfo.valid) && linkOk;
   const preview = useMemo(() => {
     if (kind !== "event" || !recurrence || !ok) return [];
     try {
@@ -4682,7 +4815,7 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
   }, [kind, recurrence && JSON.stringify(recurrence), JSON.stringify(timing), ok]);
   const submit = () => {
     if (!ok) return;
-    onSubmit({ id: initial.id, date: unplanned && kind === "task" ? null : date, unplanned, kind, title: title.trim(), cat, start: allDay ? 0 : start, dur: allDay ? 0 : len, xp, place, note, at, estimate, due: due || null, allDay, endDate, alerts, repeat: repeat && repeat.freq ? repeat : null, recurrence, timing });
+    onSubmit({ id: initial.id, date: unplanned && kind === "task" ? null : date, unplanned, kind, title: title.trim(), cat, start: allDay ? 0 : start, dur: allDay ? 0 : len, xp, place, link: normalizeMeetingLink(link) || link.trim(), note, at, estimate, due: due || null, allDay, endDate, alerts, repeat: repeat && repeat.freq ? repeat : null, recurrence, timing });
   };
   const toTime = (m) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
   const fromTime = (s) => { const [h, m] = s.split(":").map(Number); return h * 60 + m; };
@@ -4789,6 +4922,11 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
                 options={ALERT_CHOICES.map((a) => [a, a === 0 ? "AT TIME" : `${a}M`])} wrap />
               <input value={place} onChange={(e) => setPlace(e.target.value)} placeholder="Where"
                 style={{ background: surface, border: "none", borderRadius: CARD_R }} className="w-full px-3 py-2.5 text-sm" />
+              <input value={link} onChange={(e) => setLink(e.target.value)} placeholder="Meeting link — Meet, Zoom, Teams…" inputMode="url"
+                style={{ background: surface, border: "none", borderRadius: CARD_R }} className="w-full px-3 py-2.5 text-sm" />
+              {!linkOk && (
+                <span style={{ fontFamily: MONO, color: NOW_RED }} className="px-1 text-xs tracking-widest">DOESN'T LOOK LIKE A LINK</span>
+              )}
             </>
           ) : (
             <>

@@ -51,6 +51,7 @@ export function applyDetailDraft(kind, item, draft, fallbackDate) {
     title: draft.title ?? item.title,
     cat: draft.cat ?? item.cat,
     place: draft.place ?? item.place,
+    link: draft.link ?? item.link,
     note: draft.note ?? item.note,
     start: draft.start ?? item.start,
     dur: draft.dur ?? item.dur,
