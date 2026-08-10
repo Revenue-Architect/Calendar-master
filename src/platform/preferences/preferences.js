@@ -2,7 +2,10 @@ export const PREFERENCES_VERSION = 1;
 
 export const DEFAULT_PREFERENCES = Object.freeze({
   schemaVersion: PREFERENCES_VERSION,
-  display: Object.freeze({ themeId: "obsidian-acid", clock: "12", reducedMotion: false }),
+  /* `weekStart` is a weekday index the way `Date#getDay` counts, so 0 is Sunday
+     and 1 is Monday. It is a display preference like the clock: it changes which
+     column a week opens on, never what a stored record means. */
+  display: Object.freeze({ themeId: "obsidian-acid", clock: "12", weekStart: 0, reducedMotion: false }),
   feedback: Object.freeze({ sound: true, haptics: false }),
   notifications: Object.freeze({ systemEnabled: false }),
   motivation: Object.freeze({ points: true, levels: true, streaks: true, celebrations: true }),
@@ -36,6 +39,7 @@ export function createPreferences(input = {}) {
     display: {
       themeId: themeId(display.themeId),
       clock: display.clock === "24" ? "24" : "12",
+      weekStart: display.weekStart === 1 ? 1 : DEFAULT_PREFERENCES.display.weekStart,
       reducedMotion: boolean(display.reducedMotion, DEFAULT_PREFERENCES.display.reducedMotion),
     },
     feedback: {

@@ -8,11 +8,17 @@ themes. All state is local to the device.
 
 ```bash
 npm install
-npm run dev      # dev server
-npm test         # Calendar, Tasks, Notes, and shared time domain tests
-npm run build    # production bundle into dist/
-npm run preview  # serve the built bundle
+npm run dev       # dev server
+npm test          # domain, feature, and platform unit tests (node --test)
+npm run test:e2e  # browser regression suite (Playwright, against the built bundle)
+npm run test:all  # both
+npm run build     # production bundle into dist/
+npm run preview   # serve the built bundle
 ```
+
+The browser suite needs Chromium once: `npx playwright install chromium`. Where an
+image already ships one that this Playwright did not install, point at it with
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE=/path/to/chrome`.
 
 ## Layout
 
@@ -25,8 +31,10 @@ npm run preview  # serve the built bundle
 | `src/shared/time/` | Date, local date-time, interval, and IANA timezone primitives |
 | `src/platform/persistence/` | Validated planner-state loading, saving, and the v7 cutover |
 | `src/storage.js` | Browser/host storage adapter and the only browser storage I/O |
+| `src/features/planner/` | Presentation-safe projections: day, week, slots, quick add, palette, carry-forward |
 | `src/main.jsx` | Entry point: mounts `Planner` |
 | `src/index.css` | Tailwind import plus page-level resets |
+| `tests/e2e/` | Browser regression suite for the flows unit tests cannot reach |
 
 Calendar event reads and writes pass through `src/domains/calendar/index.js`.
 Canonical events use all-day, floating-time, or IANA-zoned timing; recurrence and
@@ -35,17 +43,20 @@ typed exceptions remain provider-neutral.
 ## Storage
 
 `src/storage.js` prefers a host-provided `window.storage` when embedded and falls
-back to `localStorage`. Planner state is schema version 7 under `nbmp:state:v7`.
+back to `localStorage`. Planner state is schema version 8 under `nbmp:state:v8`.
 On first load an older notebook is validated and migrated in memory, written,
 read back and validated, and only then is the older key removed. Whatever
-version is on the device upgrades straight to v7 in a single confirmed write, so an
+version is on the device upgrades straight to v8 in a single confirmed write, so an
 interrupted upgrade never strands an intermediate version. There is
 no dual-write period, and a failed write or confirmation leaves the previous version
 untouched.
 
-Missing storage seeds a new validated v7 notebook. Malformed or failed migration
+Missing storage seeds a new validated v8 notebook. Malformed or failed migration
 does not seed over existing data. Writes reject on storage failure so Settings can
 warn the user and preserve export as a recovery path.
+
+Display preferences, the motivation ledger, and local diagnostics live in their own
+stores beside the notebook, so changing a theme or a clock never rewrites records.
 
 ## Calendar foundations
 
@@ -130,6 +141,23 @@ day that already has one edits it. Checklist blocks can become real actions, and
 line that has been extracted records which task it produced so it cannot spawn a
 second. Saving something unchanged does not bump the revision.
 
+## Week
+
+Seven day columns against one shared time axis, so a week is read as one shape
+rather than seven days in sequence. Reads go through the calendar domain's
+visible-occurrence projection, and free/busy — find-a-slot, the month heatmap —
+through the availability projection, so a hidden calendar is absent and a
+non-availability calendar shows its events without ever blocking a slot.
+
+A card is moved by pressing and holding it, then dragging: the column under the
+pointer decides the day and the pointer's height decides the time, so a move can
+change both at once. A press without a hold still scrolls, and a tap still opens.
+Dragging one day of a repeating event detaches that day as an exception and leaves
+the series where it is.
+
+Week starts on Sunday or Monday — a display preference under Settings that moves
+the month grid, the week's first column, and the weekday chips together.
+
 ## Agenda
 
 The timeline answers "when, and for how long"; the agenda answers "what is coming".
@@ -140,11 +168,50 @@ week. Each entry carries its category dot, its title, and one trailing value: a 
 time, `ALL DAY`, or `ACTION` for unscheduled work. Opening an entry moves to its day
 first, so the detail is always read in context.
 
+## Capture
+
+The composer is thorough; quick add is fast. `⌘K` (or `/`) opens one input over
+both the things you have and the things you can do:
+
+- **A whole line becomes a record.** `Lunch w/ Sara Tue 1pm 45m` is an event on
+  Tuesday at 13:00 for 45 minutes. Whatever the parser does not recognise stays in
+  the title, so nothing is silently dropped, and the palette shows what it read
+  before you commit it. A time makes it an event; without one it is an action.
+  `todo:` and `event:` force the kind either way.
+- **Days**: `today`, `tonight`, `tomorrow`, `tue`, `next fri`, `in 3 days`,
+  `jan 15`, `15 jan`, `3/14`, `2026-03-14`.
+  **Times**: `1pm`, `13:00`, `9:30am`, `noon`, `1-2pm`, `9:00-10:30`.
+  **Durations**: `45m`, `90min`, `1h`, `1.5h`.
+  **Actions also take**: `by friday` / `due jan 9`, `#list`, `@tag`.
+- **Anything it cannot finish opens the composer prefilled** with what did parse,
+  so an unusual line costs a click rather than the typing.
+- **Commands** live in the same list: new event, new action, jump to today, the
+  four views, switch theme, 12/24-hour clock, week start, settings, shortcuts.
+
+## Actions without a day
+
+An action with no planned date is not an action for no day — it is work still
+owed. It stands on today and on every day ahead until it is completed, cancelled,
+given a planned date, or given a deadline; it never appears in the past, and one
+with a deadline is left to Deadlines and Overdue rather than shown twice. Dropping
+one on the timeline plans it for the day in view and the minute it landed on.
+
 ## Keyboard
 
-| Key   | Action              |
-| ----- | ------------------- |
-| `←` `→` | Previous / next day |
-| `T`   | Jump to today       |
-| `N`   | New event           |
-| `/`   | Search              |
+Press `?` in the app for this list.
+
+| Key       | Action                                            |
+| --------- | ------------------------------------------------- |
+| `←` `→`   | Previous / next day                               |
+| `T`       | Jump to today                                     |
+| `[` `]`   | Zoom out / in — day, week, month                  |
+| `N`       | New event                                         |
+| `A`       | New action                                        |
+| `⌘K` `/`  | Search, run a command, or type to create          |
+| `C`       | Complete the first open action                    |
+| `D`       | Defer the first open action by a day              |
+| `⌘Z`      | Undo the last change                              |
+| `?`       | Shortcut cheat sheet                              |
+| `Esc`     | Close whatever is open                            |
+
+Shortcuts are ignored while a field has focus, and while any sheet is open.

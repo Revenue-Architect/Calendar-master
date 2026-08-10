@@ -64,6 +64,9 @@ are too detailed for the repository README.
 - [`qa/2026-08-10-hardening-phase-3g.md`](qa/2026-08-10-hardening-phase-3g.md)
   records Phase 3G accessibility, diagnostics, import-bound, and production-gate
   evidence, including the unavailable-browser limitation.
+- [`qa/2026-08-10-capture-week-and-browser-suite.md`](qa/2026-08-10-capture-week-and-browser-suite.md)
+  records the quick-add, palette, week-drag and carried-action evidence, the
+  defects the first browser suite found, and the projection debt left in place.
 
 ## Implementation plans
 

@@ -74,6 +74,9 @@ import {
   resolvePlannerSearchPick,
   searchResultDateLabel,
 } from "./features/search/searchProjection.js";
+import { QUICK_ADD_SYNTAX, describeQuickAdd, parseQuickAdd, quickAddToEntry } from "./features/planner/quickAdd.js";
+import { matchCommands } from "./features/planner/commandPalette.js";
+import { getDayTasksWithCarry } from "./features/planner/carryForward.js";
 import { textToNoteBlocks } from "./features/notes/noteText.js";
 import { eventNoteLink, taskNoteLink } from "./features/notes/contextLink.js";
 import {
@@ -218,6 +221,24 @@ const SNAP = 5;
 const NOW_RED = "#C43A56";
 const ALERT_CHOICES = [0, 5, 15, 30, 60];
 const DAY_LETTERS = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
+
+/* Every shortcut the keydown handler implements, in one list, because a shortcut
+   nobody can find is a shortcut nobody has. The cheat sheet renders this rather
+   than a second hand-written copy, so the two cannot drift apart. */
+const SHORTCUTS = [
+  { group: "MOVING", keys: ["←", "→"], does: "Previous / next day" },
+  { group: "MOVING", keys: ["T"], does: "Jump to today" },
+  { group: "MOVING", keys: ["["], does: "Zoom out — day, week, month" },
+  { group: "MOVING", keys: ["]"], does: "Zoom in" },
+  { group: "MAKING", keys: ["N"], does: "New event" },
+  { group: "MAKING", keys: ["A"], does: "New action" },
+  { group: "MAKING", keys: ["⌘K", "/"], does: "Search, run a command, or type to create" },
+  { group: "ACTIONS", keys: ["C"], does: "Complete the first open action" },
+  { group: "ACTIONS", keys: ["D"], does: "Defer the first open action by a day" },
+  { group: "ELSEWHERE", keys: ["⌘Z"], does: "Undo the last change" },
+  { group: "ELSEWHERE", keys: ["?"], does: "This list" },
+  { group: "ELSEWHERE", keys: ["Esc"], does: "Close whatever is open" },
+];
 
 const MONO = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
 const SANS = "Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
@@ -550,6 +571,7 @@ export default function Planner() {
   const [settings, setSettings] = useState(false);
   const [search, setSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [shortcuts, setShortcuts] = useState(false);
   const [scopeAsk, setScopeAsk] = useState(null);
   const [reward, setReward] = useState(null);
   const [levelFlash, setLevelFlash] = useState(null);
@@ -817,12 +839,23 @@ export default function Planner() {
   const activeDate = parseKey(dateKey);
   const ov = (db && db.overrides) || {};
 
+  /* Which weekday a week opens on. A display preference like the clock: it moves
+     columns, never records. Everything that lays out a week — the month grid and
+     its header letters, the week view's first column, and the weekly recurrence
+     rule's own `weekStart` — reads this one value, so they cannot disagree. */
+  const weekStart = preferences?.display.weekStart ?? 0;
+  const backToWeekStart = useCallback((day) => -(((day - weekStart) + 7) % 7), [weekStart]);
+  const weekdayOrder = useMemo(
+    () => Array.from({ length: 7 }, (_, i) => (weekStart + i) % 7),
+    [weekStart],
+  );
+
   const days = useMemo(() => { const s = addDays(new Date(), -2); return Array.from({ length: 14 }, (_, i) => addDays(s, i)); }, [todayKey]);
   const monthGrid = useMemo(() => {
     const first = new Date(monthCursor.getFullYear(), monthCursor.getMonth(), 1);
-    const start = addDays(first, -first.getDay());
+    const start = addDays(first, backToWeekStart(first.getDay()));
     return Array.from({ length: 42 }, (_, i) => addDays(start, i));
-  }, [monthCursor]);
+  }, [monthCursor, backToWeekStart]);
 
   /* One continuous run of days rather than a single page. Reads go through the same
      domain queries the timeline uses, so an occurrence, an exception or a missed
@@ -853,7 +886,10 @@ export default function Planner() {
   /* The true week: 7 columns from the Sunday of the selected day's week. Reads go
      through the calendar domain's visible-occurrence projection, so a hidden or
      inactive calendar is as absent here as everywhere else. */
-  const weekStartKey = useMemo(() => keyOf(addDays(activeDate, -activeDate.getDay())), [dateKey]);
+  const weekStartKey = useMemo(
+    () => keyOf(addDays(activeDate, backToWeekStart(activeDate.getDay()))),
+    [dateKey, backToWeekStart],
+  );
   const week = useMemo(() => (db ? projectPlannerWeek(db, {
     weekStart: weekStartKey,
     mapEvent: eventForUi,
@@ -879,7 +915,14 @@ export default function Planner() {
   const dayEvents = dayProjection?.events ?? [];
   const timed = useMemo(() => dayEvents.filter((e) => !e.allDay), [dayEvents]);
   const allDay = useMemo(() => dayEvents.filter((e) => e.allDay), [dayEvents]);
-  const dayTasks = dayProjection?.tasks ?? [];
+  /* The day's own planned work, plus the undated backlog that has not been
+     given a day yet — see carryForward.js. An action with no date is not an
+     action for no day; it is work still owed, so it stands on today and on every
+     day ahead until it is done or decided about. */
+  const dayTasks = useMemo(
+    () => (db ? getDayTasksWithCarry(db, dateKey, { todayDate: todayKey }) : []),
+    [db, dateKey, todayKey],
+  );
   const notes = dayProjection?.notes ?? [];
   const openCount = countOpen(dayTasks);
 
@@ -1086,9 +1129,14 @@ export default function Planner() {
          on the page behind them — arrow keys turned days while the first-run choice
          was still up. */
       if (inspect || composer || settings || noteEdit || noteHistory || notebook || scopeAsk
-        || firstRun || confirmComplete || dependencyPicker || listPicker || pendingImport || peekDay) return;
+        || firstRun || confirmComplete || dependencyPicker || listPicker || pendingImport || peekDay
+        || shortcuts) return;
       if (e.key === "/" || (e.key === "k" && (e.metaKey || e.ctrlKey))) { e.preventDefault(); setSearchQuery(""); setSearch(true); return; }
       if (search) return;
+      /* The shortcuts have to be discoverable from the keyboard they belong to. */
+      if (e.key === "?") { e.preventDefault(); beep("click"); setShortcuts(true); return; }
+      if (e.key === "[") { e.preventDefault(); zoomOut(); }
+      if (e.key === "]") { e.preventDefault(); zoomIn(); }
       if (e.key === "ArrowRight") goDay(1);
       if (e.key === "ArrowLeft") goDay(-1);
       if (e.key === "t" || e.key === "T") jumpTo(todayKey);
@@ -1108,7 +1156,10 @@ export default function Planner() {
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [dateKey, inspect, composer, settings, noteEdit, noteHistory, notebook, search, scopeAsk, goDay, todayKey, nowMin, dayTasks, undo, firstRun, confirmComplete, dependencyPicker, listPicker, pendingImport, peekDay]);
+    /* `zoom` is in here because the handler closes over `zoomIn`/`zoomOut`, which
+       read it — without it, `[` and `]` would step from whatever zoom the page
+       had when the listener was last attached. */
+  }, [dateKey, inspect, composer, settings, noteEdit, noteHistory, notebook, search, scopeAsk, goDay, todayKey, nowMin, dayTasks, undo, firstRun, confirmComplete, dependencyPicker, listPicker, pendingImport, peekDay, shortcuts, zoom]);
 
   /* ─── writes (series-aware) ─── */
   const flash = (label, payload) => {
@@ -1269,6 +1320,32 @@ export default function Planner() {
     writeTask(id, (state, taskId) => deferTaskCommand(state.tasks, taskId, n));
     flash(n > 0 ? "Moved to tomorrow" : "Moved back", undoPayload);
   };
+  /* A week drag moves an event on both axes at once, which the day timeline
+     never had to do: `moveToDay` keeps the time and the day-view drag keeps the
+     day. This writes both in one command, through the same occurrence-vs-series
+     split every other calendar write uses, so a dragged instance of a repeating
+     event still detaches into an exception rather than dragging the series. */
+  const moveEventTo = (item, { date, start }) => {
+    if (!item || !isDateKey(date)) return;
+    beep("drop"); buzz(8);
+    const canonical = canonicalOccurrenceIdentity(item.id);
+    const label = `Moved to ${fmtDay(date)} ${tm(start)}`;
+    if (canonical) {
+      const result = moveOccurrence(db, item.id, eventTimingFromPosition(item, date, start, item.dur), { id: uid() });
+      setDb(result.state);
+      flash(label, { type: "restore-calendar-occurrence", snapshot: result.removed });
+      return;
+    }
+    const scope = splitId(item.id).date ? "occurrence" : "series";
+    mutate((d) => moveCalendarEvent(d, item.id, { date, start }, { scope }).state);
+    flash(label, {
+      type: "calendar-event-move",
+      id: item.id,
+      target: { date: item.date, start: item.start },
+      scope,
+    });
+  };
+
   const moveToDay = (kind, id, targetKey) => {
     beep("drop"); buzz(8);
     const item = kind === "event" ? dayEvents.find((e) => e.id === id) : findTask(id);
@@ -1380,9 +1457,25 @@ export default function Planner() {
     setInspect(null);
     flash("Duplicated", { type: "drop-event", id: nid });
   };
+  /* Dropping an action on the timeline says two things at once: this day, and
+     this time. The domain deliberately refuses a time without a day — a minute
+     with no date is not a plan — so an action that has never been given a day
+     (a carried one, straight out of capture) is planned onto the day in view in
+     the same write. Without this, the most natural gesture on a carried action
+     is the one that throws. */
   const scheduleTask = (id, at) => {
     beep("schedule"); buzz(8);
-    writeTask(id, (state, taskId) => scheduleTaskCommand(state.tasks, taskId, at));
+    writeTask(id, (state, taskId) => {
+      const task = state.tasks.find((item) => item.id === taskId);
+      if (at != null && task && task.planned.date == null) {
+        return planTaskCommand(state.tasks, taskId, {
+          date: dateKey,
+          startMinute: at,
+          estimateMinutes: task.planned.estimateMinutes ?? null,
+        });
+      }
+      return scheduleTaskCommand(state.tasks, taskId, at);
+    });
   };
   const reorderTask = (id, targetId) => {
     beep("tick");
@@ -2323,6 +2416,120 @@ export default function Planner() {
   const viewCounts = smartViewCounts(db, todayKey);
   const shownTasks = smartView === "today" ? dayTasks : resolveSmartView(db, smartView, todayKey);
 
+  /* ─── the palette ───
+     One input over the things you have and the things you can do. Everything is
+     computed plainly rather than in a hook: this block sits below the loading
+     guard, and it only runs while the palette is actually open. */
+  const closePalette = () => { setSearch(false); setSearchQuery(""); };
+  const runCommand = (fn) => () => { beep("click"); closePalette(); fn(); };
+  const quickDraft = search ? parseQuickAdd(searchQuery, { todayDate: todayKey, lists: db.taskLists }) : null;
+
+  const commitQuickAdd = () => {
+    const entry = quickAddToEntry(quickDraft, { fallbackDate: dateKey, defaultCategory: CATS[0] });
+    if (!entry) return;
+    closePalette();
+    /* If the line named a day, go there, so what was just created is on screen
+       rather than filed somewhere the user has to go looking for. */
+    if (entry.kind === "event" && entry.date !== dateKey) jumpTo(entry.date);
+    saveEntry(entry);
+  };
+  /* Anything short of committable opens the composer holding whatever did parse,
+     so an unrecognised line costs a click rather than the typing. */
+  const openComposerFromQuery = () => {
+    closePalette();
+    const draft = quickDraft;
+    if (!draft) { setComposer({ kind: "event", start: startSlot(nowMin), dur: 60 }); return; }
+    if (draft.date && draft.date !== dateKey) jumpTo(draft.date);
+    setComposer(draft.kind === "event"
+      ? { kind: "event", title: draft.title, start: draft.startMinute ?? startSlot(nowMin), dur: draft.durationMinutes ?? 60 }
+      : { kind: "task", title: draft.title, due: draft.deadline ?? null, at: draft.startMinute ?? null });
+  };
+
+  const paletteCommands = [
+    { id: "new-event", label: "New event", keywords: ["create", "add", "meeting"], run: runCommand(() => setComposer({ kind: "event", start: startSlot(nowMin), dur: 60 })) },
+    { id: "new-action", label: "New action", keywords: ["create", "add", "task", "todo"], run: runCommand(() => setComposer({ kind: "task" })) },
+    { id: "jump-today", label: "Jump to today", keywords: ["now"], run: runCommand(() => jumpTo(todayKey)) },
+    { id: "view-day", label: "Day view", keywords: ["timeline", "zoom"], run: runCommand(() => { setViewMode("timeline"); setZoom("day"); }) },
+    { id: "view-week", label: "Week view", keywords: ["zoom", "7"], run: runCommand(() => { setViewMode("timeline"); setZoom("week"); }) },
+    { id: "view-month", label: "Month view", keywords: ["zoom", "grid"], run: runCommand(() => { setViewMode("timeline"); setMonthCursor(activeDate); setZoom("month"); }) },
+    { id: "view-agenda", label: "Agenda view", keywords: ["list", "upcoming"], run: runCommand(() => setViewMode("agenda")) },
+    { id: "switch-theme", label: "Switch theme", keywords: ["dark", "light", "colour", "color", "appearance"], run: runCommand(() => {
+      const next = THEMES[(THEMES.findIndex((theme) => theme.id === T.id) + 1) % THEMES.length];
+      setPreferences((current) => current ? { ...current, display: { ...current.display, themeId: next.id } } : current);
+      flash(next.name.toUpperCase());
+    }) },
+    { id: "toggle-clock", label: `Switch to ${clock === "24" ? "12" : "24"}-hour clock`, keywords: ["time format", "24", "12"], run: runCommand(() => {
+      setPreferences((current) => current ? { ...current, display: { ...current.display, clock: current.display.clock === "24" ? "12" : "24" } } : current);
+    }) },
+    { id: "toggle-week-start", label: `Start weeks on ${weekStart === 1 ? "Sunday" : "Monday"}`, keywords: ["week start", "monday", "sunday"], run: runCommand(() => {
+      setPreferences((current) => current ? { ...current, display: { ...current.display, weekStart: current.display.weekStart === 1 ? 0 : 1 } } : current);
+    }) },
+    { id: "shortcuts", label: "Keyboard shortcuts", keywords: ["keys", "help", "?"], run: runCommand(() => setShortcuts(true)) },
+    { id: "settings", label: "Settings", keywords: ["preferences", "export", "import"], run: runCommand(() => setSettings(true)) },
+  ];
+
+  const paletteRows = [];
+  if (quickDraft?.title) {
+    paletteRows.push({
+      key: "quick-add",
+      group: "CREATE",
+      testId: "palette-quick-add",
+      badge: quickDraft.kind === "event" ? "EVT" : "ACT",
+      tint: T.accent,
+      label: describeQuickAdd(quickDraft, {
+        formatDate: (date) => fmtDay(date).slice(4),
+        formatTime: (minute) => tm(minute),
+        formatDuration: (minutes) => dur(minutes),
+      }),
+      meta: "⏎",
+      run: commitQuickAdd,
+    });
+  }
+  if (searchQuery.trim()) {
+    paletteRows.push({
+      key: "open-composer",
+      group: "CREATE",
+      testId: "palette-open-composer",
+      badge: "FORM",
+      label: quickDraft?.title ? `Open the composer for “${quickDraft.title}”` : "Open the composer",
+      run: openComposerFromQuery,
+    });
+  }
+  for (const command of matchCommands(paletteCommands, searchQuery)) {
+    paletteRows.push({
+      key: `cmd-${command.id}`,
+      group: "DO",
+      testId: `palette-cmd-${command.id}`,
+      badge: "CMD",
+      label: command.label,
+      run: command.run,
+    });
+  }
+  for (const result of searchProjection.results) {
+    paletteRows.push({
+      key: `${result.kind}-${result.id}`,
+      group: "FIND",
+      testId: "palette-result",
+      badge: result.kind === "event" ? "EVT" : result.kind === "task" ? "ACT" : "NOTE",
+      label: result.title,
+      meta: searchResultDateLabel(result, (date) => fmtDay(date).slice(4)),
+      run: () => {
+        const pick = resolvePlannerSearchPick(db, result, { todayDate: todayKey });
+        closePalette();
+        if (pick.status !== "available") { flash("SEARCH RESULT UNAVAILABLE"); return; }
+        if (pick.date) jumpTo(pick.date);
+        if (pick.noteId) {
+          const note = db.notes.find((entry) => entry.id === pick.noteId);
+          if (note) setNoteEdit(note);
+          return;
+        }
+        /* Let the palette finish closing before the inspector morphs open, or
+           the two sheets animate over each other. */
+        if (pick.inspect) setTimeout(() => setInspect(pick.inspect), 60);
+      },
+    });
+  }
+
   const actionsPanel = (
     <ActionsPanel
       T={T} listRef={listRef} tasks={shownTasks} notes={notes}
@@ -2507,7 +2714,7 @@ export default function Planner() {
       {/* ══ NAVIGATOR ══ */}
       <div onTouchStart={onTouchStartNav} onTouchMove={onTouchMoveNav} style={{ borderBottom: `1px solid ${T.line}` }}>
         <div className="flex items-center justify-between px-3 sm:px-5 py-1.5">
-          <button onClick={zoomOut} style={{ fontFamily: MONO, color: T.dim }} className="nb-tap text-xs tracking-widest" disabled={zoom === "month"}>
+          <button data-test="zoom-out" onClick={zoomOut} style={{ fontFamily: MONO, color: T.dim }} className="nb-tap text-xs tracking-widest" disabled={zoom === "month"}>
             {zoom === "day" ? "◂ WEEK" : zoom === "week" ? "◂ MONTH" : `${MO[monthCursor.getMonth()]} ${monthCursor.getFullYear()}`}
           </button>
           <div className="flex items-center gap-2">
@@ -2523,7 +2730,7 @@ export default function Planner() {
                 <button onClick={() => { beep("page"); setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1)); }} style={{ color: T.dim }} className="nb-tap px-2 text-xs">▸</button>
               </>
             )}
-            <button onClick={zoomIn} style={{ fontFamily: MONO, color: T.dim }} className="nb-tap text-xs tracking-widest" disabled={zoom === "day"}>
+            <button data-test="zoom-in" onClick={zoomIn} style={{ fontFamily: MONO, color: T.dim }} className="nb-tap text-xs tracking-widest" disabled={zoom === "day"}>
               {zoom === "month" ? "WEEK ▸" : zoom === "week" ? "DAY ▸" : ""}
             </button>
           </div>
@@ -2531,7 +2738,7 @@ export default function Planner() {
 
         {zoom === "month" && (
           <div className="px-3 sm:px-5 pb-3">
-            <div className="grid grid-cols-7 mb-1">{WD1.map((d, i) => <span key={i} style={{ fontFamily: MONO, color: T.dim }} className="text-center text-xs tracking-widest">{d}</span>)}</div>
+            <div className="grid grid-cols-7 mb-1">{weekdayOrder.map((d) => <span key={d} style={{ fontFamily: MONO, color: T.dim }} className="text-center text-xs tracking-widest">{WD1[d]}</span>)}</div>
             <div className="grid grid-cols-7 gap-px" style={{ background: T.line }}>
               {monthGrid.map((d, i) => {
                 const k = keyOf(d);
@@ -2698,6 +2905,7 @@ export default function Planner() {
                   onOpenEvent={(id, key) => { beep("click"); if (key !== dateKey) jumpTo(key); setTimeout(() => setInspect({ kind: "event", id }), key !== dateKey ? 80 : 0); }}
                   onOpenTask={(id, key) => { beep("click"); if (key !== dateKey) jumpTo(key); setTimeout(() => setInspect({ kind: "task", id }), key !== dateKey ? 80 : 0); }}
                   onSlotPick={(s) => { beep("click"); if (s.date !== dateKey) jumpTo(s.date); setComposer({ kind: "event", date: s.date, start: s.start, dur: s.dur }); }}
+                  onMoveEvent={moveEventTo} beep={beep} buzz={buzz}
                 />
               </>
             ) : (
@@ -2741,7 +2949,7 @@ export default function Planner() {
               </div>
             )}
 
-            <div ref={streamRef} className="nb-s nb-stream overflow-y-auto relative" style={{ background: T.card, borderTopLeftRadius: allDay.length || dayTasks.some((task) => task.planned.startMinute == null) ? 0 : 16, userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}>
+            <div ref={streamRef} data-test="day-stream" className="nb-s nb-stream overflow-y-auto relative" style={{ background: T.card, borderTopLeftRadius: allDay.length || dayTasks.some((task) => task.planned.startMinute == null) ? 0 : 16, userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}>
               <div className="relative" style={{ height: DAY_H }}>
                 {Array.from({ length: 24 }).map((_, h) => (
                   <div key={h} className="absolute left-0 right-0 flex items-start pointer-events-none"
@@ -2906,13 +3114,13 @@ export default function Planner() {
         </section>
 
         {viewMode !== "actions" && actionsOpen && (
-          <section className="nb-s hidden lg:block lg:col-span-5 min-h-0 overflow-y-auto relative">
-            <button onClick={() => setActionsOpen(false)} style={{ fontFamily: MONO, color: T.dim }} className="nb-tap sticky top-0 z-10 float-right px-2 py-1 text-xs tracking-widest" aria-label="Collapse Actions column">COLLAPSE ›</button>
+          <section data-test="actions-column" className="nb-s hidden lg:block lg:col-span-5 min-h-0 overflow-y-auto relative">
+            <button data-test="actions-collapse" onClick={() => setActionsOpen(false)} style={{ fontFamily: MONO, color: T.dim }} className="nb-tap sticky top-0 z-10 float-right px-2 py-1 text-xs tracking-widest" aria-label="Collapse Actions column">COLLAPSE ›</button>
             {actionsPanel}
           </section>
         )}
         {viewMode !== "actions" && !actionsOpen && (
-          <button onClick={() => setActionsOpen(true)}
+          <button data-test="actions-restore" onClick={() => setActionsOpen(true)}
             className="nb-tap hidden lg:block fixed right-0 top-1/2 -translate-y-1/2 z-20 px-2 py-4 text-xs font-bold tracking-widest"
             style={{ fontFamily: MONO, background: T.accent, color: T.on, borderRadius: "12px 0 0 12px", writingMode: "vertical-rl" }}>
             ACTIONS
@@ -3540,7 +3748,7 @@ export default function Planner() {
 
       {composer && (
         <Sheet T={T} title={composer.id ? "EDIT" : "NEW"} onClose={() => { beep("click"); setComposer(null); }}>
-          <Composer T={T} initial={composer} dateLabel={fmtDay(dateKey)} dateKey={dateKey} onSubmit={saveEntry} onTick={() => beep("tick")} />
+          <Composer T={T} initial={composer} dateLabel={fmtDay(dateKey)} dateKey={dateKey} onSubmit={saveEntry} onTick={() => beep("tick")} weekStart={weekStart} />
         </Sheet>
       )}
 
@@ -3596,24 +3804,19 @@ export default function Planner() {
       )}
 
       {search && (
-        <Sheet T={T} title="SEARCH" onClose={() => { beep("click"); setSearch(false); setSearchQuery(""); }}>
-          <SearchPanel T={T} query={searchQuery} onQueryChange={setSearchQuery}
-            results={searchProjection.results} queryIssues={searchProjection.query.issues} onPick={(item) => {
-            const pick = resolvePlannerSearchPick(db, item, { todayDate: todayKey });
-            setSearch(false);
-            setSearchQuery("");
-            if (pick.status !== "available") {
-              flash("SEARCH RESULT UNAVAILABLE");
-              return;
-            }
-            if (pick.date) jumpTo(pick.date);
-            if (pick.noteId) {
-              const note = db.notes.find((entry) => entry.id === pick.noteId);
-              if (note) setNoteEdit(note);
-              return;
-            }
-            setTimeout(() => setInspect(pick.inspect), 60);
-          }} />
+        <Sheet T={T} title="PALETTE" onClose={() => { beep("click"); closePalette(); }}>
+          <CommandPalette T={T} surface={surface} query={searchQuery} onQueryChange={setSearchQuery}
+            rows={paletteRows} queryIssues={searchProjection.query.issues}
+            placeholder="Search, run a command, or type to create"
+            footer={quickDraft?.consumed.length ? `READ · ${quickDraft.consumed.join(" · ").toUpperCase()}` : null} />
+          {!searchQuery.trim() && <QuickAddHint T={T} />}
+        </Sheet>
+      )}
+
+      {shortcuts && (
+        <Sheet T={T} title="SHORTCUTS" onClose={() => { beep("click"); setShortcuts(false); }}>
+          <h2 className="text-2xl font-bold tracking-tight">Keyboard</h2>
+          <ShortcutSheet T={T} surface={surface} />
         </Sheet>
       )}
 
@@ -3630,6 +3833,12 @@ export default function Planner() {
             <button onClick={() => { beep("tick"); setPreferences((current) => current ? { ...current, display: { ...current.display, clock: current.display.clock === "24" ? "12" : "24" } } : current); }} className="w-full flex items-center justify-between py-2.5" style={{ borderBottom: `1px solid ${T.line}` }}>
               <span className="text-sm">Clock</span>
               <span style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest">{clock === "24" ? "24-HOUR" : "12-HOUR"}</span>
+            </button>
+            <button data-test="week-start-toggle"
+              onClick={() => { beep("tick"); setPreferences((current) => current ? { ...current, display: { ...current.display, weekStart: current.display.weekStart === 1 ? 0 : 1 } } : current); }}
+              className="w-full flex items-center justify-between py-2.5" style={{ borderBottom: `1px solid ${T.line}` }}>
+              <span className="text-sm">Week starts</span>
+              <span style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest">{weekStart === 1 ? "MONDAY" : "SUNDAY"}</span>
             </button>
             <button onClick={askNotifs} className="w-full flex items-center justify-between py-2.5" style={{ borderBottom: `1px solid ${T.line}` }}>
               <span className="text-sm">System notifications</span>
@@ -4113,7 +4322,7 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromote
 /* The true week: 7 day columns against one shared time axis. Events are blocks and
    free time is the open space between them — the shape of the week is the point,
    so the columns carry as little chrome as they can. */
-function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, nowMin, clock, slots, onOpenDay, onOpenEvent, onOpenTask, onSlotPick }) {
+function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, nowMin, clock, slots, onOpenDay, onOpenEvent, onOpenTask, onSlotPick, onMoveEvent, beep, buzz }) {
   const scrollRef = useRef(null);
   const weekKey = week[0]?.key;
   useEffect(() => {
@@ -4124,8 +4333,130 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
     el.scrollTop = Math.max(0, (anchor / 1440) * DAY_H - 140);
   }, [weekKey]);
   const hasAllDay = week.some((d) => d.allDay.length > 0);
+
+  /* ─── dragging a card across the week ───
+     Two axes at once, which is the whole point of the view: y is the minute, x is
+     the day. Both are read from the pointer rather than from the card, so a drop
+     lands where the cursor is and not where the grab started.
+
+     Press-and-hold to lift, the same as the day timeline — a week column is
+     narrow enough that an immediate drag would fight the vertical scroll on every
+     attempt to read it. */
+  const [drag, setDrag] = useState(null);
+  const dragRef = useRef(null);
+  const holdRef = useRef(null);
+  const tapRef = useRef(false);
+  const dragging = Boolean(drag);
+
+  const minuteAt = (clientY) => {
+    const el = scrollRef.current;
+    if (!el) return 0;
+    const rect = el.getBoundingClientRect();
+    return ((clientY - rect.top + el.scrollTop) / DAY_H) * 1440;
+  };
+  /* Hit-test the column under the pointer rather than doing arithmetic on the
+     grid's width: the gutter, the borders and a horizontal scroll all shift
+     where a column actually is, and `elementFromPoint` already knows. */
+  const dayAt = (x, y) => {
+    try {
+      const found = document.elementFromPoint(x, y)?.closest("[data-week-day]");
+      return found ? found.getAttribute("data-week-day") : null;
+    } catch { return null; }
+  };
+
+  const beginDrag = (event, day, clientX, clientY) => {
+    tapRef.current = false;
+    beep?.("lift"); buzz?.(14);
+    const next = {
+      id: event.id, event, dur: event.dur,
+      grab: minuteAt(clientY) - event.start,
+      fromDate: day, fromStart: event.start,
+      date: day, start: event.start,
+      x: clientX, y: clientY,
+    };
+    dragRef.current = next;
+    setDrag(next);
+  };
+
+  const updateDrag = (clientX, clientY) => {
+    const current = dragRef.current;
+    if (!current) return;
+    const day = dayAt(clientX, clientY);
+    const start = Math.max(0, Math.min(1440 - current.dur, snapTo(minuteAt(clientY) - current.grab)));
+    const next = { ...current, x: clientX, y: clientY, start, date: day ?? current.date };
+    dragRef.current = next;
+    setDrag(next);
+  };
+
+  const endDrag = () => {
+    const finished = dragRef.current;
+    dragRef.current = null;
+    setDrag(null);
+    if (!finished) return;
+    if (finished.date === finished.fromDate && finished.start === finished.fromStart) return;
+    onMoveEvent?.(finished.event, { date: finished.date, start: finished.start });
+  };
+
+  useEffect(() => {
+    if (!dragging) return undefined;
+    const move = (e) => { e.preventDefault(); updateDrag(e.clientX, e.clientY); };
+    const up = () => endDrag();
+    window.addEventListener("pointermove", move, { passive: false });
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+  }, [dragging]);
+
+  /* Touch is driven by touch events, not pointer events: a scroll container fires
+     pointercancel the instant the browser claims the gesture, which would kill
+     every long press before it lifted. Same reason the day timeline does. */
+  const touchStart = (e, event, day) => {
+    if (e.touches.length !== 1) return;
+    const { clientX, clientY } = e.touches[0];
+    tapRef.current = true;
+    clearTimeout(holdRef.current);
+    holdRef.current = setTimeout(() => beginDrag(event, day, clientX, clientY), LIFT_MS);
+  };
+  const touchMove = (e) => {
+    if (!dragRef.current) { clearTimeout(holdRef.current); tapRef.current = false; return; }
+    e.preventDefault();
+    updateDrag(e.touches[0].clientX, e.touches[0].clientY);
+  };
+  const touchEnd = (e, event, day) => {
+    clearTimeout(holdRef.current);
+    if (dragRef.current) { endDrag(); return; }
+    if (tapRef.current) { tapRef.current = false; e.preventDefault(); onOpenEvent(event.id, day); }
+  };
+
+  const pointerDown = (e, event, day) => {
+    if (e.pointerType === "touch" || e.button === 2) return;
+    e.stopPropagation();
+    tapRef.current = true;
+    clearTimeout(holdRef.current);
+    holdRef.current = setTimeout(() => beginDrag(event, day, e.clientX, e.clientY), LIFT_MS);
+  };
+  const pointerUp = (e, event, day) => {
+    if (e.pointerType === "touch") return;
+    clearTimeout(holdRef.current);
+    if (dragRef.current) return;
+    if (tapRef.current) { tapRef.current = false; e.stopPropagation(); onOpenEvent(event.id, day); }
+  };
+
+  useEffect(() => () => clearTimeout(holdRef.current), []);
+
+  /* The lifted card leaves its old column and is drawn in the one under the
+     pointer, so the week shows the move rather than describing it. */
+  const cardsFor = (day) => {
+    const settled = drag ? day.timed.filter((event) => event.id !== drag.id) : day.timed;
+    if (!drag || drag.date !== day.key) return settled;
+    return [...settled, { ...drag.event, start: drag.start, dur: drag.dur, lane: 0, cols: 1, lifted: true }];
+  };
   return (
-    <div className="nb-x flex-1 min-h-0 overflow-x-auto flex flex-col" style={{ background: T.card, borderRadius: 16 }}>
+    <div data-test="week-grid" className="nb-x flex-1 min-h-0 overflow-x-auto flex flex-col" style={{ background: T.card, borderRadius: 16 }}>
       <div className="flex flex-col flex-1 min-h-0" style={{ minWidth: 620 }}>
         <div className="flex shrink-0" style={{ borderBottom: `1px solid ${T.line}` }}>
           <span className="w-12 shrink-0" />
@@ -4173,33 +4504,56 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
               const isToday = day.key === todayKey;
               const daySlots = slots.filter((s) => s.date === day.key);
               return (
-                <div key={day.key} className="relative flex-1 min-w-0" style={{ borderLeft: `1px solid ${hourRule}`, background: day.key === dateKey ? `${T.accent}08` : "transparent" }}
+                <div key={day.key} data-week-day={day.key} className="relative flex-1 min-w-0" style={{
+                    borderLeft: `1px solid ${hourRule}`,
+                    background: drag?.date === day.key ? `${T.accent}14` : day.key === dateKey ? `${T.accent}08` : "transparent",
+                  }}
                   onClick={(e) => {
+                    /* A drop is not a click on the column underneath it. */
+                    if (dragRef.current) return;
                     const rect = e.currentTarget.getBoundingClientRect();
                     onSlotPick({ date: day.key, start: startSlot(((e.clientY - rect.top) / DAY_H) * 1440, 30), dur: 60 });
                   }}>
                   {Array.from({ length: 24 }).map((_, h) => (
                     <div key={h} className="absolute left-0 right-0 pointer-events-none" style={{ top: h * HOUR_H, height: HOUR_H, borderTop: `1px solid ${hourRule}`, background: h % 2 ? hourBand : "transparent" }} />
                   ))}
-                  {day.timed.map((e) => {
+                  {cardsFor(day).map((e) => {
                     const top = (e.start / 1440) * DAY_H;
                     const h = Math.max(16, (e.dur / 1440) * DAY_H) - 2;
-                    const past = day.key < todayKey || (isToday && nowMin >= e.start + e.dur);
+                    const past = !e.lifted && (day.key < todayKey || (isToday && nowMin >= e.start + e.dur));
                     return (
-                      <button key={e.segmentId ?? `${e.id}-${e.start}`} onClick={(ev) => { ev.stopPropagation(); onOpenEvent(e.id, day.key); }}
+                      <button key={e.segmentId ?? `${e.id}-${e.start}`}
+                        data-test="week-event" data-event-id={e.id}
+                        onPointerDown={(ev) => pointerDown(ev, e, day.key)}
+                        onPointerUp={(ev) => pointerUp(ev, e, day.key)}
+                        onTouchStart={(ev) => touchStart(ev, e, day.key)}
+                        onTouchMove={touchMove}
+                        onTouchEnd={(ev) => touchEnd(ev, e, day.key)}
+                        onTouchCancel={() => { clearTimeout(holdRef.current); endDrag(); }}
+                        onClick={(ev) => ev.stopPropagation()}
                         className="absolute text-left overflow-hidden"
                         style={{
                           top: top + 1, height: h,
                           left: `calc(${(e.lane / e.cols) * 100}% + 2px)`, width: `calc(${100 / e.cols}% - 4px)`,
                           background: surface, borderRadius: CARD_R,
-                          opacity: past ? 0.74 : 1, zIndex: 2,
-                          boxShadow: past ? `inset 0 0 0 1px ${T.line}` : "none",
+                          opacity: past ? 0.74 : 1,
+                          /* The lifted card rides above everything, is not a drop
+                             target for its own hit-test, and says it is lifted. */
+                          zIndex: e.lifted ? 8 : 2,
+                          pointerEvents: e.lifted ? "none" : "auto",
+                          touchAction: "none",
+                          transform: e.lifted ? "scale(1.04)" : "none",
+                          boxShadow: e.lifted
+                            ? `0 8px 24px rgba(0,0,0,0.32), inset 0 0 0 1.5px ${T.accent}`
+                            : past ? `inset 0 0 0 1px ${T.line}` : "none",
                         }}>
                         <span className="flex items-center gap-1 px-1.5 pt-0.5 min-w-0">
                           <span className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: catColor(e.cat) }} />
                           <span className="font-semibold leading-tight truncate" style={{ fontSize: 10 }}>{e.title}</span>
                         </span>
-                        {h >= 30 && <span className="block truncate tracking-widest" style={{ fontFamily: MONO, color: T.dim, fontSize: 9, paddingLeft: 15 }}>{fmtTime(e.start, clock)}</span>}
+                        {/* A lifted card always states its time, however short it
+                            is: the number is the whole feedback of the drag. */}
+                        {(h >= 30 || e.lifted) && <span className="block truncate tracking-widest" style={{ fontFamily: MONO, color: e.lifted ? T.accent : T.dim, fontSize: 9, paddingLeft: 15 }}>{fmtTime(e.start, clock)}</span>}
                       </button>
                     );
                   })}
@@ -4688,7 +5042,7 @@ function useLiquidPill(wrapRef, deps) {
 function LiquidPillIndicator({ T, box, stretch, settled = true, z = 0 }) {
   if (!box) return null;
   return (
-    <span aria-hidden="true" className="absolute" style={{
+    <span aria-hidden="true" data-test="pill-indicator" data-width={Math.round(box.width)} className="absolute" style={{
       left: box.left, width: box.width, top: box.top, height: box.height,
       background: T.accent, borderRadius: 999, zIndex: z,
       transform: `scaleX(${stretch})`, transformOrigin: "center",
@@ -4906,7 +5260,7 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
   }, []);
   return (
     <div className={`nb-scrim ${closing ? "nb-fluid-closing" : ""} fixed inset-0 z-50 flex items-end sm:items-center justify-center`} style={{ background: "rgba(0,0,0,0.72)" }} onClick={guardedClose}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId.current}
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId.current} data-test="sheet" data-sheet-title={title || "Details"}
         onKeyDown={(event) => trapDialogTab(event, dialogRef.current)} onClick={(e) => e.stopPropagation()}
         className={`nb-fluid ${heightReady ? "nb-sheet-h" : ""} ${closing ? "nb-fluid-closing" : ""} w-full sm:max-w-md overflow-y-auto nb-s`} style={{ background: T.card, color: T.text, maxHeight: "88vh", height: sheetHeight == null ? "auto" : sheetHeight }}>
         <div ref={contentRef}>
@@ -5083,27 +5437,118 @@ function NoteEditor({ T, note, onSave, onDelete, history = 0, onHistory, onPin, 
   );
 }
 
-function SearchPanel({ T, query, onQueryChange, results, queryIssues, onPick }) {
+/* One input over two different things: what you have, and what you can do.
+ *
+ * The rows arrive already ordered and already flattened — creating, then
+ * commands, then results — so the highlight can walk the whole sheet with one
+ * index and Enter always means "the row I am looking at". Group headers are
+ * drawn from the rows rather than passed separately, so a section with nothing
+ * in it cannot leave its title stranded. */
+function CommandPalette({ T, surface, query, onQueryChange, rows, placeholder, footer, queryIssues = [] }) {
+  const [active, setActive] = useState(0);
+  const listRef = useRef(null);
+  /* A new query is a new list; keeping the old index would leave the highlight
+     on whatever happened to slide into that position. */
+  useEffect(() => { setActive(0); }, [query, rows.length]);
+
+  const clamp = (index) => (rows.length ? (index + rows.length) % rows.length : 0);
+  const onKeyDown = (e) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); setActive((i) => clamp(i + 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setActive((i) => clamp(i - 1)); }
+    else if (e.key === "Enter") { e.preventDefault(); rows[active]?.run(); }
+  };
+
+  useEffect(() => {
+    listRef.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: "nearest" });
+  }, [active]);
+
+  let lastGroup = null;
   return (
     <div>
-      <input autoFocus value={query} onChange={(e) => onQueryChange(e.target.value)} placeholder="Search everything"
+      <input autoFocus data-test="palette-input" value={query} onChange={(e) => onQueryChange(e.target.value)}
+        onKeyDown={onKeyDown} placeholder={placeholder} aria-label="Search or run a command"
         style={{ background: "transparent", border: `1px solid ${T.line}` }} className="w-full px-3 py-3 text-base font-semibold" />
-      <div className="mt-3 flex flex-col">
+      {footer && <p style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest pt-2">{footer}</p>}
+      <div ref={listRef} className="mt-3 flex flex-col" data-test="palette-rows">
         {queryIssues.length > 0 && <p style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest py-2">IGNORED FILTER · {queryIssues[0].token.toUpperCase()}</p>}
-        {query && results.length === 0 && <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic py-4">Nothing matches that. Try a shorter word.</p>}
-        {results.map((r) => (
-          <button key={r.kind + r.id} onClick={() => onPick(r)} className="nb-row flex items-center gap-2 py-2.5 text-left" style={{ borderBottom: `1px solid ${T.line}` }}>
-            <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0 w-12">{r.kind === "event" ? "EVT" : r.kind === "task" ? "ACT" : "NOTE"}</span>
-            <span className="flex-1 text-sm truncate">{r.title}</span>
-            <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">{searchResultDateLabel(r, (date) => fmtDay(date).slice(4))}</span>
-          </button>
+        {query && rows.length === 0 && <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic py-4">Nothing matches that. Try a shorter word.</p>}
+        {rows.map((row, index) => {
+          const header = row.group !== lastGroup ? row.group : null;
+          lastGroup = row.group;
+          const on = index === active;
+          return (
+            <React.Fragment key={row.key}>
+              {header && <p style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest pt-3 pb-1">{header}</p>}
+              <button data-test={row.testId} data-active={on} onClick={row.run} onMouseEnter={() => setActive(index)}
+                className="nb-row flex items-center gap-2 py-2.5 px-2 text-left" style={{
+                  borderBottom: `1px solid ${T.line}`,
+                  background: on ? surface : "transparent",
+                  borderRadius: on ? 8 : 0,
+                }}>
+                <span style={{ fontFamily: MONO, color: row.tint ?? T.dim }} className="text-xs tracking-widest shrink-0 w-12">{row.badge}</span>
+                <span className="flex-1 text-sm truncate">{row.label}</span>
+                {row.meta && <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">{row.meta}</span>}
+              </button>
+            </React.Fragment>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* The shortcuts, grouped as they are declared. Rendered from `SHORTCUTS` so the
+   sheet cannot claim a key the handler does not answer to. */
+function ShortcutSheet({ T, surface }) {
+  let lastGroup = null;
+  return (
+    <div data-test="shortcut-sheet">
+      {SHORTCUTS.map((shortcut) => {
+        const header = shortcut.group !== lastGroup ? shortcut.group : null;
+        lastGroup = shortcut.group;
+        return (
+          <React.Fragment key={shortcut.keys.join("+")}>
+            {header && <p style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest pt-4 pb-1">{header}</p>}
+            <div className="flex items-center gap-3 py-2" style={{ borderBottom: `1px solid ${T.line}` }}>
+              <span className="flex gap-1 shrink-0">
+                {shortcut.keys.map((key) => (
+                  <kbd key={key} style={{ fontFamily: MONO, background: surface, color: T.text, borderRadius: 6 }}
+                    className="inline-flex items-center justify-center min-w-7 px-1.5 py-1 text-xs font-bold">{key}</kbd>
+                ))}
+              </span>
+              <span className="flex-1 text-sm">{shortcut.does}</span>
+            </div>
+          </React.Fragment>
+        );
+      })}
+      <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic pt-4">
+        Shortcuts are ignored while you are typing in a field.
+      </p>
+    </div>
+  );
+}
+
+/* What the palette can parse, shown where somebody would look for it: under the
+   input, the first time they open it with nothing typed. */
+function QuickAddHint({ T }) {
+  return (
+    <div data-test="quick-add-hint" className="pt-1">
+      <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic pb-2">
+        Type a whole line and it will be read as one — “Lunch w/ Sara Tue 1pm 45m”.
+      </p>
+      <div className="flex flex-col gap-0.5">
+        {QUICK_ADD_SYNTAX.map((entry) => (
+          <div key={entry.token} className="flex items-baseline gap-2">
+            <span style={{ fontFamily: MONO, color: T.accent }} className="text-xs shrink-0 w-44 truncate">{entry.token}</span>
+            <span style={{ color: T.dim }} className="text-xs">{entry.means}</span>
+          </div>
         ))}
       </div>
     </div>
   );
 }
 
-function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
+function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick, weekStart = 0 }) {
   const editing = !!initial.id;
   const [kind, setKind] = useState(initial.kind || "event");
   const [title, setTitle] = useState(initial.title || "");
@@ -5151,7 +5596,10 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
   const recurrence = repeat?.freq ? {
     frequency: repeat.freq,
     interval: repeat.interval || 1,
-    weekStart: 0,
+    /* A weekly rule counts its interval in weeks, so which day starts the week
+       decides which side of a boundary an occurrence falls on. It has to be the
+       same week the grid is drawing. */
+    weekStart,
     ...(repeat.freq === "weekly" ? { byWeekday: repeat.byDay || [parseKey(date).getDay()] } : {}),
     ...(repeat.freq === "monthly" && repeat.monthlyMode === "last-weekday" ? { byWeekday: [{ weekday: parseKey(date).getDay(), ordinal: -1 }] } : {}),
     ...(repeat.freq === "monthly" && repeat.monthlyMode !== "last-weekday" ? { byMonthDay: [parseKey(date).getDate()] } : {}),
@@ -5196,7 +5644,7 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
   };
 
   return (
-    <div>
+    <div data-test="composer" data-composer-kind={kind}>
       {!editing && (
         <PillNav T={T} ariaLabel="What to add" value={kind}
           options={[["event", "EVENT"], ["task", "ACTION"]]}
@@ -5335,7 +5783,8 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
               </div>
               {repeat.freq === "weekly" && (
                 <div className="flex gap-1">
-                  {DAY_LETTERS.map((d, i) => {
+                  {Array.from({ length: 7 }, (_, offset) => (weekStart + offset) % 7).map((i) => {
+                    const d = DAY_LETTERS[i];
                     const on = (repeat.byDay || []).includes(i);
                     return (
                       <button key={d} onClick={() => toggleDay(i)} className="nb-tap relative flex-1 py-1 text-xs tracking-widest"

@@ -41,3 +41,14 @@ test("resets one preference group without touching the other groups", () => {
   assert.equal(reset.display.clock, "12");
   assert.equal(reset.feedback.sound, false);
 });
+
+test("week start defaults to Sunday and only accepts Monday as the alternative", () => {
+  assert.equal(createPreferences({}).display.weekStart, 0);
+  assert.equal(createPreferences({ display: { weekStart: 1 } }).display.weekStart, 1);
+  assert.equal(createPreferences({ display: { weekStart: 0 } }).display.weekStart, 0);
+  /* A stored value from a future build, or junk, falls back rather than laying
+     out the grid against a weekday index that does not exist. */
+  for (const value of [3, -1, "1", null, true, 1.5]) {
+    assert.equal(createPreferences({ display: { weekStart: value } }).display.weekStart, 0);
+  }
+});
