@@ -29,6 +29,9 @@ are too detailed for the repository README.
 - [`superpowers/specs/2026-08-10-notes-completion-design.md`](superpowers/specs/2026-08-10-notes-completion-design.md)
   defines the Phase 3F processing, tags, templates, attachment metadata,
   portability, and schema-v8 Notes foundation.
+- [`superpowers/specs/2026-08-10-hardening-design.md`](superpowers/specs/2026-08-10-hardening-design.md)
+  defines the Phase 3G dialog-focus, redacted diagnostics, and untrusted-import
+  hardening boundary.
 
 ## Quality reports
 
@@ -58,6 +61,9 @@ are too detailed for the repository README.
 - [`qa/2026-08-10-notes-completion-phase-3f.md`](qa/2026-08-10-notes-completion-phase-3f.md)
   records Notes schema-v8, portability, attachment-lifecycle, and pressure-test
   evidence.
+- [`qa/2026-08-10-hardening-phase-3g.md`](qa/2026-08-10-hardening-phase-3g.md)
+  records Phase 3G accessibility, diagnostics, import-bound, and production-gate
+  evidence, including the unavailable-browser limitation.
 
 ## Implementation plans
 
@@ -105,6 +111,9 @@ are too detailed for the repository README.
   briefing queries.
 - [`superpowers/plans/2026-08-10-notes-completion-phase-3f.md`](superpowers/plans/2026-08-10-notes-completion-phase-3f.md)
   completes the provider-free Notes foundation with schema-v8 persistence.
+- [`superpowers/plans/2026-08-10-hardening-phase-3g.md`](superpowers/plans/2026-08-10-hardening-phase-3g.md)
+  completes the final non-provider hardening slice for keyboard dialog behavior,
+  local diagnostics, and bounded Notes imports.
 
 ## Architecture decisions
 

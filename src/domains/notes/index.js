@@ -27,6 +27,8 @@ export {
   getBuiltInNoteTemplate, instantiateBuiltInNoteTemplate, listBuiltInNoteTemplates,
 } from "./templates/builtInTemplates.js";
 export {
+  MAX_NATIVE_IMPORT_ATTACHMENTS, MAX_NATIVE_IMPORT_BLOCKS_PER_NOTE,
+  MAX_NATIVE_IMPORT_NOTES, MAX_NATIVE_IMPORT_TAGS, MAX_NOTE_IMPORT_TEXT_CHARS,
   NOTE_EXPORT_FORMAT, NOTE_EXPORT_VERSION, exportNativeNoteCollection,
   exportNoteAsMarkdown, exportNoteAsPlainText, importMarkdownNote,
   importNativeNoteCollection, importPlainTextNote,

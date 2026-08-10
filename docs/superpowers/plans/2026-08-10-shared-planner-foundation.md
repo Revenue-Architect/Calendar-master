@@ -37,10 +37,10 @@ local-first browser persistence. No provider SDKs or remote APIs.
 | 3D. Preferences, motivation, and persistence ports | §4–6, §8 | Completed 2026-08-10. Versioned local aggregates now separate device settings and reward history from the planner notebook. |
 | 3E. Calendar projections | Calendar §1, §8–10 and later Phase 2 | Completed 2026-08-10. Visibility, availability, conflicts, free slots, and factual briefings reuse canonical occurrences. |
 | 3F. Notes completion | Notes §6, §8–13 | Completed 2026-08-10. Schema-v8 adds processing, catalog tags, templates, attachment metadata, and safe portability without binary storage. |
-| 3G. Accessibility, diagnostics, and security hardening | §9–11 | Cross-cutting contracts are verified once every core surface has a bounded owner. |
+| 3G. Accessibility, diagnostics, and security hardening | §9–11 | Completed 2026-08-10. Dialog keyboard boundaries, content-free local diagnostics, and bounded Notes imports close the non-provider foundation. |
 
-Slices 3A–3F are delivered. Each later slice receives its own detailed plan before
-code changes, so its product choices stay reviewable and its test boundary stays small.
+Slices 3A–3G are delivered. Each slice received its own detailed plan before code
+changes, so its product choices stayed reviewable and its test boundary stayed small.
 
 ## Slice 3A file map
 

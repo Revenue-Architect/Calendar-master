@@ -8,12 +8,33 @@ import { updateNote } from "../commands/noteCommands.js";
 
 export const NOTE_EXPORT_FORMAT = "calendar-master-notes";
 export const NOTE_EXPORT_VERSION = 1;
+export const MAX_NOTE_IMPORT_TEXT_CHARS = 100_000;
+export const MAX_NATIVE_IMPORT_NOTES = 500;
+export const MAX_NATIVE_IMPORT_TAGS = 500;
+export const MAX_NATIVE_IMPORT_ATTACHMENTS = 1_000;
+export const MAX_NATIVE_IMPORT_BLOCKS_PER_NOTE = 2_000;
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
 function requireFactory(value, name) {
   if (typeof value !== "function") throw new TypeError(`${name} is required`);
   return value;
+}
+
+function requireLimit(value, maximum, field) {
+  if (value > maximum) {
+    throw new NoteValidationError([{ field, message: `exceeds the import limit of ${maximum}` }]);
+  }
+}
+
+function requireNoteSourceBounds(note) {
+  const blocks = note?.blocks == null ? [] : note.blocks;
+  if (Array.isArray(blocks)) requireLimit(blocks.length, MAX_NATIVE_IMPORT_BLOCKS_PER_NOTE, "blocks");
+  const titleLength = typeof note?.title === "string" ? note.title.length : 0;
+  const blockLength = Array.isArray(blocks)
+    ? blocks.reduce((total, block) => total + (typeof block?.text === "string" ? block.text.length : 0), 0)
+    : 0;
+  requireLimit(titleLength + blockLength, MAX_NOTE_IMPORT_TEXT_CHARS, "note text");
 }
 
 function requireBundle(input) {
@@ -29,6 +50,10 @@ function requireBundle(input) {
   if (!Array.isArray(input.notes) || !Array.isArray(input.noteTags) || !Array.isArray(input.noteAttachments)) {
     throw new NoteValidationError([{ field: "import", message: "must include notes, noteTags, and noteAttachments arrays" }]);
   }
+  requireLimit(input.notes.length, MAX_NATIVE_IMPORT_NOTES, "notes");
+  requireLimit(input.noteTags.length, MAX_NATIVE_IMPORT_TAGS, "noteTags");
+  requireLimit(input.noteAttachments.length, MAX_NATIVE_IMPORT_ATTACHMENTS, "noteAttachments");
+  input.notes.forEach(requireNoteSourceBounds);
   const notes = input.notes.map((note) => normalizeNote(note));
   const noteTags = normalizeNoteTags(input.noteTags);
   const noteAttachments = normalizeNoteAttachments(input.noteAttachments);
@@ -139,6 +164,7 @@ export function exportNativeNoteCollection(state, { noteIds = null } = {}) {
 }
 
 export function importPlainTextNote(text, { id, title = "", createBlockId } = {}) {
+  requireLimit(String(text ?? "").length + String(title ?? "").length, MAX_NOTE_IMPORT_TEXT_CHARS, "note text");
   return normalizeNote({
     id,
     kind: "standalone",
@@ -149,6 +175,7 @@ export function importPlainTextNote(text, { id, title = "", createBlockId } = {}
 
 export function importMarkdownNote(markdown, { id, title = null, createBlockId } = {}) {
   const source = String(markdown ?? "").replace(/\r\n?/g, "\n");
+  requireLimit(source.length + String(title ?? "").length, MAX_NOTE_IMPORT_TEXT_CHARS, "note text");
   const match = /^#\s+([^\n]+)(?:\n|$)/.exec(source);
   return importPlainTextNote(match ? source.slice(match[0].length).replace(/^\n/, "") : source, {
     id,

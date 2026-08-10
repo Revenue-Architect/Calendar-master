@@ -2126,6 +2126,7 @@ src/
     gamification/
     search/
   platform/
+    diagnostics/
     persistence/
     notifications/
     integrations/
@@ -2299,6 +2300,23 @@ reminder extraction, and frontend polish remain intentionally deferred.
   previewing, and file-picker UX remain platform adapters. Export makes excluded
   bytes explicit; import marks their metadata missing instead of retaining a stale
   source storage reference.
+
+### Phase 3G delivery record — 2026-08-10
+
+- Every `Sheet` now has an accessible title, captures an appropriate initial focus,
+  wraps `Tab` and `Shift+Tab` inside its controls, supports Escape, and returns focus
+  to its connected opener. Existing save-failure and reminder interruptions are
+  assertive; undo remains a polite status update.
+- Technical diagnostics now use a separate, capped v1 local ledger. Its fixed
+  records contain only a controlled category/operation pair, app and schema version,
+  timestamp, opaque local correlation ID, and safe error code. No planner content,
+  URL, raw exception, stack, or provider payload is accepted. A diagnostics-store
+  failure is visible through the save warning but cannot self-report into a loop.
+- Plain text, Markdown, and native Notes imports are bounded before transformation:
+  text is limited to 100,000 characters; native collections to 500 notes, 500 tags,
+  1,000 attachments, and 2,000 blocks per note. Rejection produces no imported
+  aggregate. Rich HTML, link-opening, binaries, and providers remain outside this
+  local-first boundary.
 
 ### Phase 3C delivery record — 2026-08-10
 
@@ -2802,6 +2820,9 @@ collaboration fields (§3.4). These remain specified above and unimplemented.
 | 2026-08-10 | Treat note tags as catalog identity and inbox membership as processing metadata, so rename, filing, and future notebook UI never rewrite document content. |
 | 2026-08-10 | Read what a deletion removes before the state updater runs, since the payload is built before it does. |
 | 2026-08-10 | Offer undo only where there is something to undo; a confirmation carries no button. |
+| 2026-08-10 | Treat modal focus as a contained, reversible keyboard boundary rather than a visual overlay. |
+| 2026-08-10 | Keep diagnostics in a capped content-free local ledger and never report a diagnostics-store failure into that same ledger. |
+| 2026-08-10 | Reject oversized Notes imports before normalization, retaining no partial imported state. |
 | 2026-08-10 | Clamp a new entry's start to a minute the day actually has, so "now" near midnight cannot leave the day. |
 | 2026-08-10 | Make the detail view the editor; changing one attribute never opens a second surface. |
 | 2026-08-10 | Keep recurrence and time zone behind a deliberate gesture, because they rewrite a series rather than an entry. |

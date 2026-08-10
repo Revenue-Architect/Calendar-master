@@ -80,6 +80,9 @@ import {
 import { textToNoteBlocks } from "./features/notes/noteText.js";
 import { eventNoteLink, taskNoteLink } from "./features/notes/contextLink.js";
 import {
+  focusDialogOnOpen, restoreDialogFocus, trapDialogTab,
+} from "./features/accessibility/dialogFocus.js";
+import {
   applyBulkTaskAction,
   createTaskMutationUndoPayload,
   deleteTaskFromPlannerState,
@@ -98,6 +101,13 @@ import {
 } from "./domains/reminders/index.js";
 import { loadReminderRecords, saveReminderRecords } from "./platform/persistence/reminderStore.js";
 import { loadPreferences, savePreferences } from "./platform/persistence/preferencesStore.js";
+import { loadDiagnostics, saveDiagnostics } from "./platform/persistence/diagnosticsStore.js";
+import {
+  createDiagnosticsLedger,
+  recordDiagnostic,
+  shouldRecordStorageDiagnostic,
+  storageDiagnosticOperation,
+} from "./platform/diagnostics/diagnostics.js";
 import { preferencesFromLegacyState } from "./platform/preferences/preferences.js";
 import {
   awardTaskCompletion,
@@ -487,6 +497,8 @@ export default function Planner() {
   const [remindersReady, setRemindersReady] = useState(false);
   const [preferences, setPreferences] = useState(null);
   const [motivationLedger, setMotivationLedger] = useState(null);
+  const [diagnostics, setDiagnostics] = useState(null);
+  const [diagnosticsSaveBlocked, setDiagnosticsSaveBlocked] = useState(false);
   const [preferencesSaveBlocked, setPreferencesSaveBlocked] = useState(false);
   const [motivationSaveBlocked, setMotivationSaveBlocked] = useState(false);
   const [storageFailures, setStorageFailures] = useState(() => new Set(storage.writable ? [] : ["device"]));
@@ -499,6 +511,7 @@ export default function Planner() {
   const reminderSaveT = useRef(null);
   const preferencesSaveT = useRef(null);
   const motivationSaveT = useRef(null);
+  const diagnosticsSaveT = useRef(null);
   const undoT = useRef(null);
   const prevLevel = useRef(null);
   const pinch = useRef(null);
@@ -508,12 +521,24 @@ export default function Planner() {
   const tappedRef = useRef(false);
 
   const storageBad = storageFailures.size > 0;
-  const reportStorage = useCallback((scope, failed) => {
+  const reportStorage = useCallback((scope, failed, errorCode = "write-failed") => {
     setStorageFailures((current) => {
       const next = new Set(current);
       if (failed) next.add(scope); else next.delete(scope);
       return next;
     });
+    if (shouldRecordStorageDiagnostic(scope, failed)) {
+      setDiagnostics((current) => current ? recordDiagnostic(current, {
+        id: `diag-${uid()}`,
+        category: "storage",
+        operation: storageDiagnosticOperation(scope),
+        occurredAt: new Date().toISOString(),
+        appVersion: "0.1.0",
+        schemaVersion: 8,
+        correlationId: `local-${uid()}`,
+        errorCode,
+      }) : current);
+    }
   }, []);
 
   useEffect(() => { gestureRef.current = gesture; }, [gesture]);
@@ -525,6 +550,19 @@ export default function Planner() {
     (async () => {
       let state;
       let isFirstRun = false;
+      let nextDiagnostics = createDiagnosticsLedger();
+      try {
+        const loaded = await loadDiagnostics(storage);
+        nextDiagnostics = loaded.ledger;
+        if (loaded.initialized) await saveDiagnostics(storage, nextDiagnostics);
+        reportStorage("diagnostics", false);
+      } catch {
+        /* Do not overwrite a malformed diagnostics ledger on startup. The normal
+           save effect stays blocked, and `reportStorage` deliberately does not
+           create a diagnostic about this diagnostic-store failure. */
+        setDiagnosticsSaveBlocked(true);
+        reportStorage("diagnostics", true, "read-failed");
+      }
       try {
         const loaded = await loadPlannerState(storage);
         state = loaded.state || migrateV7ToV8(migrateV6ToV7(migrateV5ToV6(migrateV4ToV5(seed()))));
@@ -539,7 +577,7 @@ export default function Planner() {
            data that is damaged rather than gone, and export stays the way out. */
         state = migrateV7ToV8(migrateV6ToV7(migrateV5ToV6(migrateV4ToV5(seed()))));
         setSaveBlocked(true);
-        reportStorage("planner", true);
+        reportStorage("planner", true, "read-failed");
       }
       let nextPreferences = preferencesFromLegacyState(state);
       let nextLedger = createMotivationLedger({ openingBalance: state.xp ?? 0 });
@@ -550,7 +588,7 @@ export default function Planner() {
         reportStorage("preferences", false);
       } catch {
         setPreferencesSaveBlocked(true);
-        reportStorage("preferences", true);
+        reportStorage("preferences", true, "read-failed");
       }
       try {
         const loaded = await loadMotivationLedger(storage, { openingBalance: state.xp ?? 0 });
@@ -559,7 +597,7 @@ export default function Planner() {
         reportStorage("motivation", false);
       } catch {
         setMotivationSaveBlocked(true);
-        reportStorage("motivation", true);
+        reportStorage("motivation", true, "read-failed");
       }
       /* A brand-new notebook opens on someone else's week. The sample is useful for
          judging the app and confusing as your own planner, so the first run asks
@@ -568,6 +606,7 @@ export default function Planner() {
         setDb(state);
         setPreferences(nextPreferences);
         setMotivationLedger(nextLedger);
+        setDiagnostics(nextDiagnostics);
         setFirstRun(isFirstRun);
         setReady(true);
       }
@@ -594,7 +633,7 @@ export default function Planner() {
     let dead = false;
     loadReminderRecords(storage)
       .then((records) => { if (!dead) setReminderRecords(records); })
-      .catch(() => { if (!dead) reportStorage("reminders", true); })
+      .catch(() => { if (!dead) reportStorage("reminders", true, "read-failed"); })
       .finally(() => { if (!dead) setRemindersReady(true); });
     return () => { dead = true; };
   }, [ready, reportStorage]);
@@ -625,6 +664,18 @@ export default function Planner() {
     }, 200);
     return () => clearTimeout(motivationSaveT.current);
   }, [motivationLedger, motivationSaveBlocked, reportStorage]);
+
+  useEffect(() => {
+    if (!diagnostics || diagnosticsSaveBlocked) return undefined;
+    clearTimeout(diagnosticsSaveT.current);
+    diagnosticsSaveT.current = setTimeout(() => {
+      saveDiagnostics(storage, diagnostics).then(
+        () => reportStorage("diagnostics", false),
+        () => reportStorage("diagnostics", true),
+      );
+    }, 200);
+    return () => clearTimeout(diagnosticsSaveT.current);
+  }, [diagnostics, diagnosticsSaveBlocked, reportStorage]);
 
   useEffect(() => { const i = setInterval(() => setNow(new Date()), 15000); return () => clearInterval(i); }, []);
 
@@ -2492,7 +2543,7 @@ export default function Planner() {
           the user has no reason to open. */}
       {storageBad && (
         <div className="fixed inset-x-0 top-14 z-50 flex justify-center px-3 pointer-events-none">
-          <div className="nb-up flex items-center gap-3 px-3 py-2 w-full sm:w-auto pointer-events-auto"
+          <div role="alert" className="nb-up flex items-center gap-3 px-3 py-2 w-full sm:w-auto pointer-events-auto"
             style={{ background: NOW_RED, color: "#FFFFFF", borderRadius: CARD_R }}>
             <span style={{ fontFamily: MONO }} className="text-xs tracking-widest shrink-0">NOT SAVING</span>
             <span className="text-sm truncate">Changes are staying in this tab only.</span>
@@ -2504,7 +2555,7 @@ export default function Planner() {
 
       {alertToast && (
         <div className="fixed inset-x-0 top-16 z-50 flex justify-center px-3 pointer-events-none">
-          <div className="nb-up flex items-center gap-3 px-3 py-2 w-full sm:w-auto pointer-events-auto" style={{ background: NOW_RED, color: "#FFFFFF" }}>
+          <div role="alert" className="nb-up flex items-center gap-3 px-3 py-2 w-full sm:w-auto pointer-events-auto" style={{ background: NOW_RED, color: "#FFFFFF" }}>
             <span style={{ fontFamily: MONO }} className="text-xs tracking-widest shrink-0">REMINDER</span>
             <span className="text-sm font-semibold truncate">{alertToast.title}</span>
             <span style={{ fontFamily: MONO }} className="text-xs tracking-widest shrink-0">{alertToast.body}</span>
@@ -2518,7 +2569,7 @@ export default function Planner() {
 
       {undo && (
         <div className="fixed inset-x-0 z-50 flex justify-center pointer-events-none" style={{ bottom: 68 }}>
-          <div className="nb-up flex items-center gap-3 px-3 py-2 pointer-events-auto" style={{ background: T.text, color: T.bg }}>
+          <div role="status" aria-live="polite" className="nb-up flex items-center gap-3 px-3 py-2 pointer-events-auto" style={{ background: T.text, color: T.bg }}>
             <span style={{ fontFamily: MONO }} className="text-xs tracking-widest">{undo.label}</span>
             {undo.payload && <button onClick={runUndo} style={{ fontFamily: MONO, color: T.accent }} className="text-xs font-bold tracking-widest">UNDO</button>}
           </div>
@@ -3838,6 +3889,9 @@ function Sheet({ T, onClose, title, children }) {
      Belt and braces alongside preventDefault at the source: any future path that
      opens a sheet from a touch inherits the protection. */
   const openedAt = useRef(Date.now());
+  const dialogRef = useRef(null);
+  const openerRef = useRef(null);
+  const titleId = useRef(`sheet-title-${Math.random().toString(36).slice(2, 9)}`);
   const guardedClose = useCallback(() => {
     if (Date.now() - openedAt.current < 350) return;
     onClose();
@@ -3852,12 +3906,21 @@ function Sheet({ T, onClose, title, children }) {
       document.body.style.overflow = prev;
     };
   }, [onClose]);
+  useEffect(() => {
+    openerRef.current = document.activeElement;
+    const frame = window.requestAnimationFrame(() => focusDialogOnOpen(dialogRef.current));
+    return () => {
+      window.cancelAnimationFrame(frame);
+      restoreDialogFocus(openerRef.current);
+    };
+  }, []);
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" style={{ background: "rgba(0,0,0,0.8)" }} onClick={guardedClose}>
-      <div role="dialog" aria-modal="true" aria-label={title || "Details"} onClick={(e) => e.stopPropagation()}
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId.current}
+        onKeyDown={(event) => trapDialogTab(event, dialogRef.current)} onClick={(e) => e.stopPropagation()}
         className="nb-up w-full sm:max-w-md overflow-y-auto nb-s" style={{ background: T.card, color: T.text, maxHeight: "88vh" }}>
         <div className="sticky top-0 flex items-center justify-between px-4 sm:px-5 pt-3 pb-2" style={{ background: T.card, zIndex: 3 }}>
-          <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">{title || ""}</span>
+          <span id={titleId.current} style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">{title || "Details"}</span>
           <button onClick={onClose} aria-label="Close" style={{ color: T.dim, fontFamily: MONO }} className="nb-tap -mr-1 px-2 py-1 text-sm">✕</button>
         </div>
         <div className="px-4 sm:px-5 pb-5">{children}</div>

@@ -64,6 +64,40 @@ test("native import rejects malformed input before returning a partial aggregate
   }), /blocks/);
 });
 
+test("untrusted text and native bundle limits reject oversized input before import", () => {
+  let block = 0;
+  assert.throws(() => importPlainTextNote("x".repeat(100_001), {
+    id: "too-large", createBlockId: () => `block-${++block}`,
+  }), /limit/);
+  assert.throws(() => importMarkdownNote("# Title\n\n" + "x".repeat(100_001), {
+    id: "too-large-markdown", createBlockId: () => `block-${++block}`,
+  }), /limit/);
+  assert.throws(() => importNativeNoteCollection({ notes: [], noteTags: [], noteAttachments: [] }, {
+    format: "calendar-master-notes", version: 1,
+    notes: Array.from({ length: 501 }, (_, index) => ({ id: `note-${index}`, blocks: [] })),
+    noteTags: [], noteAttachments: [],
+  }), /limit/);
+  assert.throws(() => importNativeNoteCollection({ notes: [], noteTags: [], noteAttachments: [] }, {
+    format: "calendar-master-notes", version: 1,
+    notes: [{ id: "block-limit", blocks: Array.from({ length: 2_001 }, (_, index) => ({ id: `block-${index}`, type: "paragraph", text: "" })) }],
+    noteTags: [], noteAttachments: [],
+  }), /limit/);
+  assert.throws(() => importNativeNoteCollection({ notes: [], noteTags: [], noteAttachments: [] }, {
+    format: "calendar-master-notes", version: 1,
+    notes: [],
+    noteTags: Array.from({ length: 501 }, (_, index) => ({ id: `tag-${index}`, name: `Tag ${index}`, color: "violet" })),
+    noteAttachments: [],
+  }), /limit/);
+  assert.throws(() => importNativeNoteCollection({ notes: [], noteTags: [], noteAttachments: [] }, {
+    format: "calendar-master-notes", version: 1,
+    notes: [], noteTags: [],
+    noteAttachments: Array.from({ length: 1_001 }, (_, index) => ({
+      id: `attachment-${index}`, noteId: "missing-note", displayName: "brief.txt", mediaType: "text/plain",
+      byteSize: 0, checksum: null, status: "missing", storageRef: null, caption: "",
+    })),
+  }), /limit/);
+});
+
 test("duplicate import policies copy, skip, or metadata-merge without overwriting a document", () => {
   const initial = state();
   const backup = exportNativeNoteCollection(initial);
