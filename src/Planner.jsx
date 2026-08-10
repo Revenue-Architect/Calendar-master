@@ -89,6 +89,15 @@ import {
 import { resolveTaskForInspection } from "./features/planner/taskInspection.js";
 import { projectPlannerDay } from "./features/planner/dayProjection.js";
 import {
+  deliverReminder,
+  dismissReminder,
+  getDueReminders,
+  getReminderIntents,
+  reconcileReminders,
+  snoozeReminder,
+} from "./domains/reminders/index.js";
+import { loadReminderRecords, saveReminderRecords } from "./platform/persistence/reminderStore.js";
+import {
   createEvent as createCalendarEvent,
   deleteEvent as deleteCalendarEvent,
   getOccurrencesForRange,
@@ -489,12 +498,15 @@ export default function Planner() {
   const [listPicker, setListPicker] = useState(null);
   const [selection, setSelection] = useState(null);
   const [firstRun, setFirstRun] = useState(false);
+  const [reminderRecords, setReminderRecords] = useState([]);
+  const [remindersReady, setRemindersReady] = useState(false);
 
   const stripRef = useRef(null);
   const activeRef = useRef(null);
   const streamRef = useRef(null);
   const listRef = useRef(null);
   const saveT = useRef(null);
+  const reminderSaveT = useRef(null);
   const undoT = useRef(null);
   const prevLevel = useRef(null);
   const pinch = useRef(null);
@@ -502,7 +514,6 @@ export default function Planner() {
   const holdRef = useRef(null);
   const gestureRef = useRef(null);
   const tappedRef = useRef(false);
-  const firedRef = useRef(new Set());
 
   useEffect(() => { gestureRef.current = gesture; }, [gesture]);
   const startGesture = (g) => { gestureRef.current = g; setGesture(g); };
@@ -542,6 +553,28 @@ export default function Planner() {
     return () => clearTimeout(saveT.current);
   }, [db, ready]);
 
+  /* §2.1. Reminder delivery state is a separate local aggregate. A damaged ledger
+     must never block the canonical notebook from opening, so it starts empty and
+     is reconstructed from source intent rather than overwriting planner content. */
+  useEffect(() => {
+    if (!ready) return undefined;
+    let dead = false;
+    loadReminderRecords(storage)
+      .then((records) => { if (!dead) setReminderRecords(records); })
+      .catch(() => { if (!dead) setStorageBad(true); })
+      .finally(() => { if (!dead) setRemindersReady(true); });
+    return () => { dead = true; };
+  }, [ready]);
+
+  useEffect(() => {
+    if (!remindersReady || saveBlocked) return undefined;
+    clearTimeout(reminderSaveT.current);
+    reminderSaveT.current = setTimeout(() => {
+      saveReminderRecords(storage, reminderRecords).then(() => setStorageBad(false), () => setStorageBad(true));
+    }, 400);
+    return () => clearTimeout(reminderSaveT.current);
+  }, [reminderRecords, remindersReady, saveBlocked]);
+
   useEffect(() => { const i = setInterval(() => setNow(new Date()), 15000); return () => clearInterval(i); }, []);
 
   const T = useMemo(() => THEMES.find((t) => t.id === (db && db.themeId)) || THEMES[0], [db]);
@@ -575,6 +608,7 @@ export default function Planner() {
 
   const todayKey = keyOf(now);
   const nowMin = now.getHours() * 60 + now.getMinutes();
+  const nowLocal = addMinutesToLocalDateTime(`${todayKey}T00:00`, nowMin);
   const isToday = dateKey === todayKey;
   const activeDate = parseKey(dateKey);
   const ov = (db && db.overrides) || {};
@@ -684,63 +718,32 @@ export default function Planner() {
 
   const mutate = (fn) => setDb((d) => (d ? fn({ ...d }) : d));
 
-  /* ─── reminders ─── */
+  /* §2.1–2.5. Calendar and Tasks describe intent. The ledger resolves, preserves,
+     and controls delivery without rewriting either source record. */
   useEffect(() => {
-    if (!db) return;
-    const todays = getOccurrencesForRange(db, todayKey, addDaysToKey(todayKey, 1), { segments: true })
-      .map(eventForUi)
-      .filter((e) => !e.allDay && e.alerts && e.alerts.length);
-    todays.forEach((e) => {
-      (e.alerts || []).forEach((a) => {
-        const fireAt = e.start - a;
-        const key = `${e.id}|${a}`;
-        if (firedRef.current.has(key)) return;
-        if (nowMin >= fireAt && nowMin < fireAt + 2) {
-          firedRef.current.add(key);
-          const body = a === 0 ? `Starting now · ${tm(e.start)}` : `In ${dur(a)} · ${tm(e.start)}`;
-          beep("alert"); buzz([10, 60, 10]);
-          setAlertToast({ title: e.title, body, k: uid() });
-          setTimeout(() => setAlertToast(null), 8000);
-          try {
-            if (db.notifs && "Notification" in window && Notification.permission === "granted") new Notification(e.title, { body });
-          } catch (err) {}
-        }
-      });
+    if (!db || !remindersReady) return;
+    const intents = getReminderIntents(db, { now: nowLocal });
+    const horizonEnd = `${addDaysToKey(todayKey, 14)}T00:00`;
+    setReminderRecords((records) => {
+      const next = reconcileReminders(records, intents, { now: nowLocal, horizonEnd });
+      return JSON.stringify(next) === JSON.stringify(records) ? records : next;
     });
+  }, [db, remindersReady, nowLocal, todayKey]);
 
-    /* §12.1. Task reminders hang off a date the task already has, so a rescheduled
-       task moves its reminder with it instead of firing at the old moment. */
-    const fire = (title, body) => {
-      beep("alert"); buzz([10, 60, 10]);
-      setAlertToast({ title, body, k: uid() });
-      setTimeout(() => setAlertToast(null), 8000);
-      try {
-        if (db.notifs && "Notification" in window && Notification.permission === "granted") new Notification(title, { body });
-      } catch (err) {}
-    };
-    getDayTasks(db, todayKey)
-      .filter((task) => task.status !== "completed" && (task.reminders ?? []).length)
-      .forEach((task) => {
-        task.reminders.forEach((reminder) => {
-          const anchorDate = reminder.anchor === "deadline" ? task.deadline.date
-            : reminder.anchor === "followUp" ? task.followUpDate
-              : task.planned.date;
-          if (anchorDate !== todayKey) return;
-          const anchorMinute = reminder.anchor === "deadline"
-            ? task.deadline.minute ?? 9 * 60
-            : task.planned.startMinute ?? 9 * 60;
-          const fireAt = anchorMinute - reminder.offsetMinutes;
-          const key = `task:${task.id}|${reminder.id}`;
-          if (firedRef.current.has(key)) return;
-          if (nowMin >= fireAt && nowMin < fireAt + 2) {
-            firedRef.current.add(key);
-            fire(task.title, reminder.offsetMinutes === 0
-              ? `Due now · ${tm(anchorMinute)}`
-              : `In ${dur(reminder.offsetMinutes)} · ${tm(anchorMinute)}`);
-          }
-        });
-      });
-  }, [now, db, todayKey]);
+  useEffect(() => {
+    if (!db || !remindersReady || alertToast) return;
+    const due = getDueReminders(reminderRecords, nowLocal, { limit: 3 });
+    const reminder = due[0];
+    if (!reminder) return;
+    setReminderRecords((records) => deliverReminder(records, reminder.id, { now: nowLocal }));
+    beep("alert"); buzz([10, 60, 10]);
+    setAlertToast({ title: reminder.title, body: reminder.body, reminderId: reminder.id, k: uid() });
+    try {
+      if (db.notifs && "Notification" in window && Notification.permission === "granted") {
+        new Notification(reminder.title, { body: reminder.body });
+      }
+    } catch (err) {}
+  }, [db, remindersReady, reminderRecords, nowLocal, alertToast, beep]);
 
   const askNotifs = async () => {
     try {
@@ -749,6 +752,19 @@ export default function Planner() {
       mutate((d) => ({ ...d, notifs: p === "granted" }));
       beep(p === "granted" ? "commit" : "abort");
     } catch (e) {}
+  };
+
+  const snoozeAlert = () => {
+    if (!alertToast?.reminderId) return;
+    const until = addMinutesToLocalDateTime(nowLocal, 10);
+    setReminderRecords((records) => snoozeReminder(records, alertToast.reminderId, { now: nowLocal, until }));
+    setAlertToast(null); beep("tick");
+  };
+
+  const dismissAlert = () => {
+    if (!alertToast?.reminderId) return;
+    setReminderRecords((records) => dismissReminder(records, alertToast.reminderId, { now: nowLocal }));
+    setAlertToast(null); beep("click");
   };
 
   const densityOf = useCallback((d) => {
@@ -1587,6 +1603,7 @@ export default function Planner() {
   const wipeAll = () => {
     beep("delete");
     setDb(createBlankPlannerState({ themeId: T.id, sound: db.sound, notifs: db.notifs, clock: db.clock }));
+    setReminderRecords([]);
     setConfirmWipe(false);
     setSettings(false);
   };
@@ -2377,10 +2394,14 @@ export default function Planner() {
 
       {alertToast && (
         <div className="fixed inset-x-0 top-16 z-50 flex justify-center px-3 pointer-events-none">
-          <div className="nb-up flex items-center gap-3 px-3 py-2 w-full sm:w-auto" style={{ background: NOW_RED, color: "#FFFFFF" }}>
+          <div className="nb-up flex items-center gap-3 px-3 py-2 w-full sm:w-auto pointer-events-auto" style={{ background: NOW_RED, color: "#FFFFFF" }}>
             <span style={{ fontFamily: MONO }} className="text-xs tracking-widest shrink-0">REMINDER</span>
             <span className="text-sm font-semibold truncate">{alertToast.title}</span>
             <span style={{ fontFamily: MONO }} className="text-xs tracking-widest shrink-0">{alertToast.body}</span>
+            {alertToast.reminderId && <>
+              <button onClick={snoozeAlert} style={{ fontFamily: MONO }} className="text-xs font-bold tracking-widest underline shrink-0">SNOOZE 10M</button>
+              <button onClick={dismissAlert} style={{ fontFamily: MONO }} className="text-xs font-bold tracking-widest underline shrink-0">DISMISS</button>
+            </>}
           </div>
         </div>
       )}
@@ -2944,7 +2965,7 @@ export default function Planner() {
               <div className="flex items-center gap-2 mb-2 p-2" style={{ boxShadow: `inset 0 0 0 1px ${NOW_RED}` }}>
                 <span className="flex-1 text-xs">Replace everything on this device?</span>
                 <button onClick={() => { setPendingImport(null); beep("abort"); }} style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">CANCEL</button>
-                <button onClick={() => { setDb(pendingImport); setPendingImport(null); beep("commit"); setSettings(false); }} style={{ fontFamily: MONO, color: NOW_RED }} className="text-xs font-bold tracking-widest">REPLACE</button>
+                <button onClick={() => { setDb(pendingImport); setReminderRecords([]); setPendingImport(null); beep("commit"); setSettings(false); }} style={{ fontFamily: MONO, color: NOW_RED }} className="text-xs font-bold tracking-widest">REPLACE</button>
               </div>
             )}
             <div className="flex flex-wrap gap-2">

@@ -2243,6 +2243,19 @@ reminder extraction, and frontend polish remain intentionally deferred.
   attendance or actual-time model exists; a calendar entry alone is not evidence
   that a meeting happened.
 
+### Phase 3B delivery record — 2026-08-10
+
+- `domains/reminders` owns a durable local delivery ledger, while Calendar alerts
+  and Task reminders remain source intent. Schedules are derived by stable source,
+  occurrence, intent, and resolved-time identities, so a changed source supersedes
+  rather than duplicates an active reminder.
+- The ledger persists independently from the planner notebook. It supports bounded
+  reconciliation, in-app delivery, snooze, dismissal, cancellation, and audit
+  timestamps without mutating source events or tasks.
+- Browser notifications are a permission-gated best effort while the app runs.
+  Closed-browser scheduling is intentionally deferred to a future platform adapter;
+  the product does not claim an unavailable background service.
+
 ## Phase 4: Integrations
 
 - Add Google and Microsoft calendar and task adapters behind existing domain ports.

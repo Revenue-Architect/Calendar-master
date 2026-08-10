@@ -19,9 +19,10 @@ intentional absence of schedule-variance data.
 
 ## Browser pressure test
 
-The local Vite preview started successfully, but the available cloud browser rejected
-`http://localhost:5173` with `net::ERR_BLOCKED_BY_CLIENT`. No visual flow is claimed
-as passed from this environment.
+The available cloud browser rejected `http://localhost:5173` with
+`net::ERR_BLOCKED_BY_CLIENT`; the local Vite process subsequently reported a runtime
+network-interface error before it exposed a usable preview URL. No visual flow is
+claimed as passed from this environment.
 
 The next browser/device run must verify:
 

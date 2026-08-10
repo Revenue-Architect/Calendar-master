@@ -29,6 +29,8 @@ are too detailed for the repository README.
 - [`qa/2026-08-10-shared-planner-foundation-phase-3a.md`](qa/2026-08-10-shared-planner-foundation-phase-3a.md)
   records the shared day aggregate and daily-review automated evidence plus the
   local-browser access limitation.
+- [`qa/2026-08-10-reminders-phase-3b.md`](qa/2026-08-10-reminders-phase-3b.md)
+  records the durable reminder ledger, scheduling, delivery, and persistence gates.
 
 ## Implementation plans
 
@@ -62,6 +64,9 @@ are too detailed for the repository README.
 - [`superpowers/plans/2026-08-10-shared-planner-foundation.md`](superpowers/plans/2026-08-10-shared-planner-foundation.md)
   sequences the remaining non-provider foundation and records the completed day
   aggregate/daily-review Slice 3A.
+- [`superpowers/plans/2026-08-10-reminders-phase-3b.md`](superpowers/plans/2026-08-10-reminders-phase-3b.md)
+  defines the delivery ledger, reconciliation, controls, and local persistence
+  boundary for Reminders Phase 3B.
 
 ## Architecture decisions
 
