@@ -20,6 +20,14 @@ export {
   getNextEvent,
 } from "./queries/calendarQueries.js";
 export {
+  getCalendarBriefing,
+  getCalendarConflicts,
+  getFreeSlotsForDay,
+  getTimedBusyIntervals,
+  getVisibleCalendarIds,
+  getVisibleOccurrencesForRange,
+} from "./queries/planningQueries.js";
+export {
   normalizeTiming,
   timingEndDateExclusive,
   timingIntersectsDate,

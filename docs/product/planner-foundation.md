@@ -2269,6 +2269,19 @@ reminder extraction, and frontend polish remain intentionally deferred.
   Each persistence failure remains visible at the existing device-save warning.
   Import and full wipe start a fresh ledger from the imported legacy opening
   balance while leaving device preferences intact.
+
+### Phase 3E delivery record — 2026-08-10
+
+- Calendar visibility, availability, conflicts, free slots, and daily briefings
+  are now Calendar-owned read projections over canonical occurrences and moved
+  exceptions. They persist no duplicate events and never schedule a task.
+- Hidden, archived, and disconnected calendars are excluded. Availability also
+  respects `includeInAvailability`; all-day entries remain visible context rather
+  than silently blocking an entire working day.
+- Busy and conflict calculations use clipped half-open intervals, so adjacent
+  events do not conflict and an overnight event contributes only the portion in
+  the queried day. Briefings report facts and retain the existing explicit
+  unavailable attendance/variance state.
   Closed-browser scheduling is intentionally deferred to a future platform adapter;
   the product does not claim an unavailable background service.
 
@@ -2766,6 +2779,7 @@ resurfacing (§9.4), inbox processing states (§6.1), and the collaboration fiel
 | 2026-08-10 | Show a revision whose checksum fails as damaged rather than restoring corrupted text over a good page. |
 | 2026-08-10 | Persist device preferences and motivation history separately from canonical planner content, preserving schema-v7 compatibility. |
 | 2026-08-10 | Treat legacy XP as a one-time opening balance; only new auditable task completions and reversals change the motivation ledger. |
+| 2026-08-10 | Make availability and conflicts provider-free Calendar projections; a free slot is a suggestion, never an automatic scheduling command. |
 | 2026-08-10 | Read what a deletion removes before the state updater runs, since the payload is built before it does. |
 | 2026-08-10 | Offer undo only where there is something to undo; a confirmation carries no button. |
 | 2026-08-10 | Clamp a new entry's start to a minute the day actually has, so "now" near midnight cannot leave the day. |

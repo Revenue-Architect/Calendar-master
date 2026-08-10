@@ -23,6 +23,9 @@ are too detailed for the repository README.
 - [`superpowers/specs/2026-08-10-preferences-motivation-design.md`](superpowers/specs/2026-08-10-preferences-motivation-design.md)
   defines the Phase 3D independent preferences, humane motivation ledger, and
   recovery policy.
+- [`superpowers/specs/2026-08-10-calendar-projections-design.md`](superpowers/specs/2026-08-10-calendar-projections-design.md)
+  defines the Phase 3E provider-free visibility, availability, conflict, and
+  briefing projections.
 
 ## Quality reports
 
@@ -46,6 +49,9 @@ are too detailed for the repository README.
 - [`qa/2026-08-10-preferences-motivation-phase-3d.md`](qa/2026-08-10-preferences-motivation-phase-3d.md)
   records the preferences/motivation persistence, reward-reversal, regression,
   and browser-access evidence.
+- [`qa/2026-08-10-calendar-projections-phase-3e.md`](qa/2026-08-10-calendar-projections-phase-3e.md)
+  records Calendar projection correctness, cross-midnight pressure checks, and
+  production verification.
 
 ## Implementation plans
 
@@ -88,6 +94,9 @@ are too detailed for the repository README.
 - [`superpowers/plans/2026-08-10-preferences-motivation-phase-3d.md`](superpowers/plans/2026-08-10-preferences-motivation-phase-3d.md)
   implements separate local settings and motivation aggregates without a notebook
   schema migration.
+- [`superpowers/plans/2026-08-10-calendar-projections-phase-3e.md`](superpowers/plans/2026-08-10-calendar-projections-phase-3e.md)
+  implements Calendar-owned visibility, availability, conflict, free-slot, and
+  briefing queries.
 
 ## Architecture decisions
 
