@@ -1,4 +1,4 @@
-import { getEventsForDay, getOccurrencesForRange } from "../../calendar/index.js";
+import { getEventsForDay, getVisibleOccurrencesForRange } from "../../calendar/index.js";
 import { addDaysToKey } from "../../../shared/time/dateKey.js";
 import { localDateTimeToEpochMinutes } from "../../../shared/time/localDateTime.js";
 import { getDayTasks, getOverdueForToday } from "../../tasks/index.js";
@@ -11,15 +11,24 @@ import { getDailyNote, getNotesForDate } from "../../notes/index.js";
    the day it jumped to held no such occurrence. Both views expand the same way now.
 
    A pre-v5 event carries `date`/`start` instead of `timing`; it has no series to
-   expand and still answers to `overrides`, so it keeps the older path. */
-function occurrencesOn(state, dateKey, viewerTimeZone) {
+   expand and still answers to `overrides`, so it keeps the older path. A legacy
+   event also predates calendars entirely, so there is no calendar to hide it by
+   — filtering it through the visibility projection would erase it.
+
+   The canonical path reads through `getVisibleOccurrencesForRange`, never the raw
+   occurrence query: this aggregate is what the day timeline and the briefing are
+   built from, and a surface a person looks at must not show events from a
+   calendar they hid, archived or disconnected. Availability is a different
+   question and deliberately not asked here — a calendar can be visible without
+   blocking a slot. */
+function occurrencesOn(state, dateKey, { viewerTimeZone, calendarIds = null } = {}) {
   const events = state.events || [];
   const canonical = events.filter((event) => event.timing);
   const legacy = events.filter((event) => !event.timing);
   return [
     ...(canonical.length
-      ? getOccurrencesForRange({ ...state, events: canonical }, dateKey, addDaysToKey(dateKey, 1), {
-        segments: true, viewerTimeZone,
+      ? getVisibleOccurrencesForRange({ ...state, events: canonical }, dateKey, addDaysToKey(dateKey, 1), {
+        segments: true, viewerTimeZone, calendarIds,
       })
       : []),
     ...(legacy.length ? getEventsForDay(legacy, dateKey, state.overrides ?? {}, { viewerTimeZone }) : []),
@@ -54,10 +63,11 @@ export function getDayAggregate(state, {
   todayDate,
   currentMinute = 0,
   viewerTimeZone,
+  calendarIds = null,
 } = {}) {
   const events = read(() => {
     if (!Array.isArray(state?.events)) throw new TypeError("events are unavailable");
-    return occurrencesOn(state, selectedDate, viewerTimeZone);
+    return occurrencesOn(state, selectedDate, { viewerTimeZone, calendarIds });
   });
   const tasks = read(() => {
     if (!Array.isArray(state?.tasks)) throw new TypeError("tasks are unavailable");

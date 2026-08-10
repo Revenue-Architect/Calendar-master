@@ -123,3 +123,91 @@ test("a cancelled occurrence stays off the day", () => {
   const day = getDayAggregate(cancelled, { selectedDate: TODAY, todayDate: TODAY, currentMinute: 0 });
   assert.deepEqual(day.events, [], "an exception the old path could not even see");
 });
+
+/* A notebook with two calendars, one of them hidden. Every surface a user looks
+   at must read through the visibility projection, or hidden work reappears on
+   the day and the agenda while the week grid and month peek correctly leave it
+   out — the same event present in one view and absent from another. */
+function twoCalendarState({ hiddenStatus = {} } = {}) {
+  return {
+    calendars: [
+      { id: "cal-main", name: "Main", status: "active", role: "owner", isDefault: true, isVisible: true, includeInAvailability: true },
+      { id: "cal-other", name: "Other", status: "active", role: "owner", isDefault: false, isVisible: true, includeInAvailability: true, ...hiddenStatus },
+    ],
+    events: [
+      {
+        id: "event-main", calendarId: "cal-main", title: "Shown", category: "DEEP WORK",
+        timing: { kind: "timed", timeZoneMode: "floating", startLocal: `${TODAY}T09:00`, endLocal: `${TODAY}T09:30` },
+        recurrence: null,
+      },
+      {
+        id: "event-other", calendarId: "cal-other", title: "From the other calendar", category: "DEEP WORK",
+        timing: { kind: "timed", timeZoneMode: "floating", startLocal: `${TODAY}T11:00`, endLocal: `${TODAY}T11:30` },
+        recurrence: null,
+      },
+    ],
+    eventExceptions: [],
+    occurrenceAliases: [],
+    overrides: {},
+    tasks: [],
+    taskExceptions: [],
+    notes: [],
+  };
+}
+
+const titlesOn = (aggregate) => aggregate.events.map((event) => event.title);
+
+test("the day reads both calendars while both are visible", () => {
+  const aggregate = getDayAggregate(twoCalendarState(), { selectedDate: TODAY, todayDate: TODAY });
+  assert.deepEqual(titlesOn(aggregate), ["Shown", "From the other calendar"]);
+});
+
+test("a hidden calendar is absent from the day", () => {
+  const aggregate = getDayAggregate(
+    twoCalendarState({ hiddenStatus: { isVisible: false } }),
+    { selectedDate: TODAY, todayDate: TODAY },
+  );
+  assert.deepEqual(titlesOn(aggregate), ["Shown"]);
+});
+
+test("archived and disconnected calendars are absent from the day", () => {
+  for (const status of ["archived", "disconnected"]) {
+    const aggregate = getDayAggregate(
+      twoCalendarState({ hiddenStatus: { status } }),
+      { selectedDate: TODAY, todayDate: TODAY },
+    );
+    assert.deepEqual(titlesOn(aggregate), ["Shown"], status);
+  }
+});
+
+test("a calendar excluded from availability still shows its events on the day", () => {
+  /* Visibility and availability are different questions: this calendar must not
+     block a slot, and must still be readable. */
+  const aggregate = getDayAggregate(
+    twoCalendarState({ hiddenStatus: { includeInAvailability: false } }),
+    { selectedDate: TODAY, todayDate: TODAY },
+  );
+  assert.deepEqual(titlesOn(aggregate), ["Shown", "From the other calendar"]);
+});
+
+test("'what is next' skips an event on a hidden calendar", () => {
+  const aggregate = getDayAggregate(
+    twoCalendarState({ hiddenStatus: { isVisible: false } }),
+    { selectedDate: TODAY, todayDate: TODAY, currentMinute: 10 * 60 },
+  );
+  assert.equal(aggregate.nextEvent, null, "the only later event was on the hidden calendar");
+});
+
+test("a caller can narrow the day to named calendars", () => {
+  const aggregate = getDayAggregate(twoCalendarState(), {
+    selectedDate: TODAY, todayDate: TODAY, calendarIds: ["cal-main"],
+  });
+  assert.deepEqual(titlesOn(aggregate), ["Shown"]);
+});
+
+test("a notebook with no calendars list still reads its events", () => {
+  /* Pre-v5 notebooks have no `calendars`; they must not silently read as empty. */
+  const legacy = state();
+  const aggregate = getDayAggregate(legacy, { selectedDate: TODAY, todayDate: TODAY });
+  assert.ok(aggregate.events.length > 0, "legacy events survive the projection");
+});

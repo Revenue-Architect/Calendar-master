@@ -134,7 +134,6 @@ import { loadMotivationLedger, saveMotivationLedger } from "./platform/persisten
 import {
   createEvent as createCalendarEvent,
   deleteEvent as deleteCalendarEvent,
-  getOccurrencesForRange,
   getVisibleOccurrencesForRange,
   legacyEventInputToCanonical,
   parseOccurrenceId,
@@ -868,7 +867,11 @@ export default function Planner() {
     if (!db) return [];
     const start = addDaysToKey(dateKey, -AGENDA_BACK);
     const end = addDaysToKey(start, AGENDA_SPAN);
-    const events = getOccurrencesForRange(db, start, end, { segments: true }).map(eventForUi);
+    /* The agenda is a surface someone reads, so it goes through the visibility
+       projection like every other one — a hidden, archived or disconnected
+       calendar is as absent here as it is on the day, the week and the month.
+       See .agents/memory/calendar-read-projections.md. */
+    const events = getVisibleOccurrencesForRange(db, start, end, { segments: true }).map(eventForUi);
     const tasks = getUpcomingRange(db, start, AGENDA_SPAN);
     return Array.from({ length: AGENDA_SPAN }, (_, i) => {
       const key = addDaysToKey(start, i);

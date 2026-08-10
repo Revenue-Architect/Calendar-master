@@ -6,6 +6,7 @@ import {
   getCalendarConflicts,
   getFreeSlotsForDay,
   getTimedBusyIntervals,
+  getVisibleCalendarIds,
   getVisibleOccurrencesForRange,
 } from "../queries/planningQueries.js";
 import { makeOccurrenceId } from "../recurrence/occurrenceIdentity.js";
@@ -112,4 +113,40 @@ test("briefing remains factual and preserves occurrence identity", () => {
   assert.equal(briefing.nextTimed.id, "focus");
   assert.equal(briefing.conflicts.length, 1);
   assert.equal(briefing.scheduleVariance.status, "unavailable");
+});
+
+test("a notebook that declares no calendars is not filtered to nothing", () => {
+  /* Filtering against an empty roster would erase the whole notebook, and do it
+     silently. No roster means nothing to hide by. */
+  const rosterless = {
+    events: [{
+      id: "solo", calendarId: "calendar-default", title: "Standup",
+      timing: { kind: "timed", timeZoneMode: "floating", startLocal: "2026-08-10T09:00", endLocal: "2026-08-10T09:30" },
+      recurrence: null,
+    }],
+    eventExceptions: [], occurrenceAliases: [],
+  };
+  assert.equal(getVisibleOccurrencesForRange(rosterless, "2026-08-10", "2026-08-11").length, 1);
+  assert.equal(getTimedBusyIntervals(rosterless, "2026-08-10", "2026-08-11").length, 1);
+  assert.deepEqual(getVisibleCalendarIds(rosterless), []);
+});
+
+test("an explicit calendarIds request still narrows a rosterless notebook", () => {
+  const rosterless = {
+    events: [
+      {
+        id: "a", calendarId: "cal-a", title: "A",
+        timing: { kind: "timed", timeZoneMode: "floating", startLocal: "2026-08-10T09:00", endLocal: "2026-08-10T09:30" },
+        recurrence: null,
+      },
+      {
+        id: "b", calendarId: "cal-b", title: "B",
+        timing: { kind: "timed", timeZoneMode: "floating", startLocal: "2026-08-10T11:00", endLocal: "2026-08-10T11:30" },
+        recurrence: null,
+      },
+    ],
+    eventExceptions: [], occurrenceAliases: [],
+  };
+  const only = getVisibleOccurrencesForRange(rosterless, "2026-08-10", "2026-08-11", { calendarIds: ["cal-a"] });
+  assert.deepEqual(only.map((occurrence) => occurrence.title), ["A"]);
 });

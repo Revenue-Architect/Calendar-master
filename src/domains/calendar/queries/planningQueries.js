@@ -18,11 +18,28 @@ function selectedCalendarIds(state, { calendarIds = null, availabilityOnly = fal
     .map((calendar) => calendar.id));
 }
 
-function visibleState(state, options) {
+/* A notebook that declares no calendars has no calendar to hide anything by, so
+   the visibility filter has no opinion and must not remove a thing. Filtering
+   against an empty roster would erase every event in the notebook — an empty day
+   is a far worse answer than an unfiltered one, and it would be silent.
+   An explicit `calendarIds` request is different: the caller named what it wants,
+   so it still narrows, matched against the events' own calendar ids. */
+function visibleState(state, options = {}) {
   const calendarIds = selectedCalendarIds(state, options);
+  const events = state?.events ?? [];
+  const hasRoster = Array.isArray(state?.calendars) && state.calendars.length > 0;
+  if (!hasRoster) {
+    const requested = options.calendarIds == null ? null : new Set(options.calendarIds);
+    return {
+      calendarIds,
+      state: requested == null
+        ? state
+        : { ...state, events: events.filter((event) => requested.has(event.calendarId)) },
+    };
+  }
   return {
     calendarIds,
-    state: { ...state, events: (state?.events ?? []).filter((event) => calendarIds.has(event.calendarId)) },
+    state: { ...state, events: events.filter((event) => calendarIds.has(event.calendarId)) },
   };
 }
 
