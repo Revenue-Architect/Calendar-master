@@ -17,6 +17,9 @@ are too detailed for the repository README.
 - [`superpowers/specs/2026-08-09-planner-qa-repair-design.md`](superpowers/specs/2026-08-09-planner-qa-repair-design.md)
   defines the persistence, search, notes, recurring-task, and recovery repairs found
   during the post-implementation pressure test.
+- [`superpowers/specs/2026-08-10-unified-search-design.md`](superpowers/specs/2026-08-10-unified-search-design.md)
+  defines the Phase 3C pure search, deterministic ranking, and canonical deep-link
+  boundary.
 
 ## Quality reports
 
@@ -70,6 +73,9 @@ are too detailed for the repository README.
 - [`superpowers/plans/2026-08-10-reminders-phase-3b.md`](superpowers/plans/2026-08-10-reminders-phase-3b.md)
   defines the delivery ledger, reconciliation, controls, and local persistence
   boundary for Reminders Phase 3B.
+- [`superpowers/plans/2026-08-10-unified-search-phase-3c.md`](superpowers/plans/2026-08-10-unified-search-phase-3c.md)
+  implements the next approved Planner foundation slice: offline unified search
+  and source-owned deep links.
 
 ## Architecture decisions
 
