@@ -2230,6 +2230,19 @@ reminder extraction, and frontend polish remain intentionally deferred.
 - Extract Reminders, Search, Gamification, Settings, and persistence adapters.
 - Complete accessibility alternatives and reliability projections.
 
+### Phase 3A delivery record — 2026-08-10
+
+- `domains/planner` now composes the selected day as a read-only projection of
+  Calendar, Tasks, and Notes. It preserves source identities and keeps a usable
+  day when an optional source is unavailable; it never persists a duplicate record.
+- The React shell consumes the shared day projection for selected-day events,
+  actions, notes, overdue debt, and deadlines. Presentation, direct manipulation,
+  and source-domain commands remain at their existing boundaries.
+- Daily review reports completed work, unfinished planned work, notes, and event
+  count. Schedule variance is deliberately unavailable until an explicit event
+  attendance or actual-time model exists; a calendar entry alone is not evidence
+  that a meeting happened.
+
 ## Phase 4: Integrations
 
 - Add Google and Microsoft calendar and task adapters behind existing domain ports.

@@ -9,7 +9,6 @@ import {
   dropRevisionsFor,
   getDailyNote,
   getNotebookNotes,
-  getNotesForDate,
   getNotesForEntity,
   isEmptyNote,
   markBlockExtracted,
@@ -50,7 +49,6 @@ import {
   deferTask as deferTaskCommand,
   getBlockedTasks,
   getDayTasks,
-  getOverdueForToday,
   getSubtasksOf,
   getTaskBlockers,
   moveTaskToList,
@@ -58,7 +56,6 @@ import {
   setTaskReminders,
   setTaskTags,
   getUpcomingRange,
-  getUpcomingDeadlines,
   migrateV5ToV6,
   normalizeTaskInput,
   parseTaskOccurrenceId,
@@ -90,6 +87,7 @@ import {
   restoreTaskPlannedDates,
 } from "./features/planner/taskMutations.js";
 import { resolveTaskForInspection } from "./features/planner/taskInspection.js";
+import { projectPlannerDay } from "./features/planner/dayProjection.js";
 import {
   createEvent as createCalendarEvent,
   deleteEvent as deleteCalendarEvent,
@@ -614,26 +612,27 @@ export default function Planner() {
     });
   }, [db, dateKey]);
 
-  const dayEvents = useMemo(() => (db
-    ? getOccurrencesForRange(db, dateKey, addDaysToKey(dateKey, 1), { segments: true }).map(eventForUi)
-    : []), [db, dateKey]);
+  /* §1.1. The visible day is composed once from the three source domains. The
+     timeline still owns its layout and gestures, but it no longer reimplements
+     domain queries independently from Actions, notes, and briefing. */
+  const dayProjection = useMemo(() => (db ? projectPlannerDay(db, {
+    selectedDate: dateKey,
+    todayDate: todayKey,
+    currentMinute: nowMin,
+    mapEvent: eventForUi,
+  }) : null), [db, dateKey, todayKey, nowMin]);
+  const dayEvents = dayProjection?.events ?? [];
   const timed = useMemo(() => dayEvents.filter((e) => !e.allDay), [dayEvents]);
   const allDay = useMemo(() => dayEvents.filter((e) => e.allDay), [dayEvents]);
-  /* All task reads go through the Tasks domain. Recurring series are expanded into
-     occurrences here rather than stored, so the screen never sees an exception. */
-  const dayTasks = useMemo(() => (db ? getDayTasks(db, dateKey) : []), [db, dateKey]);
-  const notes = useMemo(() => (db ? getNotesForDate(db.notes, dateKey) : []), [db, dateKey]);
+  const dayTasks = dayProjection?.tasks ?? [];
+  const notes = dayProjection?.notes ?? [];
   const openCount = countOpen(dayTasks);
 
   /* §5.5 and §9.3 now decide this: a one-off task is overdue once its deadline has
      passed, and a series contributes only what its missed-occurrence policy still
      considers owed — nothing at all under the default `skip`. */
-  const overdue = useMemo(() => (db ? getOverdueForToday(db, todayKey) : []), [db, todayKey]);
-
-  const deadlines = useMemo(
-    () => (db ? getUpcomingDeadlines(db.tasks, todayKey, 10) : []),
-    [db, todayKey],
-  );
+  const overdue = dayProjection?.overdue ?? [];
+  const deadlines = dayProjection?.deadlines ?? [];
 
   const blockedIds = useMemo(() => {
     if (!db) return new Set();

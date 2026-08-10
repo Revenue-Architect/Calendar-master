@@ -26,6 +26,9 @@ are too detailed for the repository README.
 - [`qa/2026-08-09-notes-phase-3-pressure-test.md`](qa/2026-08-09-notes-phase-3-pressure-test.md)
   records Phase 3 regression coverage and the environment-limited browser-run
   evidence.
+- [`qa/2026-08-10-shared-planner-foundation-phase-3a.md`](qa/2026-08-10-shared-planner-foundation-phase-3a.md)
+  records the shared day aggregate and daily-review automated evidence plus the
+  local-browser access limitation.
 
 ## Implementation plans
 
@@ -56,6 +59,9 @@ are too detailed for the repository README.
 - [`superpowers/plans/2026-08-09-planner-qa-repair.md`](superpowers/plans/2026-08-09-planner-qa-repair.md)
   implements the post-implementation persistence, search, notes, task-mutation,
   browser-pressure-test, and publication gates.
+- [`superpowers/plans/2026-08-10-shared-planner-foundation.md`](superpowers/plans/2026-08-10-shared-planner-foundation.md)
+  sequences the remaining non-provider foundation and records the completed day
+  aggregate/daily-review Slice 3A.
 
 ## Architecture decisions
 
