@@ -2081,12 +2081,19 @@ export default function Planner() {
           : inspectItem.allDay
             ? { kind: "timed", timeZoneMode: "floating", startLocal: addMinutesToLocalDateTime(`${day}T00:00`, next.start), endLocal: addMinutesToLocalDateTime(`${day}T00:00`, next.start + next.dur) }
             : eventTimingFromPosition(inspectItem, day, next.start, next.dur);
-      } catch {
-        /* A zoned time that lands in a gap or a fold cannot be resolved without
-           being asked which one — that question belongs to the composer, which
-           owns the offset picker. */
+      } catch (error) {
+        /* §4.7. A zoned time landing in a DST gap or fold cannot be resolved without
+           being asked which offset is meant, and that question belongs to the
+           composer. Handing over silently is what made editing feel unpredictable —
+           the same gesture sometimes opened a whole form with no explanation — so
+           the handover says why, and the edit is carried into it rather than lost.
+
+           Only ambiguity hands over. Anything else is a fault, and dressing a fault
+           up as "here is the editor" hides it. */
+        if (!(error instanceof RangeError)) throw error;
         beep("abort");
-        setComposer({ ...next, inline: undefined });
+        flash("That clock time is ambiguous here — pick an offset", null);
+        setComposer({ ...next, inline: undefined, openRepeat: true });
         return;
       }
     }
@@ -2184,11 +2191,41 @@ export default function Planner() {
         @keyframes nbrw{0%{opacity:0;transform:translateY(20px) scale(.8)}25%{opacity:1;transform:translateY(0) scale(1)}100%{opacity:0;transform:translateY(-52px) scale(1)}}
         .nb-blink{animation:nbb 2s ease-in-out infinite}
         @keyframes nbb{0%,100%{opacity:1}50%{opacity:.4}}
-        button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid ${T.accent};outline-offset:2px}
+        button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible,
+        [data-event-id]:focus-visible,[data-task-chip]:focus-visible{outline:2px solid ${T.accent};outline-offset:2px}
         input,textarea,select{color:${T.text}}
         input::placeholder,textarea::placeholder{color:${T.dim}}
-        @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
-        ${preferences?.display.reducedMotion ? "*{animation:none!important;transition:none!important}" : ""}
+
+        /* ── Press ──────────────────────────────────────────────────────────────
+           Everything you can press answers the press. This is set on the elements
+           themselves rather than a class on 123 call sites, so a control added
+           later is never silently dead to the touch.
+
+           It animates the standalone \`scale\` property, not \`transform\`. Cards are
+           positioned, dragged and paged with transforms, and animating one
+           transform against another is exactly what made the page swipe judder —
+           \`scale\` composites on its own and cannot fight them. */
+        button,[role="button"],summary,label[for],[data-event-id],[data-task-chip]{
+          -webkit-tap-highlight-color:transparent;touch-action:manipulation;
+          transition:scale 240ms cubic-bezier(.2,1.5,.35,1),background-color 200ms ease,color 200ms ease,box-shadow 220ms ease,opacity 160ms ease;
+        }
+        /* Down is quick and linear, release overshoots and settles — the difference
+           between the two is what reads as a physical thing rather than a fade. */
+        button:active,[role="button"]:active,summary:active,[data-event-id]:active,[data-task-chip]:active{
+          scale:.965;transition:scale 90ms cubic-bezier(.4,0,.6,1);
+        }
+        button:disabled,button[disabled]{scale:1!important}
+        @media(hover:hover){
+          [data-event-id]:hover,[data-task-chip]:hover{scale:1.006}
+        }
+        /* A control that completes something pops rather than just filling in. */
+        .nb-pop{animation:nbpop 380ms cubic-bezier(.2,1.6,.35,1)}
+        @keyframes nbpop{0%{scale:1}35%{scale:1.28}100%{scale:1}}
+
+        @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}
+          button:active,[role="button"]:active,[data-event-id]:active,[data-task-chip]:active{scale:1!important}}
+        ${preferences?.display.reducedMotion ? `*{animation:none!important;transition:none!important}
+          button:active,[role="button"]:active,[data-event-id]:active,[data-task-chip]:active{scale:1!important}` : ""}
       `}</style>
 
       {/* ══ HUD ══ */}
@@ -2609,7 +2646,9 @@ export default function Planner() {
                 {(inspectItem.checklist ?? []).map((item) => (
                   <div key={item.id} className="flex items-center gap-3 px-3 py-2.5" style={{ background: surface, borderRadius: 999 }}>
                     <button onClick={() => toggleSub(inspect.id, item.id)} className="shrink-0" aria-label={item.done ? "Reopen step" : "Complete step"}>
-                      <span className="block rounded-full" style={{
+                      {/* Keyed on the state it shows, so ticking a step replays the
+                          pop rather than sliding a colour in. */}
+                      <span key={String(item.done)} className={`block rounded-full ${item.done ? "nb-pop" : ""}`} style={{
                         width: 20, height: 20,
                         background: item.done ? T.accent : "transparent",
                         boxShadow: `inset 0 0 0 2px ${item.done ? T.accent : T.faint}`,
@@ -3322,7 +3361,7 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
               {n.blocks.map((block, i, all) => (block.type === "checklist" ? (
                 <div key={block.id} className="flex items-center gap-2 py-1">
                   <button onClick={() => onToggleNoteCheck(n.id, block.id)} className="shrink-0" aria-label={block.done ? "Reopen line" : "Complete line"}>
-                    <span className="block rounded-full" style={{ width: 14, height: 14, background: block.done ? T.accent : "transparent", boxShadow: `inset 0 0 0 1.5px ${block.done ? T.accent : T.faint}` }} />
+                    <span key={String(block.done)} className={`block rounded-full ${block.done ? "nb-pop" : ""}`} style={{ width: 14, height: 14, background: block.done ? T.accent : "transparent", boxShadow: `inset 0 0 0 1.5px ${block.done ? T.accent : T.faint}` }} />
                   </button>
                   <span className="flex-1 text-sm" style={{ textDecoration: block.done ? "line-through" : "none", color: block.done ? T.dim : T.text }}>
                     <Inline T={T} text={block.text} />

@@ -2614,9 +2614,37 @@ way everywhere.
 - Every action that offers undo MUST be reversible by the payload it recorded.
 - An undo affordance that does nothing is worse than none, because it is trusted.
 
-## 7. Surfaces and density
+## 7. Motion and response
 
-### 7.1 Three depths only
+### 7.1 Everything pressable answers the press
+
+- Every control a person can press MUST respond visibly to the press itself, not
+  only to its result. A control that looks identical while being held reads as
+  broken, and the doubt costs more than the action saves.
+- The response is set on interactive elements themselves rather than opted into
+  per control, so a control added later is never silently dead to the touch.
+- Press is quick and linear; release overshoots slightly and settles. The
+  difference between going down and coming back up is what reads as a physical
+  object rather than a fade.
+
+### 7.2 Motion never fights motion
+
+- Press feedback MUST animate the standalone `scale` property, not `transform`.
+  Cards are positioned, dragged and paged with transforms, and animating one
+  transform against another is what makes a page turn judder (§6.3).
+- A state change that means something — a step completed, a line ticked — pops
+  once rather than cross-fading a colour. Keying the element on the state it shows
+  is what replays it.
+
+### 7.3 Motion is a preference
+
+- All of it MUST be switchable off, by the system's reduced-motion setting and by
+  the product's own. When it is off, states still change instantly and correctly;
+  nothing depends on an animation having played.
+
+## 8. Surfaces and density
+
+### 8.1 Three depths only
 
 - Page, day surface, and card. Additional depths make the hierarchy ambiguous.
 - Sheets sit above all three on a scrim.
@@ -2670,22 +2698,22 @@ way everywhere.
   filled control MUST reach 4:1 against its accent. The label on a primary button
   is the last text that should be hard to read.
 
-## 8. Type
+## 9. Type
 
-### 8.1 Three faces, fixed roles
+### 9.1 Three faces, fixed roles
 
 - Sans carries titles and body.
 - Mono carries times, labels, counts, and any value read as data.
 - Serif italic carries written reflection: notes and empty-state prose.
 
-### 8.2 Labels
+### 9.2 Labels
 
 - Section and metadata labels are uppercase mono with wide tracking.
 - Labels name what follows; they never repeat a value shown beside them.
 
-## 9. Written pages
+## 10. Written pages
 
-### 9.1 A block reads as what it is
+### 10.1 A block reads as what it is
 
 - Every block type the document model holds (§Notes 3.2) MUST render distinguishably
   on the page. A heading, a quote, a list line and prose MUST NOT share one style:
@@ -2697,7 +2725,7 @@ way everywhere.
 - A numbered line counts from the start of its own run, not from its position in the
   document, so a list that follows prose still begins at one.
 
-### 9.2 Marks render, source is preserved
+### 10.2 Marks render, source is preserved
 
 - Inline marks (§Notes 3.5) MUST render as the mark, not as the punctuation that
   declares it. `**bold**` reads as bold.
@@ -2706,7 +2734,7 @@ way everywhere.
 - Anything derived from a line for another domain — a task extracted from a checklist
   — takes the readable text, not the punctuation.
 
-### 9.3 History is reachable
+### 10.3 History is reachable
 
 - A note with earlier versions (§Notes 10.2) MUST offer a way into them from its
   editor, labelled with how many exist.
@@ -2829,3 +2857,7 @@ collaboration fields (§3.4). These remain specified above and unimplemented.
 | 2026-08-10 | Route every inline edit through the composer's write path, so the scope question is asked identically. |
 | 2026-08-10 | Expand a choice set from its value rather than displaying it permanently. |
 | 2026-08-10 | Commit a field on leaving or confirming it, never per keystroke. |
+| 2026-08-10 | Give every pressable control press feedback by element, not by opt-in, so a new control is never dead to the touch. |
+| 2026-08-10 | Animate press with `scale` rather than `transform`, so feedback cannot fight positioning, dragging, or the page turn. |
+| 2026-08-10 | Expand the day from its series rather than reading stored events, so both day and agenda hand out one occurrence identity. |
+| 2026-08-10 | Hand an edit to the composer only for a genuine time ambiguity, and say why rather than opening a form unexplained. |
