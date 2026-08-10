@@ -69,6 +69,31 @@ export function getUpcomingRange(state, startKey, days) {
   return out;
 }
 
+/* A search result points at one canonical task series. This query finds its next
+   actionable instance without persisting occurrences or letting UI code repeat
+   recurrence arithmetic. */
+export function getNextTaskOccurrence(state, taskId, fromDate, { maxDays = 10_958 } = {}) {
+  assertDateKey(fromDate, "fromDate");
+  if (typeof taskId !== "string" || !taskId) throw new TypeError("taskId is required");
+  if (!Number.isInteger(maxDays) || maxDays < 0 || maxDays > 10_958) {
+    throw new RangeError("maxDays must be an integer between 0 and 10958");
+  }
+  const task = (state.tasks ?? []).find((item) => item.id === taskId);
+  if (!task || task.parentTaskId || !isTaskActive(task)) return null;
+  if (!task.recurrence) {
+    return task.planned.date && task.planned.date >= fromDate ? task : null;
+  }
+
+  const exceptions = state.taskExceptions ?? [];
+  for (let offset = 0; offset <= maxDays; offset += 1) {
+    const dateKey = addDaysToKey(fromDate, offset);
+    if (!occursOn(task, dateKey)) continue;
+    const occurrence = materializeOccurrence(task, dateKey, exceptions);
+    if (occurrence && isTaskActive(occurrence)) return occurrence;
+  }
+  return null;
+}
+
 /* Used for the streak: a day counts when anything was actually finished on it. */
 export function completedOn(state, dateKey) {
   const exceptions = state.taskExceptions ?? [];

@@ -1,6 +1,6 @@
 # Unified Search and Deep Links Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Deliver a pure, offline unified search and deep-link boundary for Calendar, Tasks, and Notes, then adopt it in the existing Search sheet.
 
@@ -31,12 +31,12 @@
 - `parseSearchQuery(raw)` returns `{ text, terms, filters, issues }`; `filters` contains arrays named `types`, `statuses`, `tags`, `dates`, `lists`, and `calendars`.
 - Supported literal filter names are `type`, `status`, `tag`, `date`, `list`, and `calendar`. An unsupported `name:value` token goes into `issues` and not into `terms`.
 
-- [ ] **Step 1: Write the failing parser tests**
+- [x] **Step 1: Write the failing parser tests**
 
 ```js
 test("normalizes diacritics and punctuation while preserving quoted phrases", () => {
   const query = parseSearchQuery('Café—plan "next step" type:task tag:Client');
-  assert.deepEqual(query.terms, ["cafe plan", "next step"]);
+  assert.deepEqual(query.terms, ["cafe", "plan", "next step"]);
   assert.deepEqual(query.filters.types, ["task"]);
   assert.deepEqual(query.filters.tags, ["client"]);
 });
@@ -48,13 +48,13 @@ test("records an unsupported filter without treating it as free text", () => {
 });
 ```
 
-- [ ] **Step 2: Verify focused tests fail**
+- [x] **Step 2: Verify focused tests fail**
 
 Run: `node --test src/domains/search/query/searchQuery.test.js`
 
 Expected: FAIL because the Search domain parser does not exist.
 
-- [ ] **Step 3: Write the minimal parser**
+- [x] **Step 3: Write the minimal parser**
 
 ```js
 export function normalizeSearchText(value) {
@@ -69,13 +69,13 @@ export function parseSearchQuery(raw) {
 }
 ```
 
-- [ ] **Step 4: Verify focused tests pass**
+- [x] **Step 4: Verify focused tests pass**
 
 Run: `node --test src/domains/search/query/searchQuery.test.js`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the parser boundary**
+- [x] **Step 5: Commit the parser boundary**
 
 ```bash
 git add src/domains/search/query/searchQuery.js src/domains/search/query/searchQuery.test.js src/domains/search/index.js
@@ -97,7 +97,7 @@ git commit -m "feat: add planner search query parser"
 - `getNextTaskOccurrence(state, taskId, fromDate, { maxDays = 10958 }?)` returns a canonical one-off task or materialized task occurrence, or `null`.
 - Neither function changes source state, materializes future records into state, or constructs identities in React.
 
-- [ ] **Step 1: Write failing source-query tests**
+- [x] **Step 1: Write failing source-query tests**
 
 ```js
 test("finds a moved recurring event by its actual future date", () => {
@@ -108,18 +108,18 @@ test("finds a moved recurring event by its actual future date", () => {
 
 test("finds the next recurring task instance with its canonical identity", () => {
   const occurrence = getNextTaskOccurrence(taskState, "habit", "2026-08-10");
-  assert.equal(occurrence.id, "habit@2026-08-11");
+  assert.equal(occurrence.id, "habit@2026-08-10");
   assert.equal(occurrence.occurrenceDate, "2026-08-11");
 });
 ```
 
-- [ ] **Step 2: Verify focused tests fail**
+- [x] **Step 2: Verify focused tests fail**
 
 Run: `node --test src/domains/calendar/tests/occurrenceQueries.test.js src/domains/tasks/tests/recurrence.test.js`
 
 Expected: FAIL because neither public next-occurrence query exists.
 
-- [ ] **Step 3: Implement bounded source queries**
+- [x] **Step 3: Implement bounded source queries**
 
 ```js
 export function getNextEventOccurrence(state, eventId, fromDate) {
@@ -136,13 +136,13 @@ export function getNextEventOccurrence(state, eventId, fromDate) {
 
 For tasks, return a one-off task only when it is active and planned on/after `fromDate`; for a recurring series, loop by day at most `maxDays`, use `occursOn` and `materializeOccurrence`, and skip cancelled or completed instances.
 
-- [ ] **Step 4: Verify focused tests pass**
+- [x] **Step 4: Verify focused tests pass**
 
 Run: `node --test src/domains/calendar/tests/occurrenceQueries.test.js src/domains/tasks/tests/recurrence.test.js`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit source-owned deep-link queries**
+- [x] **Step 5: Commit source-owned deep-link queries**
 
 ```bash
 git add src/domains/calendar/queries/occurrenceQueries.js src/domains/calendar/index.js src/domains/calendar/tests/occurrenceQueries.test.js src/domains/tasks/queries/dayView.js src/domains/tasks/index.js src/domains/tasks/tests/recurrence.test.js
@@ -162,7 +162,7 @@ git commit -m "feat: add source-owned next occurrence queries"
 - Event fields are title, description/note, location/place, category, and calendar ID. Task fields are title, note, category, tags, checklist text, status, list ID, planned/deadline/follow-up dates. Note fields are title, plain block text, tags, kind, date, and links.
 - Archive exclusion, text match, typed filters, deterministic rank, and `limit` happen only in this pure query.
 
-- [ ] **Step 1: Write failing composition tests**
+- [x] **Step 1: Write failing composition tests**
 
 ```js
 test("searches all domains with accent-insensitive deterministic ranking", () => {
@@ -186,13 +186,13 @@ test("omits archived tasks and notes by default", () => {
 });
 ```
 
-- [ ] **Step 2: Verify focused tests fail**
+- [x] **Step 2: Verify focused tests fail**
 
 Run: `node --test src/domains/search/queries/searchPlanner.test.js`
 
 Expected: FAIL because the composition query does not exist.
 
-- [ ] **Step 3: Implement projections, matching, filters, and rank**
+- [x] **Step 3: Implement projections, matching, filters, and rank**
 
 ```js
 export function searchPlanner(state, { query, todayDate, limit = 30 } = {}) {
@@ -212,13 +212,13 @@ export function searchPlanner(state, { query, todayDate, limit = 30 } = {}) {
 
 A `matches` implementation requires every parsed term and every populated filter to match the candidate's own fields. A `compareSearchResults` implementation compares numeric text tier, absolute date distance from `todayDate`, `kind`, then `id`.
 
-- [ ] **Step 4: Verify focused tests pass**
+- [x] **Step 4: Verify focused tests pass**
 
 Run: `node --test src/domains/search/queries/searchPlanner.test.js`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit unified composition**
+- [x] **Step 5: Commit unified composition**
 
 ```bash
 git add src/domains/search/queries/searchPlanner.js src/domains/search/queries/searchPlanner.test.js src/domains/search/index.js
@@ -237,7 +237,7 @@ git commit -m "feat: compose unified planner search"
 - A recurring event uses `getNextEventOccurrence`; a recurring task uses `getNextTaskOccurrence`; a note must still be active; one-off records use their canonical entity ID.
 - Unavailable outcomes use one of `missing`, `archived`, or `no-upcoming-occurrence`.
 
-- [ ] **Step 1: Write failing resolver tests**
+- [x] **Step 1: Write failing resolver tests**
 
 ```js
 test("opens a moved recurring event at its actual occurrence date", () => {
@@ -251,7 +251,7 @@ test("opens the next recurring task occurrence without UI-built identity", () =>
   const target = resolveSearchTarget(state, taskResult, { todayDate: "2026-08-10" });
   assert.deepEqual(target, {
     status: "available", kind: "task", entityId: "habit",
-    occurrenceId: "habit@2026-08-11", date: "2026-08-11",
+    occurrenceId: "habit@2026-08-10", date: "2026-08-11",
   });
 });
 
@@ -262,13 +262,13 @@ test("reports an archived note selected from stale UI state", () => {
 });
 ```
 
-- [ ] **Step 2: Verify focused tests fail**
+- [x] **Step 2: Verify focused tests fail**
 
 Run: `node --test src/domains/search/queries/resolveSearchTarget.test.js`
 
 Expected: FAIL because the resolver does not exist.
 
-- [ ] **Step 3: Implement the resolver**
+- [x] **Step 3: Implement the resolver**
 
 ```js
 export function resolveSearchTarget(state, result, { todayDate } = {}) {
@@ -278,13 +278,13 @@ export function resolveSearchTarget(state, result, { todayDate } = {}) {
 }
 ```
 
-- [ ] **Step 4: Verify focused tests pass**
+- [x] **Step 4: Verify focused tests pass**
 
 Run: `node --test src/domains/search/queries/resolveSearchTarget.test.js`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit deep-link resolution**
+- [x] **Step 5: Commit deep-link resolution**
 
 ```bash
 git add src/domains/search/queries/resolveSearchTarget.js src/domains/search/queries/resolveSearchTarget.test.js src/domains/search/index.js
@@ -304,7 +304,7 @@ git commit -m "feat: resolve planner search deep links"
 - `SearchPanel` receives `results`, `queryIssues`, and a query-change callback; it never reads raw event, task, or note collections.
 - `Planner.jsx` remains the owner of `jumpTo`, sheet close/open ordering, and user-visible unavailable feedback.
 
-- [ ] **Step 1: Write failing feature-adapter tests**
+- [x] **Step 1: Write failing feature-adapter tests**
 
 ```js
 test("projects filterable display-safe results without note blocks", () => {
@@ -318,29 +318,29 @@ test("projects filterable display-safe results without note blocks", () => {
 test("maps a recurring target to the inspection contract", () => {
   const pick = resolvePlannerSearchPick(state, result, { todayDate: "2026-08-10" });
   assert.deepEqual(pick, {
-    status: "available", inspect: { kind: "task", id: "habit@2026-08-11" },
+    status: "available", inspect: { kind: "task", id: "habit@2026-08-10" },
     date: "2026-08-11",
   });
 });
 ```
 
-- [ ] **Step 2: Verify focused tests fail**
+- [x] **Step 2: Verify focused tests fail**
 
 Run: `node --test src/features/search/searchProjection.test.js`
 
 Expected: FAIL because the new adapter exports do not exist.
 
-- [ ] **Step 3: Implement adapter and UI adoption**
+- [x] **Step 3: Implement adapter and UI adoption**
 
 Replace the `SearchPanel` local `db.events.filter`, `db.tasks.filter`, and `searchNotes` composition with a memoized feature projection. On a selected result, close Search, resolve exactly once against the current `db`, call `jumpTo(pick.date)` when available, then open `setNoteEdit` for notes or `setInspect(pick.inspect)` for Calendar/Task records. Render a plain unavailable message when a stale result cannot resolve.
 
-- [ ] **Step 4: Verify focused tests and build pass**
+- [x] **Step 4: Verify focused tests and build pass**
 
 Run: `node --test src/features/search/searchProjection.test.js && npm run build`
 
 Expected: PASS and Vite exits 0.
 
-- [ ] **Step 5: Commit UI adoption**
+- [x] **Step 5: Commit UI adoption**
 
 ```bash
 git add src/features/search/searchProjection.js src/features/search/searchProjection.test.js src/Planner.jsx
@@ -359,17 +359,17 @@ git commit -m "feat: adopt unified planner search"
 **Interfaces:**
 - The delivery record states that search and deep links are derived/offline, unsupported filters are explicit, and command palette/indexing remain deferred.
 
-- [ ] **Step 1: Record coverage**
+- [x] **Step 1: Record coverage**
 
 Document exact focused-test count, complete-suite count, production build result, and the browser/device result or blocker. Include event, task, note, quoted query, filters, recurrence, keyboard, and unavailable-target flows.
 
-- [ ] **Step 2: Run the final verification gate**
+- [x] **Step 2: Run the final verification gate**
 
 Run: `npm test && npm run build && git diff --check`
 
 Expected: all tests pass, Vite exits 0, and no whitespace errors appear.
 
-- [ ] **Step 3: Commit and publish directly to main**
+- [x] **Step 3: Commit and publish directly to main**
 
 ```bash
 git add docs/product/planner-foundation.md docs/README.md docs/qa/2026-08-10-unified-search-phase-3c.md docs/superpowers/plans/2026-08-10-shared-planner-foundation.md docs/superpowers/plans/2026-08-10-unified-search-phase-3c.md

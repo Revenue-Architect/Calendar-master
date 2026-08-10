@@ -66,6 +66,29 @@ export function getOccurrence(state, occurrenceId, options = {}) {
     .find((item) => item.id === resolvedId) || null;
 }
 
+/* Search and navigation need one source-owned answer for an event series. The
+   query advances in yearly windows so a long-running daily series never expands
+   tens of thousands of instances merely to find its next valid occurrence. */
+export function getNextEventOccurrence(state, eventId, fromDate, options = {}) {
+  assertDateKey(fromDate, "fromDate");
+  if (typeof eventId !== "string" || !eventId) throw new TypeError("eventId is required");
+  const maxYears = options.maxYears ?? 30;
+  if (!Number.isInteger(maxYears) || maxYears < 0 || maxYears > 30) {
+    throw new RangeError("maxYears must be an integer between 0 and 30");
+  }
+  if (!(state.events ?? []).some((event) => event.id === eventId)) return null;
+
+  let start = fromDate;
+  for (let year = 0; year <= maxYears; year += 1) {
+    const endExclusive = addDaysToKey(start, 366);
+    const found = getOccurrencesForRange(state, start, endExclusive, options)
+      .find((occurrence) => (occurrence.seriesId ?? occurrence.id) === eventId);
+    if (found) return found;
+    start = endExclusive;
+  }
+  return null;
+}
+
 export function previewRecurrence(event, limit = 5, options = {}) {
   if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new RangeError("preview limit must be between 1 and 100");
   const start = timingStartDate(event.timing);

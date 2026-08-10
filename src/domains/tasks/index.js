@@ -106,6 +106,7 @@ export {
   completedOn,
   countOpen,
   getDayTasks,
+  getNextTaskOccurrence,
   getOverdueForToday,
   getSubtasksOf,
   getUpcomingRange,

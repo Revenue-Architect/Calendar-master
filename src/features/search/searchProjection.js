@@ -1,30 +1,25 @@
-function recurrenceToRepeat(recurrence) {
-  if (!recurrence) return null;
-  return {
-    freq: recurrence.frequency,
-    interval: recurrence.interval ?? 1,
-    ...(recurrence.byWeekday ? { byDay: recurrence.byWeekday.map((value) => (
-      typeof value === "number" ? value : value.weekday
-    )) } : {}),
-    ...(recurrence.until ? { until: recurrence.until } : {}),
-  };
+import { resolveSearchTarget, searchPlanner } from "../../domains/search/index.js";
+
+export function projectPlannerSearch(state, { query, todayDate, limit = 30 } = {}) {
+  return searchPlanner(state, { query, todayDate, limit });
 }
 
-export function projectTaskSearchResult(task) {
+export function resolvePlannerSearchPick(state, result, { todayDate } = {}) {
+  const target = resolveSearchTarget(state, result, { todayDate });
+  if (target.status !== "available") return target;
+  if (target.kind === "note") {
+    return { status: "available", noteId: target.entityId, date: target.date };
+  }
   return {
-    ...task,
-    kind: "task",
-    date: task.planned?.date ?? null,
-    repeat: recurrenceToRepeat(task.recurrence),
+    status: "available",
+    inspect: { kind: target.kind, id: target.occurrenceId ?? target.entityId },
+    date: target.date,
   };
-}
-
-export function projectNoteSearchResult(note, title) {
-  return { ...note, kind: "note", title, date: note.date ?? null };
 }
 
 export function searchResultDateLabel(result, formatDate) {
-  if (result.repeat) return "↻";
+  if (result.recurrence) return "↻";
   if (result.date) return formatDate(result.date);
-  return result.kind === "task" ? "INBOX" : "NOTE";
+  if (result.kind === "task") return "INBOX";
+  return result.kind === "note" ? "NOTE" : "EVENT";
 }

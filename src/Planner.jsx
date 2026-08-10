@@ -21,7 +21,6 @@ import {
   restoredNote,
   revisionIsIntact,
   revisionsFor,
-  searchNotes,
   archiveNote as archiveNoteCommand,
   pinNote as pinNoteCommand,
   toggleChecklistBlock,
@@ -73,8 +72,8 @@ import {
   normalizeImportedPlannerState,
 } from "./platform/persistence/plannerStateImport.js";
 import {
-  projectNoteSearchResult,
-  projectTaskSearchResult,
+  projectPlannerSearch,
+  resolvePlannerSearchPick,
   searchResultDateLabel,
 } from "./features/search/searchProjection.js";
 import { textToNoteBlocks } from "./features/notes/noteText.js";
@@ -307,29 +306,6 @@ function eventTimingFromPosition(event, date, start = event.start, duration = ev
   };
 }
 
-/* ─── recurrence ─── */
-function taskOccursOn(item, dateKey) {
-  if (dateKey < item.date) return false;
-  const r = item.repeat;
-  if (!r) return item.date === dateKey;
-  if (r.until && dateKey > r.until) return false;
-  const n = Math.max(1, r.interval || 1);
-  const a = parseKey(dateKey), b = parseKey(item.date);
-  if (r.freq === "daily") return diffDays(dateKey, item.date) % n === 0;
-  if (r.freq === "weekly") {
-    const days = r.byDay && r.byDay.length ? r.byDay : [b.getDay()];
-    if (!days.includes(a.getDay())) return false;
-    const wa = Math.floor((a - addDays(b, -b.getDay())) / (7 * 86400000));
-    return wa % n === 0;
-  }
-  if (r.freq === "monthly") {
-    if (a.getDate() !== b.getDate()) return false;
-    return ((a.getFullYear() - b.getFullYear()) * 12 + (a.getMonth() - b.getMonth())) % n === 0;
-  }
-  return false;
-}
-
-
 const repeatLabel = (r) => {
   if (!r) return "";
   const n = r.interval || 1;
@@ -477,6 +453,7 @@ export default function Planner() {
   const [notebook, setNotebook] = useState(null);
   const [settings, setSettings] = useState(false);
   const [search, setSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const [scopeAsk, setScopeAsk] = useState(null);
   const [reward, setReward] = useState(null);
   const [levelFlash, setLevelFlash] = useState(null);
@@ -608,6 +585,9 @@ export default function Planner() {
 
   const todayKey = keyOf(now);
   const nowMin = now.getHours() * 60 + now.getMinutes();
+  const searchProjection = useMemo(() => projectPlannerSearch(db, {
+    query: searchQuery, todayDate: todayKey,
+  }), [db, searchQuery, todayKey]);
   const nowLocal = addMinutesToLocalDateTime(`${todayKey}T00:00`, nowMin);
   const isToday = dateKey === todayKey;
   const activeDate = parseKey(dateKey);
@@ -861,7 +841,7 @@ export default function Planner() {
          was still up. */
       if (inspect || composer || settings || noteEdit || noteHistory || notebook || scopeAsk
         || firstRun || confirmComplete || dependencyPicker || listPicker || pendingImport) return;
-      if (e.key === "/" || (e.key === "k" && (e.metaKey || e.ctrlKey))) { e.preventDefault(); setSearch(true); return; }
+      if (e.key === "/" || (e.key === "k" && (e.metaKey || e.ctrlKey))) { e.preventDefault(); setSearchQuery(""); setSearch(true); return; }
       if (search) return;
       if (e.key === "ArrowRight") goDay(1);
       if (e.key === "ArrowLeft") goDay(-1);
@@ -2043,7 +2023,7 @@ export default function Planner() {
         <div className="flex items-center gap-1">
           <button onClick={() => { jumpTo(todayKey); setMonthCursor(new Date()); }} style={{ fontFamily: MONO, color: T.dim }} className="nb-tap px-2 py-1 text-xs tracking-widest">TODAY</button>
           <button onClick={() => { beep("click"); setNotebook("all"); }} style={{ fontFamily: MONO, color: T.dim }} className="nb-tap px-2 py-1 text-xs tracking-widest">NOTES</button>
-          <button onClick={() => { beep("click"); setSearch(true); }} style={{ color: T.dim }} className="nb-tap w-8 h-8 text-sm" aria-label="Search">⌕</button>
+          <button onClick={() => { beep("click"); setSearchQuery(""); setSearch(true); }} style={{ color: T.dim }} className="nb-tap w-8 h-8 text-sm" aria-label="Search">⌕</button>
           <button onClick={() => { beep("click"); setSettings(true); }} style={{ color: T.dim }} className="nb-tap w-8 h-8 text-sm" aria-label="Settings">⋯</button>
           <button onClick={() => { beep("click"); setComposer({ kind: "event", start: startSlot(nowMin), dur: 60 }); }} style={{ background: T.accent, color: T.on, fontFamily: MONO }} className="nb-tap px-2 py-1.5 text-xs font-bold tracking-widest">NEW</button>
         </div>
@@ -2900,20 +2880,23 @@ export default function Planner() {
       )}
 
       {search && (
-        <Sheet T={T} title="SEARCH" onClose={() => { beep("click"); setSearch(false); }}>
-          <SearchPanel T={T} db={db} todayKey={todayKey} onPick={(item) => {
+        <Sheet T={T} title="SEARCH" onClose={() => { beep("click"); setSearch(false); setSearchQuery(""); }}>
+          <SearchPanel T={T} query={searchQuery} onQueryChange={setSearchQuery}
+            results={searchProjection.results} queryIssues={searchProjection.query.issues} onPick={(item) => {
+            const pick = resolvePlannerSearchPick(db, item, { todayDate: todayKey });
             setSearch(false);
-            if (item.kind === "note") {
-              if (item.date) jumpTo(item.date);
-              setNoteEdit(item);
+            setSearchQuery("");
+            if (pick.status !== "available") {
+              flash("SEARCH RESULT UNAVAILABLE");
               return;
             }
-            const occurrence = item.kind === "event" && item.recurrence
-              ? nextCalendarOccurrence(item, todayKey)
-              : null;
-            const target = occurrence ? occurrence.timing.kind === "all-day" ? occurrence.timing.startDate : occurrence.timing.startLocal.slice(0, 10) : item.repeat ? nextOccurrence(item, todayKey) : item.date;
-            if (target) jumpTo(target);
-            setTimeout(() => setInspect({ kind: item.kind, id: occurrence?.id || (item.repeat ? `${item.id}@${target}` : item.id) }), 60);
+            if (pick.date) jumpTo(pick.date);
+            if (pick.noteId) {
+              const note = db.notes.find((entry) => entry.id === pick.noteId);
+              if (note) setNoteEdit(note);
+              return;
+            }
+            setTimeout(() => setInspect(pick.inspect), 60);
           }} />
         </Sheet>
       )}
@@ -3009,21 +2992,6 @@ export default function Planner() {
       )}
     </div>
   );
-}
-
-function nextOccurrence(item, fromKey) {
-  for (let i = 0; i < 400; i++) {
-    const k = keyOf(addDays(parseKey(fromKey), i));
-    if (taskOccursOn(item, k)) return k;
-  }
-  return item.date;
-}
-
-function nextCalendarOccurrence(item, fromKey) {
-  return previewRecurrence(item, 100).find((occurrence) => {
-    const date = occurrence.timing.kind === "all-day" ? occurrence.timing.startDate : occurrence.timing.startLocal.slice(0, 10);
-    return date >= fromKey;
-  }) || null;
 }
 
 /* ═══════════════════════ ACTIONS ═══════════════════════ */
@@ -3908,25 +3876,14 @@ function NoteEditor({ T, note, onSave, onDelete, history = 0, onHistory, onPin, 
   );
 }
 
-function SearchPanel({ T, db, todayKey, onPick }) {
-  const [q, setQ] = useState("");
-  const results = useMemo(() => {
-    const s = q.trim().toLowerCase();
-    if (!s) return [];
-    const hit = (x) => [x.title, x.note, x.place, x.text].filter(Boolean).some((f) => String(f).toLowerCase().includes(s));
-    return [
-      ...db.events.filter(hit).map((e) => ({ ...eventForUi(e), kind: "event" })),
-      ...db.tasks.filter(hit).map(projectTaskSearchResult),
-      ...searchNotes(db.notes, q).map((n) => projectNoteSearchResult(n, noteExcerpt(n, 60))),
-    ].slice(0, 30);
-  }, [q, db]);
-
+function SearchPanel({ T, query, onQueryChange, results, queryIssues, onPick }) {
   return (
     <div>
-      <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search everything"
+      <input autoFocus value={query} onChange={(e) => onQueryChange(e.target.value)} placeholder="Search everything"
         style={{ background: "transparent", border: `1px solid ${T.line}` }} className="w-full px-3 py-3 text-base font-semibold" />
       <div className="mt-3 flex flex-col">
-        {q && results.length === 0 && <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic py-4">Nothing matches that. Try a shorter word.</p>}
+        {queryIssues.length > 0 && <p style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest py-2">IGNORED FILTER · {queryIssues[0].token.toUpperCase()}</p>}
+        {query && results.length === 0 && <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic py-4">Nothing matches that. Try a shorter word.</p>}
         {results.map((r) => (
           <button key={r.kind + r.id} onClick={() => onPick(r)} className="nb-row flex items-center gap-2 py-2.5 text-left" style={{ borderBottom: `1px solid ${T.line}` }}>
             <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0 w-12">{r.kind === "event" ? "EVT" : r.kind === "task" ? "ACT" : "NOTE"}</span>

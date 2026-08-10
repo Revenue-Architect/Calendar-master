@@ -10,7 +10,7 @@ import {
   unfinishedBefore,
   upsertTaskException,
 } from "../recurrence/taskRecurrence.js";
-import { getDayTasks, getOverdueForToday } from "../queries/dayView.js";
+import { getDayTasks, getNextTaskOccurrence, getOverdueForToday } from "../queries/dayView.js";
 
 const TODAY = "2026-08-09";
 
@@ -121,6 +121,14 @@ test("expansion covers a half-open range", () => {
   const task = series({ frequency: "daily", interval: 1 });
   const occurrences = expandTaskOccurrences(task, "2026-08-01", "2026-08-04", []);
   assert.deepEqual(occurrences.map((entry) => entry.occurrenceDate), ["2026-08-01", "2026-08-02", "2026-08-03"]);
+});
+
+test("finds the next recurring task instance with its canonical identity", () => {
+  const state = { tasks: [series({ frequency: "daily", interval: 1 })], taskExceptions: [] };
+
+  const occurrence = getNextTaskOccurrence(state, "habit", "2026-08-10");
+  assert.equal(occurrence.id, "habit@2026-08-10");
+  assert.equal(occurrence.occurrenceDate, "2026-08-10");
 });
 
 /* An exception cannot outlive the series that owns it: a stored exception whose

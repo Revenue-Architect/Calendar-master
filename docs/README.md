@@ -37,6 +37,9 @@ are too detailed for the repository README.
 - [`qa/2026-08-10-phase-3b-follow-up-pressure-test.md`](qa/2026-08-10-phase-3b-follow-up-pressure-test.md)
   records fresh full-suite, dependency, and reminder-edge evidence, plus the
   cloud-browser limitation that still blocks visual flow verification.
+- [`qa/2026-08-10-unified-search-phase-3c.md`](qa/2026-08-10-unified-search-phase-3c.md)
+  records the unified-search and deep-link proof, production gates, and the
+  environment blocker for visual and assistive-technology validation.
 
 ## Implementation plans
 

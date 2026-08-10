@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  getNextEventOccurrence,
   getOccurrence,
   getOccurrencesForRange,
   getOrphanedExceptions,
@@ -59,6 +60,23 @@ test("a moved occurrence appears only at its target range", () => {
   const state = { events: [series], eventExceptions: [moved], occurrenceAliases: [] };
   assert.equal(getOccurrencesForRange(state, "2026-08-01", "2026-08-02").length, 0);
   assert.equal(getOccurrencesForRange(state, "2026-08-10", "2026-08-11")[0].recurrenceAnchor, "2026-08-01T09:00");
+});
+
+test("finds a moved recurring event by its actual future date", () => {
+  const movedId = makeOccurrenceId(series.id, "2026-08-01T09:00");
+  const state = {
+    events: [series],
+    eventExceptions: [{
+      id: "moved", type: "moved", seriesId: series.id, occurrenceId: movedId,
+      recurrenceAnchor: "2026-08-01T09:00", revision: 1,
+      timing: { kind: "timed", timeZoneMode: "floating", startLocal: "2026-08-10T11:00", endLocal: "2026-08-10T11:30" },
+    }],
+    occurrenceAliases: [],
+  };
+
+  const occurrence = getNextEventOccurrence(state, series.id, "2026-08-04");
+  assert.equal(occurrence.id, movedId);
+  assert.equal(occurrence.timing.startLocal, "2026-08-10T11:00");
 });
 
 test("a non-recurring multi-day event is returned after its start date", () => {

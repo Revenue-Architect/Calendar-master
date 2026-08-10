@@ -2256,6 +2256,22 @@ reminder extraction, and frontend polish remain intentionally deferred.
   Closed-browser scheduling is intentionally deferred to a future platform adapter;
   the product does not claim an unavailable background service.
 
+### Phase 3C delivery record — 2026-08-10
+
+- `domains/search` now owns an offline, on-demand projection over canonical
+  Calendar, Task, and Note records. It normalizes case, punctuation, and
+  diacritics; handles quoted text plus the current `type`, `status`, `tag`,
+  `date`, `list`, and `calendar` filters; records unsupported filters explicitly;
+  and ranks results deterministically without persisting a duplicate index.
+- Search deep links resolve from current source state. Calendar and Tasks each
+  supply a next-occurrence query, so moved event exceptions and recurring task
+  instances retain canonical IDs without React constructing recurrence identities.
+  A missing, archived, or exhausted target returns an unavailable outcome rather
+  than opening stale content.
+- The Search sheet is now a feature adapter over those projections. Command
+  palette actions, remote/background indexing, saved searches, and provider
+  search remain intentionally deferred.
+
 ## Phase 4: Integrations
 
 - Add Google and Microsoft calendar and task adapters behind existing domain ports.

@@ -51,6 +51,7 @@ export {
 export { changeRecurrence, splitSeries } from "./commands/seriesCommands.js";
 export {
   getOccurrence,
+  getNextEventOccurrence,
   getOccurrencesForRange,
   getOrphanedExceptions,
   getSeriesExceptions,
