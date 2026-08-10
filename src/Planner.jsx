@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from "react";
 import * as storage from "./storage.js";
 import {
   appendBlock as appendNoteBlock,
@@ -41,7 +41,6 @@ import {
   getTasksByList,
   removeTaskDependency,
   resolveSmartView,
-  setTaskStatus,
   smartViewCounts,
   completeTask as completeTaskCommand,
   countOpen,
@@ -53,8 +52,6 @@ import {
   getTaskBlockers,
   moveTaskToList,
   renameTaskList,
-  setTaskReminders,
-  setTaskTags,
   getUpcomingRange,
   migrateV5ToV6,
   normalizeTaskInput,
@@ -91,6 +88,19 @@ import {
 } from "./features/planner/taskMutations.js";
 import { resolveTaskForInspection } from "./features/planner/taskInspection.js";
 import { projectPlannerDay } from "./features/planner/dayProjection.js";
+import {
+  applyDetailDraft,
+  buildDetailEntryPayload,
+  buildTaskWritePatch,
+  durationFromClockRange,
+  durationFromDatedClockRange,
+  hasDetailDraft,
+} from "./features/planner/detailDraft.js";
+import {
+  fluidMorphFromRects,
+  fluidPillBox,
+  fluidPillStretch,
+} from "./features/motion/fluidGeometry.js";
 import {
   deliverReminder,
   dismissReminder,
@@ -319,46 +329,6 @@ function canonicalOccurrenceIdentity(id) {
   try { return parseOccurrenceId(id); } catch { return null; }
 }
 
-/* §4.6. A draft is expressed in the composer's field names; the detail view reads
-   the record's own shape. This projects one onto the other so an unsaved edit is
-   visible exactly where it will land, without touching what is stored. */
-function applyDraftToItem(kind, item, draft, fallbackDate) {
-  if (!draft || !Object.keys(draft).length) return item;
-  if (kind === "task") {
-    const plannedDate = draft.unplanned ? null : (draft.date ?? item.planned.date ?? fallbackDate);
-    return {
-      ...item,
-      title: draft.title ?? item.title,
-      category: draft.cat ?? item.category,
-      reward: draft.xp ?? item.reward,
-      note: draft.note ?? item.note,
-      planned: {
-        ...item.planned,
-        date: plannedDate,
-        startMinute: draft.unplanned ? null : (Object.hasOwn(draft, "at") ? draft.at : item.planned.startMinute),
-      },
-      deadline: { ...item.deadline, date: Object.hasOwn(draft, "due") ? (draft.due || null) : item.deadline.date },
-      recurrence: Object.hasOwn(draft, "repeat")
-        ? (draft.repeat ? { ...draft.repeat, frequency: draft.repeat.freq ?? draft.repeat.frequency } : null)
-        : item.recurrence,
-    };
-  }
-  return {
-    ...item,
-    title: draft.title ?? item.title,
-    cat: draft.cat ?? item.cat,
-    place: draft.place ?? item.place,
-    note: draft.note ?? item.note,
-    start: draft.start ?? item.start,
-    dur: draft.dur ?? item.dur,
-    date: draft.date ?? item.date,
-    allDay: Object.hasOwn(draft, "allDay") ? draft.allDay : item.allDay,
-    endDate: draft.endDate ?? item.endDate,
-    alerts: draft.alerts ?? item.alerts,
-    repeat: Object.hasOwn(draft, "repeat") ? draft.repeat : item.repeat,
-  };
-}
-
 function eventTimingFromPosition(event, date, start = event.start, duration = event.dur) {
   if (event.timing.kind === "all-day") {
     const span = diffDays(event.timing.endDateExclusive, event.timing.startDate);
@@ -529,11 +499,17 @@ export default function Planner() {
   const [composer, setComposer] = useState(null);
   const [noteEdit, setNoteEdit] = useState(null);
   const [noteHistory, setNoteHistory] = useState(null);
-  /* Pending edits to whatever the detail view has open, held until they are saved. */
+  /* The details sheet has a deliberate reading state and an editing state. The
+     record stays in place; only its controls and compact action pill change. */
+  const [detailEditing, setDetailEditing] = useState(false);
+  const [discardAsk, setDiscardAsk] = useState(false);
+  /* Pending record-field edits stay outside canonical planner state. */
   const [draft, setDraft] = useState(null);
-  /* A draft belongs to one record. Opening another must not inherit it — that is how
-     an edit lands on the wrong entry. */
-  useEffect(() => { setDraft(null); }, [inspect?.id, inspect?.kind]);
+  useEffect(() => {
+    setDraft(null);
+    setDetailEditing(false);
+    setDiscardAsk(false);
+  }, [inspect?.id, inspect?.kind]);
   const [notebook, setNotebook] = useState(null);
   const [settings, setSettings] = useState(false);
   const [search, setSearch] = useState(false);
@@ -1340,39 +1316,16 @@ export default function Planner() {
     const seriesId = parseTaskOccurrenceId(taskId).seriesId;
     mutate((d) => ({ ...d, tasks: removeTaskDependency(d.tasks, seriesId, blockerId, { now: nowStamp() }).tasks }));
   };
-  const changeStatus = (taskId, status) => {
-    beep("tick");
-    const seriesId = parseTaskOccurrenceId(taskId).seriesId;
-    mutate((d) => ({
-      ...d,
-      tasks: setTaskStatus(d.tasks, seriesId, status, {
-        now: nowStamp(),
-        followUpDate: status === "waiting" ? keyOf(addDays(now, 3)) : null,
-      }).tasks,
-    }));
-  };
   const setList = (taskId, listId) => {
     beep("tick");
+    if (listPicker?.draft) {
+      editEntry({ listId });
+      setListPicker(null);
+      return;
+    }
     const seriesId = parseTaskOccurrenceId(taskId).seriesId;
     mutate((d) => ({ ...d, tasks: moveTaskToList(d.tasks, seriesId, listId, d.taskLists).tasks }));
     setListPicker(null);
-  };
-  const setTags = (taskId, tags) => {
-    beep("tick");
-    const seriesId = parseTaskOccurrenceId(taskId).seriesId;
-    mutate((d) => ({ ...d, tasks: setTaskTags(d.tasks, seriesId, tags).tasks }));
-  };
-  /* One reminder per task for now, anchored to the planned time (§12.1). Offering a
-     list of offsets rather than a free field keeps it a single tap. */
-  const setReminder = (taskId, offsetMinutes) => {
-    beep(offsetMinutes == null ? "abort" : "schedule");
-    const seriesId = parseTaskOccurrenceId(taskId).seriesId;
-    mutate((d) => ({
-      ...d,
-      tasks: setTaskReminders(d.tasks, seriesId,
-        offsetMinutes == null ? [] : [{ id: uid(), anchor: "planned", offsetMinutes }],
-        { now: nowStamp() }).tasks,
-    }));
   };
   /* §11.3. Every bulk action runs each task through the same command a single task
      would use, and counts what actually changed. A run that reports "5 completed"
@@ -1556,15 +1509,7 @@ export default function Planner() {
     beep(p.id ? "click" : "schedule");
     const patch = p.kind === "event"
       ? { title: p.title, start: p.start, dur: p.dur, cat: p.cat, place: p.place, note: p.note, allDay: p.allDay, endDate: p.endDate || null, repeat: p.repeat, recurrence: p.recurrence, timing: p.timing, alerts: p.alerts }
-      : {
-        title: p.title,
-        category: p.cat,
-        reward: p.xp,
-        note: p.note,
-        planned: { date: p.unplanned ? null : (p.date || dateKey), startMinute: p.unplanned ? null : (p.at ?? null), estimateMinutes: null },
-        deadline: { date: p.due || null, minute: null },
-        recurrence: p.repeat ? { ...p.repeat, frequency: p.repeat.freq ?? p.repeat.frequency, missedPolicy: p.repeat.missedPolicy ?? "skip" } : null,
-      };
+      : buildTaskWritePatch(p, dateKey);
     if (p.date && scope !== "one") patch.date = p.date;
     if (p.id && p.kind === "event") {
       const canonical = canonicalOccurrenceIdentity(p.id);
@@ -1628,7 +1573,13 @@ export default function Planner() {
     /* §4.6. A composer has done its job once it writes and gets out of the way. An
        inline edit has not: closing the record you are editing after every field
        would make editing in place worse than the form it replaced. */
-    if (!p.inline) { setComposer(null); setInspect(null); }
+    if (p.inline) {
+      setDraft(null);
+      setDetailEditing(false);
+    } else {
+      setComposer(null);
+      setInspect(null);
+    }
   };
   const saveEntry = (p) => {
     const { date } = splitId(p.id || "");
@@ -1641,14 +1592,7 @@ export default function Planner() {
      record. Because both hand the same payload to the same write, an inline title
      change takes exactly the path the composer's does — including the scope
      question a recurring entry has to ask. */
-  const entryPayload = (kind, item) => (kind === "task"
-    ? {
-      kind: "task", id: item.id, title: item.title, cat: item.category, xp: item.reward,
-      at: item.planned.startMinute, due: item.deadline.date || "", date: item.planned.date || dateKey,
-      unplanned: !item.planned.date, note: item.note,
-      repeat: item.recurrence ? { ...item.recurrence, freq: item.recurrence.frequency, byDay: item.recurrence.byWeekday } : null,
-    }
-    : { ...item, kind, id: item.id });
+  const entryPayload = (kind, item) => buildDetailEntryPayload(kind, item, dateKey);
 
   const saveNote = (draft, text, title) => {
     beep("click");
@@ -2145,11 +2089,14 @@ export default function Planner() {
   /* The record as it currently reads, draft included, so the view shows what will
      be saved rather than what is stored. */
   const inspectDraft = draft && inspectItem
-    ? applyDraftToItem(inspect.kind, inspectItem, draft, dateKey)
+    ? applyDetailDraft(inspect.kind, inspectItem, draft, dateKey)
     : inspectItem;
 
   const commitDraft = (pending = draft) => {
-    if (!inspect || !inspectItem || !pending || !Object.keys(pending).length) return false;
+    if (!inspect || !inspectItem || !hasDetailDraft(pending)) {
+      setDetailEditing(false);
+      return false;
+    }
     const next = { ...entryPayload(inspect.kind, inspectItem), ...pending, inline: true };
     if (inspect.kind === "event") {
       /* The record carries the timing it was read with. An inline change to the
@@ -2176,11 +2123,21 @@ export default function Planner() {
         flash("That clock time is ambiguous here — pick an offset", null);
         setComposer({ ...next, inline: undefined, openRepeat: true });
         setDraft(null);
+        setDetailEditing(false);
+        setInspect(null);
         return true;
       }
     }
     saveEntry(next);
-    setDraft(null);
+    return true;
+  };
+  const closeInspector = () => {
+    beep("click");
+    if (hasDetailDraft(draft)) {
+      setDiscardAsk(true);
+      return false;
+    }
+    setDetailEditing(false);
     return true;
   };
   const draggingTask = gesture && gesture.mode === "task" ? dayTasks.find((t) => t.id === gesture.id) : null;
@@ -2269,19 +2226,33 @@ export default function Planner() {
         @keyframes turnprev{0%{opacity:.15;transform:perspective(1400px) rotateY(19deg) translateX(-11%) scale(.97)}60%{opacity:1}100%{opacity:1;transform:none}}
         .nb-up{animation:nbup 200ms cubic-bezier(.2,.9,.3,1.1)}
         @keyframes nbup{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
-        /* A surface arrives by growing into place rather than sliding on: it starts
-           slightly short and narrow, overshoots a touch, and settles — the same
-           easing family as the travelling pill, so opening a sheet and moving a
-           selection feel like one material. */
-        .nb-fluid{animation:nbfluid 420ms cubic-bezier(.22,1.12,.28,1);transform-origin:bottom center}
+        /* Every menu and sheet is the same material as the control that opened it.
+           When a trigger can be measured the surface grows from that exact pill;
+           first-run and system sheets use the bottom-sheet fallback. */
+        .nb-fluid{animation:nbfluid 420ms cubic-bezier(.22,1.12,.28,1);transform-origin:bottom center;border-radius:24px 24px 0 0;will-change:transform,opacity,border-radius}
         @keyframes nbfluid{
           0%{opacity:0;transform:translateY(26px) scale(.965)}
           55%{opacity:1}
           100%{opacity:1;transform:translateY(0) scale(1)}
         }
-        @media(min-width:640px){.nb-fluid{transform-origin:center}}
+        .nb-fluid[data-fluid-origin="trigger"]{animation-name:nbfluidorigin;transform-origin:center}
+        @keyframes nbfluidorigin{
+          0%{opacity:.25;transform:translate(var(--fluid-x),var(--fluid-y)) scale(var(--fluid-sx),var(--fluid-sy));border-radius:999px}
+          52%{opacity:1}
+          100%{opacity:1;transform:translate(0,0) scale(1);border-radius:24px}
+        }
+        .nb-fluid.nb-fluid-closing{animation:nbfluidout 230ms cubic-bezier(.4,0,.65,1) forwards;pointer-events:none}
+        .nb-fluid.nb-fluid-closing[data-fluid-origin="trigger"]{animation-name:nbfluidoriginout}
+        @keyframes nbfluidout{to{opacity:0;transform:translateY(18px) scale(.97)}}
+        @keyframes nbfluidoriginout{to{opacity:0;transform:translate(var(--fluid-x),var(--fluid-y)) scale(var(--fluid-sx),var(--fluid-sy));border-radius:999px}}
+        @media(min-width:640px){.nb-fluid{transform-origin:center;border-radius:24px}}
         .nb-scrim{animation:nbscrim 300ms ease forwards}
         @keyframes nbscrim{from{opacity:0;backdrop-filter:blur(0)}to{opacity:1;backdrop-filter:blur(3px)}}
+        .nb-scrim.nb-fluid-closing{animation:nbscrimout 230ms ease forwards}
+        @keyframes nbscrimout{to{opacity:0;backdrop-filter:blur(0)}}
+        .nb-edit-actions{transition:width 420ms cubic-bezier(.22,1.12,.28,1),background-color 260ms ease,box-shadow 260ms ease}
+        .nb-edit-actions>button,.nb-edit-actions>div{transition:opacity 180ms ease}
+        .nb-detail-editor{animation:nbrise 300ms cubic-bezier(.22,1.12,.28,1)}
         /* A primary action gets a little more weight under the finger than a
            secondary one — the difference is felt before it is read. */
         .nb-liquid{transition:scale 260ms cubic-bezier(.2,1.6,.35,1),box-shadow 260ms ease}
@@ -2725,9 +2696,15 @@ export default function Planner() {
       {/* ══ INSPECTOR ══ */}
       {inspectItem && (
         <Sheet T={T} title={inspect.kind === "event" ? "EVENT" : "ACTION"}
-          /* §6.7. Closing never discards: whatever is pending is written on the way
-             out, so the only way to lose an edit is to ask for it. */
-          onClose={() => { beep("click"); commitDraft(); setInspect(null); }}>
+          headerAction={(
+            <FluidEditActions T={T} editing={detailEditing} dirty={hasDetailDraft(draft)}
+              label={inspect.kind === "event" ? "EDIT EVENT" : "EDIT ACTION"}
+              onEdit={() => { beep("click"); setDetailEditing(true); }}
+              onRevert={() => { beep("abort"); setDraft(null); setDetailEditing(false); }}
+              onSave={() => { beep("commit"); commitDraft(); }} />
+          )}
+          beforeClose={closeInspector}
+          onClose={() => setInspect(null)}>
           {inspect.kind === "task" ? (
             /* A task reads as a working document: what it is, the steps, then the
                facts that govern it. Nothing is centred, because the checklist is a
@@ -2735,6 +2712,7 @@ export default function Planner() {
             <div>
               <InlineText T={T} value={inspectDraft.title} ariaLabel="Action title"
                 onCommit={(title) => editEntry({ title })}
+                editable={detailEditing}
                 className="text-2xl font-bold tracking-tight leading-tight" />
               <div className="flex items-center gap-2 mt-1.5">
                 <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: catColor(inspectDraft.category) }} />
@@ -2756,11 +2734,11 @@ export default function Planner() {
                       }} />
                     </button>
                     <span className="flex-1 text-sm truncate" style={{ textDecoration: item.done ? "line-through" : "none", color: item.done ? T.dim : T.text }}>{item.title}</span>
-                    <button onClick={() => promoteSub(inspect.id, item.id)} style={{ color: T.dim }} className="text-xs px-1" aria-label="Promote step to a subtask">↥</button>
-                    <button onClick={() => removeSub(inspect.id, item.id)} style={{ color: T.dim }} className="text-xs px-1" aria-label="Remove step">✕</button>
+                    {detailEditing && <button onClick={() => promoteSub(inspect.id, item.id)} style={{ color: T.dim }} className="text-xs px-1" aria-label="Promote step to a subtask">↥</button>}
+                    {detailEditing && <button onClick={() => removeSub(inspect.id, item.id)} style={{ color: T.dim }} className="text-xs px-1" aria-label="Remove step">✕</button>}
                   </div>
                 ))}
-                <InlineAdd T={T} surface={surface} onAdd={(v) => addSub(inspect.id, v)} />
+                {detailEditing && <InlineAdd T={T} surface={surface} onAdd={(v) => addSub(inspect.id, v)} />}
               </div>
 
               {(inspectDraft.checklist ?? []).length > 0 && (
@@ -2779,7 +2757,7 @@ export default function Planner() {
 
               <div className="flex items-start gap-3 px-3 py-3 mt-4" style={{ background: surface, borderRadius: CARD_R }}>
                 <InlineText T={T} value={inspectDraft.note} placeholder="Add a note" ariaLabel="Note" multiline
-                  onCommit={(note) => editEntry({ note })} className="text-sm leading-relaxed" />
+                  onCommit={(note) => editEntry({ note })} editable={detailEditing} className="text-sm leading-relaxed" />
                 <span style={{ color: T.dim }} className="text-sm shrink-0 pt-0.5">≡</span>
               </div>
 
@@ -2789,33 +2767,51 @@ export default function Planner() {
                 {/* §4.6. When it is planned, and when it is due, are edited where
                     they are read. §4.7 keeps the repeat rule behind its own gesture. */}
                 <DetailRow T={T} icon="▦" divider>
-                  <div className="flex items-center gap-2">
-                    <InlineStamp T={T} dark={dark} type="date" ariaLabel="Planned day"
-                      value={inspectDraft.planned.date || ""}
-                      display={inspectDraft.planned.date ? plannedLabel(inspectDraft.planned.date, todayKey) : "Unplanned"}
-                      onCommit={(v) => editEntry({ date: v, unplanned: !v })} className="text-sm" />
-                    {inspectDraft.planned.date && (
-                      <button onClick={() => editEntry({ unplanned: true })} style={{ fontFamily: MONO, color: T.dim }}
-                        className="nb-tap text-xs tracking-widest shrink-0">INBOX</button>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <InlineStamp T={T} dark={dark} type="time" ariaLabel="Planned time"
-                      value={inspectDraft.planned.startMinute != null ? hhmm(inspectDraft.planned.startMinute) : ""}
-                      display={inspectDraft.planned.startMinute != null ? tm(inspectDraft.planned.startMinute) : "Any time"}
-                      onCommit={(v) => editEntry({ at: v ? fromHhmm(v) : null })}
-                      style={{ color: T.dim }} className="text-xs" />
-                    <select value={inspectDraft.recurrence?.frequency ?? "never"} aria-label="Repeats"
-                      onChange={(e) => editEntry({ repeat: repeatFor(e.target.value, inspectDraft.recurrence
-                        ? { ...inspectDraft.recurrence, freq: inspectDraft.recurrence.frequency }
-                        : null, inspectDraft.planned.date || dateKey) })}
-                      style={{ background: "transparent", border: "none", color: T.dim, colorScheme: dark ? "dark" : "light" }}
-                      className="text-xs flex-1 truncate">
-                      {REPEATS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                    </select>
-                  </div>
+                  {detailEditing ? (
+                    <div className="flex flex-col gap-2">
+                      <PillNav T={T} ariaLabel="Action planning state"
+                        value={inspectDraft.planned.date ? "day" : "inbox"}
+                        options={[["day", "ON A DAY"], ["inbox", "INBOX"]]}
+                        onPick={(value) => editEntry(value === "inbox"
+                          ? { unplanned: true }
+                          : { unplanned: false, date: inspectDraft.planned.date || dateKey })}
+                        surface={T.card} className="w-full [&>button]:flex-1 [&>button]:py-1.5" />
+                      {inspectDraft.planned.date && (
+                        <div className="grid grid-cols-2 gap-2">
+                          <LabeledNative T={T} dark={dark} label="DAY" type="date" ariaLabel="Planned day"
+                            value={inspectDraft.planned.date}
+                            onCommit={(value) => value && editEntry({ date: value, unplanned: false })} />
+                          <LabeledNative T={T} dark={dark} label="TIME" type="time" ariaLabel="Planned time"
+                            value={inspectDraft.planned.startMinute != null ? hhmm(inspectDraft.planned.startMinute) : ""}
+                            onCommit={(value) => editEntry({ at: value ? fromHhmm(value) : null })} />
+                        </div>
+                      )}
+                      <DurationPicker T={T} label="ESTIMATE" value={inspectDraft.planned.estimateMinutes}
+                        onPick={(estimate) => editEntry({ estimate })} />
+                      <label className="flex items-center gap-2">
+                        <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">REPEATS</span>
+                        <select value={inspectDraft.recurrence?.frequency ?? "never"} aria-label="Repeats"
+                          onChange={(e) => editEntry({ repeat: repeatFor(e.target.value, inspectDraft.recurrence
+                            ? { ...inspectDraft.recurrence, freq: inspectDraft.recurrence.frequency }
+                            : null, inspectDraft.planned.date || dateKey) })}
+                          style={{ background: "transparent", border: "none", color: T.text, colorScheme: dark ? "dark" : "light" }}
+                          className="text-sm flex-1 truncate">
+                          {REPEATS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                        </select>
+                      </label>
+                    </div>
+                  ) : (
+                    <div>
+                      <span className="block text-sm">{inspectDraft.planned.date ? plannedLabel(inspectDraft.planned.date, todayKey) : "Unplanned"}</span>
+                      <span style={{ color: T.dim }} className="block text-xs mt-0.5">
+                        {inspectDraft.planned.startMinute != null ? tm(inspectDraft.planned.startMinute) : "Any time"}
+                        {inspectDraft.planned.estimateMinutes ? ` · ${dur(inspectDraft.planned.estimateMinutes)} estimate` : " · No estimate"}
+                        {` · ${inspectDraft.recurrence ? repeatLabel({ ...inspectDraft.recurrence, freq: inspectDraft.recurrence.frequency, byDay: inspectDraft.recurrence.byWeekday }) : "Does not repeat"}`}
+                      </span>
+                    </div>
+                  )}
                 </DetailRow>
-                <InlineChoiceRow T={T} icon="◔" divider
+                <InlineChoiceRow T={T} icon="◔" divider editable={detailEditing}
                   label={(inspectDraft.reminders ?? []).length
                     ? (inspectDraft.reminders[0].offsetMinutes === 0
                       ? `When it starts${inspectDraft.planned.startMinute != null ? `, ${tm(inspectDraft.planned.startMinute)}` : ""}`
@@ -2823,23 +2819,26 @@ export default function Planner() {
                     : "No reminder"}
                   value={(inspectDraft.reminders ?? [])[0]?.offsetMinutes ?? "off"}
                   options={[["off", "OFF"], [0, "AT TIME"], [15, "15M"], [60, "1H"]]}
-                  onPick={(v) => setReminder(inspect.id, v === "off" ? null : v)} />
+                  onPick={(value) => editEntry({ reminders: value === "off" ? [] : [{
+                    id: (inspectDraft.reminders ?? [])[0]?.id || uid(), anchor: "planned", offsetMinutes: value,
+                  }] })} />
                 <DetailRow T={T} icon="⌛" divider>
                   <div className="flex items-center gap-2">
                     <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">DUE</span>
                     <InlineStamp T={T} dark={dark} type="date" ariaLabel="Deadline"
                       value={inspectDraft.deadline.date || ""} onCommit={(v) => editEntry({ due: v })}
                       display={inspectDraft.deadline.date ? fmtDay(inspectDraft.deadline.date) : "No deadline"}
+                      editable={detailEditing}
                       style={{ color: inspectDraft.deadline.date && inspectDraft.deadline.date < todayKey ? NOW_RED : T.text }}
                       className="text-sm" />
-                    {inspectDraft.deadline.date && (
+                    {detailEditing && inspectDraft.deadline.date && (
                       <button onClick={() => editEntry({ due: "" })} style={{ color: T.dim }} className="nb-tap text-xs px-1" aria-label="Clear deadline">✕</button>
                     )}
                   </div>
                 </DetailRow>
                 {/* §8.2. The label names the attribute; it does not repeat the value
                     the selected chip already carries. */}
-                <InlineChoiceRow T={T} icon="◈" divider label={`Worth ${inspectDraft.reward}`}
+                <InlineChoiceRow T={T} icon="◈" divider editable={detailEditing} label={`Worth ${inspectDraft.reward}`}
                   value={inspectDraft.reward} options={[20, 30, 40, 60].map((xp) => [xp, String(xp)])}
                   onPick={(xp) => editEntry({ xp })} />
                 {inspectDraft.status === "waiting" && (
@@ -2850,16 +2849,17 @@ export default function Planner() {
                 {/* Every edge is listed, satisfied or not, each removable — otherwise a
                     dependency could be added from here but never taken back. */}
                 <DetailRow T={T} icon="▤" divider>
-                  <button onClick={() => { beep("click"); setListPicker({ taskId: inspect.id }); }} className="text-left w-full">
+                  <button disabled={!detailEditing}
+                    onClick={() => { beep("click"); setListPicker({ taskId: inspect.id, draft: true }); }} className="text-left w-full disabled:opacity-100">
                     <span className="block text-sm">{(db.taskLists.find((l) => l.id === inspectDraft.listId) || {}).name || "—"}</span>
-                    <span style={{ color: T.dim }} className="block text-xs mt-0.5">Tap to move to another list</span>
+                    <span style={{ color: T.dim }} className="block text-xs mt-0.5">{detailEditing ? "Tap to move to another list" : "List"}</span>
                   </button>
                 </DetailRow>
-                <InlineChoiceRow T={T} icon="◑" divider label={inspectDraft.category} dot={catColor}
+                <InlineChoiceRow T={T} icon="◑" divider editable={detailEditing} label={inspectDraft.category} dot={catColor}
                   value={inspectDraft.category} options={CATS.map((c) => [c, c])}
                   onPick={(cat) => editEntry({ cat })} />
                 <DetailRow T={T} icon="#" divider={inspectDependsOn.length > 0}>
-                  <TagField T={T} tags={inspectDraft.tags} onChange={(next) => setTags(inspect.id, next)} />
+                  <TagField T={T} tags={inspectDraft.tags} editable={detailEditing} onChange={(tags) => editEntry({ tags })} />
                 </DetailRow>
                 {inspectDependsOn.map((blocker, i) => (
                   <DetailRow key={blocker.id} T={T} icon="⛌" divider={i < inspectDependsOn.length - 1}>
@@ -2868,23 +2868,24 @@ export default function Planner() {
                         style={{ color: blocker.status === "completed" ? T.dim : NOW_RED, textDecoration: blocker.status === "completed" ? "line-through" : "none" }}>
                         Blocked by {blocker.title}
                       </span>
-                      <button onClick={() => unblockTask(inspect.id, blocker.id)} style={{ color: T.dim }} className="text-xs px-1" aria-label="Remove dependency">✕</button>
+                      {detailEditing && <button onClick={() => unblockTask(inspect.id, blocker.id)} style={{ color: T.dim }} className="text-xs px-1" aria-label="Remove dependency">✕</button>}
                     </div>
                   </DetailRow>
                 ))}
               </div>
 
               <div className="flex items-center justify-between gap-2 mt-4">
-                <div className="flex flex-wrap gap-1">
-                  {["open", "in_progress", "waiting"].map((next) => (
-                    <button key={next} onClick={() => changeStatus(inspect.id, next)} className="px-2 py-1 text-xs tracking-widest"
-                      style={{ fontFamily: MONO, borderRadius: 999, background: inspectDraft.status === next ? T.accent : "transparent", color: inspectDraft.status === next ? T.on : T.dim, border: `1px solid ${inspectDraft.status === next ? T.accent : T.line}` }}>
-                      {next.replace("_", " ").toUpperCase()}
-                    </button>
-                  ))}
-                </div>
-                <button onClick={() => { beep("click"); setDependencyPicker({ taskId: parseTaskOccurrenceId(inspect.id).seriesId }); }}
-                  style={{ fontFamily: MONO, color: T.accent }} className="nb-tap text-xs tracking-widest shrink-0">+ BLOCK ON</button>
+                {detailEditing ? (
+                  <PillNav T={T} ariaLabel="Action status" value={inspectDraft.status}
+                    options={[["open", "OPEN"], ["in_progress", "DOING"], ["waiting", "WAITING"]]}
+                    onPick={(status) => editEntry({ status })} style={{ border: `1px solid ${T.line}` }} />
+                ) : (
+                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">
+                    {inspectDraft.status.replace("_", " ").toUpperCase()}
+                  </span>
+                )}
+                {detailEditing && <button onClick={() => { beep("click"); setDependencyPicker({ taskId: parseTaskOccurrenceId(inspect.id).seriesId }); }}
+                  style={{ fontFamily: MONO, color: T.accent }} className="nb-tap text-xs tracking-widest shrink-0">+ BLOCK ON</button>}
               </div>
 
               {earliestStart && inspectDraft.planned.date && inspectDraft.planned.date < earliestStart && (
@@ -2900,13 +2901,14 @@ export default function Planner() {
           <div className="text-center pt-1 pb-4">
             <InlineText T={T} value={inspectDraft.title} ariaLabel="Event title"
               onCommit={(title) => editEntry({ title })}
+              editable={detailEditing}
               className="text-2xl font-bold tracking-tight leading-tight" style={{ textAlign: "center" }} />
             {inspectDraft.allDay ? (
               <p className="text-base font-semibold mt-1.5">All day</p>
             ) : (
               <div className="flex items-center justify-center gap-1.5 mt-1.5">
                 <InlineStamp T={T} dark={dark} type="time" ariaLabel="Starts" value={hhmm(inspectDraft.start)}
-                  display={tm(inspectDraft.start)} onCommit={(v) => v && editEntry({ start: fromHhmm(v) })}
+                  display={tm(inspectDraft.start)} onCommit={(v) => v && editEntry({ start: fromHhmm(v) })} editable={false}
                   className="text-base font-semibold" />
                 <span style={{ color: T.dim }} className="text-base">–</span>
                 <InlineStamp T={T} dark={dark} type="time" ariaLabel="Ends" value={hhmm((inspectDraft.start + inspectDraft.dur) % 1440)}
@@ -2914,16 +2916,23 @@ export default function Planner() {
                   onCommit={(v) => {
                     if (!v) return;
                     const end = fromHhmm(v);
-                    editEntry({ dur: Math.max(5, (end > inspectDraft.start ? end : end + 1440) - inspectDraft.start) });
-                  }} className="text-base font-semibold" />
+                    editEntry({ dur: durationFromClockRange(inspectDraft.start, end) });
+                  }} editable={false} className="text-base font-semibold" />
               </div>
             )}
             <InlineStamp T={T} dark={dark} type="date" ariaLabel="Day"
               value={splitId(inspect.id).date || inspectDraft.date || dateKey}
               display={fmtDay(splitId(inspect.id).date || inspectDraft.date || dateKey)}
               onCommit={(v) => v && editEntry({ date: v })}
+              editable={false}
               style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest mt-1" />
           </div>
+
+          {detailEditing && (
+            <EventScheduleEditor T={T} dark={dark} event={inspectDraft}
+              date={splitId(inspect.id).date || inspectDraft.date || dateKey}
+              onChange={editEntry} />
+          )}
 
           {/* Two figures the app can actually answer, rather than borrowed metrics. */}
           <div className="flex gap-2 pb-4">
@@ -2950,11 +2959,11 @@ export default function Planner() {
           {/* One row per attribute, each one the control for it (§4.6). Collapsed it
               costs a line; touched, it grows the alternatives underneath. */}
           <div className="flex flex-col gap-2">
-            <InlineChoice T={T} surface={surface} icon="◑" tint={catColor(inspectDraft.cat)}
+            <InlineChoice T={T} surface={surface} icon="◑" tint={catColor(inspectDraft.cat)} editable={detailEditing}
               label={inspectDraft.cat || "—"} value={inspectDraft.cat} dot={catColor}
               options={CATS.map((c) => [c, c])} onPick={(cat) => editEntry({ cat })} />
 
-            <InlineChoice T={T} surface={surface} icon="◷" label={inspectDraft.allDay ? "All day" : "At a time"}
+            <InlineChoice T={T} surface={surface} icon="◷" label={inspectDraft.allDay ? "All day" : "At a time"} editable={detailEditing}
               value={inspectDraft.allDay ? "all" : "timed"} options={[["timed", "AT A TIME"], ["all", "ALL DAY"]]}
               onPick={(v) => editEntry({ allDay: v === "all", ...(v === "all" ? {} : { start: inspectDraft.start || 540, dur: inspectDraft.dur || 60 }) })} />
 
@@ -2965,6 +2974,7 @@ export default function Planner() {
                   value={inspectDraft.endDate || inspectDraft.date || dateKey} min={inspectDraft.date || dateKey}
                   display={fmtDay(inspectDraft.endDate || inspectDraft.date || dateKey)}
                   onCommit={(v) => v && editEntry({ endDate: v })}
+                  editable={detailEditing}
                   style={{ fontFamily: MONO }} className="text-sm" />
               </InlineField>
             )}
@@ -2975,13 +2985,13 @@ export default function Planner() {
                 chosen here rather than in a form somewhere else. The safety was never
                 the separate surface — it is the scope question, which the save still
                 asks. */}
-            <InlineChoice T={T} surface={surface} icon="↻"
+            <InlineChoice T={T} surface={surface} icon="↻" editable={detailEditing}
               label={inspectDraft.repeat ? repeatLabel(inspectDraft.repeat) : "Does not repeat"}
               value={inspectDraft.repeat?.freq ?? "never"}
               options={REPEATS}
               onPick={(freq) => editEntry({ repeat: repeatFor(freq, inspectDraft.repeat, inspectDraft.date || dateKey) })} />
 
-            <InlineChoice T={T} surface={surface} icon="◔"
+            <InlineChoice T={T} surface={surface} icon="◔" editable={detailEditing}
               label={(inspectDraft.alerts || []).length
                 ? inspectDraft.alerts.map((a) => (a === 0 ? "When it starts" : `${dur(a)} before`)).join(", ")
                 : "No reminder"}
@@ -2991,7 +3001,7 @@ export default function Planner() {
 
             <InlineField T={T} surface={surface} icon="⌖">
               <InlineText T={T} value={inspectDraft.place} placeholder="Add a place" ariaLabel="Place"
-                onCommit={(place) => editEntry({ place })} className="text-sm" />
+                onCommit={(place) => editEntry({ place })} editable={detailEditing} className="text-sm" />
             </InlineField>
 
             {conflictIds.has(inspect.id) && (
@@ -3001,7 +3011,7 @@ export default function Planner() {
             <div className="flex items-start gap-3 px-3 py-2.5" style={{ background: surface, borderRadius: CARD_R }}>
               <span style={{ color: T.dim }} className="text-sm shrink-0 w-4 text-center pt-0.5">≡</span>
               <InlineText T={T} value={inspectDraft.note} placeholder="Add a note" ariaLabel="Note" multiline
-                onCommit={(note) => editEntry({ note })} className="text-sm leading-relaxed" />
+                onCommit={(note) => editEntry({ note })} editable={detailEditing} className="text-sm leading-relaxed" />
             </div>
           </div>
 
@@ -3014,42 +3024,40 @@ export default function Planner() {
           </>
           )}
 
-          <EntityNotes T={T} notes={linkedNotes} kind={inspect.kind}
-            onNew={newContextualNote}
-            onOpen={(note) => { beep("click"); setInspect(null); setNoteEdit(note); }} />
+          {!detailEditing && <>
+            <EntityNotes T={T} notes={linkedNotes} kind={inspect.kind}
+              onNew={newContextualNote}
+              onOpen={(note) => { beep("click"); setInspect(null); setNoteEdit(note); }} />
+            <button
+              onClick={() => {
+                if (inspect.kind === "event") duplicateEvent(inspect.id);
+                else { inspectDraft.status === "completed" ? reopenTask(inspect.id) : completeTask(inspect.id); setInspect(null); }
+              }}
+              style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="nb-tap nb-liquid w-full py-3 mt-5 text-xs font-bold tracking-widest">
+              {inspect.kind === "event" ? "DUPLICATE" : inspectDraft.status === "completed" ? "REOPEN" : "MARK COMPLETE"}
+            </button>
+            <button onClick={() => removeItem(inspect.kind, inspect.id)} style={{ fontFamily: MONO, color: NOW_RED, border: `1px solid ${T.line}` }} className="nb-tap w-full py-3 mt-2 text-xs tracking-widest">DELETE</button>
+          </>}
+        </Sheet>
+      )}
 
-          {/* §4.6. A pending edit is visible and reversible before it lands. The bar
-              only exists while there is something to save, so a record you are only
-              reading carries no chrome for changing it. */}
-          {draft && Object.keys(draft).length > 0 && (
-            <div className="nb-rise sticky bottom-0 flex items-center gap-2 mt-5 pt-3 pb-1"
-              style={{ background: `linear-gradient(to top, ${T.card} 72%, transparent)`, zIndex: 4 }}>
-              <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest flex-1">
-                {Object.keys(draft).length} UNSAVED
-              </span>
-              <button onClick={() => { beep("abort"); setDraft(null); }}
-                style={{ fontFamily: MONO, color: T.dim, border: `1px solid ${T.line}`, borderRadius: 999 }}
-                className="nb-tap px-4 py-2 text-xs tracking-widest">REVERT</button>
-              <button onClick={() => { beep("commit"); commitDraft(); }}
-                style={{ fontFamily: MONO, background: T.accent, color: T.on, borderRadius: 999 }}
-                className="nb-tap nb-liquid px-5 py-2 text-xs font-bold tracking-widest">SAVE</button>
-            </div>
-          )}
-
-          {/* §4.7. No generic "edit" — the view above already is the editor, so the
-              only actions left are the ones that do something other than change a
-              field. An action that leads elsewhere names what it is for. */}
-          <button
-            onClick={() => {
-              /* Whatever is pending is part of the record before it is acted on. */
-              commitDraft();
-              if (inspect.kind === "event") duplicateEvent(inspect.id);
-              else { inspectDraft.status === "completed" ? reopenTask(inspect.id) : completeTask(inspect.id); setInspect(null); }
-            }}
-            style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="nb-tap nb-liquid w-full py-3 mt-5 text-xs font-bold tracking-widest">
-            {inspect.kind === "event" ? "DUPLICATE" : inspectDraft.status === "completed" ? "REOPEN" : "MARK COMPLETE"}
-          </button>
-          <button onClick={() => removeItem(inspect.kind, inspect.id)} style={{ fontFamily: MONO, color: NOW_RED, border: `1px solid ${T.line}` }} className="nb-tap w-full py-3 mt-2 text-xs tracking-widest">DELETE</button>
+      {discardAsk && (
+        <Sheet T={T} title="UNSAVED CHANGES" onClose={() => { beep("click"); setDiscardAsk(false); }}>
+          <h2 className="text-xl font-bold tracking-tight">Discard this edit?</h2>
+          <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic mt-1 mb-4">
+            The saved {inspect?.kind === "event" ? "event" : "action"} will stay as it was.
+          </p>
+          <div className="flex flex-col gap-2">
+            <button onClick={() => { beep("click"); setDiscardAsk(false); }}
+              style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="nb-tap nb-liquid py-3 text-xs font-bold tracking-widest">KEEP EDITING</button>
+            <button onClick={() => {
+              beep("abort");
+              setDraft(null);
+              setDetailEditing(false);
+              setDiscardAsk(false);
+              setInspect(null);
+            }} style={{ fontFamily: MONO, color: NOW_RED, border: `1px solid ${T.line}` }} className="nb-tap py-3 text-xs tracking-widest">DISCARD CHANGES</button>
+          </div>
         </Sheet>
       )}
 
@@ -3773,7 +3781,7 @@ function Agenda({ T, surface, days, dateKey, todayKey, clock, onOpenEvent, onOpe
 
 /* Tags are added by typing and removed by tapping the tag itself — a chip that is
    its own delete control, so there is no second affordance to hunt for. */
-function TagField({ T, tags, onChange }) {
+function TagField({ T, tags, onChange, editable = true }) {
   const [v, setV] = useState("");
   const add = () => {
     const value = v.trim().replace(/^#/, "");
@@ -3782,13 +3790,20 @@ function TagField({ T, tags, onChange }) {
   return (
     <div className="flex flex-wrap items-center gap-1">
       {tags.map((tag) => (
-        <button key={tag} onClick={() => onChange(tags.filter((x) => x !== tag))}
-          className="px-2 py-0.5 text-xs tracking-widest" title="Remove tag"
-          style={{ fontFamily: MONO, borderRadius: 999, color: T.dim, border: `1px solid ${T.line}` }}>{tag} ✕</button>
+        editable ? (
+          <button key={tag} onClick={() => onChange(tags.filter((x) => x !== tag))}
+            className="px-2 py-0.5 text-xs tracking-widest" title="Remove tag"
+            style={{ fontFamily: MONO, borderRadius: 999, color: T.dim, border: `1px solid ${T.line}` }}>{tag} ✕</button>
+        ) : (
+          <span key={tag} className="px-2 py-0.5 text-xs tracking-widest"
+            style={{ fontFamily: MONO, borderRadius: 999, color: T.dim, border: `1px solid ${T.line}` }}>{tag}</span>
+        )
       ))}
-      <input value={v} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} onBlur={add}
-        placeholder={tags.length ? "Add tag" : "No tags"} style={{ background: "transparent", border: "none" }}
-        className="text-sm py-0.5 flex-1 min-w-20" />
+      {editable ? (
+        <input value={v} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} onBlur={add}
+          placeholder={tags.length ? "Add tag" : "No tags"} style={{ background: "transparent", border: "none" }}
+          className="text-sm py-0.5 flex-1 min-w-20" />
+      ) : !tags.length ? <span style={{ color: T.dim }} className="text-sm">No tags</span> : null}
     </div>
   );
 }
@@ -3833,7 +3848,7 @@ function Pill({ T, surface, icon, label, tint = null }) {
 /* §4.6. A title or a line of prose commits when it is left or confirmed, never per
    keystroke: a half-typed title is not a title, and committing one would put it
    through the scope question a character at a time. */
-function InlineText({ T, value, onCommit, placeholder = "Untitled", multiline = false, className = "", style = {}, ariaLabel }) {
+function InlineText({ T, value, onCommit, placeholder = "Untitled", multiline = false, className = "", style = {}, ariaLabel, editable = true }) {
   const [draft, setDraft] = useState(value ?? "");
   const [live, setLive] = useState(false);
   /* Escape blurs the field, and blur is what commits — so the abandonment has to be
@@ -3877,6 +3892,12 @@ function InlineText({ T, value, onCommit, placeholder = "Untitled", multiline = 
       ...style,
     },
   };
+  if (!editable) {
+    const content = value || placeholder;
+    return multiline
+      ? <p aria-label={ariaLabel} className={`${className} w-full`} style={{ whiteSpace: "pre-wrap", ...style }}>{content}</p>
+      : <span aria-label={ariaLabel} className={`${className} block w-full`} style={style}>{content}</span>;
+  }
   return multiline
     ? <textarea rows={Math.min(6, Math.max(1, draft.split("\n").length))} {...shared} />
     : <input {...shared} />;
@@ -3884,15 +3905,16 @@ function InlineText({ T, value, onCommit, placeholder = "Untitled", multiline = 
 
 /* §4.6. Collapsed, an attribute costs one line. Tapping it grows the alternatives
    underneath rather than showing every choice all the time. */
-function InlineChoice({ T, surface, icon, label, options, value, onPick, tint = null, dot = null, children = null }) {
+function InlineChoice({ T, surface, icon, label, options, value, onPick, tint = null, dot = null, children = null, editable = true }) {
   const [open, setOpen] = useState(false);
+  useEffect(() => { if (!editable) setOpen(false); }, [editable]);
   return (
     <div style={{ background: tint ? `${tint}22` : surface, borderRadius: CARD_R }} className="overflow-hidden">
-      <button onClick={() => setOpen(!open)} className="nb-tap flex items-center gap-3 px-3 py-2.5 w-full text-left">
+      <button disabled={!editable} onClick={() => setOpen(!open)} className="nb-tap flex items-center gap-3 px-3 py-2.5 w-full text-left disabled:opacity-100">
         <span style={{ color: tint || T.dim }} className="text-sm shrink-0 w-4 text-center">{icon}</span>
         <span className="flex-1 text-sm truncate" style={{ color: tint || T.text }}>{label}</span>
-        <span style={{ color: T.dim, transform: open ? "rotate(180deg)" : "none", transition: "transform 200ms cubic-bezier(.2,.8,.25,1)" }}
-          className="text-xs shrink-0">▾</span>
+        {editable && <span style={{ color: T.dim, transform: open ? "rotate(180deg)" : "none", transition: "transform 200ms cubic-bezier(.2,.8,.25,1)" }}
+          className="text-xs shrink-0">▾</span>}
       </button>
       <div style={{
         display: "grid",
@@ -3967,6 +3989,97 @@ function InlineNative({ T, type, value, onCommit, ariaLabel, className = "", sty
   );
 }
 
+function LabeledNative({ T, dark, label, type, value, onCommit, ariaLabel, min }) {
+  return (
+    <label className="block px-2.5 py-2" style={{ border: `1px solid ${T.line}`, borderRadius: 12 }}>
+      <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest mb-0.5">{label}</span>
+      <InlineNative T={T} dark={dark} type={type} value={value} min={min} onCommit={onCommit} ariaLabel={ariaLabel}
+        className="w-full text-sm" style={{ fontFamily: MONO }} />
+    </label>
+  );
+}
+
+function DurationPicker({ T, label, value, onPick, allowNone = true }) {
+  const standards = [15, 30, 45, 60, 90, 120];
+  const choices = value && !standards.includes(value)
+    ? [...standards, value].sort((a, b) => a - b)
+    : standards;
+  const options = [
+    ...(allowNone ? [[null, "NONE"]] : []),
+    ...choices.map((minutes) => [minutes, dur(minutes).toUpperCase()]),
+  ];
+  return (
+    <div>
+      <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest mb-1">{label}</span>
+      <PillNav T={T} ariaLabel={label} value={value ?? null} options={options} onPick={onPick}
+        className="w-full [&>button]:flex-1 [&>button]:px-1.5 [&>button]:py-1.5"
+        style={{ border: `1px solid ${T.line}` }} />
+    </div>
+  );
+}
+
+function EventScheduleEditor({ T, dark, event, date, onChange }) {
+  const endMinute = (event.start + event.dur) % 1440;
+  const derivedEndDate = addDaysToKey(date, Math.floor((event.start + event.dur) / 1440));
+  return (
+    <div className="nb-detail-editor flex flex-col gap-2 mb-4 p-3"
+      style={{ background: isDark(T.bg) ? mixHex(T.card, "#FFFFFF", 0.13) : mixHex(T.card, "#000000", 0.06), borderRadius: CARD_R }}>
+      {event.allDay ? (
+        <div className="grid grid-cols-2 gap-2">
+          <LabeledNative T={T} dark={dark} label="DAY" type="date" ariaLabel="Event day" value={date}
+            onCommit={(value) => value && onChange({ date: value })} />
+          <LabeledNative T={T} dark={dark} label="THROUGH" type="date" ariaLabel="Last day"
+            min={date} value={event.endDate || date}
+            onCommit={(value) => value && onChange({ endDate: value })} />
+        </div>
+      ) : <>
+        <div className="grid grid-cols-2 gap-2">
+          <LabeledNative T={T} dark={dark} label="DAY" type="date" ariaLabel="Event day" value={date}
+            onCommit={(value) => value && onChange({ date: value })} />
+          <LabeledNative T={T} dark={dark} label="START" type="time" ariaLabel="Starts" value={hhmm(event.start)}
+            onCommit={(value) => value && onChange({ start: fromHhmm(value) })} />
+          <LabeledNative T={T} dark={dark} label="END DAY" type="date" ariaLabel="Event end day"
+            min={date} value={derivedEndDate}
+            onCommit={(value) => value && onChange({ dur: durationFromDatedClockRange(date, event.start, value, endMinute) })} />
+          <LabeledNative T={T} dark={dark} label="END" type="time" ariaLabel="Ends" value={hhmm(endMinute)}
+            onCommit={(value) => value && onChange({ dur: durationFromDatedClockRange(date, event.start, derivedEndDate, fromHhmm(value)) })} />
+        </div>
+        <DurationPicker T={T} label="LENGTH" value={event.dur} allowNone={false}
+          onPick={(duration) => onChange({ dur: duration })} />
+      </>}
+    </div>
+  );
+}
+
+function FluidEditActions({ T, editing, dirty, label, onEdit, onRevert, onSave }) {
+  return (
+    <div className={`nb-edit-actions relative overflow-hidden ${editing ? "is-editing" : ""}`}
+      style={{
+        width: editing ? 176 : 104,
+        height: 34,
+        borderRadius: 999,
+        background: editing ? T.faint : T.accent,
+        boxShadow: editing ? `inset 0 0 0 1px ${T.line}` : "none",
+      }}>
+      <button onClick={onEdit} disabled={editing} aria-hidden={editing}
+        className="absolute inset-0 text-xs font-bold tracking-widest"
+        style={{ fontFamily: MONO, color: T.on, opacity: editing ? 0 : 1, pointerEvents: editing ? "none" : "auto" }}>
+        {label}
+      </button>
+      <div className="absolute inset-0 grid grid-cols-2" inert={!editing}
+        style={{ opacity: editing ? 1 : 0, pointerEvents: editing ? "auto" : "none" }}>
+        <button onClick={onRevert} disabled={!editing} className="text-xs tracking-widest"
+          style={{ fontFamily: MONO, color: T.dim }}>{dirty ? "REVERT" : "CANCEL"}</button>
+        <button onClick={onSave} disabled={!editing} className="relative text-xs font-bold tracking-widest"
+          style={{ fontFamily: MONO, color: T.on, background: T.accent, borderRadius: 999 }}>
+          {dirty ? "SAVE" : "DONE"}
+          {dirty && <span aria-label="Unsaved changes" className="absolute rounded-full" style={{ width: 5, height: 5, right: 7, top: 6, background: T.on }} />}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* A segmented control where the selection is one pill that travels between the
    options rather than a background that blinks from one to the next. It stretches
    along the direction of travel and settles — the liquid-pill idiom — which is what
@@ -3978,33 +4091,31 @@ function PillNav({ T, value, options, onPick, ariaLabel, surface = "transparent"
   const wrapRef = useRef(null);
   const [box, setBox] = useState(null);
   const [stretch, setStretch] = useState(1);
+  const boxRef = useRef(null);
   const settle = useRef(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const wrap = wrapRef.current;
     if (!wrap) return undefined;
     const move = () => {
       const active = wrap.querySelector('[data-active="true"]');
       if (!active) return;
-      const a = active.getBoundingClientRect();
-      const w = wrap.getBoundingClientRect();
-      setBox((prev) => {
-        const next = { left: a.left - w.left, width: a.width, top: a.top - w.top, height: a.height };
-        /* Only a real move stretches the pill; a resize should not wobble it. */
-        if (prev && Math.abs(prev.left - next.left) > 1) {
-          const distance = Math.abs(prev.left - next.left);
-          setStretch(1 + Math.min(0.34, distance / 260));
-          clearTimeout(settle.current);
-          settle.current = setTimeout(() => setStretch(1), 210);
-        }
-        return next;
-      });
+      const next = fluidPillBox(wrap.getBoundingClientRect(), active.getBoundingClientRect());
+      const previous = boxRef.current;
+      if (previous && Math.abs(previous.left - next.left) > 1) {
+        setStretch(fluidPillStretch(previous, next));
+        clearTimeout(settle.current);
+        settle.current = setTimeout(() => setStretch(1), 210);
+      }
+      boxRef.current = next;
+      setBox(next);
     };
     move();
-    const observer = new ResizeObserver(move);
-    observer.observe(wrap);
-    return () => { observer.disconnect(); clearTimeout(settle.current); };
-  }, [value, options]);
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(move) : null;
+    observer?.observe(wrap);
+    window.addEventListener("resize", move);
+    return () => { observer?.disconnect(); window.removeEventListener("resize", move); clearTimeout(settle.current); };
+  }, [value, options.length]);
 
   return (
     <div ref={wrapRef} role="tablist" aria-label={ariaLabel} className={`relative flex ${className}`}
@@ -4036,11 +4147,12 @@ function PillNav({ T, value, options, onPick, ariaLabel, surface = "transparent"
 /* §4.4/§4.6. The same expansion inside the task's grouped rules card, which reads as
    one block of rules with its icons on the right — so the choices cannot bring their
    own surface without breaking the group. */
-function InlineChoiceRow({ T, icon, label, sub, options, value, onPick, dot = null, divider = false }) {
+function InlineChoiceRow({ T, icon, label, sub, options, value, onPick, dot = null, divider = false, editable = true }) {
   const [open, setOpen] = useState(false);
+  useEffect(() => { if (!editable) setOpen(false); }, [editable]);
   return (
     <div style={{ borderBottom: divider ? `1px solid ${T.line}` : "none" }}>
-      <button onClick={() => setOpen(!open)} className="nb-tap flex items-center gap-3 px-3 py-3 w-full text-left">
+      <button disabled={!editable} onClick={() => setOpen(!open)} className="nb-tap flex items-center gap-3 px-3 py-3 w-full text-left disabled:opacity-100">
         <span className="flex-1 min-w-0">
           <span className="flex items-center gap-2">
             {dot && <span className="rounded-full shrink-0" style={{ width: 8, height: 8, background: dot(value) }} />}
@@ -4048,8 +4160,8 @@ function InlineChoiceRow({ T, icon, label, sub, options, value, onPick, dot = nu
           </span>
           {sub && <span style={{ color: T.dim }} className="block text-xs mt-0.5">{sub}</span>}
         </span>
-        <span style={{ color: T.dim, transform: open ? "rotate(180deg)" : "none", transition: "transform 200ms cubic-bezier(.2,.8,.25,1)" }}
-          className="text-xs shrink-0">▾</span>
+        {editable && <span style={{ color: T.dim, transform: open ? "rotate(180deg)" : "none", transition: "transform 200ms cubic-bezier(.2,.8,.25,1)" }}
+          className="text-xs shrink-0">▾</span>}
         <span style={{ color: T.dim }} className="text-sm shrink-0">{icon}</span>
       </button>
       <div style={{ display: "grid", gridTemplateRows: open ? "1fr" : "0fr", transition: "grid-template-rows 240ms cubic-bezier(.2,.8,.25,1)" }}>
@@ -4084,13 +4196,13 @@ function InlineChoiceRow({ T, icon, label, sub, options, value, onPick, dot = nu
    would read "08/10/2026 📅" in the middle of a page that says "MON 10 AUG". The
    value keeps the product's own formatting and the real control lies invisibly on
    top of it, so the picker is still exactly where the value is. */
-function InlineStamp({ T, type, value, display, onCommit, ariaLabel, min, className = "", style = {}, dark = false }) {
+function InlineStamp({ T, type, value, display, onCommit, ariaLabel, min, className = "", style = {}, dark = false, editable = true }) {
   return (
     <span className="nb-stamp relative inline-flex items-center">
       <span aria-hidden="true" className={className} style={{ ...style, pointerEvents: "none" }}>{display}</span>
-      <InlineNative T={T} dark={dark} type={type} value={value} min={min} onCommit={onCommit} ariaLabel={ariaLabel}
+      {editable && <InlineNative T={T} dark={dark} type={type} value={value} min={min} onCommit={onCommit} ariaLabel={ariaLabel}
         className="absolute inset-0 w-full h-full"
-        style={{ opacity: 0, cursor: "pointer", padding: 0, margin: 0 }} />
+        style={{ opacity: 0, cursor: "pointer", padding: 0, margin: 0 }} />}
     </span>
   );
 }
@@ -4115,30 +4227,64 @@ function Row({ T, k, v }) {
   );
 }
 
-function Sheet({ T, onClose, title, children }) {
+function Sheet({ T, onClose, title, children, headerAction = null, beforeClose = null }) {
   /* Ignore a backdrop dismissal that arrives in the same tap that opened the sheet.
      Belt and braces alongside preventDefault at the source: any future path that
      opens a sheet from a touch inherits the protection. */
   const openedAt = useRef(Date.now());
   const dialogRef = useRef(null);
   const openerRef = useRef(null);
+  const closeTimer = useRef(null);
+  const closingRef = useRef(false);
+  const onCloseRef = useRef(onClose);
+  const beforeCloseRef = useRef(beforeClose);
+  const [closing, setClosing] = useState(false);
   const titleId = useRef(`sheet-title-${Math.random().toString(36).slice(2, 9)}`);
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+  useEffect(() => { beforeCloseRef.current = beforeClose; }, [beforeClose]);
+  const requestClose = useCallback(() => {
+    if (closingRef.current) return;
+    if (beforeCloseRef.current && beforeCloseRef.current() === false) return;
+    closingRef.current = true;
+    setClosing(true);
+    const panel = dialogRef.current;
+    const reduced = typeof window !== "undefined" && (
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+      || (panel && window.getComputedStyle(panel).animationName === "none")
+    );
+    closeTimer.current = window.setTimeout(() => onCloseRef.current(), reduced ? 0 : 230);
+  }, []);
   const guardedClose = useCallback(() => {
     if (Date.now() - openedAt.current < 350) return;
-    onClose();
-  }, [onClose]);
+    requestClose();
+  }, [requestClose]);
   useEffect(() => {
-    const h = (e) => e.key === "Escape" && onClose();
+    const h = (e) => e.key === "Escape" && requestClose();
     window.addEventListener("keydown", h);
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
       window.removeEventListener("keydown", h);
       document.body.style.overflow = prev;
+      window.clearTimeout(closeTimer.current);
     };
-  }, [onClose]);
-  useEffect(() => {
+  }, [requestClose]);
+  useLayoutEffect(() => {
     openerRef.current = document.activeElement;
+    const panel = dialogRef.current;
+    const opener = openerRef.current;
+    if (panel && opener instanceof HTMLElement && opener !== document.body && opener.isConnected) {
+      const triggerRect = opener.getBoundingClientRect();
+      const panelRect = panel.getBoundingClientRect();
+      if (triggerRect.width > 0 && triggerRect.height > 0) {
+        const morph = fluidMorphFromRects(triggerRect, panelRect);
+        panel.dataset.fluidOrigin = "trigger";
+        panel.style.setProperty("--fluid-x", `${morph.translateX}px`);
+        panel.style.setProperty("--fluid-y", `${morph.translateY}px`);
+        panel.style.setProperty("--fluid-sx", String(morph.scaleX));
+        panel.style.setProperty("--fluid-sy", String(morph.scaleY));
+      }
+    }
     const frame = window.requestAnimationFrame(() => focusDialogOnOpen(dialogRef.current));
     return () => {
       window.cancelAnimationFrame(frame);
@@ -4146,13 +4292,16 @@ function Sheet({ T, onClose, title, children }) {
     };
   }, []);
   return (
-    <div className="nb-scrim fixed inset-0 z-50 flex items-end sm:items-center justify-center" style={{ background: "rgba(0,0,0,0.72)" }} onClick={guardedClose}>
+    <div className={`nb-scrim ${closing ? "nb-fluid-closing" : ""} fixed inset-0 z-50 flex items-end sm:items-center justify-center`} style={{ background: "rgba(0,0,0,0.72)" }} onClick={guardedClose}>
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId.current}
         onKeyDown={(event) => trapDialogTab(event, dialogRef.current)} onClick={(e) => e.stopPropagation()}
-        className="nb-fluid w-full sm:max-w-md overflow-y-auto nb-s" style={{ background: T.card, color: T.text, maxHeight: "88vh" }}>
+        className={`nb-fluid ${closing ? "nb-fluid-closing" : ""} w-full sm:max-w-md overflow-y-auto nb-s`} style={{ background: T.card, color: T.text, maxHeight: "88vh" }}>
         <div className="sticky top-0 flex items-center justify-between px-4 sm:px-5 pt-3 pb-2" style={{ background: T.card, zIndex: 3 }}>
           <span id={titleId.current} style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">{title || "Details"}</span>
-          <button onClick={onClose} aria-label="Close" style={{ color: T.dim, fontFamily: MONO }} className="nb-tap -mr-1 px-2 py-1 text-sm">✕</button>
+          <div className="flex items-center gap-1.5">
+            {headerAction}
+            <button onClick={requestClose} aria-label="Close" style={{ color: T.dim, fontFamily: MONO }} className="nb-tap -mr-1 px-2 py-1 text-sm">✕</button>
+          </div>
         </div>
         <div className="px-4 sm:px-5 pb-5">{children}</div>
       </div>
@@ -4353,6 +4502,7 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
   const [place, setPlace] = useState(initial.place || "");
   const [note, setNote] = useState(initial.note || "");
   const [at, setAt] = useState(initial.at != null ? initial.at : null);
+  const [estimate, setEstimate] = useState(initial.estimate != null ? initial.estimate : null);
   const [due, setDue] = useState(initial.due || "");
   const [allDay, setAllDay] = useState(!!initial.allDay);
   const [endDate, setEndDate] = useState(initial.endDate || "");
@@ -4412,7 +4562,7 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
   }, [kind, recurrence && JSON.stringify(recurrence), JSON.stringify(timing), ok]);
   const submit = () => {
     if (!ok) return;
-    onSubmit({ id: initial.id, date: unplanned && kind === "task" ? null : date, unplanned, kind, title: title.trim(), cat, start: allDay ? 0 : start, dur: allDay ? 0 : len, xp, place, note, at, due: due || null, allDay, endDate, alerts, repeat: repeat && repeat.freq ? repeat : null, recurrence, timing });
+    onSubmit({ id: initial.id, date: unplanned && kind === "task" ? null : date, unplanned, kind, title: title.trim(), cat, start: allDay ? 0 : start, dur: allDay ? 0 : len, xp, place, note, at, estimate, due: due || null, allDay, endDate, alerts, repeat: repeat && repeat.freq ? repeat : null, recurrence, timing });
   };
   const toTime = (m) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
   const fromTime = (s) => { const [h, m] = s.split(":").map(Number); return h * 60 + m; };
@@ -4457,8 +4607,7 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
                 <span style={{ color: T.dim }} className="text-sm">&#8594;</span>
                 <input type="time" step={60} value={endLocal.slice(11)} onChange={(e) => {
                   if (!e.target.value) return;
-                  const proposed = `${endLocal.slice(0, 10)}T${e.target.value}`;
-                  setLen(Math.max(5, localDateTimeToEpochMinutes(proposed) - localDateTimeToEpochMinutes(startLocal)));
+                  setLen(durationFromClockRange(start, fromTime(e.target.value)));
                 }} style={{ background: "transparent", border: "none", fontFamily: MONO }} className="text-sm" />
                 <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest ml-auto shrink-0">{dur(len)}</span>
               </div>
@@ -4525,6 +4674,7 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
             <>
               <Chips T={T} surface={surface} label="REWARD" value={xp} onChange={(v) => { onTick(); setXp(v); }}
                 options={[[30, "+30"], [40, "+40"], [50, "+50"], [60, "+60"]]} />
+              <DurationPicker T={T} label="ESTIMATE" value={estimate} onPick={(value) => { onTick(); setEstimate(value); }} />
               {!unplanned && (
                 <div className="flex items-center gap-2 px-3 py-2.5" style={{ background: surface, borderRadius: CARD_R }}>
                   <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">AT</span>
