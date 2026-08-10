@@ -20,6 +20,9 @@ are too detailed for the repository README.
 - [`superpowers/specs/2026-08-10-unified-search-design.md`](superpowers/specs/2026-08-10-unified-search-design.md)
   defines the Phase 3C pure search, deterministic ranking, and canonical deep-link
   boundary.
+- [`superpowers/specs/2026-08-10-preferences-motivation-design.md`](superpowers/specs/2026-08-10-preferences-motivation-design.md)
+  defines the Phase 3D independent preferences, humane motivation ledger, and
+  recovery policy.
 
 ## Quality reports
 
@@ -40,6 +43,9 @@ are too detailed for the repository README.
 - [`qa/2026-08-10-unified-search-phase-3c.md`](qa/2026-08-10-unified-search-phase-3c.md)
   records the unified-search and deep-link proof, production gates, and the
   environment blocker for visual and assistive-technology validation.
+- [`qa/2026-08-10-preferences-motivation-phase-3d.md`](qa/2026-08-10-preferences-motivation-phase-3d.md)
+  records the preferences/motivation persistence, reward-reversal, regression,
+  and browser-access evidence.
 
 ## Implementation plans
 
@@ -79,6 +85,9 @@ are too detailed for the repository README.
 - [`superpowers/plans/2026-08-10-unified-search-phase-3c.md`](superpowers/plans/2026-08-10-unified-search-phase-3c.md)
   implements the next approved Planner foundation slice: offline unified search
   and source-owned deep links.
+- [`superpowers/plans/2026-08-10-preferences-motivation-phase-3d.md`](superpowers/plans/2026-08-10-preferences-motivation-phase-3d.md)
+  implements separate local settings and motivation aggregates without a notebook
+  schema migration.
 
 ## Architecture decisions
 

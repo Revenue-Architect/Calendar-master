@@ -42,7 +42,6 @@ import {
   setTaskStatus,
   smartViewCounts,
   completeTask as completeTaskCommand,
-  completedOn,
   countOpen,
   createTask as createTaskCommand,
   deferTask as deferTaskCommand,
@@ -96,6 +95,15 @@ import {
   snoozeReminder,
 } from "./domains/reminders/index.js";
 import { loadReminderRecords, saveReminderRecords } from "./platform/persistence/reminderStore.js";
+import { loadPreferences, savePreferences } from "./platform/persistence/preferencesStore.js";
+import { preferencesFromLegacyState } from "./platform/preferences/preferences.js";
+import {
+  awardTaskCompletion,
+  createMotivationLedger,
+  getMotivationSummary,
+  reverseLatestTaskAward,
+} from "./domains/gamification/index.js";
+import { loadMotivationLedger, saveMotivationLedger } from "./platform/persistence/gamificationStore.js";
 import {
   createEvent as createCalendarEvent,
   deleteEvent as deleteCalendarEvent,
@@ -159,7 +167,6 @@ const catColor = (cat) => CAT_COLOR[cat] || "#8A8A96";
 const CARD_R = 10;
 const HOUR_H = 68;
 const DAY_H = HOUR_H * 24;
-const XP_PER_LEVEL = 300;
 const HOLD_MS = 420;
 const LIFT_MS = 300;
 const SNAP = 5;
@@ -214,7 +221,7 @@ const startSlot = (m, s = 15) => Math.min(snapTo(m, s), 1440 - s);
 /* The wire form a native time input speaks, independent of the 12/24 display clock. */
 const hhmm = (m) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
 const fromHhmm = (s) => { const [h, m] = s.split(":").map(Number); return h * 60 + m; };
-const buzz = (p) => { try { navigator.vibrate && navigator.vibrate(p); } catch (e) {} };
+const buzzDevice = (p) => { try { navigator.vibrate && navigator.vibrate(p); } catch (e) {} };
 const splitId = (id) => { const i = String(id).indexOf("@"); return i === -1 ? { base: id, date: null } : { base: id.slice(0, i), date: id.slice(i + 1) }; };
 /* "STARTS" reads in the largest unit that still says something useful — days for
    next week, hours today, minutes when it is imminent, and past tense once gone. */
@@ -465,7 +472,6 @@ export default function Planner() {
   const [alertToast, setAlertToast] = useState(null);
   const [confirmWipe, setConfirmWipe] = useState(false);
   const [pendingImport, setPendingImport] = useState(null);
-  const [storageBad, setStorageBad] = useState(!storage.writable);
   const [saveBlocked, setSaveBlocked] = useState(false);
   const [confirmComplete, setConfirmComplete] = useState(null);
   const [smartView, setSmartView] = useState("today");
@@ -477,6 +483,11 @@ export default function Planner() {
   const [firstRun, setFirstRun] = useState(false);
   const [reminderRecords, setReminderRecords] = useState([]);
   const [remindersReady, setRemindersReady] = useState(false);
+  const [preferences, setPreferences] = useState(null);
+  const [motivationLedger, setMotivationLedger] = useState(null);
+  const [preferencesSaveBlocked, setPreferencesSaveBlocked] = useState(false);
+  const [motivationSaveBlocked, setMotivationSaveBlocked] = useState(false);
+  const [storageFailures, setStorageFailures] = useState(() => new Set(storage.writable ? [] : ["device"]));
 
   const stripRef = useRef(null);
   const activeRef = useRef(null);
@@ -484,6 +495,8 @@ export default function Planner() {
   const listRef = useRef(null);
   const saveT = useRef(null);
   const reminderSaveT = useRef(null);
+  const preferencesSaveT = useRef(null);
+  const motivationSaveT = useRef(null);
   const undoT = useRef(null);
   const prevLevel = useRef(null);
   const pinch = useRef(null);
@@ -492,6 +505,15 @@ export default function Planner() {
   const gestureRef = useRef(null);
   const tappedRef = useRef(false);
 
+  const storageBad = storageFailures.size > 0;
+  const reportStorage = useCallback((scope, failed) => {
+    setStorageFailures((current) => {
+      const next = new Set(current);
+      if (failed) next.add(scope); else next.delete(scope);
+      return next;
+    });
+  }, []);
+
   useEffect(() => { gestureRef.current = gesture; }, [gesture]);
   const startGesture = (g) => { gestureRef.current = g; setGesture(g); };
   const endGesture = () => { gestureRef.current = null; setGesture(null); };
@@ -499,25 +521,57 @@ export default function Planner() {
   useEffect(() => {
     let dead = false;
     (async () => {
+      let state;
+      let isFirstRun = false;
       try {
         const loaded = await loadPlannerState(storage);
-        const state = loaded.state || migrateV6ToV7(migrateV5ToV6(migrateV4ToV5(seed())));
+        state = loaded.state || migrateV6ToV7(migrateV5ToV6(migrateV4ToV5(seed())));
         if (!loaded.state) await savePlannerState(storage, state);
-        /* A brand-new notebook opens on someone else's week. The sample is useful for
-           judging the app and confusing as your own planner, so the first run asks
-           rather than assuming. */
-        if (!dead) { setDb(state); setStorageBad(false); setFirstRun(!loaded.state); setReady(true); }
+        isFirstRun = !loaded.state;
+        reportStorage("planner", false);
       } catch (error) {
         /* Either the device can't be written to, or what's already stored is
            unreadable. Open a fresh notebook in memory so the app is still usable —
            without it `ready` flips while `db` stays null and the loader never
            clears — but leave autosave off. Overwriting here would seed straight over
            data that is damaged rather than gone, and export stays the way out. */
-        if (!dead) { setDb(migrateV6ToV7(migrateV5ToV6(migrateV4ToV5(seed())))); setSaveBlocked(true); setStorageBad(true); setReady(true); }
+        state = migrateV6ToV7(migrateV5ToV6(migrateV4ToV5(seed())));
+        setSaveBlocked(true);
+        reportStorage("planner", true);
+      }
+      let nextPreferences = preferencesFromLegacyState(state);
+      let nextLedger = createMotivationLedger({ openingBalance: state.xp ?? 0 });
+      try {
+        const loaded = await loadPreferences(storage, state);
+        nextPreferences = loaded.preferences;
+        if (loaded.initialized) await savePreferences(storage, nextPreferences);
+        reportStorage("preferences", false);
+      } catch {
+        setPreferencesSaveBlocked(true);
+        reportStorage("preferences", true);
+      }
+      try {
+        const loaded = await loadMotivationLedger(storage, { openingBalance: state.xp ?? 0 });
+        nextLedger = loaded.ledger;
+        if (loaded.initialized) await saveMotivationLedger(storage, nextLedger);
+        reportStorage("motivation", false);
+      } catch {
+        setMotivationSaveBlocked(true);
+        reportStorage("motivation", true);
+      }
+      /* A brand-new notebook opens on someone else's week. The sample is useful for
+         judging the app and confusing as your own planner, so the first run asks
+         rather than assuming. */
+      if (!dead) {
+        setDb(state);
+        setPreferences(nextPreferences);
+        setMotivationLedger(nextLedger);
+        setFirstRun(isFirstRun);
+        setReady(true);
       }
     })();
     return () => { dead = true; };
-  }, []);
+  }, [reportStorage]);
 
   useEffect(() => { if (ready) { const r = requestAnimationFrame(() => setMounted(true)); return () => cancelAnimationFrame(r); } }, [ready]);
 
@@ -525,10 +579,10 @@ export default function Planner() {
     if (!ready || !db || saveBlocked) return;
     clearTimeout(saveT.current);
     saveT.current = setTimeout(() => {
-      savePlannerState(storage, db).then(() => setStorageBad(false), () => setStorageBad(true));
+      savePlannerState(storage, db).then(() => reportStorage("planner", false), () => reportStorage("planner", true));
     }, 400);
     return () => clearTimeout(saveT.current);
-  }, [db, ready]);
+  }, [db, ready, reportStorage, saveBlocked]);
 
   /* §2.1. Reminder delivery state is a separate local aggregate. A damaged ledger
      must never block the canonical notebook from opening, so it starts empty and
@@ -538,24 +592,45 @@ export default function Planner() {
     let dead = false;
     loadReminderRecords(storage)
       .then((records) => { if (!dead) setReminderRecords(records); })
-      .catch(() => { if (!dead) setStorageBad(true); })
+      .catch(() => { if (!dead) reportStorage("reminders", true); })
       .finally(() => { if (!dead) setRemindersReady(true); });
     return () => { dead = true; };
-  }, [ready]);
+  }, [ready, reportStorage]);
 
   useEffect(() => {
     if (!remindersReady || saveBlocked) return undefined;
     clearTimeout(reminderSaveT.current);
     reminderSaveT.current = setTimeout(() => {
-      saveReminderRecords(storage, reminderRecords).then(() => setStorageBad(false), () => setStorageBad(true));
+      saveReminderRecords(storage, reminderRecords).then(() => reportStorage("reminders", false), () => reportStorage("reminders", true));
     }, 400);
     return () => clearTimeout(reminderSaveT.current);
-  }, [reminderRecords, remindersReady, saveBlocked]);
+  }, [reminderRecords, remindersReady, saveBlocked, reportStorage]);
+
+  useEffect(() => {
+    if (!preferences || preferencesSaveBlocked) return undefined;
+    clearTimeout(preferencesSaveT.current);
+    preferencesSaveT.current = setTimeout(() => {
+      savePreferences(storage, preferences).then(() => reportStorage("preferences", false), () => reportStorage("preferences", true));
+    }, 200);
+    return () => clearTimeout(preferencesSaveT.current);
+  }, [preferences, preferencesSaveBlocked, reportStorage]);
+
+  useEffect(() => {
+    if (!motivationLedger || motivationSaveBlocked) return undefined;
+    clearTimeout(motivationSaveT.current);
+    motivationSaveT.current = setTimeout(() => {
+      saveMotivationLedger(storage, motivationLedger).then(() => reportStorage("motivation", false), () => reportStorage("motivation", true));
+    }, 200);
+    return () => clearTimeout(motivationSaveT.current);
+  }, [motivationLedger, motivationSaveBlocked, reportStorage]);
 
   useEffect(() => { const i = setInterval(() => setNow(new Date()), 15000); return () => clearInterval(i); }, []);
 
-  const T = useMemo(() => THEMES.find((t) => t.id === (db && db.themeId)) || THEMES[0], [db]);
-  const beep = useSynth(db ? db.sound : true);
+  const T = useMemo(() => THEMES.find((t) => t.id === preferences?.display.themeId) || THEMES[0], [preferences]);
+  const beep = useSynth(preferences?.feedback.sound ?? true);
+  const buzz = useCallback((pattern) => {
+    if (preferences?.feedback.haptics) buzzDevice(pattern);
+  }, [preferences]);
   /* An event card sits *above* the day surface, so it is lifted off the page rather
      than cut into it. Blending keeps the fill opaque so cards never show the grid
      lines through them. */
@@ -569,7 +644,7 @@ export default function Planner() {
      breakpoint stays in CSS rather than being read from window at render time,
      which would not survive a resize. */
   const sheetPad = sheet ? "76dvh" : "64px";
-  const clock = (db && db.clock) || "12";
+  const clock = preferences?.display.clock ?? "12";
   const tm = (m) => fmtTime(m, clock);
 
   /* The theme lives in state, so the page around the app has to follow it: the body
@@ -659,21 +734,18 @@ export default function Planner() {
     return packEventLanes(list);
   }, [timed, gesture]);
 
-  const xp = db ? db.xp : 0;
-  const level = Math.floor(xp / XP_PER_LEVEL) + 1;
-  const levelPct = ((xp % XP_PER_LEVEL) / XP_PER_LEVEL) * 100;
-
-  const streak = useMemo(() => {
-    if (!db) return 0;
-    const doneOn = (k) => completedOn(db, k);
-    let n = 0, cur = new Date(now);
-    if (!doneOn(keyOf(cur))) cur = addDays(cur, -1);
-    while (n < 60 && doneOn(keyOf(cur))) { n++; cur = addDays(cur, -1); }
-    return n;
-  }, [db, todayKey, ov]);
+  const motivation = useMemo(() => (motivationLedger
+    ? getMotivationSummary(motivationLedger, {
+      todayDate: todayKey,
+      controls: preferences?.motivation,
+    })
+    : { points: null, level: null, levelProgress: null, streak: null }), [motivationLedger, preferences, todayKey]);
+  const level = motivation.level;
+  const levelPct = motivation.levelProgress == null ? 0 : motivation.levelProgress * 100;
+  const streak = motivation.streak;
 
   useEffect(() => {
-    if (prevLevel.current !== null && level > prevLevel.current) {
+    if (level != null && preferences?.motivation.celebrations && prevLevel.current !== null && level > prevLevel.current) {
       beep("levelup"); buzz([12, 40, 12]);
       setLevelFlash(level);
       const t = setTimeout(() => setLevelFlash(null), 2400);
@@ -681,7 +753,7 @@ export default function Planner() {
       return () => clearTimeout(t);
     }
     prevLevel.current = level;
-  }, [level]);
+  }, [level, preferences, beep, buzz]);
 
   useEffect(() => {
     if (ready && zoom === "week" && activeRef.current && stripRef.current) {
@@ -719,17 +791,20 @@ export default function Planner() {
     beep("alert"); buzz([10, 60, 10]);
     setAlertToast({ title: reminder.title, body: reminder.body, reminderId: reminder.id, k: uid() });
     try {
-      if (db.notifs && "Notification" in window && Notification.permission === "granted") {
+      if (preferences?.notifications.systemEnabled && "Notification" in window && Notification.permission === "granted") {
         new Notification(reminder.title, { body: reminder.body });
       }
     } catch (err) {}
-  }, [db, remindersReady, reminderRecords, nowLocal, alertToast, beep]);
+  }, [db, preferences, remindersReady, reminderRecords, nowLocal, alertToast, beep, buzz]);
 
   const askNotifs = async () => {
     try {
       if (!("Notification" in window)) return;
       const p = await Notification.requestPermission();
-      mutate((d) => ({ ...d, notifs: p === "granted" }));
+      setPreferences((current) => current ? {
+        ...current,
+        notifications: { ...current.notifications, systemEnabled: p === "granted" },
+      } : current);
       beep(p === "granted" ? "commit" : "abort");
     } catch (e) {}
   };
@@ -895,6 +970,29 @@ export default function Planner() {
 
   const findTask = (id) => dayTasks.find((t) => t.id === id) || (db && db.tasks.find((t) => t.id === id));
   const nowStamp = () => new Date().toISOString().slice(0, 16);
+  const taskRewardSource = (id) => {
+    const { seriesId, occurrenceDate } = parseTaskOccurrenceId(id);
+    return { domain: "task", entityId: seriesId, occurrenceId: occurrenceDate ?? null };
+  };
+  const awardCompletion = (id, task, awardId = uid()) => {
+    if (!preferences?.motivation.points || !task?.reward) return null;
+    const source = taskRewardSource(id);
+    setMotivationLedger((ledger) => ledger ? awardTaskCompletion(ledger, {
+      id: awardId,
+      source,
+      amount: task.reward,
+      occurredAt: nowStamp(),
+      planningDate: todayKey,
+    }) : ledger);
+    return source;
+  };
+  const reverseTaskReward = (id) => {
+    const source = taskRewardSource(id);
+    setMotivationLedger((ledger) => ledger ? reverseLatestTaskAward(ledger, source, {
+      id: uid(), occurredAt: nowStamp(),
+    }) : ledger);
+    return source;
+  };
 
   /* One write path for both plain tasks and series occurrences.
      An occurrence id is `series@date`. Completing or reopening one records a typed
@@ -956,16 +1054,18 @@ export default function Planner() {
       return;
     }
     beep("commit"); buzz([8, 30, 14]);
-    setReward({ xp: t.reward, k: uid() });
-    setTimeout(() => setReward(null), 900);
+    const rewardSource = awardCompletion(id, t);
+    if (rewardSource && preferences?.motivation.celebrations) {
+      setReward({ xp: t.reward, k: uid() });
+      setTimeout(() => setReward(null), 900);
+    }
     writeTask(id, (state, taskId) => completeTaskCommand(state.tasks, taskId, {
       now: new Date().toISOString().slice(0, 16),
       override: true,
     }), { completed: true });
-    mutate((d) => ({ ...d, xp: d.xp + (t.reward || 0) }));
     /* §10.3. Completion is the most-used action and fires from a 420ms hold, so it
        is the one that most needs a way back. */
-    flash("Completed", { type: "task-complete", id, reward: t.reward || 0 });
+    flash("Completed", { type: "task-complete", id, rewardSources: rewardSource ? [rewardSource] : [] });
     setConfirmComplete(null);
   };
   const reopenTask = (id) => {
@@ -973,7 +1073,7 @@ export default function Planner() {
     if (!t || t.status !== "completed") return;
     beep("click");
     writeTask(id, (state, taskId) => reopenTaskCommand(state.tasks, taskId), { reopened: true });
-    mutate((d) => ({ ...d, xp: Math.max(0, d.xp - (t.reward || 0)) }));
+    reverseTaskReward(id);
   };
   const deferTask = (id, n = 1) => {
     const t = findTask(id);
@@ -1173,12 +1273,19 @@ export default function Planner() {
     const done = result.completedIds.length;
     const failed = result.failures;
     setDb(result.state);
+    const rewardSources = action === "complete"
+      ? result.completedIds.flatMap((id) => {
+        const { seriesId } = parseTaskOccurrenceId(id);
+        const task = before.tasks.find((entry) => entry.id === seriesId);
+        return awardCompletion(id, task) ? [taskRewardSource(id)] : [];
+      })
+      : [];
     beep(failed.length ? "abort" : "commit");
     flash(
       failed.length
         ? `${done} of ${ids.length} — ${failed.length} ${failed[0].reason === "blocked" ? "blocked" : "refused"}`
         : `${done} ${action === "delete" ? "deleted" : action === "complete" ? "completed" : action === "tag" ? "tagged" : action === "priority" ? "reprioritised" : "moved"}`,
-      done ? { type: "restore-planner-state", snapshot: { state: before } } : null,
+      done ? { type: "restore-planner-state", snapshot: { state: before }, rewardSources } : null,
     );
     setSelection(null);
   };
@@ -1224,17 +1331,13 @@ export default function Planner() {
     if (kind === "task") {
       const targetId = date && scope === "one" ? id : base;
       const result = deleteTaskFromPlannerState(db, targetId, { exceptionId: uid() });
-      const reward = result.removed.kind === "series" && result.removed.tasks[0]?.status === "completed"
-        ? result.removed.tasks[0].reward || 0
-        : 0;
-      setDb(reward
-        ? { ...result.state, xp: Math.max(0, result.state.xp - reward) }
-        : result.state);
+      /* A reward records a completed action, not the continued existence of its
+         task. Deleting a completed task therefore preserves its historical award. */
+      setDb(result.state);
       setInspect(null); setScopeAsk(null);
       flash(result.removed.kind === "occurrence" ? "This one skipped" : "Deleted", {
         type: "restore-task-deletion",
         removed: result.removed,
-        reward,
       });
       return;
     }
@@ -1265,6 +1368,11 @@ export default function Planner() {
     if (!undo || !undo.payload) return;
     const p = undo.payload;
     beep("click");
+    if (p.rewardSources?.length) {
+      setMotivationLedger((ledger) => p.rewardSources.reduce((next, source) => reverseLatestTaskAward(next, source, {
+        id: uid(), occurredAt: nowStamp(),
+      }), ledger));
+    }
     mutate((d) => {
       if (p.type === "restore" && p.item) {
         if (p.kind === "note") {
@@ -1277,8 +1385,7 @@ export default function Planner() {
         }
       }
       if (p.type === "restore-task-deletion" && p.removed) {
-        const restored = restoreDeletedTaskInPlannerState(d, p.removed);
-        return p.reward ? { ...restored, xp: restored.xp + p.reward } : restored;
+        return restoreDeletedTaskInPlannerState(d, p.removed);
       }
       if (p.type === "restore-calendar-event") return restoreCalendarEvent(d, p.snapshot).state;
       if (p.type === "restore-calendar-occurrence") return restoreOccurrence(d, p.snapshot).state;
@@ -1289,7 +1396,6 @@ export default function Planner() {
         const target = d.tasks.find((x) => x.id === seriesId);
         if (target && target.status === "completed") d.tasks = reopenTaskCommand(d.tasks, seriesId).tasks;
         d.taskExceptions = removeTaskException(d.taskExceptions, seriesId, parseTaskOccurrenceId(p.id).occurrenceDate ?? "");
-        d.xp = Math.max(0, d.xp - (p.reward || 0));
       }
       if (p.type === "unskip") { const o = { ...d.overrides }; delete o[p.key]; d.overrides = o; }
       /* Deferral moves the planned date, so undo moves it back — the old handler
@@ -1582,8 +1688,9 @@ export default function Planner() {
   };
   const wipeAll = () => {
     beep("delete");
-    setDb(createBlankPlannerState({ themeId: T.id, sound: db.sound, notifs: db.notifs, clock: db.clock }));
+    setDb(createBlankPlannerState());
     setReminderRecords([]);
+    setMotivationLedger(createMotivationLedger());
     setConfirmWipe(false);
     setSettings(false);
   };
@@ -1945,7 +2052,7 @@ export default function Planner() {
       onStartSelect={(id) => { beep("lift"); buzz(8); setSelection(new Set(id ? [id] : [])); }}
       onCancelSelect={() => { beep("click"); setSelection(null); }}
       onBulk={runBulk} overdue={overdue} deadlines={deadlines} showOverdue={isToday}
-      todayKey={todayKey} gesture={gesture} onPullOverdue={pullOverdue} beep={beep}
+      todayKey={todayKey} gesture={gesture} onPullOverdue={pullOverdue} beep={beep} buzz={buzz}
       onComplete={completeTask} onReopen={reopenTask} onDefer={deferTask}
       onInspect={(id) => setInspect({ kind: "task", id })} onToggleSub={toggleSub} onAddSub={addSub} onRemoveSub={removeSub}
       onDragStart={(id, x, y) => { startGesture({ mode: "task", kind: "task", id, x, y }); setSheet(false); buzz(6); beep("lift"); }}
@@ -2006,19 +2113,22 @@ export default function Planner() {
         @keyframes nbrw{0%{opacity:0;transform:translateY(20px) scale(.8)}25%{opacity:1;transform:translateY(0) scale(1)}100%{opacity:0;transform:translateY(-52px) scale(1)}}
         .nb-blink{animation:nbb 2s ease-in-out infinite}
         @keyframes nbb{0%,100%{opacity:1}50%{opacity:.4}}
-                                button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid ${T.accent};outline-offset:2px}
+        button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid ${T.accent};outline-offset:2px}
         input,textarea,select{color:${T.text}}
         input::placeholder,textarea::placeholder{color:${T.dim}}
         @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+        ${preferences?.display.reducedMotion ? "*{animation:none!important;transition:none!important}" : ""}
       `}</style>
 
       {/* ══ HUD ══ */}
       <header style={{ background: T.bg, borderBottom: `1px solid ${T.line}` }} className="sticky top-0 z-30 px-3 sm:px-5 py-2 flex items-center justify-between gap-3">
         <div className="flex items-baseline gap-2 min-w-0">
-          <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">LVL</span>
-          <span style={{ fontFamily: MONO }} className="text-sm font-bold">{level}</span>
-          <div style={{ background: T.faint }} className="w-14 h-1 mx-1"><div style={{ background: T.accent, width: `${levelPct}%` }} className="h-full" /></div>
-          {streak > 0 && <span style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest">{streak}d</span>}
+          {level != null && <>
+            <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">LVL</span>
+            <span style={{ fontFamily: MONO }} className="text-sm font-bold">{level}</span>
+            <div style={{ background: T.faint }} className="w-14 h-1 mx-1"><div style={{ background: T.accent, width: `${levelPct}%` }} className="h-full" /></div>
+          </>}
+          {streak != null && streak > 0 && <span style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest">{streak}d</span>}
         </div>
         <div className="flex items-center gap-1">
           <button onClick={() => { jumpTo(todayKey); setMonthCursor(new Date()); }} style={{ fontFamily: MONO, color: T.dim }} className="nb-tap px-2 py-1 text-xs tracking-widest">TODAY</button>
@@ -2738,6 +2848,7 @@ export default function Planner() {
             <button onClick={() => {
               beep("click");
               mutate((d) => ({ ...d, events: [], tasks: [], notes: [], eventExceptions: [], taskExceptions: [], occurrenceAliases: [], overrides: {}, xp: 0 }));
+              setMotivationLedger(createMotivationLedger());
               setFirstRun(false);
             }} style={{ fontFamily: MONO, background: surface, borderRadius: CARD_R }} className="nb-tap py-3 text-xs tracking-widest">START EMPTY</button>
           </div>
@@ -2907,17 +3018,17 @@ export default function Planner() {
 
           <div className="mt-4">
             <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">FEEDBACK</span>
-            <button onClick={() => { beep("tick"); mutate((d) => ({ ...d, sound: !d.sound })); }} className="w-full flex items-center justify-between py-2.5" style={{ borderBottom: `1px solid ${T.line}` }}>
+            <button onClick={() => { beep("tick"); setPreferences((current) => current ? { ...current, feedback: { ...current.feedback, sound: !current.feedback.sound } } : current); }} className="w-full flex items-center justify-between py-2.5" style={{ borderBottom: `1px solid ${T.line}` }}>
               <span className="text-sm">Sound</span>
-              <span style={{ fontFamily: MONO, color: db.sound ? T.accent : T.dim }} className="text-xs tracking-widest">{db.sound ? "ON" : "OFF"}</span>
+              <span style={{ fontFamily: MONO, color: preferences.feedback.sound ? T.accent : T.dim }} className="text-xs tracking-widest">{preferences.feedback.sound ? "ON" : "OFF"}</span>
             </button>
-            <button onClick={() => { beep("tick"); mutate((d) => ({ ...d, clock: d.clock === "24" ? "12" : "24" })); }} className="w-full flex items-center justify-between py-2.5" style={{ borderBottom: `1px solid ${T.line}` }}>
+            <button onClick={() => { beep("tick"); setPreferences((current) => current ? { ...current, display: { ...current.display, clock: current.display.clock === "24" ? "12" : "24" } } : current); }} className="w-full flex items-center justify-between py-2.5" style={{ borderBottom: `1px solid ${T.line}` }}>
               <span className="text-sm">Clock</span>
               <span style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest">{clock === "24" ? "24-HOUR" : "12-HOUR"}</span>
             </button>
             <button onClick={askNotifs} className="w-full flex items-center justify-between py-2.5" style={{ borderBottom: `1px solid ${T.line}` }}>
               <span className="text-sm">System notifications</span>
-              <span style={{ fontFamily: MONO, color: db.notifs ? T.accent : T.dim }} className="text-xs tracking-widest">{db.notifs ? "ON" : "ALLOW"}</span>
+              <span style={{ fontFamily: MONO, color: preferences.notifications.systemEnabled ? T.accent : T.dim }} className="text-xs tracking-widest">{preferences.notifications.systemEnabled ? "ON" : "ALLOW"}</span>
             </button>
           </div>
 
@@ -2925,7 +3036,7 @@ export default function Planner() {
             <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">THEME</span>
             <div className="flex flex-col mt-1">
               {THEMES.map((th) => (
-                <button key={th.id} onClick={() => { beep("tick"); mutate((d) => ({ ...d, themeId: th.id })); }} className="nb-row flex items-center gap-3 py-2 px-1 text-left" style={{ borderBottom: `1px solid ${T.line}` }}>
+                <button key={th.id} onClick={() => { beep("tick"); setPreferences((current) => current ? { ...current, display: { ...current.display, themeId: th.id } } : current); }} className="nb-row flex items-center gap-3 py-2 px-1 text-left" style={{ borderBottom: `1px solid ${T.line}` }}>
                   <span className="flex shrink-0">
                     <span className="w-4 h-6" style={{ background: th.bg }} />
                     <span className="w-4 h-6" style={{ background: th.card }} />
@@ -2939,6 +3050,22 @@ export default function Planner() {
           </div>
 
           <div className="mt-5">
+            <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">PACE</span>
+            {[
+              ["reducedMotion", "Reduce motion", preferences.display.reducedMotion, (current) => ({ ...current, display: { ...current.display, reducedMotion: !current.display.reducedMotion } })],
+              ["points", "Points", preferences.motivation.points, (current) => ({ ...current, motivation: { ...current.motivation, points: !current.motivation.points } })],
+              ["levels", "Levels", preferences.motivation.levels, (current) => ({ ...current, motivation: { ...current.motivation, levels: !current.motivation.levels } })],
+              ["streaks", "Streaks", preferences.motivation.streaks, (current) => ({ ...current, motivation: { ...current.motivation, streaks: !current.motivation.streaks } })],
+              ["celebrations", "Celebrations", preferences.motivation.celebrations, (current) => ({ ...current, motivation: { ...current.motivation, celebrations: !current.motivation.celebrations } })],
+            ].map(([id, label, enabled, update]) => (
+              <button key={id} onClick={() => { beep("tick"); setPreferences((current) => current ? update(current) : current); }} className="w-full flex items-center justify-between py-2.5" style={{ borderBottom: `1px solid ${T.line}` }}>
+                <span className="text-sm">{label}</span>
+                <span style={{ fontFamily: MONO, color: enabled ? T.accent : T.dim }} className="text-xs tracking-widest">{enabled ? "ON" : "OFF"}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-5">
             <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">YOUR DATA</span>
             <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic mt-1 mb-2">Everything lives on this device. There's no account to sync with — take it with you as a file instead.</p>
             {storageBad && (
@@ -2948,7 +3075,14 @@ export default function Planner() {
               <div className="flex items-center gap-2 mb-2 p-2" style={{ boxShadow: `inset 0 0 0 1px ${NOW_RED}` }}>
                 <span className="flex-1 text-xs">Replace everything on this device?</span>
                 <button onClick={() => { setPendingImport(null); beep("abort"); }} style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">CANCEL</button>
-                <button onClick={() => { setDb(pendingImport); setReminderRecords([]); setPendingImport(null); beep("commit"); setSettings(false); }} style={{ fontFamily: MONO, color: NOW_RED }} className="text-xs font-bold tracking-widest">REPLACE</button>
+                <button onClick={() => {
+                  setDb(pendingImport);
+                  setReminderRecords([]);
+                  setMotivationLedger(createMotivationLedger({ openingBalance: pendingImport.xp ?? 0 }));
+                  setPendingImport(null);
+                  beep("commit");
+                  setSettings(false);
+                }} style={{ fontFamily: MONO, color: NOW_RED }} className="text-xs font-bold tracking-widest">REPLACE</button>
               </div>
             )}
             <div className="flex flex-wrap gap-2">
@@ -2996,7 +3130,7 @@ export default function Planner() {
 
 /* ═══════════════════════ ACTIONS ═══════════════════════ */
 
-function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, onOpenDeadline, overdue, deadlines, showOverdue, todayKey, gesture, blockersFor, onPromoteSub, smartView, viewCounts, onSmartView, lists, onManageLists, clock = "12", selection, onToggleSelect, onStartSelect, onCancelSelect, onBulk, onPullOverdue, beep, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onAddTask, onEditNote, onUnschedule, onJump }) {
+function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, onOpenDeadline, overdue, deadlines, showOverdue, todayKey, gesture, blockersFor, onPromoteSub, smartView, viewCounts, onSmartView, lists, onManageLists, clock = "12", selection, onToggleSelect, onStartSelect, onCancelSelect, onBulk, onPullOverdue, beep, buzz, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onAddTask, onEditNote, onUnschedule, onJump }) {
   const open = tasks.filter((t) => t.status !== "completed");
   const done = tasks.filter((t) => t.status === "completed");
   return (
@@ -3089,7 +3223,7 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
 
       <div className="flex flex-col gap-2">
         {open.map((t) => (
-          <TaskCard key={t.id} T={T} t={t} beep={beep} target={gesture && gesture.overTask === t.id} todayKey={todayKey} blockers={blockersFor(t)} onPromoteSub={onPromoteSub} clock={clock} selection={selection} onToggleSelect={onToggleSelect} onStartSelect={onStartSelect}
+          <TaskCard key={t.id} T={T} t={t} beep={beep} buzz={buzz} target={gesture && gesture.overTask === t.id} todayKey={todayKey} blockers={blockersFor(t)} onPromoteSub={onPromoteSub} clock={clock} selection={selection} onToggleSelect={onToggleSelect} onStartSelect={onStartSelect}
             onComplete={onComplete} onReopen={onReopen} onDefer={onDefer} onInspect={onInspect} onToggleSub={onToggleSub} onAddSub={onAddSub} onRemoveSub={onRemoveSub} onDragStart={onDragStart} onUnschedule={onUnschedule} />
         ))}
       </div>
@@ -3099,7 +3233,7 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
           <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">DONE · {done.length}</span>
           <div className="flex flex-col gap-2 mt-2">
             {done.map((t) => (
-              <TaskCard key={t.id} T={T} t={t} beep={beep} todayKey={todayKey} blockers={blockersFor(t)} onPromoteSub={onPromoteSub} clock={clock} selection={selection} onToggleSelect={onToggleSelect} onStartSelect={onStartSelect}
+              <TaskCard key={t.id} T={T} t={t} beep={beep} buzz={buzz} todayKey={todayKey} blockers={blockersFor(t)} onPromoteSub={onPromoteSub} clock={clock} selection={selection} onToggleSelect={onToggleSelect} onStartSelect={onStartSelect}
                 onComplete={onComplete} onReopen={onReopen} onDefer={onDefer} onInspect={onInspect} onToggleSub={onToggleSub} onAddSub={onAddSub} onRemoveSub={onRemoveSub} onDragStart={onDragStart} onUnschedule={onUnschedule} />
             ))}
           </div>
@@ -3193,7 +3327,7 @@ function NoteBlock({ T, block, ordinal, onOpen }) {
   return <button onClick={onOpen} className="text-left w-full">{body}</button>;
 }
 
-function TaskCard({ T, t, beep, target, todayKey, blockers = [], onPromoteSub, clock = "12", selection = null, onToggleSelect, onStartSelect, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onUnschedule }) {
+function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromoteSub, clock = "12", selection = null, onToggleSelect, onStartSelect, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onUnschedule }) {
   const [prog, setProg] = useState(0);
   const [dx, setDx] = useState(0);
   const [burst, setBurst] = useState(null);

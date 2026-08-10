@@ -190,13 +190,11 @@ export function applyBulkTaskAction(state, ids, action, {
               patch: {},
               completedAt: now,
             }),
-            xp: working.xp + (task.reward || 0),
           };
         } else {
           working = {
             ...working,
             tasks: completeTaskCommand(working.tasks, seriesId, { now }).tasks,
-            xp: working.xp + (task.reward || 0),
           };
         }
       } else if (action === "defer" || (action === "today" && occurrenceDate)) {
@@ -229,12 +227,7 @@ export function applyBulkTaskAction(state, ids, action, {
         working = { ...working, tasks: updateTaskCommand(working.tasks, seriesId, { priority: bulkArg }, { now }).tasks };
       } else if (action === "delete") {
         const deletion = deleteTaskFromPlannerState(working, id, { exceptionId: createId() });
-        working = {
-          ...deletion.state,
-          xp: !occurrenceDate && task.status === "completed"
-            ? Math.max(0, deletion.state.xp - (task.reward || 0))
-            : deletion.state.xp,
-        };
+        working = deletion.state;
       } else {
         throw new Error(`unsupported bulk action ${action}`);
       }

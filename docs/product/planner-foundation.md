@@ -2253,6 +2253,22 @@ reminder extraction, and frontend polish remain intentionally deferred.
   reconciliation, in-app delivery, snooze, dismissal, cancellation, and audit
   timestamps without mutating source events or tasks.
 - Browser notifications are a permission-gated best effort while the app runs.
+
+### Phase 3D delivery record — 2026-08-10
+
+- Preferences now persist in a versioned local aggregate separate from the v7
+  notebook. Theme, clock format, sound, notification intent, reduced motion, and
+  motivation controls affect future experience only; legacy display fields seed a
+  new preference record once for compatibility.
+- Motivation now uses an immutable ledger rather than mutable planner `xp`.
+  Task completion awards are source- and action-idempotent; reopening records an
+  explicit reversal; retries cannot create a second active reward. Levels and
+  streaks are pure reads from unreversed task-completion entries, never from task
+  debt or calendar attendance.
+- A malformed preferences or motivation record does not overwrite the notebook.
+  Each persistence failure remains visible at the existing device-save warning.
+  Import and full wipe start a fresh ledger from the imported legacy opening
+  balance while leaving device preferences intact.
   Closed-browser scheduling is intentionally deferred to a future platform adapter;
   the product does not claim an unavailable background service.
 
@@ -2748,6 +2764,8 @@ resurfacing (§9.4), inbox processing states (§6.1), and the collaboration fiel
 | 2026-08-10 | Derive anything handed to another domain from the readable text, never the mark punctuation. |
 | 2026-08-10 | Make going back to a version an edit of its own, so history is never erased by returning to it. |
 | 2026-08-10 | Show a revision whose checksum fails as damaged rather than restoring corrupted text over a good page. |
+| 2026-08-10 | Persist device preferences and motivation history separately from canonical planner content, preserving schema-v7 compatibility. |
+| 2026-08-10 | Treat legacy XP as a one-time opening balance; only new auditable task completions and reversals change the motivation ledger. |
 | 2026-08-10 | Read what a deletion removes before the state updater runs, since the payload is built before it does. |
 | 2026-08-10 | Offer undo only where there is something to undo; a confirmation carries no button. |
 | 2026-08-10 | Clamp a new entry's start to a minute the day actually has, so "now" near midnight cannot leave the day. |

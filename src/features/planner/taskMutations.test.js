@@ -137,6 +137,18 @@ test("bulk completion settles only the selected recurring occurrence", () => {
   assert.equal(getDayTasks(result.state, "2026-08-10")[0].status, "open");
 });
 
+test("bulk completion preserves legacy xp while the motivation ledger owns new rewards", () => {
+  const original = { ...stateWithTasks([task({ id: "one" })]), xp: 75 };
+  const result = applyBulkTaskAction(original, ["one"], "complete", {
+    now: "2026-08-09T09:00",
+    createId: () => "unused",
+    todayKey: "2026-08-09",
+  });
+
+  assert.equal(result.state.xp, 75);
+  assert.equal(result.state.tasks[0].status, "completed");
+});
+
 test("bulk defer detaches one occurrence without shifting the series", () => {
   const ids = ["detached", "cancelled"];
   const original = stateWithTasks([task({

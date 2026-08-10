@@ -34,12 +34,12 @@ local-first browser persistence. No provider SDKs or remote APIs.
 | 3A. Day composition and review | §1, §1.2, §1.4, §1.5 | Completed 2026-08-10. One authoritative day query removes duplicated UI calculations and gives later modules stable inputs. |
 | 3B. Reminder engine | §2 | Completed 2026-08-10. Reminder intent is already modeled by events/tasks; scheduling and delivery state belong outside both. |
 | 3C. Unified search and deep links | §3 | Completed 2026-08-10. Search consumes domain projections and source-owned occurrence identities without owning content. |
-| 3D. Preferences, motivation, and persistence ports | §4–6, §8 | These are application concerns that become safe once read/write seams are explicit. |
+| 3D. Preferences, motivation, and persistence ports | §4–6, §8 | Completed 2026-08-10. Versioned local aggregates now separate device settings and reward history from the v7 notebook. |
 | 3E. Calendar projections | Calendar §1, §8–10 and later Phase 2 | Availability, conflicts, briefing, and calendar visibility consume the shared day model. |
 | 3F. Notes completion | Notes §6, §8–13 | Inbox processing, templates, tags, portability, and attachments build on the shipped notebook/backlink layer. |
 | 3G. Accessibility, diagnostics, and security hardening | §9–11 | Cross-cutting contracts are verified once every core surface has a bounded owner. |
 
-Slices 3A–3C are delivered. Each later slice receives its own detailed plan before
+Slices 3A–3D are delivered. Each later slice receives its own detailed plan before
 code changes, so its product choices stay reviewable and its test boundary stays small.
 
 ## Slice 3A file map
