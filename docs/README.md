@@ -31,6 +31,9 @@ are too detailed for the repository README.
   local-browser access limitation.
 - [`qa/2026-08-10-reminders-phase-3b.md`](qa/2026-08-10-reminders-phase-3b.md)
   records the durable reminder ledger, scheduling, delivery, and persistence gates.
+- [`qa/2026-08-10-phase-3b-follow-up-pressure-test.md`](qa/2026-08-10-phase-3b-follow-up-pressure-test.md)
+  records fresh full-suite, dependency, and reminder-edge evidence, plus the
+  cloud-browser limitation that still blocks visual flow verification.
 
 ## Implementation plans
 
