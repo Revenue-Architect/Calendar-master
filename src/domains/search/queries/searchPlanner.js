@@ -72,18 +72,24 @@ function projectTasks(tasks) {
     }));
 }
 
-function projectNotes(notes) {
+function noteTagNames(note, noteTags) {
+  const names = new Map((noteTags ?? []).map((tag) => [tag.id, tag.name]));
+  return [...new Set([...(note.tags ?? []), ...(note.tagIds ?? []).map((tagId) => names.get(tagId)).filter(Boolean)])];
+}
+
+function projectNotes(notes, noteTags) {
   return notes
     .filter((note) => !note.archived)
     .map((note) => {
       const body = blocksToText(note.blocks ?? []);
+      const tags = noteTagNames(note, noteTags);
       return candidate("note", note, {
         title: note.title || noteExcerpt({ ...note, blocks: note.blocks ?? [] }, 80),
         excerpt: body,
         date: note.date ?? null,
         dates: isDateKey(note.date) ? [text(note.date)] : EMPTY,
-        tags: (note.tags ?? []).map(text),
-        fields: [body, ...(note.tags ?? []), note.kind, ...(note.links ?? []).map((link) => link.targetId)],
+        tags: tags.map(text),
+        fields: [body, ...tags, note.kind, ...(note.links ?? []).map((link) => link.targetId)],
       });
     });
 }
@@ -138,7 +144,7 @@ export function searchPlanner(state, { query, todayDate, limit = 30 } = {}) {
   const results = [
     ...projectEvents(state?.events ?? []),
     ...projectTasks(state?.tasks ?? []),
-    ...projectNotes(state?.notes ?? []),
+    ...projectNotes(state?.notes ?? [], state?.noteTags ?? []),
   ].filter((item) => matchesFilters(item, parsed.filters))
     .map((item) => ({ item, match: matchTier(item, parsed.terms) }))
     .filter((entry) => entry.match)

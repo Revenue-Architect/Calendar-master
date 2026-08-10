@@ -90,7 +90,10 @@ export function linkNote(notes, noteId, link, { now = null } = {}) {
     && (entry.occurrenceDate ?? null) === (link.occurrenceDate ?? null)
   ));
   if (exists) return { notes, events: [] };
-  const result = updateNote(notes, noteId, { links: [...current.links, link] }, { now });
+  const result = updateNote(notes, noteId, {
+    links: [...current.links, link],
+    processing: current.processing?.state === "inbox" ? { state: "processed", snoozedUntil: null } : current.processing,
+  }, { now });
   return { ...result, events: [...result.events, noteEvent("NoteLinked", noteId, { link })] };
 }
 

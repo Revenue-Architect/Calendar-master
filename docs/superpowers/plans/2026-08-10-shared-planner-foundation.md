@@ -18,7 +18,7 @@ local-first browser persistence. No provider SDKs or remote APIs.
 
 ## Global Constraints
 
-- Preserve schema-v7 compatibility until a migration is explicitly tested and committed.
+- Preserve schema-v8 compatibility until a later migration is explicitly tested and committed.
 - Keep Google and Microsoft integration, shared calendars, collaboration, and cloud sync out
   of scope; ports may be introduced but must have no provider dependency.
 - A projection never becomes a persisted duplicate of a source record.
@@ -34,12 +34,12 @@ local-first browser persistence. No provider SDKs or remote APIs.
 | 3A. Day composition and review | §1, §1.2, §1.4, §1.5 | Completed 2026-08-10. One authoritative day query removes duplicated UI calculations and gives later modules stable inputs. |
 | 3B. Reminder engine | §2 | Completed 2026-08-10. Reminder intent is already modeled by events/tasks; scheduling and delivery state belong outside both. |
 | 3C. Unified search and deep links | §3 | Completed 2026-08-10. Search consumes domain projections and source-owned occurrence identities without owning content. |
-| 3D. Preferences, motivation, and persistence ports | §4–6, §8 | Completed 2026-08-10. Versioned local aggregates now separate device settings and reward history from the v7 notebook. |
+| 3D. Preferences, motivation, and persistence ports | §4–6, §8 | Completed 2026-08-10. Versioned local aggregates now separate device settings and reward history from the planner notebook. |
 | 3E. Calendar projections | Calendar §1, §8–10 and later Phase 2 | Completed 2026-08-10. Visibility, availability, conflicts, free slots, and factual briefings reuse canonical occurrences. |
-| 3F. Notes completion | Notes §6, §8–13 | Inbox processing, templates, tags, portability, and attachments build on the shipped notebook/backlink layer. |
+| 3F. Notes completion | Notes §6, §8–13 | Completed 2026-08-10. Schema-v8 adds processing, catalog tags, templates, attachment metadata, and safe portability without binary storage. |
 | 3G. Accessibility, diagnostics, and security hardening | §9–11 | Cross-cutting contracts are verified once every core surface has a bounded owner. |
 
-Slices 3A–3E are delivered. Each later slice receives its own detailed plan before
+Slices 3A–3F are delivered. Each later slice receives its own detailed plan before
 code changes, so its product choices stay reviewable and its test boundary stays small.
 
 ## Slice 3A file map

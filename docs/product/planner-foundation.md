@@ -2285,6 +2285,21 @@ reminder extraction, and frontend polish remain intentionally deferred.
   Closed-browser scheduling is intentionally deferred to a future platform adapter;
   the product does not claim an unavailable background service.
 
+### Phase 3F delivery record — 2026-08-10
+
+- Notes processing, reusable tag identity, built-in template instantiation,
+  attachment metadata, and native/text/Markdown portability now live in small Notes
+  modules rather than in the Planner shell. A tag rename/merge/delete never rewrites
+  document blocks; processing and snooze membership remain source-owned metadata.
+- Canonical planner state is now schema v8. The confirmed v7-to-v8 cutover derives
+  tag records and explicit processing state while preserving note, block, link,
+  revision, Calendar, and Task identities. A failed confirmation keeps the previous
+  stored state intact.
+- Attachments are deliberately metadata-only: binary storage, upload, MIME policy,
+  previewing, and file-picker UX remain platform adapters. Export makes excluded
+  bytes explicit; import marks their metadata missing instead of retaining a stale
+  source storage reference.
+
 ### Phase 3C delivery record — 2026-08-10
 
 - `domains/search` now owns an offline, on-demand projection over canonical
@@ -2694,10 +2709,12 @@ and what deliberately is not, is recorded in the Notes Phase 1 plan.
 
 Built: the block document model with stable block identity and deterministic
 serialization; daily, event, task and standalone note kinds; links with derived
-backlinks; system views for daily, inbox, pinned and archived; search over title,
-body and tags; revision counting that ignores no-op saves; checklist blocks with
-task extraction guarded against duplication; and the v6 to v7 migration that turns
-each legacy text note into a daily note of paragraph blocks.
+backlinks; system views for daily, inbox, pinned and archived; explicit processing
+and date-bound snooze membership; catalog-backed tags; built-in template
+instantiation with provenance; attachment metadata references; plain-text,
+Markdown, and native portable transforms; revision counting that ignores no-op
+saves; checklist blocks with task extraction guarded against duplication; and the
+v6-to-v7 then v7-to-v8 migrations.
 
 Reachable from the interface: every block type through line shorthand, both to write
 (`#`, `-`, `1.`, `[ ]`, `>`, `---`, fenced code) and to read back, since the editor
@@ -2706,10 +2723,11 @@ punctuation stays in storage; and revision history, browsable from the note edit
 with a single action to return to an earlier version. Revisions are recorded on save,
 dropped with the note, and restored by undoing the deletion.
 
-Not yet built: conflict resolution (§10.3), attachments (§11), notebooks and folders
-as user-facing features (§8.4, §8.5), note templates and daily prompts (§4.3),
-resurfacing (§9.4), inbox processing states (§6.1), and the collaboration fields
-(§3.4). These remain specified above and unimplemented.
+Not yet built: conflict resolution (§10.3), binary attachment storage and its
+picker/preview surface (§11), notebooks and folders as user-facing features (§8.4,
+§8.5), user-authored templates and daily prompts (§4.3), resurfacing (§9.4), the
+focused UI adoption of the new processing/tag/template/portability APIs, and the
+collaboration fields (§3.4). These remain specified above and unimplemented.
 
 # Decision log
 
@@ -2780,6 +2798,8 @@ resurfacing (§9.4), inbox processing states (§6.1), and the collaboration fiel
 | 2026-08-10 | Persist device preferences and motivation history separately from canonical planner content, preserving schema-v7 compatibility. |
 | 2026-08-10 | Treat legacy XP as a one-time opening balance; only new auditable task completions and reversals change the motivation ledger. |
 | 2026-08-10 | Make availability and conflicts provider-free Calendar projections; a free slot is a suggestion, never an automatic scheduling command. |
+| 2026-08-10 | Keep Notes bytes outside the planner state; portable attachment metadata becomes missing on import until a storage adapter supplies the bytes. |
+| 2026-08-10 | Treat note tags as catalog identity and inbox membership as processing metadata, so rename, filing, and future notebook UI never rewrite document content. |
 | 2026-08-10 | Read what a deletion removes before the state updater runs, since the payload is built before it does. |
 | 2026-08-10 | Offer undo only where there is something to undo; a confirmation carries no button. |
 | 2026-08-10 | Clamp a new entry's start to a minute the day actually has, so "now" near midnight cannot leave the day. |

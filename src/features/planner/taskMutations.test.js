@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { normalizeNote } from "../../domains/notes/model/note.js";
-import { validatePlannerStateV7 } from "../../domains/notes/migrations/validatePlannerStateV7.js";
+import { validatePlannerStateV8 } from "../../domains/notes/migrations/validatePlannerStateV8.js";
 import { normalizeTaskInput } from "../../domains/tasks/model/task.js";
 import { getDayTasks } from "../../domains/tasks/queries/dayView.js";
 import { createBlankPlannerState } from "../../platform/persistence/plannerStateImport.js";
@@ -79,17 +79,17 @@ test("series deletion and undo preserve dependencies, exceptions, and note extra
       completedAt: "2026-08-08T09:00",
     }],
   };
-  validatePlannerStateV7(original);
+  validatePlannerStateV8(original);
 
   const deleted = deleteTaskFromPlannerState(original, "habit", { exceptionId: "unused" });
-  validatePlannerStateV7(deleted.state);
+  validatePlannerStateV8(deleted.state);
   assert.deepEqual(deleted.state.tasks.map((entry) => entry.id), ["dependent"]);
   assert.deepEqual(deleted.state.tasks[0].dependsOn, []);
   assert.deepEqual(deleted.state.taskExceptions, []);
   assert.equal(deleted.state.notes[0].blocks[0].extractedTaskId, null);
 
   const restored = restoreDeletedTaskInPlannerState(deleted.state, deleted.removed);
-  validatePlannerStateV7(restored);
+  validatePlannerStateV8(restored);
   assert.deepEqual(new Set(restored.tasks.map((entry) => entry.id)), new Set(["habit", "child", "dependent"]));
   assert.deepEqual(restored.tasks.find((entry) => entry.id === "dependent").dependsOn, ["habit"]);
   assert.equal(restored.taskExceptions[0].id, "exception");
@@ -193,5 +193,5 @@ test("bulk delete cascades series records and reports missing selections", () =>
   assert.deepEqual(result.failures, [{ id: "missing", reason: "gone" }]);
   assert.deepEqual(result.state.tasks, []);
   assert.deepEqual(result.state.taskExceptions, []);
-  validatePlannerStateV7(result.state);
+  validatePlannerStateV8(result.state);
 });

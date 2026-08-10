@@ -4,6 +4,7 @@ import test from "node:test";
 import { searchPlanner } from "./searchPlanner.js";
 
 const state = {
+  noteTags: [{ id: "decision", name: "Decisions", color: "violet" }],
   events: [
     {
       id: "event-place", title: "Workshop", calendarId: "calendar-work",
@@ -36,7 +37,7 @@ const state = {
     {
       id: "note-body", kind: "standalone", title: "Loose note", date: "2026-08-10",
       blocks: [{ id: "body", type: "paragraph", text: "Café planning thoughts" }],
-      tags: ["client"], links: [], pinned: false, archived: false,
+      tags: ["client"], tagIds: ["decision"], links: [], pinned: false, archived: false,
     },
     {
       id: "archived-note", kind: "standalone", title: "Archive", date: null,
@@ -90,4 +91,10 @@ test("omits archived tasks and notes by default", () => {
   const found = searchPlanner(state, { query: "archive", todayDate: "2026-08-10" }).results;
 
   assert.deepEqual(found, []);
+});
+
+test("search resolves a stable note tag ID through its current catalog name", () => {
+  const found = searchPlanner(state, { query: "type:note tag:decisions", todayDate: "2026-08-10" }).results;
+
+  assert.deepEqual(found.map((item) => item.id), ["note-body"]);
 });

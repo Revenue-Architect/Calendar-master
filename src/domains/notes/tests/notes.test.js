@@ -2,9 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   appendBlock, archiveNote, createNote, deleteNote, getBacklinks, getDailyNote,
-  getInboxNotes, getNotebookNotes, getNotesForEntity, getPinnedNotes, isEmptyNote, linkNote,
+  createNoteTag, deleteNoteTag, getInboxNotes, getNotebookNotes, getNotesForEntity, getPinnedNotes,
+  isEmptyNote, linkNote, mergeNoteTags, renameNoteTag,
   markBlockExtracted, migrateV6ToV7, moveBlock, normalizeNote, noteExcerpt,
-  pinNote, removeBlock, searchNotes, serializeBlocks, toggleChecklistBlock,
+  pinNote, removeBlock, searchNotes, serializeBlocks, setNoteProcessing, setNoteTagIds, toggleChecklistBlock,
   updateBlock, updateNote,
 } from "../index.js";
 
@@ -172,6 +173,41 @@ test("system views separate inbox, pinned, daily and archived", () => {
   notes = archiveNote(notes, "n2", true, { now: NOW }).notes;
   assert.equal(getInboxNotes(notes).some((n) => n.id === "n2"), false, "archived leaves the inbox");
   assert.ok(notes.find((n) => n.id === "n2"), "but the note still exists");
+});
+
+test("inbox processing is explicit and a snoozed note returns only when due", () => {
+  let notes = createNote([], { id: "capture", kind: "standalone", title: "Unsorted" }, { now: NOW }).notes;
+  assert.equal(notes[0].processing.state, "inbox");
+
+  notes = setNoteProcessing(notes, "capture", { state: "snoozed", snoozedUntil: "2026-08-11" }, { now: NOW }).notes;
+  assert.deepEqual(getInboxNotes(notes, { todayDate: DAY }), []);
+  assert.deepEqual(getInboxNotes(notes, { todayDate: "2026-08-11" }).map((note) => note.id), ["capture"]);
+  assert.equal(notes[0].processing.state, "snoozed", "a query never changes processing state");
+
+  notes = setNoteProcessing(notes, "capture", { state: "in-progress" }, { now: NOW }).notes;
+  assert.deepEqual(getInboxNotes(notes, { todayDate: "2026-08-11" }), []);
+});
+
+test("note tag rename, merge, and deletion preserve note and document identity", () => {
+  let notes = createNote([], daily(), { now: NOW }).notes;
+  let tags = [];
+  ({ noteTags: tags } = createNoteTag(tags, { id: "strategy", name: "Strategy", color: "violet" }));
+  ({ noteTags: tags } = createNoteTag(tags, { id: "work", name: "Work" }));
+  notes = setNoteTagIds(notes, "n1", ["strategy", "work"], { noteTags: tags, now: NOW }).notes;
+
+  ({ noteTags: tags } = renameNoteTag(tags, "strategy", { name: "Decisions" }));
+  assert.equal(tags.find((tag) => tag.id === "strategy").name, "Decisions");
+  assert.deepEqual(notes[0].tagIds, ["strategy", "work"], "rename retains canonical IDs");
+
+  ({ notes, noteTags: tags } = mergeNoteTags(notes, tags, "work", "strategy", { now: NOW }));
+  assert.deepEqual(notes[0].tagIds, ["strategy"]);
+  assert.equal(tags.some((tag) => tag.id === "work"), false);
+  assert.deepEqual(notes[0].blocks.map((block) => block.id), ["b1", "b2"]);
+
+  ({ notes, noteTags: tags } = deleteNoteTag(notes, tags, "strategy", { now: NOW }));
+  assert.deepEqual(notes[0].tagIds, []);
+  assert.equal(tags.length, 0);
+  assert.equal(notes[0].id, "n1");
 });
 
 test("search covers title, body and tags and skips archived by default", () => {

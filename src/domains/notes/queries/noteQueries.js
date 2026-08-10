@@ -41,8 +41,14 @@ export function getBacklinks(notes, noteId) {
 }
 
 /* §6.1. Inbox is a captured note with nowhere to be yet: no day, nothing linked. */
-export function getInboxNotes(notes) {
-  return notes.filter((note) => active(note) && note.kind === "standalone" && !note.date && note.links.length === 0).sort(byUpdated);
+export function getInboxNotes(notes, { todayDate = null } = {}) {
+  if (todayDate != null) assertDateKey(todayDate);
+  return notes.filter((note) => {
+    if (!active(note)) return false;
+    const processing = note.processing ?? { state: note.kind === "standalone" && !note.date && note.links.length === 0 ? "inbox" : "processed", snoozedUntil: null };
+    return processing.state === "inbox"
+      || (processing.state === "snoozed" && todayDate != null && processing.snoozedUntil <= todayDate);
+  }).sort(byUpdated);
 }
 
 export function getPinnedNotes(notes) {
@@ -75,7 +81,7 @@ export function searchNotes(notes, term, { includeArchived = false } = {}) {
 }
 
 export function allNoteTags(notes) {
-  return [...new Set(notes.flatMap((note) => note.tags ?? []))].sort();
+  return [...new Set(notes.flatMap((note) => note.tagIds?.length ? note.tagIds : (note.tags ?? [])))].sort();
 }
 
 export function noteExcerpt(note, length = 90) {

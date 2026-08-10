@@ -5,7 +5,7 @@ import {
   blocksToShorthand,
   blocksToText,
   createNote as createNoteCommand,
-  deleteNote as deleteNoteCommand,
+  deleteNoteWithAttachments,
   dropRevisionsFor,
   getDailyNote,
   getNotebookNotes,
@@ -13,12 +13,14 @@ import {
   isEmptyNote,
   markBlockExtracted,
   migrateV6ToV7,
+  migrateV7ToV8,
   noteExcerpt,
   parseInline,
   plainText,
   recordRevision,
   removeBlock as removeNoteBlock,
   restoredNote,
+  restoreDeletedNoteWithAttachments,
   revisionIsIntact,
   revisionsFor,
   archiveNote as archiveNoteCommand,
@@ -525,7 +527,7 @@ export default function Planner() {
       let isFirstRun = false;
       try {
         const loaded = await loadPlannerState(storage);
-        state = loaded.state || migrateV6ToV7(migrateV5ToV6(migrateV4ToV5(seed())));
+        state = loaded.state || migrateV7ToV8(migrateV6ToV7(migrateV5ToV6(migrateV4ToV5(seed()))));
         if (!loaded.state) await savePlannerState(storage, state);
         isFirstRun = !loaded.state;
         reportStorage("planner", false);
@@ -535,7 +537,7 @@ export default function Planner() {
            without it `ready` flips while `db` stays null and the loader never
            clears — but leave autosave off. Overwriting here would seed straight over
            data that is damaged rather than gone, and export stays the way out. */
-        state = migrateV6ToV7(migrateV5ToV6(migrateV4ToV5(seed())));
+        state = migrateV7ToV8(migrateV6ToV7(migrateV5ToV6(migrateV4ToV5(seed()))));
         setSaveBlocked(true);
         reportStorage("planner", true);
       }
@@ -1348,11 +1350,23 @@ export default function Planner() {
     /* A revision cannot outlive the note it snapshots — but undo has to be able to
        put both back, so the history rides along in the undo payload. */
     const removedRevisions = kind === "note" ? revisionsFor(db.noteRevisions, base) : [];
-    mutate((d) => (kind === "note" && removed
-      ? { ...d, notes: deleteNoteCommand(d.notes, base).notes, noteRevisions: dropRevisionsFor(d.noteRevisions, [base]) }
-      : d));
+    const removedAttachments = kind === "note"
+      ? (db.noteAttachments ?? []).filter((attachment) => attachment.noteId === base)
+      : [];
+    mutate((d) => {
+      if (kind !== "note" || !removed) return d;
+      const deletion = deleteNoteWithAttachments(d.notes, d.noteAttachments ?? [], base);
+      return {
+        ...d,
+        notes: deletion.notes,
+        noteAttachments: deletion.noteAttachments,
+        noteRevisions: dropRevisionsFor(d.noteRevisions, [base]),
+      };
+    });
     setInspect(null); setNoteEdit(null); setNoteHistory(null); setScopeAsk(null);
-    flash("Deleted", { type: "restore", kind, item: removed, revisions: removedRevisions });
+    flash("Deleted", {
+      type: "restore", kind, item: removed, revisions: removedRevisions, attachments: removedAttachments,
+    });
   };
 
   const removeItem = (kind, id) => {
@@ -1376,7 +1390,13 @@ export default function Planner() {
     mutate((d) => {
       if (p.type === "restore" && p.item) {
         if (p.kind === "note") {
-          d.notes = [...d.notes, p.item];
+          const restored = restoreDeletedNoteWithAttachments(
+            d.notes,
+            d.noteAttachments ?? [],
+            { note: p.item, attachments: p.attachments ?? [] },
+          );
+          d.notes = restored.notes;
+          d.noteAttachments = restored.noteAttachments;
           /* revisionsFor hands back newest-first; the store keeps them oldest-first
              so the head it compares against is the latest one. */
           if (p.revisions?.length) {
@@ -2847,7 +2867,7 @@ export default function Planner() {
               style={{ fontFamily: MONO, background: T.accent, color: T.on, borderRadius: CARD_R }} className="nb-tap py-3 text-xs font-bold tracking-widest">EXPLORE THE SAMPLE</button>
             <button onClick={() => {
               beep("click");
-              mutate((d) => ({ ...d, events: [], tasks: [], notes: [], eventExceptions: [], taskExceptions: [], occurrenceAliases: [], overrides: {}, xp: 0 }));
+              mutate((d) => ({ ...d, events: [], tasks: [], notes: [], noteTags: [], noteAttachments: [], eventExceptions: [], taskExceptions: [], occurrenceAliases: [], overrides: {}, xp: 0 }));
               setMotivationLedger(createMotivationLedger());
               setFirstRun(false);
             }} style={{ fontFamily: MONO, background: surface, borderRadius: CARD_R }} className="nb-tap py-3 text-xs tracking-widest">START EMPTY</button>

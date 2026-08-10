@@ -26,6 +26,9 @@ are too detailed for the repository README.
 - [`superpowers/specs/2026-08-10-calendar-projections-design.md`](superpowers/specs/2026-08-10-calendar-projections-design.md)
   defines the Phase 3E provider-free visibility, availability, conflict, and
   briefing projections.
+- [`superpowers/specs/2026-08-10-notes-completion-design.md`](superpowers/specs/2026-08-10-notes-completion-design.md)
+  defines the Phase 3F processing, tags, templates, attachment metadata,
+  portability, and schema-v8 Notes foundation.
 
 ## Quality reports
 
@@ -52,6 +55,9 @@ are too detailed for the repository README.
 - [`qa/2026-08-10-calendar-projections-phase-3e.md`](qa/2026-08-10-calendar-projections-phase-3e.md)
   records Calendar projection correctness, cross-midnight pressure checks, and
   production verification.
+- [`qa/2026-08-10-notes-completion-phase-3f.md`](qa/2026-08-10-notes-completion-phase-3f.md)
+  records Notes schema-v8, portability, attachment-lifecycle, and pressure-test
+  evidence.
 
 ## Implementation plans
 
@@ -97,6 +103,8 @@ are too detailed for the repository README.
 - [`superpowers/plans/2026-08-10-calendar-projections-phase-3e.md`](superpowers/plans/2026-08-10-calendar-projections-phase-3e.md)
   implements Calendar-owned visibility, availability, conflict, free-slot, and
   briefing queries.
+- [`superpowers/plans/2026-08-10-notes-completion-phase-3f.md`](superpowers/plans/2026-08-10-notes-completion-phase-3f.md)
+  completes the provider-free Notes foundation with schema-v8 persistence.
 
 ## Architecture decisions
 

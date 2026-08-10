@@ -10,9 +10,35 @@ export const DEFAULT_NOTEBOOK_ID = "notebook-default";
 export const NOTE_KINDS = Object.freeze(["daily", "event", "task", "standalone"]);
 
 export const DOCUMENT_VERSION = 1;
+export const NOTE_PROCESSING_STATES = Object.freeze(["inbox", "in-progress", "processed", "snoozed"]);
 
 function issue(issues, field, message) {
   issues.push({ field, message });
+}
+
+function defaultProcessing({ kind, date, links }) {
+  return kind === "standalone" && !date && links.length === 0
+    ? { state: "inbox", snoozedUntil: null }
+    : { state: "processed", snoozedUntil: null };
+}
+
+export function normalizeNoteProcessing(input, context) {
+  if (input == null) return defaultProcessing(context);
+  if (!input || typeof input !== "object") {
+    throw new NoteValidationError([{ field: "processing", message: "must be an object" }]);
+  }
+  const state = input.state;
+  if (!NOTE_PROCESSING_STATES.includes(state)) {
+    throw new NoteValidationError([{ field: "processing.state", message: `must be one of ${NOTE_PROCESSING_STATES.join(", ")}` }]);
+  }
+  const snoozedUntil = input.snoozedUntil ?? null;
+  if (state === "snoozed" && !isDateKey(snoozedUntil)) {
+    throw new NoteValidationError([{ field: "processing.snoozedUntil", message: "is required for a snoozed note" }]);
+  }
+  if (state !== "snoozed" && snoozedUntil != null) {
+    throw new NoteValidationError([{ field: "processing.snoozedUntil", message: "is only allowed for a snoozed note" }]);
+  }
+  return { state, snoozedUntil };
 }
 
 export function normalizeNote(input) {
@@ -53,6 +79,33 @@ export function normalizeNote(input) {
     issues.push(...(error.issues ?? [{ field: "blocks", message: error.message }]));
   }
 
+  let processing;
+  try {
+    processing = normalizeNoteProcessing(input.processing, { kind, date, links });
+  } catch (error) {
+    issues.push(...(error.issues ?? [{ field: "processing", message: error.message }]));
+  }
+
+  const tagIds = input.tagIds == null ? [] : input.tagIds;
+  if (!Array.isArray(tagIds) || tagIds.some((tagId) => typeof tagId !== "string" || !tagId)) {
+    issue(issues, "tagIds", "must be an array of tag IDs");
+  }
+  const attachmentIds = input.attachmentIds == null ? [] : input.attachmentIds;
+  if (!Array.isArray(attachmentIds) || attachmentIds.some((attachmentId) => typeof attachmentId !== "string" || !attachmentId)) {
+    issue(issues, "attachmentIds", "must be an array of attachment IDs");
+  }
+
+  const provenance = input.templateProvenance ?? null;
+  if (provenance != null && (!provenance || typeof provenance !== "object" || typeof provenance.id !== "string" || !provenance.id || !Number.isInteger(provenance.version) || provenance.version < 1)) {
+    issue(issues, "templateProvenance", "must contain a template ID and positive version");
+  }
+
+  const legacyTags = input.tags == null ? [] : input.tags;
+  if (!Array.isArray(legacyTags)) issue(issues, "tags", "must be an array");
+  const normalizedLegacyTags = Array.isArray(legacyTags)
+    ? [...new Set(legacyTags.map((tag) => String(tag).trim()).filter(Boolean))]
+    : [];
+
   if (issues.length) throw new NoteValidationError(issues);
 
   return {
@@ -70,7 +123,11 @@ export function normalizeNote(input) {
       targetId: link.targetId,
       ...(link.occurrenceDate ? { occurrenceDate: link.occurrenceDate } : {}),
     })),
-    tags: [...new Set((input.tags ?? []).map((tag) => String(tag).trim()).filter(Boolean))],
+    ...(normalizedLegacyTags.length ? { tags: normalizedLegacyTags } : {}),
+    tagIds: [...new Set(tagIds)],
+    attachmentIds: [...new Set(attachmentIds)],
+    processing,
+    templateProvenance: provenance ? { id: provenance.id, version: provenance.version } : null,
     pinned: input.pinned === true,
     archived: input.archived === true,
     /* §10.2. A monotonic counter plus the last serialization, so a revision bump can
@@ -87,7 +144,11 @@ export function noteChanged(previous, next) {
     || previous.pinned !== next.pinned
     || previous.archived !== next.archived
     || JSON.stringify(previous.links) !== JSON.stringify(next.links)
-    || JSON.stringify(previous.tags) !== JSON.stringify(next.tags);
+    || JSON.stringify(previous.tags) !== JSON.stringify(next.tags)
+    || JSON.stringify(previous.tagIds) !== JSON.stringify(next.tagIds)
+    || JSON.stringify(previous.attachmentIds) !== JSON.stringify(next.attachmentIds)
+    || JSON.stringify(previous.processing) !== JSON.stringify(next.processing)
+    || JSON.stringify(previous.templateProvenance) !== JSON.stringify(next.templateProvenance);
 }
 
 export function isEmptyNote(note) {
