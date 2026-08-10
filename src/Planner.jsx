@@ -162,6 +162,26 @@ const THEMES = [
   { id: "cream-blue", name: "Cream / Actions Blue", bg: "#F1F2F4", card: "#FFFFFF", line: "#E1E3E7", text: "#14141A", dim: "#71757C", faint: "#D8DBE0", accent: "#0E7F99", on: "#FFFFFF" },
 ];
 
+/* §4.6/§4.7. The frequencies an entry can be set to from its own detail view. The
+   fuller rule — selected weekdays, an end date, a count — still belongs to the
+   composer, which has the room to explain it. */
+const REPEATS = [["never", "NEVER"], ["daily", "DAILY"], ["weekly", "WEEKLY"], ["monthly", "MONTHLY"], ["yearly", "YEARLY"]];
+
+/* Changing the frequency keeps whatever else the rule already said, so switching
+   weekly → monthly and back does not quietly drop an end date. */
+function repeatFor(freq, current, dateKey) {
+  if (!freq || freq === "never") return null;
+  return {
+    ...(current ?? {}),
+    freq,
+    interval: current?.interval || 1,
+    byDay: freq === "weekly" ? (current?.byDay ?? [parseKey(dateKey).getDay()]) : undefined,
+    until: current?.until || "",
+    endMode: current?.endMode || "never",
+    missingDatePolicy: current?.missingDatePolicy || "skip",
+  };
+}
+
 const CATS = ["DEEP WORK", "ADMIN", "BODY", "PEOPLE", "RITUAL"];
 
 /* Category colour is the one hue an event card carries, so it has to read on both a
@@ -297,6 +317,46 @@ function eventForUi(event) {
 
 function canonicalOccurrenceIdentity(id) {
   try { return parseOccurrenceId(id); } catch { return null; }
+}
+
+/* §4.6. A draft is expressed in the composer's field names; the detail view reads
+   the record's own shape. This projects one onto the other so an unsaved edit is
+   visible exactly where it will land, without touching what is stored. */
+function applyDraftToItem(kind, item, draft, fallbackDate) {
+  if (!draft || !Object.keys(draft).length) return item;
+  if (kind === "task") {
+    const plannedDate = draft.unplanned ? null : (draft.date ?? item.planned.date ?? fallbackDate);
+    return {
+      ...item,
+      title: draft.title ?? item.title,
+      category: draft.cat ?? item.category,
+      reward: draft.xp ?? item.reward,
+      note: draft.note ?? item.note,
+      planned: {
+        ...item.planned,
+        date: plannedDate,
+        startMinute: draft.unplanned ? null : (Object.hasOwn(draft, "at") ? draft.at : item.planned.startMinute),
+      },
+      deadline: { ...item.deadline, date: Object.hasOwn(draft, "due") ? (draft.due || null) : item.deadline.date },
+      recurrence: Object.hasOwn(draft, "repeat")
+        ? (draft.repeat ? { ...draft.repeat, frequency: draft.repeat.freq ?? draft.repeat.frequency } : null)
+        : item.recurrence,
+    };
+  }
+  return {
+    ...item,
+    title: draft.title ?? item.title,
+    cat: draft.cat ?? item.cat,
+    place: draft.place ?? item.place,
+    note: draft.note ?? item.note,
+    start: draft.start ?? item.start,
+    dur: draft.dur ?? item.dur,
+    date: draft.date ?? item.date,
+    allDay: Object.hasOwn(draft, "allDay") ? draft.allDay : item.allDay,
+    endDate: draft.endDate ?? item.endDate,
+    alerts: draft.alerts ?? item.alerts,
+    repeat: Object.hasOwn(draft, "repeat") ? draft.repeat : item.repeat,
+  };
 }
 
 function eventTimingFromPosition(event, date, start = event.start, duration = event.dur) {
@@ -469,6 +529,11 @@ export default function Planner() {
   const [composer, setComposer] = useState(null);
   const [noteEdit, setNoteEdit] = useState(null);
   const [noteHistory, setNoteHistory] = useState(null);
+  /* Pending edits to whatever the detail view has open, held until they are saved. */
+  const [draft, setDraft] = useState(null);
+  /* A draft belongs to one record. Opening another must not inherit it — that is how
+     an edit lands on the wrong entry. */
+  useEffect(() => { setDraft(null); }, [inspect?.id, inspect?.kind]);
   const [notebook, setNotebook] = useState(null);
   const [settings, setSettings] = useState(false);
   const [search, setSearch] = useState(false);
@@ -2067,9 +2132,25 @@ export default function Planner() {
   /* §4.6/§4.8. Changing one attribute is the same write as changing all of them,
      with the rest of the record supplied unchanged. Nothing here decides scope —
      that stays with saveEntry, so one question has one answer. */
+  /* §4.6. Edits are held as a draft rather than written field by field. Two reasons,
+     and the second is the important one: a change you can see pending is a change
+     you can see landed, and a recurring entry asks its scope question once for the
+     whole batch instead of once per field — editing a title, a time and a category
+     used to mean answering it three times. */
   const editEntry = (patch) => {
     if (!inspect || !inspectItem) return;
-    const next = { ...entryPayload(inspect.kind, inspectItem), ...patch, inline: true };
+    setDraft((current) => ({ ...(current ?? {}), ...patch }));
+  };
+
+  /* The record as it currently reads, draft included, so the view shows what will
+     be saved rather than what is stored. */
+  const inspectDraft = draft && inspectItem
+    ? applyDraftToItem(inspect.kind, inspectItem, draft, dateKey)
+    : inspectItem;
+
+  const commitDraft = (pending = draft) => {
+    if (!inspect || !inspectItem || !pending || !Object.keys(pending).length) return false;
+    const next = { ...entryPayload(inspect.kind, inspectItem), ...pending, inline: true };
     if (inspect.kind === "event") {
       /* The record carries the timing it was read with. An inline change to the
          time, the day, or all-day has to rebuild it — passing the old timing
@@ -2094,10 +2175,13 @@ export default function Planner() {
         beep("abort");
         flash("That clock time is ambiguous here — pick an offset", null);
         setComposer({ ...next, inline: undefined, openRepeat: true });
-        return;
+        setDraft(null);
+        return true;
       }
     }
     saveEntry(next);
+    setDraft(null);
+    return true;
   };
   const draggingTask = gesture && gesture.mode === "task" ? dayTasks.find((t) => t.id === gesture.id) : null;
   const dropMin = gesture && gesture.mode === "task" && !gesture.overDay && !gesture.overTask && streamRef.current
@@ -2185,6 +2269,25 @@ export default function Planner() {
         @keyframes turnprev{0%{opacity:.15;transform:perspective(1400px) rotateY(19deg) translateX(-11%) scale(.97)}60%{opacity:1}100%{opacity:1;transform:none}}
         .nb-up{animation:nbup 200ms cubic-bezier(.2,.9,.3,1.1)}
         @keyframes nbup{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+        /* A surface arrives by growing into place rather than sliding on: it starts
+           slightly short and narrow, overshoots a touch, and settles — the same
+           easing family as the travelling pill, so opening a sheet and moving a
+           selection feel like one material. */
+        .nb-fluid{animation:nbfluid 420ms cubic-bezier(.22,1.12,.28,1);transform-origin:bottom center}
+        @keyframes nbfluid{
+          0%{opacity:0;transform:translateY(26px) scale(.965)}
+          55%{opacity:1}
+          100%{opacity:1;transform:translateY(0) scale(1)}
+        }
+        @media(min-width:640px){.nb-fluid{transform-origin:center}}
+        .nb-scrim{animation:nbscrim 300ms ease forwards}
+        @keyframes nbscrim{from{opacity:0;backdrop-filter:blur(0)}to{opacity:1;backdrop-filter:blur(3px)}}
+        /* A primary action gets a little more weight under the finger than a
+           secondary one — the difference is felt before it is read. */
+        .nb-liquid{transition:scale 260ms cubic-bezier(.2,1.6,.35,1),box-shadow 260ms ease}
+        .nb-liquid:active{scale:.94;transition:scale 90ms cubic-bezier(.4,0,.6,1)}
+        .nb-rise{animation:nbrise 260ms cubic-bezier(.22,1.12,.28,1)}
+        @keyframes nbrise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
         .nb-p{animation:nbp 620ms cubic-bezier(.1,.7,.3,1) forwards}
         @keyframes nbp{from{opacity:1;transform:translate(0,0) scale(1)}to{opacity:0;transform:translate(var(--tx),var(--ty)) scale(.2)}}
         .nb-rw{animation:nbrw 900ms cubic-bezier(.2,.8,.3,1) forwards}
@@ -2243,7 +2346,7 @@ export default function Planner() {
           <button onClick={() => { beep("click"); setNotebook("all"); }} style={{ fontFamily: MONO, color: T.dim }} className="nb-tap px-2 py-1 text-xs tracking-widest">NOTES</button>
           <button onClick={() => { beep("click"); setSearchQuery(""); setSearch(true); }} style={{ color: T.dim }} className="nb-tap w-8 h-8 text-sm" aria-label="Search">⌕</button>
           <button onClick={() => { beep("click"); setSettings(true); }} style={{ color: T.dim }} className="nb-tap w-8 h-8 text-sm" aria-label="Settings">⋯</button>
-          <button onClick={() => { beep("click"); setComposer({ kind: "event", start: startSlot(nowMin), dur: 60 }); }} style={{ background: T.accent, color: T.on, fontFamily: MONO }} className="nb-tap px-2 py-1.5 text-xs font-bold tracking-widest">NEW</button>
+          <button onClick={() => { beep("click"); setComposer({ kind: "event", start: startSlot(nowMin), dur: 60 }); }} style={{ background: T.accent, color: T.on, fontFamily: MONO }} className="nb-tap nb-liquid px-2 py-1.5 text-xs font-bold tracking-widest">NEW</button>
         </div>
       </header>
 
@@ -2256,15 +2359,10 @@ export default function Planner() {
           <div className="flex items-center gap-2">
             {/* Timeline answers "when, and for how long"; agenda answers "what is
                 coming". Same days, same data, two questions. */}
-            <div className="flex" style={{ borderRadius: 999, border: `1px solid ${T.line}` }}>
-              {[["timeline", "TIMELINE"], ["agenda", "AGENDA"]].map(([mode, label]) => (
-                <button key={mode} onClick={() => { beep("tick"); setViewMode(mode); }}
-                  className="px-2 py-1 text-xs tracking-widest"
-                  style={{ fontFamily: MONO, borderRadius: 999, background: viewMode === mode ? T.accent : "transparent", color: viewMode === mode ? T.on : T.dim }}>
-                  {label}
-                </button>
-              ))}
-            </div>
+            <PillNav T={T} ariaLabel="View mode" value={viewMode}
+              options={[["timeline", "TIMELINE"], ["agenda", "AGENDA"]]}
+              onPick={(mode) => { beep("tick"); setViewMode(mode); }}
+              style={{ border: `1px solid ${T.line}` }} />
             {zoom === "month" && (
               <>
                 <button onClick={() => { beep("page"); setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() - 1, 1)); }} style={{ color: T.dim }} className="nb-tap px-2 text-xs">◂</button>
@@ -2564,7 +2662,7 @@ export default function Planner() {
             <span style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest">{openCount} OPEN</span>
             {isToday && overdue.length > 0 && <span style={{ fontFamily: MONO, color: NOW_RED }} className="text-xs tracking-widest">{overdue.length} LATE</span>}
           </button>
-          <button onClick={() => { beep("click"); setComposer({ kind: "task" }); }} style={{ background: T.accent, color: T.on, fontFamily: MONO }} className="nb-tap px-3 py-1.5 text-xs font-bold tracking-widest">+ ACTION</button>
+          <button onClick={() => { beep("click"); setComposer({ kind: "task" }); }} style={{ background: T.accent, color: T.on, fontFamily: MONO }} className="nb-tap nb-liquid px-3 py-1.5 text-xs font-bold tracking-widest">+ ACTION</button>
         </div>
         <div className="nb-s flex-1 overflow-y-auto px-3 pb-6">{actionsPanel}</div>
       </div>
@@ -2626,24 +2724,27 @@ export default function Planner() {
 
       {/* ══ INSPECTOR ══ */}
       {inspectItem && (
-        <Sheet T={T} title={inspect.kind === "event" ? "EVENT" : "ACTION"} onClose={() => { beep("click"); setInspect(null); }}>
+        <Sheet T={T} title={inspect.kind === "event" ? "EVENT" : "ACTION"}
+          /* §6.7. Closing never discards: whatever is pending is written on the way
+             out, so the only way to lose an edit is to ask for it. */
+          onClose={() => { beep("click"); commitDraft(); setInspect(null); }}>
           {inspect.kind === "task" ? (
             /* A task reads as a working document: what it is, the steps, then the
                facts that govern it. Nothing is centred, because the checklist is a
                list you act on rather than a title card you read. */
             <div>
-              <InlineText T={T} value={inspectItem.title} ariaLabel="Action title"
+              <InlineText T={T} value={inspectDraft.title} ariaLabel="Action title"
                 onCommit={(title) => editEntry({ title })}
                 className="text-2xl font-bold tracking-tight leading-tight" />
               <div className="flex items-center gap-2 mt-1.5">
-                <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: catColor(inspectItem.category) }} />
+                <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: catColor(inspectDraft.category) }} />
                 <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">
-                  {(db.taskLists.find((l) => l.id === inspectItem.listId) || {}).name || "—"} · {inspectItem.category}
+                  {(db.taskLists.find((l) => l.id === inspectDraft.listId) || {}).name || "—"} · {inspectDraft.category}
                 </span>
               </div>
 
               <div className="flex flex-col gap-1.5 mt-4">
-                {(inspectItem.checklist ?? []).map((item) => (
+                {(inspectDraft.checklist ?? []).map((item) => (
                   <div key={item.id} className="flex items-center gap-3 px-3 py-2.5" style={{ background: surface, borderRadius: 999 }}>
                     <button onClick={() => toggleSub(inspect.id, item.id)} className="shrink-0" aria-label={item.done ? "Reopen step" : "Complete step"}>
                       {/* Keyed on the state it shows, so ticking a step replays the
@@ -2662,22 +2763,22 @@ export default function Planner() {
                 <InlineAdd T={T} surface={surface} onAdd={(v) => addSub(inspect.id, v)} />
               </div>
 
-              {(inspectItem.checklist ?? []).length > 0 && (
+              {(inspectDraft.checklist ?? []).length > 0 && (
                 <div className="flex items-center gap-3 mt-3">
                   <span className="flex-1 h-1 rounded-full overflow-hidden" style={{ background: T.faint }}>
                     <span className="block h-full rounded-full" style={{
-                      width: `${((inspectItem.checklist.filter((x) => x.done).length) / inspectItem.checklist.length) * 100}%`,
+                      width: `${((inspectDraft.checklist.filter((x) => x.done).length) / inspectDraft.checklist.length) * 100}%`,
                       background: T.accent, transition: "width 220ms ease",
                     }} />
                   </span>
                   <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">
-                    {inspectItem.checklist.filter((x) => x.done).length} / {inspectItem.checklist.length}
+                    {inspectDraft.checklist.filter((x) => x.done).length} / {inspectDraft.checklist.length}
                   </span>
                 </div>
               )}
 
               <div className="flex items-start gap-3 px-3 py-3 mt-4" style={{ background: surface, borderRadius: CARD_R }}>
-                <InlineText T={T} value={inspectItem.note} placeholder="Add a note" ariaLabel="Note" multiline
+                <InlineText T={T} value={inspectDraft.note} placeholder="Add a note" ariaLabel="Note" multiline
                   onCommit={(note) => editEntry({ note })} className="text-sm leading-relaxed" />
                 <span style={{ color: T.dim }} className="text-sm shrink-0 pt-0.5">≡</span>
               </div>
@@ -2690,73 +2791,75 @@ export default function Planner() {
                 <DetailRow T={T} icon="▦" divider>
                   <div className="flex items-center gap-2">
                     <InlineStamp T={T} dark={dark} type="date" ariaLabel="Planned day"
-                      value={inspectItem.planned.date || ""}
-                      display={inspectItem.planned.date ? plannedLabel(inspectItem.planned.date, todayKey) : "Unplanned"}
+                      value={inspectDraft.planned.date || ""}
+                      display={inspectDraft.planned.date ? plannedLabel(inspectDraft.planned.date, todayKey) : "Unplanned"}
                       onCommit={(v) => editEntry({ date: v, unplanned: !v })} className="text-sm" />
-                    {inspectItem.planned.date && (
+                    {inspectDraft.planned.date && (
                       <button onClick={() => editEntry({ unplanned: true })} style={{ fontFamily: MONO, color: T.dim }}
                         className="nb-tap text-xs tracking-widest shrink-0">INBOX</button>
                     )}
                   </div>
                   <div className="flex items-center gap-2 mt-0.5">
                     <InlineStamp T={T} dark={dark} type="time" ariaLabel="Planned time"
-                      value={inspectItem.planned.startMinute != null ? hhmm(inspectItem.planned.startMinute) : ""}
-                      display={inspectItem.planned.startMinute != null ? tm(inspectItem.planned.startMinute) : "Any time"}
+                      value={inspectDraft.planned.startMinute != null ? hhmm(inspectDraft.planned.startMinute) : ""}
+                      display={inspectDraft.planned.startMinute != null ? tm(inspectDraft.planned.startMinute) : "Any time"}
                       onCommit={(v) => editEntry({ at: v ? fromHhmm(v) : null })}
                       style={{ color: T.dim }} className="text-xs" />
-                    <button onClick={() => { beep("click"); setComposer({ ...entryPayload("task", inspectItem), openRepeat: true }); }}
-                      style={{ color: T.dim }} className="nb-tap text-xs text-left flex-1 truncate">
-                      {inspectItem.recurrence
-                        ? repeatLabel({ ...inspectItem.recurrence, freq: inspectItem.recurrence.frequency, byDay: inspectItem.recurrence.byWeekday })
-                        : "Does not repeat"}
-                    </button>
+                    <select value={inspectDraft.recurrence?.frequency ?? "never"} aria-label="Repeats"
+                      onChange={(e) => editEntry({ repeat: repeatFor(e.target.value, inspectDraft.recurrence
+                        ? { ...inspectDraft.recurrence, freq: inspectDraft.recurrence.frequency }
+                        : null, inspectDraft.planned.date || dateKey) })}
+                      style={{ background: "transparent", border: "none", color: T.dim, colorScheme: dark ? "dark" : "light" }}
+                      className="text-xs flex-1 truncate">
+                      {REPEATS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                    </select>
                   </div>
                 </DetailRow>
                 <InlineChoiceRow T={T} icon="◔" divider
-                  label={(inspectItem.reminders ?? []).length
-                    ? (inspectItem.reminders[0].offsetMinutes === 0
-                      ? `When it starts${inspectItem.planned.startMinute != null ? `, ${tm(inspectItem.planned.startMinute)}` : ""}`
-                      : `${dur(inspectItem.reminders[0].offsetMinutes)} before`)
+                  label={(inspectDraft.reminders ?? []).length
+                    ? (inspectDraft.reminders[0].offsetMinutes === 0
+                      ? `When it starts${inspectDraft.planned.startMinute != null ? `, ${tm(inspectDraft.planned.startMinute)}` : ""}`
+                      : `${dur(inspectDraft.reminders[0].offsetMinutes)} before`)
                     : "No reminder"}
-                  value={(inspectItem.reminders ?? [])[0]?.offsetMinutes ?? "off"}
+                  value={(inspectDraft.reminders ?? [])[0]?.offsetMinutes ?? "off"}
                   options={[["off", "OFF"], [0, "AT TIME"], [15, "15M"], [60, "1H"]]}
                   onPick={(v) => setReminder(inspect.id, v === "off" ? null : v)} />
                 <DetailRow T={T} icon="⌛" divider>
                   <div className="flex items-center gap-2">
                     <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">DUE</span>
                     <InlineStamp T={T} dark={dark} type="date" ariaLabel="Deadline"
-                      value={inspectItem.deadline.date || ""} onCommit={(v) => editEntry({ due: v })}
-                      display={inspectItem.deadline.date ? fmtDay(inspectItem.deadline.date) : "No deadline"}
-                      style={{ color: inspectItem.deadline.date && inspectItem.deadline.date < todayKey ? NOW_RED : T.text }}
+                      value={inspectDraft.deadline.date || ""} onCommit={(v) => editEntry({ due: v })}
+                      display={inspectDraft.deadline.date ? fmtDay(inspectDraft.deadline.date) : "No deadline"}
+                      style={{ color: inspectDraft.deadline.date && inspectDraft.deadline.date < todayKey ? NOW_RED : T.text }}
                       className="text-sm" />
-                    {inspectItem.deadline.date && (
+                    {inspectDraft.deadline.date && (
                       <button onClick={() => editEntry({ due: "" })} style={{ color: T.dim }} className="nb-tap text-xs px-1" aria-label="Clear deadline">✕</button>
                     )}
                   </div>
                 </DetailRow>
                 {/* §8.2. The label names the attribute; it does not repeat the value
                     the selected chip already carries. */}
-                <InlineChoiceRow T={T} icon="◈" divider label={`Worth ${inspectItem.reward}`}
-                  value={inspectItem.reward} options={[20, 30, 40, 60].map((xp) => [xp, String(xp)])}
+                <InlineChoiceRow T={T} icon="◈" divider label={`Worth ${inspectDraft.reward}`}
+                  value={inspectDraft.reward} options={[20, 30, 40, 60].map((xp) => [xp, String(xp)])}
                   onPick={(xp) => editEntry({ xp })} />
-                {inspectItem.status === "waiting" && (
+                {inspectDraft.status === "waiting" && (
                   <DetailRow T={T} icon="◷" divider={inspectDependsOn.length > 0}>
-                    <span className="block text-sm">{inspectItem.followUpDate ? `Follow up ${fmtDay(inspectItem.followUpDate)}` : "Waiting, no follow-up date"}</span>
+                    <span className="block text-sm">{inspectDraft.followUpDate ? `Follow up ${fmtDay(inspectDraft.followUpDate)}` : "Waiting, no follow-up date"}</span>
                   </DetailRow>
                 )}
                 {/* Every edge is listed, satisfied or not, each removable — otherwise a
                     dependency could be added from here but never taken back. */}
                 <DetailRow T={T} icon="▤" divider>
                   <button onClick={() => { beep("click"); setListPicker({ taskId: inspect.id }); }} className="text-left w-full">
-                    <span className="block text-sm">{(db.taskLists.find((l) => l.id === inspectItem.listId) || {}).name || "—"}</span>
+                    <span className="block text-sm">{(db.taskLists.find((l) => l.id === inspectDraft.listId) || {}).name || "—"}</span>
                     <span style={{ color: T.dim }} className="block text-xs mt-0.5">Tap to move to another list</span>
                   </button>
                 </DetailRow>
-                <InlineChoiceRow T={T} icon="◑" divider label={inspectItem.category} dot={catColor}
-                  value={inspectItem.category} options={CATS.map((c) => [c, c])}
+                <InlineChoiceRow T={T} icon="◑" divider label={inspectDraft.category} dot={catColor}
+                  value={inspectDraft.category} options={CATS.map((c) => [c, c])}
                   onPick={(cat) => editEntry({ cat })} />
                 <DetailRow T={T} icon="#" divider={inspectDependsOn.length > 0}>
-                  <TagField T={T} tags={inspectItem.tags} onChange={(next) => setTags(inspect.id, next)} />
+                  <TagField T={T} tags={inspectDraft.tags} onChange={(next) => setTags(inspect.id, next)} />
                 </DetailRow>
                 {inspectDependsOn.map((blocker, i) => (
                   <DetailRow key={blocker.id} T={T} icon="⛌" divider={i < inspectDependsOn.length - 1}>
@@ -2775,7 +2878,7 @@ export default function Planner() {
                 <div className="flex flex-wrap gap-1">
                   {["open", "in_progress", "waiting"].map((next) => (
                     <button key={next} onClick={() => changeStatus(inspect.id, next)} className="px-2 py-1 text-xs tracking-widest"
-                      style={{ fontFamily: MONO, borderRadius: 999, background: inspectItem.status === next ? T.accent : "transparent", color: inspectItem.status === next ? T.on : T.dim, border: `1px solid ${inspectItem.status === next ? T.accent : T.line}` }}>
+                      style={{ fontFamily: MONO, borderRadius: 999, background: inspectDraft.status === next ? T.accent : "transparent", color: inspectDraft.status === next ? T.on : T.dim, border: `1px solid ${inspectDraft.status === next ? T.accent : T.line}` }}>
                       {next.replace("_", " ").toUpperCase()}
                     </button>
                   ))}
@@ -2784,7 +2887,7 @@ export default function Planner() {
                   style={{ fontFamily: MONO, color: T.accent }} className="nb-tap text-xs tracking-widest shrink-0">+ BLOCK ON</button>
               </div>
 
-              {earliestStart && inspectItem.planned.date && inspectItem.planned.date < earliestStart && (
+              {earliestStart && inspectDraft.planned.date && inspectDraft.planned.date < earliestStart && (
                 <p style={{ fontFamily: MONO, color: NOW_RED }} className="text-xs tracking-widest mt-3">
                   PLANNED BEFORE ITS BLOCKERS LAND — EARLIEST {fmtDay(earliestStart)}
                 </p>
@@ -2795,29 +2898,29 @@ export default function Planner() {
           {/* Header reads as a title card: what, when, which day — centred, with the
               detail rows below it. Every line of it is the field itself (§4.6). */}
           <div className="text-center pt-1 pb-4">
-            <InlineText T={T} value={inspectItem.title} ariaLabel="Event title"
+            <InlineText T={T} value={inspectDraft.title} ariaLabel="Event title"
               onCommit={(title) => editEntry({ title })}
               className="text-2xl font-bold tracking-tight leading-tight" style={{ textAlign: "center" }} />
-            {inspectItem.allDay ? (
+            {inspectDraft.allDay ? (
               <p className="text-base font-semibold mt-1.5">All day</p>
             ) : (
               <div className="flex items-center justify-center gap-1.5 mt-1.5">
-                <InlineStamp T={T} dark={dark} type="time" ariaLabel="Starts" value={hhmm(inspectItem.start)}
-                  display={tm(inspectItem.start)} onCommit={(v) => v && editEntry({ start: fromHhmm(v) })}
+                <InlineStamp T={T} dark={dark} type="time" ariaLabel="Starts" value={hhmm(inspectDraft.start)}
+                  display={tm(inspectDraft.start)} onCommit={(v) => v && editEntry({ start: fromHhmm(v) })}
                   className="text-base font-semibold" />
                 <span style={{ color: T.dim }} className="text-base">–</span>
-                <InlineStamp T={T} dark={dark} type="time" ariaLabel="Ends" value={hhmm((inspectItem.start + inspectItem.dur) % 1440)}
-                  display={tm((inspectItem.start + inspectItem.dur) % 1440)}
+                <InlineStamp T={T} dark={dark} type="time" ariaLabel="Ends" value={hhmm((inspectDraft.start + inspectDraft.dur) % 1440)}
+                  display={tm((inspectDraft.start + inspectDraft.dur) % 1440)}
                   onCommit={(v) => {
                     if (!v) return;
                     const end = fromHhmm(v);
-                    editEntry({ dur: Math.max(5, (end > inspectItem.start ? end : end + 1440) - inspectItem.start) });
+                    editEntry({ dur: Math.max(5, (end > inspectDraft.start ? end : end + 1440) - inspectDraft.start) });
                   }} className="text-base font-semibold" />
               </div>
             )}
             <InlineStamp T={T} dark={dark} type="date" ariaLabel="Day"
-              value={splitId(inspect.id).date || inspectItem.date || dateKey}
-              display={fmtDay(splitId(inspect.id).date || inspectItem.date || dateKey)}
+              value={splitId(inspect.id).date || inspectDraft.date || dateKey}
+              display={fmtDay(splitId(inspect.id).date || inspectDraft.date || dateKey)}
               onCommit={(v) => v && editEntry({ date: v })}
               style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest mt-1" />
           </div>
@@ -2826,7 +2929,7 @@ export default function Planner() {
           <div className="flex gap-2 pb-4">
             <div className="flex-1 text-center py-3" style={{ background: surface, borderRadius: CARD_R }}>
               <span className="block text-2xl font-semibold tracking-tight">
-                {inspect.kind === "event" ? (inspectItem.allDay ? "—" : dur(inspectItem.dur)) : `+${inspectItem.reward}`}
+                {inspect.kind === "event" ? (inspectDraft.allDay ? "—" : dur(inspectDraft.dur)) : `+${inspectDraft.reward}`}
               </span>
               <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest mt-0.5">
                 {inspect.kind === "event" ? "LENGTH" : "REWARD"}
@@ -2835,8 +2938,8 @@ export default function Planner() {
             <div className="flex-1 text-center py-3" style={{ background: surface, borderRadius: CARD_R }}>
               <span className="block text-2xl font-semibold tracking-tight">
                 {inspect.kind === "event"
-                  ? (inspectItem.allDay ? "—" : countdownLabel(dateKey, inspectItem.start, todayKey, nowMin))
-                  : `${(inspectItem.checklist ?? []).filter((x) => x.done).length}/${(inspectItem.checklist ?? []).length}`}
+                  ? (inspectDraft.allDay ? "—" : countdownLabel(dateKey, inspectDraft.start, todayKey, nowMin))
+                  : `${(inspectDraft.checklist ?? []).filter((x) => x.done).length}/${(inspectDraft.checklist ?? []).length}`}
               </span>
               <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest mt-0.5">
                 {inspect.kind === "event" ? "STARTS" : "STEPS"}
@@ -2847,20 +2950,20 @@ export default function Planner() {
           {/* One row per attribute, each one the control for it (§4.6). Collapsed it
               costs a line; touched, it grows the alternatives underneath. */}
           <div className="flex flex-col gap-2">
-            <InlineChoice T={T} surface={surface} icon="◑" tint={catColor(inspectItem.cat)}
-              label={inspectItem.cat || "—"} value={inspectItem.cat} dot={catColor}
+            <InlineChoice T={T} surface={surface} icon="◑" tint={catColor(inspectDraft.cat)}
+              label={inspectDraft.cat || "—"} value={inspectDraft.cat} dot={catColor}
               options={CATS.map((c) => [c, c])} onPick={(cat) => editEntry({ cat })} />
 
-            <InlineChoice T={T} surface={surface} icon="◷" label={inspectItem.allDay ? "All day" : "At a time"}
-              value={inspectItem.allDay ? "all" : "timed"} options={[["timed", "AT A TIME"], ["all", "ALL DAY"]]}
-              onPick={(v) => editEntry({ allDay: v === "all", ...(v === "all" ? {} : { start: inspectItem.start || 540, dur: inspectItem.dur || 60 }) })} />
+            <InlineChoice T={T} surface={surface} icon="◷" label={inspectDraft.allDay ? "All day" : "At a time"}
+              value={inspectDraft.allDay ? "all" : "timed"} options={[["timed", "AT A TIME"], ["all", "ALL DAY"]]}
+              onPick={(v) => editEntry({ allDay: v === "all", ...(v === "all" ? {} : { start: inspectDraft.start || 540, dur: inspectDraft.dur || 60 }) })} />
 
-            {inspectItem.allDay && (
+            {inspectDraft.allDay && (
               <InlineField T={T} surface={surface} icon="→">
                 <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">THROUGH</span>
                 <InlineStamp T={T} dark={dark} type="date" ariaLabel="Last day"
-                  value={inspectItem.endDate || inspectItem.date || dateKey} min={inspectItem.date || dateKey}
-                  display={fmtDay(inspectItem.endDate || inspectItem.date || dateKey)}
+                  value={inspectDraft.endDate || inspectDraft.date || dateKey} min={inspectDraft.date || dateKey}
+                  display={fmtDay(inspectDraft.endDate || inspectDraft.date || dateKey)}
                   onCommit={(v) => v && editEntry({ endDate: v })}
                   style={{ fontFamily: MONO }} className="text-sm" />
               </InlineField>
@@ -2868,23 +2971,26 @@ export default function Planner() {
 
             {/* §4.7. Recurrence rewrites a series rather than an entry, so it stays
                 behind a deliberate gesture with room to explain itself. */}
-            <button onClick={() => { beep("click"); setComposer({ ...entryPayload("event", inspectItem), openRepeat: true }); }}
-              className="nb-tap flex items-center gap-3 px-3 py-2.5 text-left" style={{ background: surface, borderRadius: CARD_R }}>
-              <span style={{ color: T.dim }} className="text-sm shrink-0 w-4 text-center">↻</span>
-              <span className="flex-1 text-sm truncate">{inspectItem.repeat ? repeatLabel(inspectItem.repeat) : "Does not repeat"}</span>
-              <span style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest shrink-0">CHANGE</span>
-            </button>
+            {/* §4.6. Repeating is an attribute of the entry like any other, so it is
+                chosen here rather than in a form somewhere else. The safety was never
+                the separate surface — it is the scope question, which the save still
+                asks. */}
+            <InlineChoice T={T} surface={surface} icon="↻"
+              label={inspectDraft.repeat ? repeatLabel(inspectDraft.repeat) : "Does not repeat"}
+              value={inspectDraft.repeat?.freq ?? "never"}
+              options={REPEATS}
+              onPick={(freq) => editEntry({ repeat: repeatFor(freq, inspectDraft.repeat, inspectDraft.date || dateKey) })} />
 
             <InlineChoice T={T} surface={surface} icon="◔"
-              label={(inspectItem.alerts || []).length
-                ? inspectItem.alerts.map((a) => (a === 0 ? "When it starts" : `${dur(a)} before`)).join(", ")
+              label={(inspectDraft.alerts || []).length
+                ? inspectDraft.alerts.map((a) => (a === 0 ? "When it starts" : `${dur(a)} before`)).join(", ")
                 : "No reminder"}
-              value={(inspectItem.alerts || [])[0] ?? "off"}
+              value={(inspectDraft.alerts || [])[0] ?? "off"}
               options={[["off", "OFF"], [0, "AT TIME"], [5, "5M"], [15, "15M"], [30, "30M"], [60, "60M"]]}
               onPick={(v) => editEntry({ alerts: v === "off" ? [] : [v] })} />
 
             <InlineField T={T} surface={surface} icon="⌖">
-              <InlineText T={T} value={inspectItem.place} placeholder="Add a place" ariaLabel="Place"
+              <InlineText T={T} value={inspectDraft.place} placeholder="Add a place" ariaLabel="Place"
                 onCommit={(place) => editEntry({ place })} className="text-sm" />
             </InlineField>
 
@@ -2894,14 +3000,14 @@ export default function Planner() {
 
             <div className="flex items-start gap-3 px-3 py-2.5" style={{ background: surface, borderRadius: CARD_R }}>
               <span style={{ color: T.dim }} className="text-sm shrink-0 w-4 text-center pt-0.5">≡</span>
-              <InlineText T={T} value={inspectItem.note} placeholder="Add a note" ariaLabel="Note" multiline
+              <InlineText T={T} value={inspectDraft.note} placeholder="Add a note" ariaLabel="Note" multiline
                 onCommit={(note) => editEntry({ note })} className="text-sm leading-relaxed" />
             </div>
           </div>
 
-          {!inspectItem.allDay && minutesUntil(dateKey, inspectItem.start, todayKey, nowMin) > 0 && (
+          {!inspectDraft.allDay && minutesUntil(dateKey, inspectDraft.start, todayKey, nowMin) > 0 && (
             <p className="text-center text-sm mt-5" style={{ color: T.dim }}>
-              <span className="font-bold" style={{ color: T.text }}>{countdownLabel(dateKey, inspectItem.start, todayKey, nowMin, inspectItem.dur)}</span> away
+              <span className="font-bold" style={{ color: T.text }}>{countdownLabel(dateKey, inspectDraft.start, todayKey, nowMin, inspectDraft.dur)}</span> away
             </p>
           )}
 
@@ -2912,16 +3018,36 @@ export default function Planner() {
             onNew={newContextualNote}
             onOpen={(note) => { beep("click"); setInspect(null); setNoteEdit(note); }} />
 
+          {/* §4.6. A pending edit is visible and reversible before it lands. The bar
+              only exists while there is something to save, so a record you are only
+              reading carries no chrome for changing it. */}
+          {draft && Object.keys(draft).length > 0 && (
+            <div className="nb-rise sticky bottom-0 flex items-center gap-2 mt-5 pt-3 pb-1"
+              style={{ background: `linear-gradient(to top, ${T.card} 72%, transparent)`, zIndex: 4 }}>
+              <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest flex-1">
+                {Object.keys(draft).length} UNSAVED
+              </span>
+              <button onClick={() => { beep("abort"); setDraft(null); }}
+                style={{ fontFamily: MONO, color: T.dim, border: `1px solid ${T.line}`, borderRadius: 999 }}
+                className="nb-tap px-4 py-2 text-xs tracking-widest">REVERT</button>
+              <button onClick={() => { beep("commit"); commitDraft(); }}
+                style={{ fontFamily: MONO, background: T.accent, color: T.on, borderRadius: 999 }}
+                className="nb-tap nb-liquid px-5 py-2 text-xs font-bold tracking-widest">SAVE</button>
+            </div>
+          )}
+
           {/* §4.7. No generic "edit" — the view above already is the editor, so the
               only actions left are the ones that do something other than change a
               field. An action that leads elsewhere names what it is for. */}
           <button
             onClick={() => {
+              /* Whatever is pending is part of the record before it is acted on. */
+              commitDraft();
               if (inspect.kind === "event") duplicateEvent(inspect.id);
-              else { inspectItem.status === "completed" ? reopenTask(inspect.id) : completeTask(inspect.id); setInspect(null); }
+              else { inspectDraft.status === "completed" ? reopenTask(inspect.id) : completeTask(inspect.id); setInspect(null); }
             }}
-            style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="nb-tap w-full py-3 mt-5 text-xs font-bold tracking-widest">
-            {inspect.kind === "event" ? "DUPLICATE" : inspectItem.status === "completed" ? "REOPEN" : "MARK COMPLETE"}
+            style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="nb-tap nb-liquid w-full py-3 mt-5 text-xs font-bold tracking-widest">
+            {inspect.kind === "event" ? "DUPLICATE" : inspectDraft.status === "completed" ? "REOPEN" : "MARK COMPLETE"}
           </button>
           <button onClick={() => removeItem(inspect.kind, inspect.id)} style={{ fontFamily: MONO, color: NOW_RED, border: `1px solid ${T.line}` }} className="nb-tap w-full py-3 mt-2 text-xs tracking-widest">DELETE</button>
         </Sheet>
@@ -3231,7 +3357,7 @@ export default function Planner() {
             </div>
           </div>
 
-          <button onClick={() => { beep("click"); setSettings(false); }} style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="nb-tap w-full py-3 mt-5 text-xs font-bold tracking-widest">DONE</button>
+          <button onClick={() => { beep("click"); setSettings(false); }} style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="nb-tap nb-liquid w-full py-3 mt-5 text-xs font-bold tracking-widest">DONE</button>
         </Sheet>
       )}
     </div>
@@ -3841,6 +3967,72 @@ function InlineNative({ T, type, value, onCommit, ariaLabel, className = "", sty
   );
 }
 
+/* A segmented control where the selection is one pill that travels between the
+   options rather than a background that blinks from one to the next. It stretches
+   along the direction of travel and settles — the liquid-pill idiom — which is what
+   makes the movement read as one object rather than two states.
+
+   Built natively: the reference implementations are Framer components, and a
+   published page here cannot load anything off-host anyway. */
+function PillNav({ T, value, options, onPick, ariaLabel, surface = "transparent", className = "", style = {} }) {
+  const wrapRef = useRef(null);
+  const [box, setBox] = useState(null);
+  const [stretch, setStretch] = useState(1);
+  const settle = useRef(null);
+
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) return undefined;
+    const move = () => {
+      const active = wrap.querySelector('[data-active="true"]');
+      if (!active) return;
+      const a = active.getBoundingClientRect();
+      const w = wrap.getBoundingClientRect();
+      setBox((prev) => {
+        const next = { left: a.left - w.left, width: a.width, top: a.top - w.top, height: a.height };
+        /* Only a real move stretches the pill; a resize should not wobble it. */
+        if (prev && Math.abs(prev.left - next.left) > 1) {
+          const distance = Math.abs(prev.left - next.left);
+          setStretch(1 + Math.min(0.34, distance / 260));
+          clearTimeout(settle.current);
+          settle.current = setTimeout(() => setStretch(1), 210);
+        }
+        return next;
+      });
+    };
+    move();
+    const observer = new ResizeObserver(move);
+    observer.observe(wrap);
+    return () => { observer.disconnect(); clearTimeout(settle.current); };
+  }, [value, options]);
+
+  return (
+    <div ref={wrapRef} role="tablist" aria-label={ariaLabel} className={`relative flex ${className}`}
+      style={{ background: surface, borderRadius: 999, ...style }}>
+      {box && (
+        <span aria-hidden="true" className="absolute" style={{
+          left: box.left, width: box.width, top: box.top, height: box.height,
+          background: T.accent, borderRadius: 999,
+          transform: `scaleX(${stretch})`, transformOrigin: "center",
+          transition: "left 420ms cubic-bezier(.22,1.1,.28,1), width 420ms cubic-bezier(.22,1.1,.28,1), height 300ms ease, top 300ms ease, transform 210ms cubic-bezier(.3,1.4,.4,1)",
+          pointerEvents: "none",
+        }} />
+      )}
+      {options.map(([key, label]) => {
+        const on = key === value;
+        return (
+          <button key={String(key)} role="tab" aria-selected={on} data-active={on ? "true" : "false"}
+            onClick={() => onPick(key)}
+            className="relative px-3 py-1 text-xs tracking-widest"
+            style={{ fontFamily: MONO, color: on ? T.on : T.dim, borderRadius: 999, zIndex: 1, transition: "color 260ms ease" }}>
+            {label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 /* §4.4/§4.6. The same expansion inside the task's grouped rules card, which reads as
    one block of rules with its icons on the right — so the choices cannot bring their
    own surface without breaking the group. */
@@ -3954,10 +4146,10 @@ function Sheet({ T, onClose, title, children }) {
     };
   }, []);
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" style={{ background: "rgba(0,0,0,0.8)" }} onClick={guardedClose}>
+    <div className="nb-scrim fixed inset-0 z-50 flex items-end sm:items-center justify-center" style={{ background: "rgba(0,0,0,0.72)" }} onClick={guardedClose}>
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId.current}
         onKeyDown={(event) => trapDialogTab(event, dialogRef.current)} onClick={(e) => e.stopPropagation()}
-        className="nb-up w-full sm:max-w-md overflow-y-auto nb-s" style={{ background: T.card, color: T.text, maxHeight: "88vh" }}>
+        className="nb-fluid w-full sm:max-w-md overflow-y-auto nb-s" style={{ background: T.card, color: T.text, maxHeight: "88vh" }}>
         <div className="sticky top-0 flex items-center justify-between px-4 sm:px-5 pt-3 pb-2" style={{ background: T.card, zIndex: 3 }}>
           <span id={titleId.current} style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">{title || "Details"}</span>
           <button onClick={onClose} aria-label="Close" style={{ color: T.dim, fontFamily: MONO }} className="nb-tap -mr-1 px-2 py-1 text-sm">✕</button>
@@ -4065,16 +4257,11 @@ function NotebookPanel({ T, view, notes, onView, onNew, onOpen, onPin, onArchive
   const tabs = [["all", "ALL"], ["pinned", "PINNED"], ["archived", "ARCHIVED"]];
   return (
     <div>
-      <div className="flex gap-1" role="tablist" aria-label="Notebook views">
-        {tabs.map(([id, label]) => {
-          const active = id === view;
-          return <button key={id} role="tab" aria-selected={active} onClick={() => onView(id)}
-            style={{ fontFamily: MONO, background: active ? T.accent : "transparent", color: active ? T.on : T.dim, border: `1px solid ${active ? T.accent : T.line}`, borderRadius: 999 }}
-            className="nb-tap flex-1 py-2 text-xs tracking-widest">{label}</button>;
-        })}
-      </div>
+      <PillNav T={T} ariaLabel="Notebook views" value={view} options={tabs} onPick={onView}
+        className="w-full [&>button]:flex-1 [&>button]:py-2"
+        style={{ border: `1px solid ${T.line}` }} />
       {view !== "archived" && (
-        <button onClick={onNew} style={{ fontFamily: MONO, color: T.on, background: T.accent }} className="nb-tap w-full py-3 mt-4 text-xs font-bold tracking-widest">+ NEW NOTE</button>
+        <button onClick={onNew} style={{ fontFamily: MONO, color: T.on, background: T.accent }} className="nb-tap nb-liquid w-full py-3 mt-4 text-xs font-bold tracking-widest">+ NEW NOTE</button>
       )}
       <div className="flex flex-col mt-3">
         {notes.map((note) => (
@@ -4239,14 +4426,10 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick }) {
   return (
     <div>
       {!editing && (
-        <div className="flex gap-1 p-1 mb-1" style={{ background: surface, borderRadius: 999 }}>
-          {["event", "task"].map((k) => (
-            <button key={k} onClick={() => { onTick(); setKind(k); }} className="nb-tap flex-1 py-1.5 text-xs tracking-widest"
-              style={{ fontFamily: MONO, borderRadius: 999, background: kind === k ? T.accent : "transparent", color: kind === k ? T.on : T.dim, transition: "background 180ms ease, color 180ms ease" }}>
-              {k === "event" ? "EVENT" : "ACTION"}
-            </button>
-          ))}
-        </div>
+        <PillNav T={T} ariaLabel="What to add" value={kind}
+          options={[["event", "EVENT"], ["task", "ACTION"]]}
+          onPick={(k) => { onTick(); setKind(k); }}
+          surface={surface} className="mb-1 p-1 w-full [&>button]:flex-1 [&>button]:py-1.5" />
       )}
 
       <div className={`${kind === "event" ? "text-center" : ""} pt-3 pb-4`}>
