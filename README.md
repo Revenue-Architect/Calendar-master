@@ -57,8 +57,23 @@ Missing storage seeds a new validated v8 notebook. Malformed or failed migration
 does not seed over existing data. Writes reject on storage failure so Settings can
 warn the user and preserve export as a recovery path.
 
-Display preferences, the motivation ledger, and local diagnostics live in their own
-stores beside the notebook, so changing a theme or a clock never rewrites records.
+Display preferences, the motivation ledger, local diagnostics, and the backup
+record live in their own stores beside the notebook, so changing a theme or a
+clock never rewrites records.
+
+## When it breaks
+
+Everything is on this device, which changes what a crash means: the instinct to
+clear site data and reload is the one action that destroys the notebook. So a
+render error is caught rather than left blank, and the fallback's first control
+saves a copy — read straight from storage, not from the app that just failed, so
+a crash caused by a bad record still exports that record.
+
+For the same reason the planner asks for a backup rather than waiting to be
+asked. It stays quiet on an empty notebook, never asks twice for the same
+content, and treats "not now" as holding until the notebook has actually moved
+on. Exporting from anywhere counts. The file it writes is the one
+Settings -> Import accepts.
 
 ## Calendar foundations
 

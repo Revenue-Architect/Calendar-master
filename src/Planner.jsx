@@ -79,6 +79,8 @@ import { matchCommands } from "./features/planner/commandPalette.js";
 import { getDayTasksWithCarry } from "./features/planner/carryForward.js";
 import { planOverdueForToday, pullableOverdue } from "./features/planner/overduePull.js";
 import { AUTO_COMPLETE_DELAY_MS, autoCompleteStillValid, togglesLastOpenStep } from "./features/planner/autoComplete.js";
+import { recordBackupDismissed, recordBackupTaken, shouldPromptBackup } from "./features/planner/backupReminder.js";
+import { loadBackupRecord, saveBackupRecord } from "./platform/persistence/backupStore.js";
 import { textToNoteBlocks } from "./features/notes/noteText.js";
 import { eventNoteLink, taskNoteLink } from "./features/notes/contextLink.js";
 import {
@@ -579,6 +581,7 @@ export default function Planner() {
   const [search, setSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [shortcuts, setShortcuts] = useState(false);
+  const [backupRecord, setBackupRecord] = useState(null);
   const [scopeAsk, setScopeAsk] = useState(null);
   const [reward, setReward] = useState(null);
   const [levelFlash, setLevelFlash] = useState(null);
@@ -724,13 +727,20 @@ export default function Planner() {
         setMotivationSaveBlocked(true);
         reportStorage("motivation", true, "read-failed");
       }
+      /* Knowing nothing about past backups is a fine state to be in — it only
+         means the nudge may ask once more than it needed to. */
+      let nextBackup = null;
+      try {
+        nextBackup = (await loadBackupRecord(storage)).record;
+      } catch { nextBackup = null; }
       /* A brand-new notebook opens on someone else's week. The sample is useful for
          judging the app and confusing as your own planner, so the first run asks
          rather than assuming. */
       if (!dead) {
         setDb(state);
         setPreferences(nextPreferences);
-        setMotivationLedger(nextLedger);
+          setMotivationLedger(nextLedger);
+        setBackupRecord(nextBackup);
         setDiagnostics(nextDiagnostics);
         setFirstRun(isFirstRun);
         setReady(true);
@@ -802,6 +812,11 @@ export default function Planner() {
     return () => clearTimeout(diagnosticsSaveT.current);
   }, [diagnostics, diagnosticsSaveBlocked, reportStorage]);
 
+  useEffect(() => {
+    if (!backupRecord) return;
+    saveBackupRecord(storage, backupRecord).catch(() => { /* best effort: the nudge is not worth blocking on */ });
+  }, [backupRecord]);
+
   useEffect(() => { const i = setInterval(() => setNow(new Date()), 15000); return () => clearInterval(i); }, []);
 
   const T = useMemo(() => THEMES.find((t) => t.id === preferences?.display.themeId) || THEMES[0], [preferences]);
@@ -844,6 +859,12 @@ export default function Planner() {
   }, [T]);
 
   const todayKey = keyOf(now);
+  /* Fingerprinting a few hundred kilobytes is ~1ms, but there is no reason to do
+     it on every keystroke: the decision only changes when the notebook or the
+     day does. */
+  const askForBackup = useMemo(() => (
+    db && backupRecord ? shouldPromptBackup({ state: db, record: backupRecord, today: todayKey }) : false
+  ), [db, backupRecord, todayKey]);
   const nowMin = now.getHours() * 60 + now.getMinutes();
   const searchProjection = useMemo(() => projectPlannerSearch(db, {
     query: searchQuery, todayDate: todayKey,
@@ -1936,7 +1957,12 @@ export default function Planner() {
       beep("commit");
     } catch (e) { beep("abort"); }
   };
-  const exportJson = () => download(`planner-${todayKey}.json`, JSON.stringify(db, null, 2), "application/json");
+  const exportJson = () => {
+    download(`planner-${todayKey}.json`, JSON.stringify(db, null, 2), "application/json");
+    /* Exporting *is* the backup, however the user got here — from Settings, from
+       the storage warning, or from the nudge. All three should quiet it. */
+    setBackupRecord((current) => recordBackupTaken(current, { state: db, today: todayKey }));
+  };
   const exportIcs = () => {
     const esc = (s) => String(s || "").replace(/([,;\\])/g, "\\$1").replace(/\n/g, "\\n");
     const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Not Boring Moleskine Planner//EN"];
@@ -3187,6 +3213,28 @@ export default function Planner() {
             <span className="text-sm truncate">Changes are staying in this tab only.</span>
             <button onClick={() => { beep("click"); setSettings(true); }}
               style={{ fontFamily: MONO }} className="text-xs font-bold tracking-widest shrink-0 underline">EXPORT</button>
+          </div>
+        </div>
+      )}
+
+      {/* Everything is on this device, and export is a manual action in Settings
+          nobody performs on a good day. This is the only thing that closes the
+          gap between "my planner" and "my planner, if this browser survives" —
+          so it is a real prompt, and it is rare enough to be believed: never for
+          an empty notebook, never twice for the same content, and "not now"
+          holds until the notebook has actually moved on. It yields to the
+          storage warning, which is the more urgent problem. */}
+      {askForBackup && !storageBad && !firstRun && (
+        <div className="fixed inset-x-0 bottom-20 lg:bottom-6 z-40 flex justify-center px-3 pointer-events-none">
+          <div data-test="backup-nudge" className="nb-up flex items-center gap-3 px-3 py-2 w-full sm:w-auto pointer-events-auto"
+            style={{ background: surface, color: T.text, borderRadius: CARD_R, boxShadow: `inset 0 0 0 1px ${T.line}` }}>
+            <span style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest shrink-0">BACK UP</span>
+            <span className="text-sm truncate">This notebook only exists on this device.</span>
+            <button data-test="backup-nudge-save" onClick={() => { beep("click"); exportJson(); }}
+              style={{ fontFamily: MONO, color: T.accent }} className="nb-tap text-xs font-bold tracking-widest shrink-0 underline">SAVE A COPY</button>
+            <button data-test="backup-nudge-dismiss"
+              onClick={() => { beep("click"); setBackupRecord((current) => recordBackupDismissed(current, { state: db, today: todayKey })); }}
+              style={{ fontFamily: MONO, color: T.dim }} className="nb-tap text-xs tracking-widest shrink-0" aria-label="Not now">NOT NOW</button>
           </div>
         </div>
       )}
