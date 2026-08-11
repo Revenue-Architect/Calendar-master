@@ -144,3 +144,39 @@ test.describe("a control you can actually hit", () => {
     expect(small, `${small.length} controls under 44px: ${small.slice(0, 12).join(" | ")}`).toEqual([]);
   });
 });
+
+test.describe("the target rule keeps its hands off layout", () => {
+  test.use({ viewport: { width: 393, height: 780 }, hasTouch: true, isMobile: true });
+
+  test("a control that was positioned stays positioned", async ({ page }) => {
+    /* The tap-target fix sets `position: relative` so a pseudo-element has
+       something to position against. `.nb-tap` and Tailwind's `.absolute` are
+       both single-class selectors and this stylesheet loads second, so a blanket
+       rule won against every control that was already placed: an action chip
+       stretched with `left-0 right-2` collapsed from 289px to 202px, in the
+       middle of the timeline, from a rule about touch targets.
+
+       Asserting the property rather than the width, because the width depends on
+       the notebook and the property is the actual invariant. */
+    await openPlanner(page, { keepSample: true });
+    await page.waitForTimeout(400);
+
+    const misplaced = await page.evaluate(() => {
+      const out = [];
+      for (const node of document.querySelectorAll(".nb-tap")) {
+        const placed = node.classList.contains("absolute")
+          || node.classList.contains("fixed")
+          || node.classList.contains("sticky");
+        if (!placed) continue;
+        const actual = getComputedStyle(node).position;
+        const wanted = node.classList.contains("absolute") ? "absolute"
+          : node.classList.contains("fixed") ? "fixed" : "sticky";
+        if (actual !== wanted) {
+          out.push(`${(node.textContent || "").trim().slice(0, 20)} wants ${wanted}, computes ${actual}`);
+        }
+      }
+      return out;
+    });
+    expect(misplaced, `layout stolen by a non-layout rule: ${misplaced.join(" | ")}`).toEqual([]);
+  });
+});

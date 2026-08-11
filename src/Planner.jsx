@@ -3165,7 +3165,16 @@ export default function Planner() {
            of header on a screen where the timeline is already down to 44% —
            the wrong trade on the one surface the app exists to show. */
         @media(pointer:coarse){
-          .nb-tap{position:relative}
+          /* The :not() here is load-bearing, not defensive. .nb-tap and
+             Tailwind's .absolute are both single-class selectors, so source
+             order decides — and this stylesheet is injected after Tailwind's.
+             A blanket position:relative therefore *won* against every control
+             that was already positioned, and an action chip stretched with
+             left-0 right-2 collapsed to its content: 289px wide became 202px,
+             in the middle of the timeline, from a rule about touch targets.
+             An already-positioned element is a containing block anyway, so it
+             never needed the declaration in the first place. */
+          .nb-tap:not(.absolute):not(.fixed):not(.sticky){position:relative}
           .nb-tap::after{
             content:"";position:absolute;left:50%;top:50%;
             width:max(100%,44px);height:max(100%,44px);

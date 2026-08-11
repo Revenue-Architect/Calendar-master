@@ -17,7 +17,7 @@ export const TYPE_SCALE = Object.freeze({
   display: { px: 64, weight: 800, tracking: -0.035, family: "data", role: "The day numeral, and nothing else." },
   title:   { px: 24, weight: 700, tracking: -0.018, family: "display", role: "Sheet titles and view headings." },
   heading: { px: 19, weight: 600, tracking: -0.01,  family: "display", role: "Section headings inside a sheet." },
-  lead:    { px: 16, weight: 600, tracking: -0.008, family: "display", role: "Event and action titles on a card." },
+  lead:    { px: 15, weight: 500, tracking: -0.005, family: "display", role: "Event and action titles on a card." },
   body:    { px: 15, weight: 400, tracking: 0,      family: "display", role: "Running interface text." },
   voice:   { px: 15, weight: 400, tracking: 0,      family: "voice",   role: "Note bodies and the app's own asides." },
   label:   { px: 13, weight: 700, tracking: 0.1,    family: "display", role: "The interface voice: rails, chips, controls." },

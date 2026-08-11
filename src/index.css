@@ -42,7 +42,7 @@
   --t-display: 64px;   --t-display-w: 800;  --t-display-ls: -0.035em;
   --t-title:   24px;   --t-title-w:   700;  --t-title-ls:   -0.018em;
   --t-heading: 19px;   --t-heading-w: 600;  --t-heading-ls: -0.01em;
-  --t-lead:    16px;   --t-lead-w:    600;  --t-lead-ls:    -0.008em;
+  --t-lead:    15px;   --t-lead-w:    500;  --t-lead-ls:    -0.005em;
   --t-body:    15px;   --t-body-w:    400;  --t-body-ls:    0;
   --t-label:   13px;   --t-label-w:   700;  --t-label-ls:   0.1em;
   --t-data:    13px;   --t-data-w:    400;  --t-data-ls:    0.02em;

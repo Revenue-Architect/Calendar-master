@@ -59,7 +59,7 @@ A browser test compares them so they cannot drift.
 | `display` | 64 | 800 | −0.035em | The day numeral, and nothing else. Mono. |
 | `title` | 24 | 700 | −0.018em | Sheet titles, view headings. |
 | `heading` | 19 | 600 | −0.01em | Section headings inside a sheet. |
-| `lead` | 16 | 600 | −0.008em | Event and action titles on a card. |
+| `lead` | 15 | 500 | −0.005em | Event and action titles on a card. |
 | `body` | 15 | 400 | 0 | Running interface text. |
 | `voice` | 15 | 400 | 0 | Note bodies and asides. Serif italic. |
 | `label` | 13 | 700 | +0.1em | Rails, chips, controls. Capitals. |
@@ -71,10 +71,12 @@ A browser test compares them so they cannot drift.
 Hierarchy had nothing to carry it but colour and capitals, and a phone screen read
 as one uniform texture.
 
-**Why 16 and not 17.** The sizes are set against geometry that already exists,
-not a ratio. A half-hour event is 31 px tall at `HOUR_H = 68`; 16 px with its
-padding fits, 17 px clips. A scale that looks correct in a specimen and clips
-real content is not correct.
+**Why 15 and not 17.** The sizes are set against geometry that already exists,
+not a ratio. A half-hour event is 31 px tall at `HOUR_H = 68`; 17 px clips it.
+16 px at weight 600 fitted but read heavy on a card that is mostly title — so
+`lead` settled at 15/500, which is the same size as `body` and distinguished
+from it by weight, which is the honest difference between a title on a card and
+a sentence in a sheet.
 
 **Why the scale change and the face change are one decision.** Geometric sans
 have low x-heights and near-circular bowls — c, e and o converge below about
@@ -179,10 +181,16 @@ These have tests. Breaking one should turn something red.
 2. **Every control on a coarse pointer reaches 44 × 44.** The target may grow via
    a pseudo-element while the button stays its drawn size — padding would have
    cost 40 px of header on a screen where the timeline is already down to 44%.
-3. **The declared face is the rendered face.** Asserted metrically, not by
+3. **A rule about targets does not move anything.** The `position: relative` that
+   the pseudo-element needs is scoped `:not(.absolute):not(.fixed):not(.sticky)`.
+   Without it, that single declaration beat Tailwind's `.absolute` on source
+   order and collapsed every stretched chip on the timeline from 289 px to
+   202 px — a layout regression shipped by a rule that had nothing to do with
+   layout.
+4. **The declared face is the rendered face.** Asserted metrically, not by
    presence.
-4. **The stylesheet and the token map agree.**
-5. **Nothing in the interface is smaller than the smallest step (11 px).**
+5. **The stylesheet and the token map agree.**
+6. **Nothing in the interface is smaller than the smallest step (11 px).**
 
 ---
 
