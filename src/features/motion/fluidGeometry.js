@@ -14,7 +14,7 @@ export function fluidPillBox(containerRect, activeRect) {
 export function fluidPillStretch(previousBox, nextBox) {
   if (!previousBox || !nextBox) return 1;
   const distance = Math.abs(finite(previousBox.left) - finite(nextBox.left));
-  return 1 + Math.min(0.34, distance / 260);
+  return 1 + Math.min(0.18, distance / 400);
 }
 
 export function fluidMorphFromRects(triggerRect, panelRect) {

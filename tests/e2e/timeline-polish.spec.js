@@ -75,14 +75,14 @@ test.describe("checklist progress", () => {
     await seedPlanner(page, withSteps(2, 5));
     const bar = page.getByRole("progressbar", { name: /steps done/ });
     await expect(bar).toBeVisible();
-    await expect(bar.locator("span")).toHaveCount(5);
+    await expect(bar.locator("[data-segment-index]")).toHaveCount(5);
     await expect(bar).toHaveAttribute("aria-valuenow", "2");
     await expect(bar).toHaveAttribute("aria-valuemax", "5");
   });
 
   test("the segments are evenly sized, so the count is readable at a glance", async ({ page }) => {
     await seedPlanner(page, withSteps(1, 4));
-    const widths = await page.getByRole("progressbar").locator("span")
+    const widths = await page.getByRole("progressbar").locator("[data-segment-index]")
       .evaluateAll((nodes) => nodes.map((n) => Math.round(n.getBoundingClientRect().width)));
     expect(widths).toHaveLength(4);
     expect(Math.max(...widths) - Math.min(...widths)).toBeLessThanOrEqual(1);
@@ -91,15 +91,29 @@ test.describe("checklist progress", () => {
   test("ticking a step fills exactly one more segment", async ({ page }) => {
     await seedPlanner(page, withSteps(2, 5));
     const bar = page.getByRole("progressbar");
-    const filled = async () => bar.locator("span").evaluateAll(
-      (nodes) => nodes.filter((n) => getComputedStyle(n).backgroundColor !== getComputedStyle(nodes.at(-1)).backgroundColor).length,
-    );
+    const filled = async () => bar.locator('[data-filled="true"]').count();
     expect(await filled()).toBe(2);
 
     await page.getByRole("button", { name: /Step 3/ }).click();
     await page.waitForTimeout(500);
     await expect(bar).toHaveAttribute("aria-valuenow", "3");
     expect(await filled()).toBe(3);
+  });
+
+  test("fills left to right when a later step is completed first", async ({ page }) => {
+    await seedPlanner(page, withSteps(0, 4));
+    const bar = page.getByRole("progressbar");
+
+    await page.getByRole("button", { name: /Step 2/ }).click();
+    await page.waitForTimeout(500);
+    await expect(bar.locator('[data-segment-index="0"] [data-filled="true"]')).toHaveCount(1);
+    await expect(bar.locator('[data-segment-index="1"] [data-filled="true"]')).toHaveCount(0);
+
+    await page.getByRole("button", { name: /Step 4/ }).click();
+    await page.waitForTimeout(500);
+    await expect(bar.locator('[data-filled="true"]')).toHaveCount(2);
+    await expect(bar.locator('[data-segment-index="1"] [data-filled="true"]')).toHaveCount(1);
+    await expect(bar.locator('[data-segment-index="3"] [data-filled="true"]')).toHaveCount(0);
   });
 
   test("an action with no steps shows no bar at all", async ({ page }) => {

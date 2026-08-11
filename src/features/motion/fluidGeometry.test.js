@@ -19,8 +19,8 @@ test("fluid pill geometry is relative to its container", () => {
 
 test("fluid pill stretch grows with travel and stays bounded", () => {
   assert.equal(fluidPillStretch({ left: 0 }, { left: 0 }), 1);
-  assert.equal(fluidPillStretch({ left: 0 }, { left: 52 }), 1.2);
-  assert.equal(fluidPillStretch({ left: 0 }, { left: 1000 }), 1.34);
+  assert.equal(fluidPillStretch({ left: 0 }, { left: 52 }), 1.13);
+  assert.equal(fluidPillStretch({ left: 0 }, { left: 1000 }), 1.18);
 });
 
 test("sheet morph starts at the trigger center and clamps tiny scales", () => {

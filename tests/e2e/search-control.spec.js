@@ -3,8 +3,7 @@ import { openPlanner } from "./helpers.js";
 
 /* The search control was a bare ⌕ with no label and no hint that ⌘K reaches it —
  * the fastest way into the app and the least legible thing in the header. It now
- * expands on hover or focus into a pill carrying the shortcut, two shapes merging
- * through an SVG goo filter.
+ * expands on hover or focus into a pill carrying the shortcut.
  *
  * A flourish earns its place by costing nothing. These assert the three ways it
  * could cost something: moving its neighbours, delaying the thing it opens, or
@@ -69,13 +68,12 @@ test.describe("the search control", () => {
     await expect(page.getByTestId("palette-input")).toBeFocused();
   });
 
-  test("mounts no filter while it is at rest", async ({ page }) => {
+  test("does not mount a runtime filter while it expands", async ({ page }) => {
     await openPlanner(page);
-    /* The goo filter is expensive; it exists only while something is travelling
-       through it. */
+    /* One stable pill does not need an SVG filter at rest or in motion. */
     expect(await page.locator('filter[id^="goo-search"]').count()).toBe(0);
     await control(page).hover();
     await page.waitForTimeout(300);
-    expect(await page.locator('filter[id^="goo-search"]').count()).toBe(1);
+    expect(await page.locator('filter[id^="goo-search"]').count()).toBe(0);
   });
 });
