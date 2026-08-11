@@ -212,12 +212,15 @@ const CAT_COLOR = {
 const catColor = (cat) => CAT_COLOR[cat] || "#8A8A96";
 const CARD_R = 10;
 const HOUR_H = 68;
+/* A short phone window can leave less vertical room than a three-hour card at
+   the preferred scale. Forty-four pixels still gives an hour a real touch-sized
+   row; below that, density starts making the timeline less usable than scrolling. */
+const MIN_DAY_HOUR_H = 44;
 /* How close the now marker has to get to an hour before that hour's label steps
    aside. The marker and a label are each about eighteen pixels tall, so inside
    this distance they overlap and read as one smudged mark rather than two
    times — and at that distance the marker *is* the hour, so there is nothing
    the label was still saying. */
-const NOW_LABEL_CLEARANCE_MIN = Math.round((18 / HOUR_H) * 60);
 const DAY_H = HOUR_H * 24;
 const HOLD_MS = 420;
 const LIFT_MS = 300;
@@ -731,6 +734,8 @@ export default function Planner() {
   const navToggleRef = useRef(null);
   const navFirstItemRef = useRef(null);
   const navCloseTimer = useRef(null);
+  const navPhaseRef = useRef(navPhase);
+  navPhaseRef.current = navPhase;
   /* The timeline's touch gestures are delegated to the stream element rather than
      bound per card, so the effect that installs them has to know when that element
      is *replaced* — and it is, routinely: the page wrapper is keyed on the day
@@ -746,10 +751,30 @@ export default function Planner() {
      than relying on someone remembering to list every cause of a remount. */
   const streamRef = useRef(null);
   const [streamNode, setStreamNode] = useState(null);
+  const [dayHourHeight, setDayHourHeight] = useState(HOUR_H);
+  const dayHeight = dayHourHeight * 24;
+  const nowLabelClearanceMin = Math.round((18 / dayHourHeight) * 60);
   const attachStream = useCallback((node) => {
     streamRef.current = node;
     setStreamNode(node);
   }, []);
+  useEffect(() => {
+    if (!streamNode) return undefined;
+    const fitTimeline = () => {
+      /* Keep a three-hour block wholly inspectable in the stream that actually
+         exists after the header, anytime shelf, backup notice and action handle
+         have taken their space. The scale stays at 68px whenever there is room;
+         only short windows compact it. */
+      const fitted = Math.floor(Math.max(0, streamNode.clientHeight - 8) / 3);
+      const next = Math.max(MIN_DAY_HOUR_H, Math.min(HOUR_H, fitted));
+      setDayHourHeight((current) => (current === next ? current : next));
+    };
+    fitTimeline();
+    if (typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(fitTimeline);
+    observer.observe(streamNode);
+    return () => observer.disconnect();
+  }, [streamNode]);
   const listRef = useRef(null);
   const saveT = useRef(null);
   const reminderSaveT = useRef(null);
@@ -789,7 +814,8 @@ export default function Planner() {
   }, []);
 
   useEffect(() => { gestureRef.current = gesture; }, [gesture]);
-  /* The last lane layout computed while nothing was being dragged — see `events`. */
+  /* The last shared event/action lane layout computed while nothing was being
+     transformed — see `timelineLayout`. */
   const laneFreeze = useRef(null);
   const [anyTimeRef, anyTimeFade] = useEdgeFade();
   /* The strip is a scroll container too, and the same argument applies: without
@@ -994,17 +1020,29 @@ export default function Planner() {
   const navOpen = navPhase === "opening" || navPhase === "open";
   const openNavigation = useCallback(() => {
     window.clearTimeout(navCloseTimer.current);
+    navPhaseRef.current = "opening";
     setNavPhase("opening");
   }, []);
+  const finishNavigationClose = useCallback(() => {
+    if (navPhaseRef.current !== "closing") return;
+    window.clearTimeout(navCloseTimer.current);
+    navPhaseRef.current = "closed";
+    setNavPhase("closed");
+    requestAnimationFrame(() => navToggleRef.current?.focus({ preventScroll: true }));
+  }, []);
   const closeNavigation = useCallback(() => {
-    if (navPhase === "closed" || navPhase === "closing") return;
+    if (navPhaseRef.current === "closed" || navPhaseRef.current === "closing") return;
+    navPhaseRef.current = "closing";
     setNavPhase("closing");
     window.clearTimeout(navCloseTimer.current);
-    navCloseTimer.current = window.setTimeout(() => {
-      setNavPhase("closed");
-      navToggleRef.current?.focus({ preventScroll: true });
-    }, reducedMotion ? 0 : 320);
-  }, [navPhase, reducedMotion]);
+    /* transitionend is the clock. This is only a safety net for a browser that
+       cancels the transition (for example during a visibility change). */
+    navCloseTimer.current = window.setTimeout(finishNavigationClose, reducedMotion ? 50 : 500);
+  }, [finishNavigationClose, reducedMotion]);
+  const finishNavigationOnSurfaceTransition = useCallback((event) => {
+    if (event.target !== event.currentTarget || (event.propertyName && event.propertyName !== "transform")) return;
+    finishNavigationClose();
+  }, [finishNavigationClose]);
   useEffect(() => {
     if (navPhase !== "opening") return undefined;
     const frame = requestAnimationFrame(() => {
@@ -1167,6 +1205,10 @@ export default function Planner() {
     () => (db ? getDayTasksWithCarry(db, dateKey, { todayDate: todayKey }) : []),
     [db, dateKey, todayKey],
   );
+  const scheduledTasks = useMemo(
+    () => dayTasks.filter((task) => task.planned.startMinute != null),
+    [dayTasks],
+  );
   const notes = dayProjection?.notes ?? [];
   const openCount = countOpen(dayTasks);
 
@@ -1181,25 +1223,51 @@ export default function Planner() {
     return new Set(getBlockedTasks(db.tasks).map((task) => task.id));
   }, [db]);
 
-  const events = useMemo(() => {
+  /* Events and scheduled actions occupy one timeline, so they must be packed in
+     one collision graph. Packing the event list alone and then painting actions
+     full-width made an action at 9:00 cover every 9:00 event even though each
+     individual renderer looked correct in isolation. */
+  const timelineLayout = useMemo(() => {
     const g = gesture;
-    const dragging = g && (g.mode === "move" || g.mode === "resize-end" || g.mode === "resize-start");
-    const list = timed.map((e) => (dragging && g.id === e.id ? { ...e, start: g.start, dur: g.dur } : e));
+    const movingEvent = g && (g.mode === "move" || g.mode === "resize-end" || g.mode === "resize-start");
+    const resizingTask = g && g.mode === "task-resize";
+    const transforming = movingEvent || resizingTask;
+    const list = [
+      ...timed.map((event) => ({
+        ...(movingEvent && g.id === event.id ? { ...event, start: g.start, dur: g.dur } : event),
+        timelineKind: "event",
+        timelineKey: `event:${event.id}`,
+      })),
+      ...scheduledTasks.map((task) => ({
+        ...task,
+        start: task.planned.startMinute,
+        dur: resizingTask && g.id === task.id ? g.dur : (task.planned.estimateMinutes ?? 30),
+        timelineKind: "task",
+        timelineKey: `task:${task.id}`,
+      })),
+    ];
     const packed = packEventLanes(list);
-    /* Lanes are frozen for the duration of a drag. Repacking every frame means the
-       cards *around* the one being moved slide sideways as it passes them, so the
-       timeline reflows under a hand that is only trying to put one thing down —
-       and the card being dragged changes width mid-gesture, which reads as the
-       app fighting the gesture. The columns settle once, on drop, when there is a
-       result worth showing. */
-    if (!dragging) {
-      laneFreeze.current = new Map(packed.map((e) => [e.id, { lane: e.lane, cols: e.cols }]));
-      return packed;
+    /* Lanes are frozen for the duration of a transform. Repacking every frame
+       makes surrounding cards slide under the hand and changes the held card's
+       width mid-gesture. They settle together once the gesture lands. */
+    if (!transforming) {
+      laneFreeze.current = new Map(packed.map((item) => [item.timelineKey, { lane: item.lane, cols: item.cols }]));
+      return {
+        events: packed.filter((item) => item.timelineKind === "event"),
+        tasks: packed.filter((item) => item.timelineKind === "task"),
+      };
     }
     const frozen = laneFreeze.current;
-    if (!frozen) return packed;
-    return packed.map((e) => (frozen.has(e.id) ? { ...e, ...frozen.get(e.id) } : e));
-  }, [timed, gesture]);
+    const laidOut = frozen
+      ? packed.map((item) => (frozen.has(item.timelineKey) ? { ...item, ...frozen.get(item.timelineKey) } : item))
+      : packed;
+    return {
+      events: laidOut.filter((item) => item.timelineKind === "event"),
+      tasks: laidOut.filter((item) => item.timelineKind === "task"),
+    };
+  }, [timed, scheduledTasks, gesture]);
+  const events = timelineLayout.events;
+  const plannedTasks = timelineLayout.tasks;
 
   const motivation = useMemo(() => (motivationLedger
     ? getMotivationSummary(motivationLedger, {
@@ -1232,12 +1300,12 @@ export default function Planner() {
     if (!ready || !streamRef.current) return;
     const first = timed.slice().sort((a, b) => a.start - b.start)[0];
     const anchor = isToday ? nowMin : first ? first.start : 480;
-    streamRef.current.scrollTop = Math.max(0, (anchor / 1440) * DAY_H - 140);
+    streamRef.current.scrollTop = Math.max(0, (anchor / 1440) * dayHeight - 140);
     /* `zoom` belongs here: changing it rebuilds the surface above the day, which
        remounts the stream with a scrollTop of zero. Without it, zooming out to the
        month and back left the day sitting at midnight — eight hours above anything
        the day actually contains — and the only clue was an empty grid. */
-  }, [ready, dateKey, turn, zoom]);
+  }, [ready, dateKey, turn, zoom, dayHeight]);
 
   const mutate = (fn) => setDb((d) => (d ? fn({ ...d }) : d));
 
@@ -2318,7 +2386,7 @@ export default function Planner() {
     const el = streamRef.current;
     if (!el) return 0;
     const r = el.getBoundingClientRect();
-    return ((clientY - r.top + el.scrollTop) / DAY_H) * 1440;
+    return ((clientY - r.top + el.scrollTop) / dayHeight) * 1440;
   };
   const hitAttr = (x, y, attr) => {
     try {
@@ -2718,7 +2786,6 @@ export default function Planner() {
   dateKeyRef.current = dateKey;
   /* The actions that have a time on the day, mirrored for the native touch
      listeners — same reason as `eventsRef`: they must never read a stale list. */
-  const plannedTasks = dayTasks.filter((t) => t.planned.startMinute != null);
   plannedRef.current = plannedTasks;
 
   const inspectItem = inspect && (inspect.kind === "event"
@@ -3013,6 +3080,7 @@ export default function Planner() {
         onToday={() => { jumpTo(todayKey); setMonthCursor(new Date()); closeNavigation(); }}
       />
       <div data-test="app-surface" className={`nb-root nb-app-surface ${navOpen ? "nb-app-surface-open" : ""} flex flex-col`}
+        onTransitionEnd={finishNavigationOnSurfaceTransition}
         onPointerDown={(event) => {
           if (!navOpen || event.target.closest("[data-test='nav-toggle'], [data-test='mobile-calendar-return']")) return;
           event.preventDefault();
@@ -3070,7 +3138,7 @@ export default function Planner() {
         .nb-navigation[aria-hidden="true"]{visibility:hidden;pointer-events:none}
         .nb-nav-brand,.nb-nav-item,.nb-nav-membership{opacity:0;transform:translate3d(-10px,0,0);transition:opacity var(--nav-content-duration) var(--nav-ease),transform var(--nav-content-duration) var(--nav-ease)}
         .nb-nav-shell[data-nav-state="open"] .nb-nav-brand,.nb-nav-shell[data-nav-state="open"] .nb-nav-item,.nb-nav-shell[data-nav-state="open"] .nb-nav-membership{opacity:1;transform:translate3d(0,0,0);transition-delay:calc(var(--nav-index, 0) * var(--nav-item-stagger))}
-        .nb-nav-shell[data-nav-state="closing"] .nb-nav-brand,.nb-nav-shell[data-nav-state="closing"] .nb-nav-item,.nb-nav-shell[data-nav-state="closing"] .nb-nav-membership{transition-delay:calc((7 - var(--nav-index, 0)) * 18ms)}
+        .nb-nav-shell[data-nav-state="closing"] .nb-nav-brand,.nb-nav-shell[data-nav-state="closing"] .nb-nav-item,.nb-nav-shell[data-nav-state="closing"] .nb-nav-membership{transition-delay:0ms}
         .nb-nav-item{font-family:${MONO};font-size:15px;letter-spacing:.1em;text-align:left;padding:13px 12px;border-radius:10px;color:#c8c7c0}
         .nb-nav-item:hover,.nb-nav-item:focus-visible{background:#2a2b2f;color:#fff;outline:none}
         .nb-nav-membership{margin-top:auto;padding:15px 12px;border:1px solid #37383d;border-radius:12px;color:#aaa9a2}
@@ -3080,14 +3148,15 @@ export default function Planner() {
         .nb-mobile-calendar-return{display:none}
         @media(max-width:639px){
           .nb-nav-shell{--nav-width:min(78vw,320px);--nav-gap:11px;--nav-page-scale:.94;--nav-page-radius:16px}
-          /* The navigation itself keeps its desktop sequence. Only the calendar
-             changes material: it slides right and narrows continuously into the
-             return rail, then reverses the exact same geometry when tapped. */
-          .nb-app-surface{left:0;right:auto;width:100%}
-          .nb-app-surface-open{top:14px;right:auto;bottom:14px;left:calc(100% - 49px);width:40px;transform:none;border-radius:16px}
+          /* Keep the calendar at its real width while it becomes the return rail.
+             Animating width from the viewport to 40px made its complete layout
+             reflow on every frame; clip-path reveals a narrowing left slice and
+             transform carries that stable slice to the right edge instead. */
+          .nb-app-surface{inset:0 auto auto 0;width:100%;height:100%;clip-path:inset(0 0 0 0 round 0);transition:transform var(--nav-page-duration) var(--nav-ease),clip-path var(--nav-page-duration) var(--nav-ease),box-shadow var(--nav-page-duration) var(--nav-ease)}
+          .nb-app-surface-open{inset:0 auto auto 0;width:100%;height:100%;transform:translate3d(calc(100% - 49px),0,0);clip-path:inset(14px calc(100% - 44px) 14px 0 round 16px);border-radius:16px;box-shadow:none}
           .nb-app-surface>*:not(.nb-mobile-calendar-return){opacity:1;transition:opacity 150ms ease}
           .nb-app-surface-open>*:not(.nb-mobile-calendar-return){opacity:0;pointer-events:none}
-          .nb-mobile-calendar-return{display:flex;position:absolute;z-index:40;inset:0;align-items:center;justify-content:center;border:0;background:${T.accent};color:${T.on};font-family:${MONO};font-size:10px;font-weight:700;letter-spacing:.12em;writing-mode:vertical-rl;transform:rotate(180deg);opacity:0;pointer-events:none;transition:opacity 160ms ease}
+          .nb-mobile-calendar-return{display:flex;position:absolute;z-index:40;inset:14px auto 14px 0;width:44px;align-items:center;justify-content:center;border:0;border-radius:16px;background:${T.accent};color:${T.on};font-family:${MONO};font-size:10px;font-weight:700;letter-spacing:.12em;writing-mode:vertical-rl;transform:rotate(180deg);opacity:0;pointer-events:none;transition:opacity 160ms ease}
           .nb-app-surface-open .nb-mobile-calendar-return{opacity:1;pointer-events:auto;transition-delay:120ms}
           .nb-navigation{padding:18px 12px}
           .nb-hud{padding:.45rem .65rem;gap:.35rem}
@@ -3154,8 +3223,10 @@ export default function Planner() {
            whole design and it is most of what "tactile" means — imperceptible
            once, and the difference between an interface and an object over a
            day of use. */
-        .nb-tap{transition:transform var(--press-out) var(--spring),opacity 120ms ease}
-        .nb-tap:active{transform:scale(0.97);transition-duration:var(--press-in)}
+        /* Press motion is owned once, by the standalone scale rule below.
+           The previous nb-tap transform multiplied with that scale and gave
+           every button two different release curves. */
+        .nb-tap{transition:opacity 120ms ease}
         /* A 13px label with a little padding measures about 62 x 25, and the
            floor for a finger is 44 x 44. Fifteen controls had been under it for
            the life of the project and nothing had ever measured them.
@@ -3180,11 +3251,6 @@ export default function Planner() {
             width:max(100%,44px);height:max(100%,44px);
             transform:translate(-50%,-50%);
           }
-        }
-        .nb-press{transition:transform var(--press-out) var(--spring)}
-        .nb-press:active{transform:scale(0.97);transition-duration:var(--press-in)}
-        @media(prefers-reduced-motion:reduce){
-          .nb-tap:active,.nb-press:active{transform:none}
         }
         /* A stamp hides its native control, so the focus it takes has to be drawn
            on the wrapper instead — otherwise a keyboard user sees nothing. */
@@ -3319,13 +3385,20 @@ export default function Planner() {
            positioned, dragged and paged with transforms, and animating one
            transform against another is exactly what made the page swipe judder —
            \`scale\` composites on its own and cannot fight them. */
-        button,[role="button"],summary,label[for],[data-event-id],[data-task-chip]{
+        button,[role="button"],a[href],summary,label[for],[data-event-id],[data-task-chip]{
           -webkit-tap-highlight-color:transparent;touch-action:manipulation;
           transition:scale 240ms cubic-bezier(.2,1.5,.35,1),background-color 200ms ease,color 200ms ease,box-shadow 220ms ease,opacity 160ms ease;
         }
+        /* A collision changes every card in its cluster, so lane geometry settles
+           as one connected movement. Left and width keep positioning out of
+           transform, leaving the standalone press scale and drag transform free
+           to do their own jobs. */
+        .nb-timeline-lane{
+          transition:left 280ms cubic-bezier(.22,.61,.36,1),width 280ms cubic-bezier(.22,.61,.36,1),scale 240ms cubic-bezier(.2,1.5,.35,1),opacity 160ms ease;
+        }
         /* Down is quick and linear, release overshoots and settles — the difference
            between the two is what reads as a physical thing rather than a fade. */
-        button:active,[role="button"]:active,summary:active,[data-event-id]:active,[data-task-chip]:active{
+        button:active,[role="button"]:active,a[href]:active,summary:active,[data-event-id]:active,[data-task-chip]:active{
           scale:.965;transition:scale 90ms cubic-bezier(.4,0,.6,1);
         }
         button:disabled,button[disabled]{scale:1!important}
@@ -3338,9 +3411,9 @@ export default function Planner() {
 
         @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}
           .nb-app-surface,.nb-nav-brand,.nb-nav-item,.nb-nav-membership{transition-duration:1ms!important}
-          button:active,[role="button"]:active,[data-event-id]:active,[data-task-chip]:active{scale:1!important}}
+          button:active,[role="button"]:active,a[href]:active,[data-event-id]:active,[data-task-chip]:active{scale:1!important}}
         ${preferences?.display.reducedMotion ? `*{animation:none!important;transition:none!important}
-          button:active,[role="button"]:active,[data-event-id]:active,[data-task-chip]:active{scale:1!important}` : ""}
+          button:active,[role="button"]:active,a[href]:active,[data-event-id]:active,[data-task-chip]:active{scale:1!important}` : ""}
       `}</style>
 
       {/* ══ HUD ══ */}
@@ -3675,10 +3748,10 @@ export default function Planner() {
             )}
 
             <div ref={attachStream} data-test="day-stream" className="nb-s nb-stream overflow-y-auto relative" style={{ background: T.card, borderTopLeftRadius: allDay.length || dayTasks.some((task) => task.planned.startMinute == null) ? 0 : 16, userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}>
-              <div className="relative" style={{ height: DAY_H }}>
+              <div className="relative" style={{ height: dayHeight }}>
                 {Array.from({ length: 24 }).map((_, h) => (
                   <div key={h} className="absolute left-0 right-0 flex items-start pointer-events-none"
-                    style={{ top: h * HOUR_H, height: HOUR_H }}>
+                    style={{ top: h * dayHourHeight, height: dayHourHeight }}>
                     {/* The label owns its gutter: rules and banding start after it, so
                         the times read on clean card instead of sitting across the
                         grid lines they annotate. */}
@@ -3690,7 +3763,7 @@ export default function Planner() {
                     <span style={{
                       fontFamily: MONO, color: T.dimText,
                       transform: h === 0 ? "none" : "translateY(-50%)",
-                      opacity: isToday && liveEvent && Math.abs(nowMin - h * 60) < NOW_LABEL_CLEARANCE_MIN ? 0 : 1,
+                      opacity: isToday && liveEvent && Math.abs(nowMin - h * 60) < nowLabelClearanceMin ? 0 : 1,
                       transition: "opacity 200ms ease",
                     }}
                       className="w-14 shrink-0 pr-3 text-right nb-data">{fmtHour(h, clock)}</span>
@@ -3712,7 +3785,7 @@ export default function Planner() {
                   onContextMenu={(e) => e.preventDefault()}
                   onPointerDown={canvasDown} onPointerUp={canvasUp} />
 
-                <div className="absolute left-16 right-2 top-0" style={{ height: DAY_H, pointerEvents: "none" }}>
+                <div className="absolute left-16 right-2 top-0" style={{ height: dayHeight, pointerEvents: "none" }}>
                   {isToday && (
                     <>
                       {/* The rule runs up to the live card and stops there; inside the
@@ -3722,7 +3795,7 @@ export default function Planner() {
                       <div className="absolute pointer-events-none" style={{
                         left: 0,
                         width: liveEvent ? `calc(${laneL}% + 2px)` : "100%",
-                        top: mounted ? (nowMin / 1440) * DAY_H : 0,
+                        top: mounted ? (nowMin / 1440) * dayHeight : 0,
                         height: 2,
                         background: T.accent,
                         zIndex: 6,
@@ -3745,7 +3818,7 @@ export default function Planner() {
                                not just overlap part of it and leave a stray digit. */
                             ? { right: "100%", marginRight: 4, whiteSpace: "nowrap", minWidth: 54, textAlign: "right" }
                             : { right: 0 }),
-                          top: mounted ? (nowMin / 1440) * DAY_H - 9 : -9,
+                          top: mounted ? (nowMin / 1440) * dayHeight - 9 : -9,
                           zIndex: 7,
                           transition: "top 600ms cubic-bezier(.2,.8,.25,1)",
                         }}>
@@ -3758,15 +3831,15 @@ export default function Planner() {
                   )}
 
                   {events.map((e) => {
-                    const top = (e.start / 1440) * DAY_H;
-                    const h = Math.max(22, (e.dur / 1440) * DAY_H) - 3;
+                    const top = (e.start / 1440) * dayHeight;
+                    const h = Math.max(22, (e.dur / 1440) * dayHeight) - 3;
                     const live = isToday && nowMin >= e.start && nowMin < e.start + e.dur;
                     const past = isToday && nowMin >= e.start + e.dur;
                     const pct = live ? ((nowMin - e.start) / e.dur) * 100 : 0;
                     const held = gesture && gesture.id === e.id
                       && (gesture.mode === "move" || gesture.mode === "resize-end" || gesture.mode === "resize-start");
                     return (
-                      <div key={e.id} data-event-id={e.id} className="absolute" style={{ top: top + 2, height: h, left: `${(e.lane / e.cols) * 100}%`, width: `calc(${100 / e.cols}% - 6px)`, zIndex: held ? 20 : 1, opacity: held && gesture.overDay ? 0.35 : 1, pointerEvents: "auto" }}>
+                      <div key={e.id} data-event-id={e.id} className="nb-timeline-lane absolute" style={{ top: top + 2, height: h, left: `${(e.lane / e.cols) * 100}%`, width: `calc(${100 / e.cols}% - 6px)`, zIndex: held ? 20 : 1, opacity: held && gesture.overDay ? 0.35 : 1, pointerEvents: "auto" }}>
                         <div onPointerDown={(ev) => eventDown(ev, e)} onPointerUp={(ev) => eventUp(ev, e)} onContextMenu={(ev) => ev.preventDefault()}
                           className="relative w-full h-full overflow-hidden"
                           style={{
@@ -3857,7 +3930,7 @@ export default function Planner() {
 
                   {gesture && gesture.mode === "draft" && (
                     <div className="absolute left-0 right-2 pointer-events-none flex items-center justify-center"
-                      style={{ top: (gesture.start / 1440) * DAY_H, height: (gesture.dur / 1440) * DAY_H, borderRadius: CARD_R, boxShadow: `inset 0 0 0 1.5px ${T.accent}`, background: `${T.accent}14` }}>
+                      style={{ top: (gesture.start / 1440) * dayHeight, height: (gesture.dur / 1440) * dayHeight, borderRadius: CARD_R, boxShadow: `inset 0 0 0 1.5px ${T.accent}`, background: `${T.accent}14` }}>
                       <span style={{ fontFamily: MONO, color: T.accentText }} className="nb-data">
                         {tm(gesture.start)} – {tm(gesture.start + gesture.dur)}
                       </span>
@@ -3872,10 +3945,10 @@ export default function Planner() {
                     const sizing = gesture && gesture.mode === "task-resize" && gesture.id === t.id;
                     const estimate = sizing ? gesture.dur : t.planned.estimateMinutes;
                     const block = isResizable(t, "task");
-                    const h = block ? Math.max(28, (estimate / 1440) * DAY_H - 3) : 28;
+                    const h = block ? Math.max(28, (estimate / 1440) * dayHeight - 3) : 28;
                     return (
-                      <button key={t.id} data-task-chip={t.id} onClick={() => { if (clickFollowsGesture()) return; beep("click"); setInspect({ kind: "task", id: t.id }); }} className="nb-tap absolute left-0 right-2 text-left overflow-hidden"
-                        style={{ display: "flex", flexDirection: "column", justifyContent: "flex-start", top: (t.planned.startMinute / 1440) * DAY_H + 2, height: h, borderRadius: CARD_R, border: `1px dashed ${sizing ? T.accent : T.faint}`, background: block ? `${T.accent}0D` : "transparent", opacity: t.status === "completed" ? 0.4 : 1, zIndex: sizing ? 20 : 5, pointerEvents: "auto" }}>
+                      <button key={t.id} data-task-chip={t.id} onClick={() => { if (clickFollowsGesture()) return; beep("click"); setInspect({ kind: "task", id: t.id }); }} className="nb-tap nb-timeline-lane absolute text-left overflow-hidden"
+                        style={{ display: "flex", flexDirection: "column", justifyContent: "flex-start", top: (t.planned.startMinute / 1440) * dayHeight + 2, height: h, left: `${(t.lane / t.cols) * 100}%`, width: `calc(${100 / t.cols}% - 6px)`, borderRadius: CARD_R, border: `1px dashed ${sizing ? T.accent : T.faint}`, background: block ? `${T.accent}0D` : "transparent", opacity: t.status === "completed" ? 0.4 : 1, zIndex: sizing ? 20 : 5, pointerEvents: "auto" }}>
                         <span className="flex items-center gap-2 px-2.5 py-1">
                           <span className="w-2 h-2 shrink-0 rounded-full" style={{ background: t.status === "completed" ? T.accent : "transparent", boxShadow: `inset 0 0 0 1.5px ${T.accent}` }} />
                           <span className="nb-lead truncate" style={{ textDecoration: t.status === "completed" ? "line-through" : "none" }}>{t.title}</span>
@@ -3899,7 +3972,7 @@ export default function Planner() {
                   })}
 
                   {dropMin != null && (
-                    <div className="absolute left-0 right-2 pointer-events-none" style={{ top: (dropMin / 1440) * DAY_H, zIndex: 30 }}>
+                    <div className="absolute left-0 right-2 pointer-events-none" style={{ top: (dropMin / 1440) * dayHeight, zIndex: 30 }}>
                       <div style={{ background: T.accent, height: 2 }} />
                       <span style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="absolute right-0 -top-2 px-1 nb-data">{tm(dropMin)}</span>
                     </div>

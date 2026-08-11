@@ -59,6 +59,66 @@ test.describe("the floating navigation shell", () => {
     await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
   });
 
+  test("mobile morphs the calendar without reflowing its layout", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 601 });
+    await openPlanner(page);
+
+    const shell = page.getByTestId("nav-shell");
+    const surface = page.getByTestId("app-surface");
+    const before = await surface.boundingBox();
+    await page.getByTestId("nav-toggle").click();
+    await expect(shell).toHaveAttribute("data-nav-state", "open");
+    const after = await surface.boundingBox();
+
+    expect(before).not.toBeNull();
+    expect(after).not.toBeNull();
+    /* A visual rail is allowed to reveal only its 44px touch target, but the calendar itself must
+       keep its full layout width. Animating width from 390px to 40px makes every
+       grid, card and label reflow on every frame — the glitch this guards. */
+    expect(Math.round(after.width)).toBe(Math.round(before.width));
+    await expect(surface).not.toHaveCSS("clip-path", "none");
+  });
+
+  test("the navigation trigger uses one press scale channel", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 601 });
+    await openPlanner(page);
+
+    const trigger = page.getByTestId("nav-toggle");
+    const box = await trigger.boundingBox();
+    expect(box).not.toBeNull();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    const pressed = await trigger.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return { transform: style.transform, scale: style.scale };
+    });
+    await page.mouse.up();
+
+    /* The global press system owns `scale`. The older nb-tap transform used to
+       multiply it by another .97, producing a 6% double-shrink and two release
+       curves every time the side menu opened. */
+    expect(pressed.scale).not.toBe("none");
+    expect(pressed.transform).toBe("none");
+  });
+
+  test("closing completes from the surface transition", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 601 });
+    await openPlanner(page);
+
+    const shell = page.getByTestId("nav-shell");
+    const surface = page.getByTestId("app-surface");
+    await page.getByTestId("nav-toggle").click();
+    await expect(shell).toHaveAttribute("data-nav-state", "open");
+    await page.getByTestId("mobile-calendar-return").click();
+    await expect(shell).toHaveAttribute("data-nav-state", "closing");
+
+    /* CSS owns the actual duration. The old 320ms JavaScript timer ended a
+       340ms surface transition early and could also hide reverse-staggered nav
+       items mid-flight. Completing from transitionend keeps those clocks one. */
+    await surface.dispatchEvent("transitionend", { propertyName: "transform" });
+    expect(await shell.getAttribute("data-nav-state")).toBe("closed");
+  });
+
   test("reduced motion retains navigation semantics without staged movement", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await openPlanner(page);

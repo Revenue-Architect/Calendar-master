@@ -31,6 +31,74 @@ function liveAt(today, hour) {
 
 const hourLabel = (page, text) => page.getByText(text, { exact: true }).first();
 
+test.describe("short mobile timeline density", () => {
+  test.use({ viewport: { width: 489, height: 601 }, hasTouch: true, isMobile: true });
+
+  test("a three-hour event can fit wholly inside the timeline viewport", async ({ page }) => {
+    await openPlanner(page, { keepSample: true });
+    await page.getByRole("button", { name: "Next day" }).click();
+
+    const stream = page.getByTestId("day-stream");
+    const workshop = page.locator("[data-event-id]").filter({ hasText: "Roadmap workshop" });
+    await expect(workshop).toHaveCount(1);
+    const [streamBox, workshopBox] = await Promise.all([stream.boundingBox(), workshop.boundingBox()]);
+
+    expect(streamBox).not.toBeNull();
+    expect(workshopBox).not.toBeNull();
+    /* If the card itself is taller than its scrolling viewport, no scroll
+       position can show the complete block. That is the literal clipping seen
+       in the short in-app browser. */
+    expect(workshopBox.height).toBeLessThanOrEqual(streamBox.height - 4);
+  });
+
+  test("events and actions at the same time share lanes without covering each other", async ({ page }) => {
+    const today = await atTime(page, 9, 30);
+    const blank = createBlankPlannerState({});
+    const first = createEvent(blank, {
+      calendarId: "calendar-default", title: "Design review", category: "WORK",
+      timing: {
+        kind: "timed", timeZoneMode: "floating",
+        startLocal: `${today}T09:00`, endLocal: `${today}T10:00`,
+      },
+    }, { id: "evt-design" }).state;
+    const second = createEvent(first, {
+      calendarId: "calendar-default", title: "Partner call", category: "WORK",
+      timing: {
+        kind: "timed", timeZoneMode: "floating",
+        startLocal: `${today}T09:00`, endLocal: `${today}T10:00`,
+      },
+    }, { id: "evt-partner" }).state;
+    const scheduled = createTask(second.tasks, {
+      id: "task-brief", title: "Finish brief",
+      planned: { date: today, startMinute: 9 * 60, estimateMinutes: 60 },
+    });
+    await seedPlanner(page, { ...second, tasks: scheduled.tasks });
+
+    const cards = [
+      page.locator('[data-event-id="evt-design"]'),
+      page.locator('[data-event-id="evt-partner"]'),
+      page.locator('[data-task-chip="task-brief"]'),
+    ];
+    const boxes = await Promise.all(cards.map(async (card) => {
+      await expect(card).toBeVisible();
+      return card.boundingBox();
+    }));
+
+    for (let left = 0; left < boxes.length; left += 1) {
+      for (let right = left + 1; right < boxes.length; right += 1) {
+        const a = boxes[left];
+        const b = boxes[right];
+        const horizontalOverlap = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+        expect(horizontalOverlap, `cards ${left} and ${right} cover each other`).toBeLessThanOrEqual(1);
+      }
+    }
+
+    const transitionProperties = await cards[0].evaluate((node) => getComputedStyle(node).transitionProperty);
+    expect(transitionProperties).toContain("left");
+    expect(transitionProperties).toContain("width");
+  });
+});
+
 test.describe("the now marker and the hour it lands on", () => {
   test("the hour label steps aside when the marker is on top of it", async ({ page }) => {
     const today = await atTime(page, 14, 56); /* four minutes short of 3 PM */
