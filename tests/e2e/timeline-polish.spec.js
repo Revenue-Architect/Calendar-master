@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { seedPlanner } from "./helpers.js";
+import { openPlanner, seedPlanner } from "./helpers.js";
 import { createBlankPlannerState } from "../../src/platform/persistence/plannerStateImport.js";
 import { createEvent } from "../../src/domains/calendar/index.js";
 import { createTask, updateTask } from "../../src/domains/tasks/index.js";
@@ -146,5 +146,30 @@ test.describe("checklist progress", () => {
   test("an action with no steps shows no bar at all", async ({ page }) => {
     await seedPlanner(page, withSteps(0, 0));
     await expect(page.getByRole("progressbar")).toHaveCount(0);
+  });
+});
+
+test.describe("cards sit where their time is", () => {
+  test("a week card puts its title at the top of the block, not the middle", async ({ page }) => {
+    /* A button centres its contents vertically — the browser's own layout for
+       buttons, which does not care that this one is a two-hour block. The title of
+       a 9-to-11 event sat 55px down the card, level with 10 o'clock. */
+    await openPlanner(page, { keepSample: true });
+    await page.keyboard.press("[");
+    await expect(page.getByTestId("week-grid")).toBeVisible();
+
+    const offsets = await page.evaluate(() => [...document.querySelectorAll('[data-test="week-event"]')]
+      .map((card) => {
+        const title = card.querySelector("span");
+        if (!title) return null;
+        const cr = card.getBoundingClientRect();
+        return { height: cr.height, offset: title.getBoundingClientRect().top - cr.top };
+      })
+      .filter((row) => row && row.height > 40));
+
+    expect(offsets.length, "the sample week should have some cards tall enough to test").toBeGreaterThan(0);
+    for (const { height, offset } of offsets) {
+      expect(offset, `a ${Math.round(height)}px card put its title ${Math.round(offset)}px down`).toBeLessThan(8);
+    }
   });
 });

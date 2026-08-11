@@ -472,16 +472,25 @@ function useSynth(enabled) {
       o.connect(g); g.connect(c.destination);
       o.start(t); o.stop(t + d + 0.03);
     };
-    const paper = (secs, cut, gain) => {
+    /* A page turning is two brushes and a sweep: the sheet lifts, brightens as it
+       passes the fold, and dulls as it lands. A flat noise burst through a fixed
+       bandpass — which is what this was — is a hiss; the moving filter is the
+       whole difference between "paper" and "static". */
+    const paper = (secs, gain) => {
       const len = Math.max(1, Math.floor(c.sampleRate * secs));
       const buf = c.createBuffer(1, len, c.sampleRate);
       const d = buf.getChannelData(0);
       for (let i = 0; i < len; i++) {
         const t = i / len;
-        d[i] = (Math.random() * 2 - 1) * Math.pow(1 - t, 2.1) * (0.55 + 0.45 * Math.sin(t * 34));
+        const lift = Math.pow(1 - t, 1.6);
+        const land = 0.8 * Math.exp(-Math.pow((t - 0.55) / 0.11, 2));
+        d[i] = (Math.random() * 2 - 1) * (lift + land) * 0.6;
       }
       const src = c.createBufferSource(); src.buffer = buf;
-      const bp = c.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = cut; bp.Q.value = 0.7;
+      const bp = c.createBiquadFilter(); bp.type = "bandpass"; bp.Q.value = 0.8;
+      bp.frequency.setValueAtTime(1500, t0);
+      bp.frequency.exponentialRampToValueAtTime(4200, t0 + secs * 0.45);
+      bp.frequency.exponentialRampToValueAtTime(950, t0 + secs);
       const g = c.createGain(); g.gain.value = gain;
       src.connect(bp); bp.connect(g); g.connect(c.destination);
       src.start(t0);
@@ -500,7 +509,7 @@ function useSynth(enabled) {
         break;
       case "levelup": [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => tone("triangle", f, f * 1.02, 0.14, 0.16, i * 0.07)); break;
       case "alert": [880, 1174.66].forEach((f, i) => tone("sine", f, f, 0.16, 0.16, i * 0.18)); break;
-      case "page": paper(0.26, 2300, 0.26); tone("sine", 180, 90, 0.06, 0.05); break;
+      case "page": paper(0.22, 0.3); tone("sine", 150, 78, 0.05, 0.045); break;
       case "schedule": tone("square", 660, 880, 0.03, 0.07); break;
       case "defer": tone("sine", 420, 220, 0.09, 0.11); break;
       case "delete": tone("sawtooth", 240, 50, 0.06, 0.14); break;
@@ -1037,7 +1046,11 @@ export default function Planner() {
     const first = timed.slice().sort((a, b) => a.start - b.start)[0];
     const anchor = isToday ? nowMin : first ? first.start : 480;
     streamRef.current.scrollTop = Math.max(0, (anchor / 1440) * DAY_H - 140);
-  }, [ready, dateKey, turn]);
+    /* `zoom` belongs here: changing it rebuilds the surface above the day, which
+       remounts the stream with a scrollTop of zero. Without it, zooming out to the
+       month and back left the day sitting at midnight — eight hours above anything
+       the day actually contains — and the only clue was an empty grid. */
+  }, [ready, dateKey, turn, zoom]);
 
   const mutate = (fn) => setDb((d) => (d ? fn({ ...d }) : d));
 
@@ -2737,10 +2750,18 @@ export default function Planner() {
         .nb-row:hover{background:${T.faint}55}
         .nb-cell{transition:opacity 420ms cubic-bezier(.2,.7,.3,1),transform 420ms cubic-bezier(.2,.7,.3,1)}
         .nb-page{transform-origin:left center;backface-visibility:hidden}
-        .nb-turn-next{animation:turnnext 380ms cubic-bezier(.22,.75,.3,1)}
-        @keyframes turnnext{0%{opacity:.15;transform:perspective(1400px) rotateY(-19deg) translateX(11%) scale(.97)}60%{opacity:1}100%{opacity:1;transform:none}}
-        .nb-turn-prev{animation:turnprev 380ms cubic-bezier(.22,.75,.3,1);transform-origin:right center}
-        @keyframes turnprev{0%{opacity:.15;transform:perspective(1400px) rotateY(19deg) translateX(-11%) scale(.97)}60%{opacity:1}100%{opacity:1;transform:none}}
+        /* A day arrives from the side it came from, and it arrives quickly.
+           This used to be a rotateY through a 1400px perspective — a page-flip
+           mime that read as cheap for the same reason stock 3D transitions
+           always do: the day is not a physical sheet, and pretending it is
+           draws attention to the effect instead of to the day. A fast slide
+           says the same thing (you moved, this way) in a quarter of a second
+           and then gets out of the way. The paper sound carries the metaphor;
+           the motion just needs to be direction and speed. */
+        .nb-turn-next{animation:turnnext 240ms cubic-bezier(.22,.9,.28,1)}
+        @keyframes turnnext{0%{opacity:.4;transform:translate3d(6%,0,0)}55%{opacity:1}100%{opacity:1;transform:translate3d(0,0,0)}}
+        .nb-turn-prev{animation:turnprev 240ms cubic-bezier(.22,.9,.28,1)}
+        @keyframes turnprev{0%{opacity:.4;transform:translate3d(-6%,0,0)}55%{opacity:1}100%{opacity:1;transform:translate3d(0,0,0)}}
         .nb-up{animation:nbup 200ms cubic-bezier(.2,.9,.3,1.1)}
         @keyframes nbup{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
         /* Every menu and sheet is the same material as the control that opened it.
@@ -2922,8 +2943,16 @@ export default function Planner() {
                 const sel = k === dateKey;
                 /* The tint is the heat — how much of the working day is booked —
                    and the bar underneath is the same fact as a readable measure.
-                   An empty track is the free/busy signal for a clear day. */
-                const heat = Math.min(0.8, bf * 0.9 + (n ? 0.1 : 0));
+                   An empty track is the free/busy signal for a clear day.
+
+                   Straight proportion, and nothing added for merely having
+                   something on it. A flat bonus for "this day is not empty" plus a
+                   scale that topped out at four booked hours meant every day in the
+                   month landed between 0.10 and 0.30 — a single olive wash, in
+                   which a day holding one recurring ritual looked exactly as full
+                   as a day with back-to-back meetings. The corner dot already says
+                   there is something here; the tint should only say how much. */
+                const heat = Math.min(0.72, bf * 0.72);
                 return (
                   <button key={k} data-day={k}
                     onClick={() => {
@@ -3312,7 +3341,7 @@ export default function Planner() {
                     const h = block ? Math.max(28, (estimate / 1440) * DAY_H - 3) : 28;
                     return (
                       <button key={t.id} data-task-chip={t.id} onClick={() => { beep("click"); setInspect({ kind: "task", id: t.id }); }} className="nb-tap absolute left-0 right-2 text-left overflow-hidden"
-                        style={{ top: (t.planned.startMinute / 1440) * DAY_H + 2, height: h, borderRadius: CARD_R, border: `1px dashed ${sizing ? T.accent : T.faint}`, background: block ? `${T.accent}0D` : "transparent", opacity: t.status === "completed" ? 0.4 : 1, zIndex: sizing ? 20 : 5, pointerEvents: "auto" }}>
+                        style={{ display: "flex", flexDirection: "column", justifyContent: "flex-start", top: (t.planned.startMinute / 1440) * DAY_H + 2, height: h, borderRadius: CARD_R, border: `1px dashed ${sizing ? T.accent : T.faint}`, background: block ? `${T.accent}0D` : "transparent", opacity: t.status === "completed" ? 0.4 : 1, zIndex: sizing ? 20 : 5, pointerEvents: "auto" }}>
                         <span className="flex items-center gap-2 px-2.5 py-1">
                           <span className="w-2 h-2 shrink-0 rounded-full" style={{ background: t.status === "completed" ? T.accent : "transparent", boxShadow: `inset 0 0 0 1.5px ${T.accent}` }} />
                           <span className="text-xs font-semibold truncate" style={{ textDecoration: t.status === "completed" ? "line-through" : "none" }}>{t.title}</span>
@@ -3410,9 +3439,12 @@ export default function Planner() {
           an empty notebook, never twice for the same content, and "not now"
           holds until the notebook has actually moved on. It yields to the
           storage warning, which is the more urgent problem. */}
+      {/* Centred, it straddled both columns and covered a row of each. Docked to
+          one corner on a wide screen it sits over the end of one list instead of
+          the middle of the layout, and stops being the widest thing on the page. */}
       {askForBackup && !storageBad && !firstRun && (
-        <div className="fixed inset-x-0 bottom-20 lg:bottom-6 z-40 flex justify-center px-3 pointer-events-none">
-          <div data-test="backup-nudge" className="nb-up flex items-center gap-3 px-3 py-2 w-full sm:w-auto pointer-events-auto"
+        <div className="fixed inset-x-0 bottom-20 lg:bottom-6 z-40 flex justify-center lg:justify-end px-3 lg:pr-5 pointer-events-none">
+          <div data-test="backup-nudge" className="nb-up flex items-center gap-3 px-3 py-2 w-full sm:w-auto sm:max-w-lg pointer-events-auto"
             style={{ background: surface, color: T.text, borderRadius: CARD_R, boxShadow: `inset 0 0 0 1px ${T.line}` }}>
             <span style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest shrink-0">BACK UP</span>
             <span className="text-sm truncate">This notebook only exists on this device.</span>
@@ -4863,6 +4895,13 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
                         onClick={(ev) => ev.stopPropagation()}
                         className="absolute text-left overflow-hidden"
                         style={{
+                          /* A button centres its contents vertically — that is the
+                             browser's own layout for buttons, and it does not care
+                             that this one happens to be a two-hour block. The title
+                             of a 9-to-11 event was floating 55px down the card,
+                             nowhere near the hour it starts at, while the identical
+                             card on the day timeline (a div) had it at the top. */
+                          display: "flex", flexDirection: "column", justifyContent: "flex-start",
                           top: top + 1, height: h,
                           left: `calc(${(e.lane / e.cols) * 100}% + 2px)`, width: `calc(${100 / e.cols}% - 4px)`,
                           background: surface, borderRadius: CARD_R,
@@ -4877,13 +4916,18 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
                             ? `0 8px 24px rgba(0,0,0,0.32), inset 0 0 0 1.5px ${T.accent}`
                             : past ? `inset 0 0 0 1px ${T.line}` : "none",
                         }}>
-                        <span className="flex items-center gap-1 px-1.5 pt-0.5 min-w-0">
-                          <span className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: catColor(e.cat) }} />
+                        {/* Sharing the column halves the width, and at half a
+                            week-column there is only room for one thing to be
+                            legible. Keeping the dot and the time turned a title
+                            into "R…" over "10:…" — two truncations that say
+                            nothing where one whole word would have. */}
+                        <span className={`flex items-center gap-1 ${e.cols > 1 ? "px-1" : "px-1.5"} pt-0.5 min-w-0`}>
+                          {e.cols === 1 && <span className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: catColor(e.cat) }} />}
                           <span className="font-semibold leading-tight truncate" style={{ fontSize: 10 }}>{e.title}</span>
                         </span>
                         {/* A lifted card always states its time, however short it
                             is: the number is the whole feedback of the drag. */}
-                        {(h >= 30 || e.lifted) && <span className="block truncate tracking-widest" style={{ fontFamily: MONO, color: e.lifted ? T.accent : T.dim, fontSize: 9, paddingLeft: 15 }}>{fmtTime(e.start, clock)}</span>}
+                        {(e.lifted || (h >= 30 && e.cols === 1)) && <span className="block truncate tracking-widest" style={{ fontFamily: MONO, color: e.lifted ? T.accent : T.dim, fontSize: 9, paddingLeft: e.lifted && e.cols > 1 ? 4 : 15 }}>{fmtTime(e.start, clock)}</span>}
                       </button>
                     );
                   })}
