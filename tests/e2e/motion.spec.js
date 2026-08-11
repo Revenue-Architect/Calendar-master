@@ -177,3 +177,118 @@ test.describe("sheet exits", () => {
     expect(tooSmall === "desktop" || tooSmall === 0).toBe(true);
   });
 });
+
+test.describe("the shape a sheet grows from", () => {
+  /* The morph is computed from two rectangles: the button pressed, and the panel
+     it becomes. Getting the second one wrong is invisible in code review and very
+     visible on screen — the sheet starts from the wrong place and size and then
+     snaps to the right one on its last frame. These assert the numbers the CSS
+     actually animates between, because that is the only part a browser can check. */
+
+  const geometryOf = (sheet) => sheet.evaluate((node) => {
+    const style = getComputedStyle(node);
+    const rect = node.getBoundingClientRect();
+    return {
+      x: Number(style.getPropertyValue("--fluid-x").replace("px", "")),
+      y: Number(style.getPropertyValue("--fluid-y").replace("px", "")),
+      sx: Number(style.getPropertyValue("--fluid-sx")),
+      sy: Number(style.getPropertyValue("--fluid-sy")),
+      panel: { top: rect.top, left: rect.left, width: rect.width, height: rect.height },
+    };
+  });
+
+  test("the morph is measured from the panel, not from the panel mid-animation", async ({ page }) => {
+    await openPlanner(page);
+    const trigger = page.getByTestId("new-entry");
+    const box = await trigger.boundingBox();
+    await trigger.click();
+
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).toBeVisible();
+    /* Let the entry animation finish, so the rect read here is the settled panel
+       — the thing the geometry was supposed to have been measured against. */
+    await page.waitForTimeout(700);
+    const g = await geometryOf(sheet);
+
+    const panelCenterY = g.panel.top + g.panel.height / 2;
+    const triggerCenterY = box.y + box.height / 2;
+    /* A CSS animation's first keyframe is applied before any layout effect runs,
+       so a naive `getBoundingClientRect()` in that effect measures the *pill*.
+       `.nb-fluid`'s 0% is `translateY(26px) scale(.965)` about the bottom edge,
+       which put this number tens of pixels out. */
+    expect(
+      Math.abs(g.y - (triggerCenterY - panelCenterY)),
+      "the morph's travel does not match the distance between the button and the panel",
+    ).toBeLessThan(2);
+
+    const expectedSx = Math.max(0.12, Math.min(1, box.width / g.panel.width));
+    expect(
+      Math.abs(g.sx - expectedSx),
+      "the morph's scale does not match the button's width against the panel's",
+    ).toBeLessThan(0.005);
+  });
+
+  test("the same is true of an ordinary sheet, not just the notch", async ({ page }) => {
+    await openPlanner(page);
+    await page.keyboard.press("ControlOrMeta+k");
+    await page.getByTestId("palette-input").fill("Standup today 10am 30m");
+    await page.getByTestId("palette-quick-add").click();
+    await page.waitForTimeout(500);
+
+    const card = page.getByText("Standup", { exact: true }).first();
+    const box = await card.boundingBox();
+    await card.click();
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).toHaveAttribute("data-fluid-origin", "trigger");
+    await page.waitForTimeout(700);
+
+    const g = await geometryOf(sheet);
+    const panelCenterY = g.panel.top + g.panel.height / 2;
+    expect(Math.abs(g.y - ((box.y + box.height / 2) - panelCenterY))).toBeLessThan(2);
+  });
+
+  test("opening a sheet scrolls neither the page nor the sheet", async ({ page }) => {
+    /* The first focusable is focused on the opening frame, while the panel is
+       still a scaled-down pill. A focus that is allowed to scroll asks the browser
+       to bring a transformed, quarter-sized element into view inside a container
+       that is itself mid-animation — it scrolls somewhere that will not exist a
+       frame later, and the contents visibly jump. */
+    await openPlanner(page);
+    await page.getByTestId("new-entry").click();
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).toBeVisible();
+
+    for (const label of ["on the opening frame", "once settled"]) {
+      const scrolled = await page.evaluate(() => ({
+        page: window.scrollY,
+        sheet: document.querySelector('[data-test="sheet"]')?.scrollTop ?? 0,
+      }));
+      expect(scrolled.page, `the page scrolled ${label}`).toBe(0);
+      expect(scrolled.sheet, `the sheet scrolled ${label}`).toBe(0);
+      await page.waitForTimeout(700);
+    }
+    /* And the focus it was doing all that for still landed inside the sheet. */
+    expect(await sheet.evaluate((node) => node.contains(document.activeElement))).toBe(true);
+  });
+
+  test("the scrim blurs at a constant radius", async ({ page }) => {
+    /* Animating a blur radius throws away the compositor's cached backdrop every
+       frame and re-blurs the whole viewport under a sheet that is already
+       animating. The scrim fades its opacity instead, which fades the blur in
+       with it for one blur's worth of work. */
+    await openPlanner(page);
+    await page.getByTestId("new-entry").click();
+    const scrim = page.locator(".nb-scrim").first();
+    await expect(scrim).toBeVisible();
+
+    const radii = [];
+    for (let i = 0; i < 3; i += 1) {
+      radii.push(await scrim.evaluate((node) => {
+        const style = getComputedStyle(node);
+        return style.backdropFilter || style.webkitBackdropFilter;
+      }));
+      await page.waitForTimeout(120);
+    }
+    expect(new Set(radii).size, `the blur radius changed over time: ${radii.join(" → ")}`).toBe(1);
+  });
+});

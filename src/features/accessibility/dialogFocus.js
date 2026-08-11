@@ -23,11 +23,19 @@ export function getDialogFocusableElements(root) {
     && element.getAttribute("aria-hidden") !== "true");
 }
 
+/* `preventScroll` is not a nicety here.
+   This runs on the first frame of the sheet's entry animation, while the panel is
+   still scaled down to a pill somewhere near the button that opened it. Focusing
+   without it asks the browser to scroll a transformed, quarter-sized element into
+   view inside a scroll container that is itself mid-animation — so it scrolls to a
+   place that will not exist a frame later, and the sheet's contents visibly jump
+   as it opens. The sheet is already the only thing on screen; there is nothing to
+   scroll towards. */
 export function focusDialogOnOpen(root) {
   if (!root || root.contains(document.activeElement)) return false;
   const first = getDialogFocusableElements(root)[0];
   if (!first) return false;
-  first.focus();
+  first.focus({ preventScroll: true });
   return true;
 }
 
@@ -42,8 +50,10 @@ export function trapDialogTab(event, root) {
   return true;
 }
 
+/* Same reason on the way out: the opener was on screen when it was pressed, and
+   the closing sheet is still folding back over it. */
 export function restoreDialogFocus(element) {
   if (!element?.isConnected || typeof element.focus !== "function") return false;
-  element.focus();
+  element.focus({ preventScroll: true });
   return true;
 }

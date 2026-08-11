@@ -80,6 +80,12 @@ import { getDayTasksWithCarry } from "./features/planner/carryForward.js";
 import { planOverdueForToday, pullableOverdue } from "./features/planner/overduePull.js";
 import { AUTO_COMPLETE_DELAY_MS, autoCompleteStillValid, togglesLastOpenStep } from "./features/planner/autoComplete.js";
 import { recordBackupDismissed, recordBackupTaken, shouldPromptBackup } from "./features/planner/backupReminder.js";
+import {
+  gestureChangedAnything,
+  isResizable,
+  movedEnoughToCancelHold,
+  proposeGesture,
+} from "./features/planner/timelineGesture.js";
 import { loadBackupRecord, saveBackupRecord } from "./platform/persistence/backupStore.js";
 import { textToNoteBlocks } from "./features/notes/noteText.js";
 import { eventNoteLink, taskNoteLink } from "./features/notes/contextLink.js";
@@ -671,6 +677,8 @@ export default function Planner() {
   }, []);
 
   useEffect(() => { gestureRef.current = gesture; }, [gesture]);
+  /* The last lane layout computed while nothing was being dragged — see `events`. */
+  const laneFreeze = useRef(null);
   const startGesture = (g) => { gestureRef.current = g; setGesture(g); };
   const endGesture = () => { gestureRef.current = null; setGesture(null); };
 
@@ -979,8 +987,22 @@ export default function Planner() {
 
   const events = useMemo(() => {
     const g = gesture;
-    const list = timed.map((e) => (g && g.id === e.id && (g.mode === "move" || g.mode === "resize") ? { ...e, start: g.start, dur: g.dur } : e));
-    return packEventLanes(list);
+    const dragging = g && (g.mode === "move" || g.mode === "resize-end" || g.mode === "resize-start");
+    const list = timed.map((e) => (dragging && g.id === e.id ? { ...e, start: g.start, dur: g.dur } : e));
+    const packed = packEventLanes(list);
+    /* Lanes are frozen for the duration of a drag. Repacking every frame means the
+       cards *around* the one being moved slide sideways as it passes them, so the
+       timeline reflows under a hand that is only trying to put one thing down —
+       and the card being dragged changes width mid-gesture, which reads as the
+       app fighting the gesture. The columns settle once, on drop, when there is a
+       result worth showing. */
+    if (!dragging) {
+      laneFreeze.current = new Map(packed.map((e) => [e.id, { lane: e.lane, cols: e.cols }]));
+      return packed;
+    }
+    const frozen = laneFreeze.current;
+    if (!frozen) return packed;
+    return packed.map((e) => (frozen.has(e.id) ? { ...e, ...frozen.get(e.id) } : e));
   }, [timed, gesture]);
 
   const motivation = useMemo(() => (motivationLedger
@@ -1474,6 +1496,24 @@ export default function Planner() {
       }
       return scheduleTaskCommand(state.tasks, taskId, at);
     });
+  };
+  /* An estimate is how much of the day an action is expected to take, so on the
+     timeline it *is* the height of its block. Dragging that height is the most
+     direct sentence available for "this is going to take longer than I thought" —
+     and it is the same gesture the events beside it already answer to. */
+  const estimateTask = (id, minutes) => {
+    const before = structuredClone(db);
+    buzz(6);
+    writeTask(id, (state, taskId) => {
+      const task = state.tasks.find((item) => item.id === taskId);
+      if (!task) return { tasks: state.tasks };
+      return planTaskCommand(state.tasks, taskId, {
+        date: task.planned.date ?? dateKey,
+        startMinute: task.planned.startMinute ?? null,
+        estimateMinutes: minutes,
+      });
+    });
+    flash(`Estimate ${dur(minutes)}`, { type: "restore-planner-state", snapshot: { state: before } });
   };
   const reorderTask = (id, targetId) => {
     beep("tick");
@@ -2043,6 +2083,7 @@ export default function Planner() {
 
   /* live mirrors so the native listeners below never read stale data */
   const eventsRef = useRef([]);
+  const plannedRef = useRef([]);
   const dateKeyRef = useRef(dateKey);
   const applyRef = useRef(() => {});
   const finishRef = useRef(() => {});
@@ -2054,9 +2095,22 @@ export default function Planner() {
     const overTask = hitAttr(x, y, "data-task");
     const m = minutesAt(y);
     const next = { ...g, x, y, overDay, overTask };
-    if (g.mode === "move" && !overDay) next.start = Math.max(0, Math.min(1440 - g.dur, snapTo(m - g.grab)));
-    if (g.mode === "resize") next.dur = Math.max(10, Math.min(1440 - g.start, snapTo(m - g.start)));
-    if (g.mode === "draft") next.dur = Math.max(15, snapTo(m - g.start) || 15);
+    /* The arithmetic itself lives in features/planner/timelineGesture.js, shared
+       with the week grid. What stays here is only the part that is genuinely
+       about this surface: where the pointer is and what it is over. */
+    if (g.mode === "move" && !overDay) {
+      next.start = proposeGesture("move", { pointerMinute: m, grab: g.grab, duration: g.dur }).start;
+    } else if (g.mode === "resize-end" || g.mode === "task-resize" || g.mode === "draft") {
+      next.dur = proposeGesture("resize-end", { start: g.start, pointerMinute: m, kind: g.kind }).duration;
+    } else if (g.mode === "resize-start") {
+      /* Measured from where the gesture began, not from the last frame, so a
+         chain of roundings can never walk the end of the block away. */
+      const resized = proposeGesture("resize-start", {
+        start: g.was.start, duration: g.was.dur, pointerMinute: m, kind: g.kind,
+      });
+      next.start = resized.start;
+      next.dur = resized.duration;
+    }
     gestureRef.current = next;
     setGesture(next);
   };
@@ -2083,7 +2137,14 @@ export default function Planner() {
           flash(`Moved to ${tm(g.start)}`, { type: "event-time", id: g.id, start: g.was.start, dur: g.was.dur, scope });
         }
       }
-    } else if (g.mode === "resize") {
+    } else if (g.mode === "resize-end" || g.mode === "resize-start") {
+      /* A drag that lands where it started is not a change: no write, no undo
+         entry, no toast. The difference between "I put it back" and "I changed my
+         mind" is invisible to the person and should be invisible to the record. */
+      if (!gestureChangedAnything(
+        { start: g.was.start, duration: g.was.dur },
+        { start: g.start, duration: g.dur },
+      )) return;
       beep("drop");
       const canonical = canonicalOccurrenceIdentity(g.id);
       if (canonical) {
@@ -2094,9 +2155,21 @@ export default function Planner() {
         flash(`Set to ${dur(g.dur)}`, { type: "restore-calendar-occurrence", snapshot: result.removed });
       } else {
         const scope = splitId(g.id).date ? "occurrence" : "series";
-        mutate((d) => resizeCalendarEvent(d, g.id, g.dur, { scope }).state);
+        mutate((d) => {
+          /* Dragging the top edge changes where the block starts as well as how
+             long it is. Two commands, one gesture — and the move goes first so a
+             block growing upward is never briefly long enough to hit midnight. */
+          const moved = g.start === g.was.start
+            ? d
+            : moveCalendarEvent(d, g.id, { start: g.start }, { scope }).state;
+          return resizeCalendarEvent(moved, g.id, g.dur, { scope }).state;
+        });
         flash(`Set to ${dur(g.dur)}`, { type: "event-time", id: g.id, start: g.was.start, dur: g.was.dur, scope });
       }
+    } else if (g.mode === "task-resize") {
+      if (g.dur === g.was.dur) return;
+      beep("drop");
+      estimateTask(g.id, g.dur);
     } else if (g.mode === "draft") {
       beep("click");
       setComposer({ kind: "event", start: g.start, dur: g.dur });
@@ -2139,7 +2212,7 @@ export default function Planner() {
     const move = (e) => {
       const armed = armedRef.current;
       if (!armed || gestureRef.current) return;
-      if (Math.hypot(e.clientX - armed.x, e.clientY - armed.y) > 8) {
+      if (movedEnoughToCancelHold(armed, { x: e.clientX, y: e.clientY })) {
         disarmHold();
         tappedRef.current = false;
       }
@@ -2186,13 +2259,19 @@ export default function Planner() {
     if (gestureRef.current) return;
     if (tappedRef.current) { tappedRef.current = false; e.stopPropagation(); beep("click"); setInspect({ kind: "event", id: ev.id }); }
   };
-  const resizeDown = (e, ev) => {
+  /* `edge` is which end of the block the hand has hold of: the bottom moves the
+     end and the top moves the start, and in both cases the *other* end is what
+     the person is holding still in their head. */
+  const resizeDown = (e, ev, edge = "end", kind = "event") => {
     if (e.pointerType === "touch") return;
     e.stopPropagation();
     disarmHold();
     tappedRef.current = false;
     beep("lift");
-    startGesture({ mode: "resize", kind: "event", id: ev.id, start: ev.start, dur: ev.dur, was: { start: ev.start, dur: ev.dur } });
+    startGesture({
+      mode: kind === "task" ? "task-resize" : `resize-${edge}`,
+      kind, id: ev.id, start: ev.start, dur: ev.dur, was: { start: ev.start, dur: ev.dur },
+    });
   };
 
   /* ─── touch: delegated on the stream, driven entirely by touch events ─── */
@@ -2208,8 +2287,21 @@ export default function Planner() {
       const node = e.target.closest ? e.target.closest("[data-event-id],[data-resize],[data-task-chip]") : null;
       const m = minutesAt(t.clientY);
       if (node && node.hasAttribute("data-resize")) {
-        const ev = eventsRef.current.find((x) => x.id === node.getAttribute("data-resize"));
-        if (ev) { beep("lift"); buzz(10); startGesture({ mode: "resize", kind: "event", id: ev.id, start: ev.start, dur: ev.dur, was: { start: ev.start, dur: ev.dur }, x: t.clientX, y: t.clientY }); }
+        const handleId = node.getAttribute("data-resize");
+        const edge = node.getAttribute("data-resize-edge") || "end";
+        const ev = eventsRef.current.find((x) => x.id === handleId);
+        const chip = ev ? null : plannedRef.current.find((x) => x.id === handleId);
+        if (ev || chip) {
+          beep("lift"); buzz(10);
+          const block = ev
+            ? { start: ev.start, dur: ev.dur }
+            : { start: chip.planned.startMinute, dur: chip.planned.estimateMinutes };
+          startGesture({
+            mode: ev ? `resize-${edge}` : "task-resize",
+            kind: ev ? "event" : "task",
+            id: handleId, ...block, was: { ...block }, x: t.clientX, y: t.clientY,
+          });
+        }
         return;
       }
       const chipId = node && node.getAttribute("data-task-chip");
@@ -2322,6 +2414,10 @@ export default function Planner() {
 
   eventsRef.current = events;
   dateKeyRef.current = dateKey;
+  /* The actions that have a time on the day, mirrored for the native touch
+     listeners — same reason as `eventsRef`: they must never read a stale list. */
+  const plannedTasks = dayTasks.filter((t) => t.planned.startMinute != null);
+  plannedRef.current = plannedTasks;
 
   const inspectItem = inspect && (inspect.kind === "event"
     ? dayEvents.find((event) => event.id === inspect.id)
@@ -2695,10 +2791,16 @@ export default function Planner() {
         .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-notch-body{animation:nbnotchbodyout 140ms ease forwards}
         @keyframes nbnotchbodyout{to{opacity:0;transform:translateY(6px)}}
         @media(min-width:640px){.nb-fluid{transform-origin:center;border-radius:24px}}
-        .nb-scrim{animation:nbscrim 300ms ease forwards}
-        @keyframes nbscrim{from{opacity:0;backdrop-filter:blur(0)}to{opacity:1;backdrop-filter:blur(3px)}}
+        /* The blur is set once and never animated. A changing blur radius throws
+           away the compositor's cached backdrop every frame and re-blurs the whole
+           viewport — the most expensive thing on screen, running underneath the
+           sheet's own morph, which is what made the first open of a session stutter
+           while that pipeline warmed up. Fading the scrim's opacity fades the blur
+           in with it, so it costs one blur instead of eighteen and looks the same. */
+        .nb-scrim{animation:nbscrim 300ms ease forwards;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
+        @keyframes nbscrim{from{opacity:0}to{opacity:1}}
         .nb-scrim.nb-fluid-closing{animation:nbscrimout 240ms ease forwards}
-        @keyframes nbscrimout{0%,25%{opacity:1}100%{opacity:0;backdrop-filter:blur(0)}}
+        @keyframes nbscrimout{0%,25%{opacity:1}100%{opacity:0}}
         .nb-sheet-h{transition:height 320ms cubic-bezier(.2,.8,.25,1)}
         .nb-edit-actions{transition:width 420ms cubic-bezier(.22,1.12,.28,1),background-color 260ms ease,box-shadow 260ms ease}
         .nb-edit-liquid{transition:left 420ms cubic-bezier(.22,1.12,.28,1)}
@@ -3110,7 +3212,8 @@ export default function Planner() {
                     const live = isToday && nowMin >= e.start && nowMin < e.start + e.dur;
                     const past = isToday && nowMin >= e.start + e.dur;
                     const pct = live ? ((nowMin - e.start) / e.dur) * 100 : 0;
-                    const held = gesture && gesture.id === e.id && (gesture.mode === "move" || gesture.mode === "resize");
+                    const held = gesture && gesture.id === e.id
+                      && (gesture.mode === "move" || gesture.mode === "resize-end" || gesture.mode === "resize-start");
                     return (
                       <div key={e.id} data-event-id={e.id} className="absolute" style={{ top: top + 2, height: h, left: `${(e.lane / e.cols) * 100}%`, width: `calc(${100 / e.cols}% - 6px)`, zIndex: held ? 20 : 1, opacity: held && gesture.overDay ? 0.35 : 1, pointerEvents: "auto" }}>
                         <div onPointerDown={(ev) => eventDown(ev, e)} onPointerUp={(ev) => eventUp(ev, e)} onContextMenu={(ev) => ev.preventDefault()}
@@ -3164,8 +3267,23 @@ export default function Planner() {
                               <span style={{ color: T.dim }} className="block text-xs mt-1 truncate pl-4">{e.place || e.note}</span>
                             )}
                           </div>
+                          {/* Both ends are draggable. Only the bottom one used to be,
+                              which meant the only way to say "this started earlier"
+                              was to move the block and then lengthen it — two gestures
+                              for one thought, and the second undid the first. */}
+                          {/* The top handle is shorter than the bottom one and only
+                              appears on a card with room to spare. The title sits at
+                              the top of the card, and the top of the card is also the
+                              most natural place to grab it — a full-width 12px handle
+                              there turns "pick this up" into "make it start earlier".
+                              8px is edge; anything more is content. */}
+                          {h >= 52 && (
+                            <div data-resize={e.id} data-resize-edge="start" onPointerDown={(ev) => resizeDown(ev, e, "start")} className="absolute inset-x-0 top-0 flex items-start justify-center" style={{ height: 8, cursor: "ns-resize", touchAction: "none" }}>
+                              <span style={{ background: T.faint, width: 22, height: 2, marginTop: 2, borderRadius: 2 }} />
+                            </div>
+                          )}
                           {h >= 32 && (
-                            <div data-resize={e.id} onPointerDown={(ev) => resizeDown(ev, e)} className="absolute inset-x-0 bottom-0 flex items-end justify-center" style={{ height: 12, cursor: "ns-resize", touchAction: "none" }}>
+                            <div data-resize={e.id} data-resize-edge="end" onPointerDown={(ev) => resizeDown(ev, e, "end")} className="absolute inset-x-0 bottom-0 flex items-end justify-center" style={{ height: 12, cursor: "ns-resize", touchAction: "none" }}>
                               <span style={{ background: T.faint, width: 22, height: 2, marginBottom: 3, borderRadius: 2 }} />
                             </div>
                           )}
@@ -3183,16 +3301,39 @@ export default function Planner() {
                     </div>
                   )}
 
-                  {dayTasks.filter((t) => t.planned.startMinute != null).map((t) => (
-                    <button key={t.id} data-task-chip={t.id} onClick={() => { beep("click"); setInspect({ kind: "task", id: t.id }); }} className="nb-tap absolute left-0 right-2 text-left overflow-hidden"
-                      style={{ top: (t.planned.startMinute / 1440) * DAY_H + 2, height: 28, borderRadius: CARD_R, border: `1px dashed ${T.faint}`, opacity: t.status === "completed" ? 0.4 : 1, zIndex: 5, pointerEvents: "auto" }}>
-                      <span className="flex items-center gap-2 px-2.5 py-1">
-                        <span className="w-2 h-2 shrink-0 rounded-full" style={{ background: t.status === "completed" ? T.accent : "transparent", boxShadow: `inset 0 0 0 1.5px ${T.accent}` }} />
-                        <span className="text-xs font-semibold truncate" style={{ textDecoration: t.status === "completed" ? "line-through" : "none" }}>{t.title}</span>
-                        <span style={{ fontFamily: MONO, color: T.dim }} className="ml-auto text-xs tracking-widest">{tm(t.planned.startMinute)}</span>
-                      </span>
-                    </button>
-                  ))}
+                  {/* An action with an estimate occupies the time it claims. It used
+                      to be drawn 28px tall whatever it said it would take, so a
+                      three-hour action and a five-minute one looked identical and the
+                      day looked emptier than it was. */}
+                  {plannedTasks.map((t) => {
+                    const sizing = gesture && gesture.mode === "task-resize" && gesture.id === t.id;
+                    const estimate = sizing ? gesture.dur : t.planned.estimateMinutes;
+                    const block = isResizable(t, "task");
+                    const h = block ? Math.max(28, (estimate / 1440) * DAY_H - 3) : 28;
+                    return (
+                      <button key={t.id} data-task-chip={t.id} onClick={() => { beep("click"); setInspect({ kind: "task", id: t.id }); }} className="nb-tap absolute left-0 right-2 text-left overflow-hidden"
+                        style={{ top: (t.planned.startMinute / 1440) * DAY_H + 2, height: h, borderRadius: CARD_R, border: `1px dashed ${sizing ? T.accent : T.faint}`, background: block ? `${T.accent}0D` : "transparent", opacity: t.status === "completed" ? 0.4 : 1, zIndex: sizing ? 20 : 5, pointerEvents: "auto" }}>
+                        <span className="flex items-center gap-2 px-2.5 py-1">
+                          <span className="w-2 h-2 shrink-0 rounded-full" style={{ background: t.status === "completed" ? T.accent : "transparent", boxShadow: `inset 0 0 0 1.5px ${T.accent}` }} />
+                          <span className="text-xs font-semibold truncate" style={{ textDecoration: t.status === "completed" ? "line-through" : "none" }}>{t.title}</span>
+                          <span style={{ fontFamily: MONO, color: sizing ? T.accent : T.dim }} className="ml-auto text-xs tracking-widest shrink-0">
+                            {sizing ? dur(estimate) : tm(t.planned.startMinute)}
+                          </span>
+                        </span>
+                        {block && h >= 40 && (
+                          <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest truncate px-2.5 pl-7">{dur(estimate)}</span>
+                        )}
+                        {/* Only an action that has an estimate gets a handle: with no
+                            length there is nothing for the gesture to change. */}
+                        {block && (
+                          <span data-resize={t.id} data-resize-edge="end" onPointerDown={(ev) => resizeDown(ev, { id: t.id, start: t.planned.startMinute, dur: estimate }, "end", "task")}
+                            className="absolute inset-x-0 bottom-0 flex items-end justify-center" style={{ height: 12, cursor: "ns-resize", touchAction: "none" }}>
+                            <span style={{ background: T.faint, width: 22, height: 2, marginBottom: 3, borderRadius: 2 }} />
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
 
                   {dropMin != null && (
                     <div className="absolute left-0 right-2 pointer-events-none" style={{ top: (dropMin / 1440) * DAY_H, zIndex: 30 }}>
@@ -4542,7 +4683,10 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
     const current = dragRef.current;
     if (!current) return;
     const day = dayAt(clientX, clientY);
-    const start = Math.max(0, Math.min(1440 - current.dur, snapTo(minuteAt(clientY) - current.grab)));
+    /* Same arithmetic the day timeline uses — features/planner/timelineGesture.js. */
+    const { start } = proposeGesture("move", {
+      pointerMinute: minuteAt(clientY), grab: current.grab, duration: current.dur,
+    });
     const next = { ...current, x: clientX, y: clientY, start, date: day ?? current.date };
     dragRef.current = next;
     setDrag(next);
@@ -4553,7 +4697,10 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
     dragRef.current = null;
     setDrag(null);
     if (!finished) return;
-    if (finished.date === finished.fromDate && finished.start === finished.fromStart) return;
+    if (!gestureChangedAnything(
+      { start: finished.fromStart, duration: finished.dur, date: finished.fromDate },
+      { start: finished.start, duration: finished.dur, date: finished.date },
+    )) return;
     onMoveEvent?.(finished.event, { date: finished.date, start: finished.start });
   };
 
@@ -4604,7 +4751,7 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
     const move = (e) => {
       const armed = armedRef.current;
       if (!armed || dragRef.current) return;
-      if (Math.hypot(e.clientX - armed.x, e.clientY - armed.y) > 8) { disarm(); tapRef.current = false; }
+      if (movedEnoughToCancelHold(armed, { x: e.clientX, y: e.clientY })) { disarm(); tapRef.current = false; }
     };
     window.addEventListener("pointermove", move);
     return () => window.removeEventListener("pointermove", move);
@@ -5583,7 +5730,21 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
       if (rect.width > 0 && rect.height > 0) triggerRect = rect;
     }
     if (panel && triggerRect) {
+      /* Measure the panel as it will finally be, not as the entry animation has
+         already made it.
+         A CSS animation's first keyframe is applied the moment the element is
+         first styled — which is before any layout effect runs — so the rect read
+         here is the *pill*: `.nb-fluid`'s 0% is `translateY(26px) scale(.965)`,
+         and `getBoundingClientRect` reports transformed boxes. The morph was
+         being computed from its own output, so it started a few per cent too
+         small and 26px too low and then snapped to the real box on the last
+         frame. Suppressing the animation for the length of one measurement costs
+         nothing — this is all still before the first paint — and the animation is
+         handed back the correct numbers to start from. */
+      const suppressed = panel.style.animation;
+      panel.style.animation = "none";
       const panelRect = panel.getBoundingClientRect();
+      panel.style.animation = suppressed;
       /* Named `geometry`, not `morph`: the prop of that name says *how* to move,
          this says *how far*, and letting the local shadow the prop silently
          compared an object to a string and lost the notch every time. */

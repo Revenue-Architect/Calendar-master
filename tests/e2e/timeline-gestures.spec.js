@@ -38,10 +38,10 @@ test.describe("moving an event on the timeline", () => {
     await card(page).scrollIntoViewIfNeeded();
     const box = await card(page).boundingBox();
 
-    await page.mouse.move(box.x + box.width / 2, box.y + 10);
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await page.mouse.down();
     await page.waitForTimeout(600); /* past the lift threshold */
-    await page.mouse.move(box.x + box.width / 2, box.y + 10 + HOUR_PX * 2, { steps: 15 });
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + HOUR_PX * 2, { steps: 15 });
     await page.waitForTimeout(80);
     await page.mouse.up();
 
@@ -56,9 +56,9 @@ test.describe("moving an event on the timeline", () => {
     await card(page).scrollIntoViewIfNeeded();
     const box = await card(page).boundingBox();
 
-    await page.mouse.move(box.x + box.width / 2, box.y + 10);
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await page.mouse.down();
-    await page.mouse.move(box.x + box.width / 2, box.y + 10 + HOUR_PX * 2, { steps: 20 });
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + HOUR_PX * 2, { steps: 20 });
     await page.mouse.up();
     await page.waitForTimeout(700);
 
@@ -71,7 +71,7 @@ test.describe("resizing an event on the timeline", () => {
   test("dragging the bottom edge changes how long it lasts, not when it starts", async ({ page }) => {
     await seedPlanner(page, seeded());
     await card(page).scrollIntoViewIfNeeded();
-    const handle = page.locator("[data-resize]").first();
+    const handle = page.locator('[data-resize-edge="end"]').first();
     await expect(handle, "the resize handle is missing from the card").toBeVisible();
 
     const hb = await handle.boundingBox();
@@ -90,7 +90,7 @@ test.describe("resizing an event on the timeline", () => {
   test("it can be shortened as well as lengthened", async ({ page }) => {
     await seedPlanner(page, seeded());
     await card(page).scrollIntoViewIfNeeded();
-    const hb = await page.locator("[data-resize]").first().boundingBox();
+    const hb = await page.locator('[data-resize-edge="end"]').first().boundingBox();
 
     await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
     await page.mouse.down();
@@ -102,6 +102,48 @@ test.describe("resizing an event on the timeline", () => {
     const minutes = (v) => Number(v.slice(11, 13)) * 60 + Number(v.slice(14, 16));
     expect(minutes(shrunk.endLocal) - minutes(shrunk.startLocal)).toBeLessThan(60);
     expect(minutes(shrunk.endLocal) - minutes(shrunk.startLocal)).toBeGreaterThan(0);
+  });
+});
+
+test.describe("resizing from the top edge", () => {
+  /* The other half of the gesture. Without it, "this actually started earlier"
+     took two moves — drag the block up, then drag its bottom back down — and the
+     second one undid the first. */
+  test("dragging the top edge changes when it starts, and keeps the end exactly", async ({ page }) => {
+    await seedPlanner(page, seeded());
+    await card(page).scrollIntoViewIfNeeded();
+    const handle = page.locator('[data-resize-edge="start"]').first();
+    await expect(handle, "the top resize handle is missing from the card").toBeVisible();
+
+    const hb = await handle.boundingBox();
+    await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
+    await page.mouse.down();
+    await page.waitForTimeout(120);
+    await page.mouse.move(hb.x + hb.width / 2, hb.y - HOUR_PX / 2, { steps: 12 });
+    await page.mouse.up();
+
+    const grown = await timing(page, (t) => !t.startLocal.endsWith("10:00"), "the top edge never moved the start");
+    expect(grown.startLocal < `${today}T10:00`, "the start should have moved earlier").toBe(true);
+    /* The whole point: the end is the thing being held still. */
+    expect(grown.endLocal, "resizing from the top must not move the end").toBe(`${today}T11:00`);
+  });
+
+  test("the top of a card is still somewhere you can pick it up", async ({ page }) => {
+    /* A full-width grab zone across the top of a card sits exactly on its title,
+       which is the most natural place to take hold of it — so the gesture that
+       means "move this" would have silently meant "start it earlier". */
+    await seedPlanner(page, seeded());
+    await card(page).scrollIntoViewIfNeeded();
+    const box = await card(page).boundingBox();
+
+    await page.mouse.move(box.x + box.width / 2, box.y + 14);
+    await page.mouse.down();
+    await page.waitForTimeout(600);
+    await page.mouse.move(box.x + box.width / 2, box.y + 14 + HOUR_PX, { steps: 15 });
+    await page.mouse.up();
+
+    const moved = await timing(page, (t) => t.startLocal.endsWith("11:00"), "pressing near the title resized instead of moving");
+    expect(moved.endLocal, "a move keeps the length").toBe(`${today}T12:00`);
   });
 });
 
