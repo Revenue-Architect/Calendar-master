@@ -10,7 +10,9 @@ import { defineConfig, devices } from "@playwright/test";
  * transform is not a regression anyone would see.
  */
 
-const PORT = 4321;
+/* An explicit port keeps an existing local preview from silently serving a
+   different worktree to this suite. CI continues to use the stable default. */
+const PORT = Number(process.env.PLAYWRIGHT_PORT || 4321);
 
 /* Normally Playwright finds the browser it installed itself. Some sandboxes and
    CI images ship a Chromium that does not match this Playwright's expected build
