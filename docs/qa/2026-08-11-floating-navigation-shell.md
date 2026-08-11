@@ -22,6 +22,7 @@
 - The compact header keeps the menu, level, Today, search, and New action within the 390px viewport; Notes and Setup remain available from the side navigation.
 - Open mobile navigation now intentionally turns the calendar surface into a 40px vertical `CALENDAR` return rail. Tapping it restores the full planner.
 - Corrected the inherited full-height rule so open-card top and bottom insets are honoured rather than extending beyond the viewport. Focused navigation checks pass (6/6); the full unit suite remains 485/485.
+- The mobile menu preserves the desktop navigation reveal; only the calendar surface now continuously slides and narrows into the return rail, with its content fading during the same 340ms geometry transition.
 
 ## Note
 

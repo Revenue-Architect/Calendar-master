@@ -3021,7 +3021,7 @@ export default function Planner() {
         .nb-app-surface{
           position:absolute;inset:0;z-index:2;height:auto;overflow:hidden;transform:translate3d(0,0,0) scale(1);
           transform-origin:top left;border-radius:0;box-shadow:none;
-          transition:inset var(--nav-page-duration) var(--nav-ease),transform var(--nav-page-duration) var(--nav-ease),border-radius var(--nav-page-duration) var(--nav-ease),box-shadow var(--nav-page-duration) var(--nav-ease);
+          transition:top var(--nav-page-duration) var(--nav-ease),right var(--nav-page-duration) var(--nav-ease),bottom var(--nav-page-duration) var(--nav-ease),left var(--nav-page-duration) var(--nav-ease),width var(--nav-page-duration) var(--nav-ease),transform var(--nav-page-duration) var(--nav-ease),border-radius var(--nav-page-duration) var(--nav-ease),box-shadow var(--nav-page-duration) var(--nav-ease);
         }
         .nb-app-surface-open{inset:18px 22px 18px calc(var(--nav-width) + var(--nav-gap));transform:translate3d(0,0,0) scale(var(--nav-page-scale));border-radius:var(--nav-page-radius);box-shadow:var(--nav-page-shadow)}
         .nb-navigation{position:absolute;z-index:1;inset:0 auto 0 0;width:var(--nav-width);padding:22px 18px;color:#f2f0ea;display:flex;flex-direction:column;overflow:auto}
@@ -3038,12 +3038,15 @@ export default function Planner() {
         .nb-mobile-calendar-return{display:none}
         @media(max-width:639px){
           .nb-nav-shell{--nav-width:min(78vw,320px);--nav-gap:11px;--nav-page-scale:.94;--nav-page-radius:16px}
-          /* The desktop card would be only a narrow, unusable slice on a phone.
-             Here it deliberately resolves into a tactile calendar rail: tapping
-             it restores the full planner instead of leaving a cramped miniature. */
-          .nb-app-surface-open{inset:14px 9px 14px auto;width:40px;transform:none;border-radius:16px}
-          .nb-app-surface-open>*:not(.nb-mobile-calendar-return){visibility:hidden;pointer-events:none}
-          .nb-app-surface-open .nb-mobile-calendar-return{display:flex;position:absolute;z-index:40;inset:0;align-items:center;justify-content:center;border:0;background:${T.accent};color:${T.on};font-family:${MONO};font-size:10px;font-weight:700;letter-spacing:.12em;writing-mode:vertical-rl;transform:rotate(180deg)}
+          /* The navigation itself keeps its desktop sequence. Only the calendar
+             changes material: it slides right and narrows continuously into the
+             return rail, then reverses the exact same geometry when tapped. */
+          .nb-app-surface{left:0;right:auto;width:100%}
+          .nb-app-surface-open{top:14px;right:auto;bottom:14px;left:calc(100% - 49px);width:40px;transform:none;border-radius:16px}
+          .nb-app-surface>*:not(.nb-mobile-calendar-return){opacity:1;transition:opacity 150ms ease}
+          .nb-app-surface-open>*:not(.nb-mobile-calendar-return){opacity:0;pointer-events:none}
+          .nb-mobile-calendar-return{display:flex;position:absolute;z-index:40;inset:0;align-items:center;justify-content:center;border:0;background:${T.accent};color:${T.on};font-family:${MONO};font-size:10px;font-weight:700;letter-spacing:.12em;writing-mode:vertical-rl;transform:rotate(180deg);opacity:0;pointer-events:none;transition:opacity 160ms ease}
+          .nb-app-surface-open .nb-mobile-calendar-return{opacity:1;pointer-events:auto;transition-delay:120ms}
           .nb-navigation{padding:18px 12px}
           .nb-hud{padding:.45rem .65rem;gap:.35rem}
           .nb-hud-left{gap:.35rem}
