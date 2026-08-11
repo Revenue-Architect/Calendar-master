@@ -135,7 +135,7 @@ Direct manipulation is a core capability, not a decorative enhancement.
 - Once drag mode begins, the card lifts visually without changing the viewport scale.
 - The original slot remains visible as a low-emphasis placeholder.
 - A time label tracks the proposed start and end.
-- Movement snaps to the configured increment, initially 15 minutes, while preserving exact values for events imported with non-standard minutes.
+- Movement snaps to the configured increment, initially five minutes to preserve the existing interaction contract, while preserving exact values for imported events.
 - Auto-scroll begins near timeline edges and stops immediately when the pointer leaves the edge zone.
 - Releasing commits one atomic mutation. Cancelling returns the card to its origin without a server write.
 
@@ -144,7 +144,7 @@ Direct manipulation is a core capability, not a decorative enhancement.
 - Timed cards expose top and bottom resize targets that are large enough for touch but visually quiet.
 - Dragging the top edge changes the start while preserving the end; dragging the bottom edge changes the end.
 - The preview must show duration and block invalid ranges before release.
-- Minimum duration is configurable by entity type; the launch default is 15 minutes.
+- Minimum duration is configurable by entity type; the launch defaults preserve the current 10-minute event and 15-minute action floors.
 - Resizing a recurring occurrence must ask whether the change applies to this occurrence, this and following, or the full series when those operations are valid.
 
 #### Gesture ownership
@@ -379,6 +379,7 @@ Every synchronized domain row includes or can derive:
 - Stable application `entityId`
 - Server `revision`
 - Server `syncVersion`
+- Server-maintained revision metadata for each conflict-mergeable field
 - Authored and updated timestamps with explicit provenance
 - Optional tombstone timestamp
 - Last accepted mutation identifier
@@ -405,6 +406,7 @@ Each mutation contains:
 - Operation: create, patch, delete, or a named transactional domain command.
 - Base server revision.
 - Changed fields or command payload.
+- Optional atomic group identifier for one domain operation that changed related records.
 - Client-authored timestamp for diagnostics, never as the sole ordering authority.
 
 A Convex mutation:
@@ -412,11 +414,11 @@ A Convex mutation:
 1. Authenticates the user and verifies device ownership.
 2. Returns the original result if the mutation id was already applied.
 3. Loads the current record by indexed owner/entity key.
-4. Applies the object-specific conflict policy.
-5. Increments the user's sync head and writes the entity, change record, and idempotency record atomically.
+4. Applies the object-specific conflict policy using server-maintained field revisions, not device timestamps.
+5. Assigns a unique next user sync version to each change row and writes the entity, change record, and idempotency record atomically. Related rows in an atomic group receive consecutive unique versions in the same transaction.
 6. Returns the authoritative row and sync version.
 
-Clients pull `syncChanges` by owner and sync version in bounded pages. Convex reactivity may notify a visible client that the sync head changed, but the indexed pull protocol remains the source of catch-up correctness.
+Clients pull `syncChanges` by owner and sync version in bounded pages. A user never has two change rows with the same sync version, so a page cursor can safely advance to the highest returned version without skipping a row. Convex reactivity may notify a visible client that the sync head changed, but the indexed pull protocol remains the source of catch-up correctness.
 
 ### 7.5 Conflict rules
 
@@ -424,7 +426,7 @@ The invariant is: no user-authored content disappears solely because two devices
 
 | Object | Resolution |
 |---|---|
-| Event or action | Merge disjoint fields. For the same field, the authoritative winner is retained and the losing value is stored in a conflict record the user can inspect. |
+| Event or action | Merge fields whose last server field revision is no newer than the client's base revision. For a same-field conflict, the later server-accepted mutation wins and the previous value is stored in a conflict record the user can inspect. Device clocks do not choose the winner. |
 | Completion | A newer explicit completion event is not reversed by an older general record patch. Reopening is its own later command. |
 | Subtasks | Merge by stable subtask id. Additions union; edits conflict per field; deletion is a tombstone. |
 | Note body/blocks | Keep the authoritative current revision and always persist the losing authored version in note revisions. |
