@@ -108,12 +108,30 @@ test.describe("the notch morph", () => {
     await expect(page.getByTestId("composer")).toHaveAttribute("data-composer-kind", "task");
   });
 
-  test("every other route into the composer keeps the ordinary morph", async ({ page }) => {
+  test("a sheet opened from the keyboard arrives on its own terms", async ({ page }) => {
     await openPlanner(page);
     /* The notch is the signature of "make something new" from a create button,
-       not of the composer itself. */
+       not of the composer itself — and neither is the trigger morph, which needs a
+       control that was actually pressed. Nothing was pressed here, so growing the
+       sheet out of whatever still holds focus (a view tab, the last thing clicked)
+       would make it fly out of something unrelated. */
     await page.keyboard.press("n");
-    await expect(page.getByTestId("sheet")).toHaveAttribute("data-fluid-origin", "trigger");
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).toBeVisible();
+    expect(await sheet.getAttribute("data-fluid-origin"), "a keystroke is not a control").toBeNull();
+  });
+
+  test("a press still gives the sheet its origin, and a later keystroke does not steal it", async ({ page }) => {
+    await openPlanner(page);
+    await page.getByTestId("new-entry").click();
+    await expect(page.getByTestId("sheet")).toHaveAttribute("data-fluid-origin", "notch");
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("sheet")).toHaveCount(0, { timeout: 3000 });
+
+    /* The remembered press is cleared by the keystroke that closed the last sheet,
+       so this one cannot inherit an origin from a button pressed a moment ago. */
+    await page.keyboard.press("n");
+    expect(await page.getByTestId("sheet").getAttribute("data-fluid-origin")).toBeNull();
   });
 
   test("the composer still saves what it was opened with", async ({ page }) => {

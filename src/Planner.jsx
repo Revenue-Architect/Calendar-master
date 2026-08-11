@@ -306,7 +306,17 @@ const fromHhmm = (s) => { const [h, m] = s.split(":").map(Number); return h * 60
 const buzzDevice = (p) => { try { navigator.vibrate && navigator.vibrate(p); } catch (e) {} };
 /* Sheets morph open from the control that opened them. Focus alone cannot always
    say which control that was — iOS Safari does not focus a tapped button — so the
-   last pressed trigger is remembered here and consulted when a sheet mounts. */
+   last pressed trigger is remembered here and consulted when a sheet mounts.
+ *
+ * The remembered press is only good until the next thing that could open a sheet
+ * some other way. A keystroke clears it: a sheet opened by pressing N was not
+ * opened by a control, and growing it out of whichever button happens to still
+ * hold focus — a view tab, the last thing clicked a second ago — makes it appear
+ * to fly out of something unrelated. With nothing remembered the sheet uses its
+ * neutral arrival, which is the honest answer to "where did this come from".
+ * The window is short for the same reason: a sheet opens within a frame or two of
+ * the press that opened it, so anything later did not come from that press. */
+const FLUID_TRIGGER_MAX_AGE_MS = 900;
 let lastFluidTrigger = null;
 let lastFluidTriggerAt = 0;
 if (typeof window !== "undefined") {
@@ -314,12 +324,14 @@ if (typeof window !== "undefined") {
     const el = event.target instanceof Element
       ? event.target.closest("button,[role='button'],summary,label,[data-event-id],[data-task-chip]")
       : null;
-    if (el) { lastFluidTrigger = el; lastFluidTriggerAt = Date.now(); }
+    lastFluidTrigger = el;
+    lastFluidTriggerAt = el ? Date.now() : 0;
   }, true);
+  window.addEventListener("keydown", () => { lastFluidTrigger = null; lastFluidTriggerAt = 0; }, true);
 }
 function recentFluidTriggerRect() {
   if (!lastFluidTrigger || !lastFluidTrigger.isConnected) return null;
-  if (Date.now() - lastFluidTriggerAt > 1200) return null;
+  if (Date.now() - lastFluidTriggerAt > FLUID_TRIGGER_MAX_AGE_MS) return null;
   const rect = lastFluidTrigger.getBoundingClientRect();
   return rect.width > 0 && rect.height > 0 ? rect : null;
 }
@@ -5835,15 +5847,13 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
   useLayoutEffect(() => {
     openerRef.current = document.activeElement;
     const panel = dialogRef.current;
-    const opener = openerRef.current;
-    /* The pressed control is the truer origin: on touch the opener never receives
-       focus, and a confirmation raised from inside another sheet should grow from
-       the button that asked for it, not from whatever still holds focus. */
-    let triggerRect = recentFluidTriggerRect();
-    if (!triggerRect && opener instanceof HTMLElement && opener !== document.body && opener.isConnected) {
-      const rect = opener.getBoundingClientRect();
-      if (rect.width > 0 && rect.height > 0) triggerRect = rect;
-    }
+    /* The pressed control is the origin — and the only one. There used to be a
+       fallback to whatever held focus, which sounds harmless and is not: focus
+       lands on a view tab, or stays on the last thing clicked, so a sheet opened
+       from the keyboard grew out of a button that had nothing to do with it. A
+       press is the only evidence that a particular control opened this; with no
+       press, the sheet arrives on its own terms. */
+    const triggerRect = recentFluidTriggerRect();
     if (panel && triggerRect) {
       /* Measure the panel as it will finally be, not as the entry animation has
          already made it.
