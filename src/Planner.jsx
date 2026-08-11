@@ -3394,7 +3394,15 @@ export default function Planner() {
            transform, leaving the standalone press scale and drag transform free
            to do their own jobs. */
         .nb-timeline-lane{
+          container-type:inline-size;
           transition:left 280ms cubic-bezier(.22,.61,.36,1),width 280ms cubic-bezier(.22,.61,.36,1),scale 240ms cubic-bezier(.2,1.5,.35,1),opacity 160ms ease;
+        }
+        /* A shared lane is information in itself. Once a card is narrow, repeat,
+           alert, conflict and time badges stop repeating that information and
+           yield to the two things the card must preserve: its title and JOIN. */
+        @container (max-width:220px){
+          .nb-event-secondary{display:none}
+          .nb-event-row{column-gap:.375rem}
         }
         /* Down is quick and linear, release overshoots and settles — the difference
            between the two is what reads as a physical thing rather than a fade. */
@@ -3832,7 +3840,10 @@ export default function Planner() {
 
                   {events.map((e) => {
                     const top = (e.start / 1440) * dayHeight;
-                    const h = Math.max(22, (e.dur / 1440) * dayHeight) - 3;
+                    /* Subtract the inter-card gap from a real duration, but never
+                       from the minimum itself. The old ordering turned the stated
+                       22px floor into 19px — shorter than one line of title text. */
+                    const h = Math.max(22, (e.dur / 1440) * dayHeight - 3);
                     const live = isToday && nowMin >= e.start && nowMin < e.start + e.dur;
                     const past = isToday && nowMin >= e.start + e.dur;
                     const pct = live ? ((nowMin - e.start) / e.dur) * 100 : 0;
@@ -3863,14 +3874,14 @@ export default function Planner() {
                               <span className="absolute inset-y-0" style={{ right: 0, width: 2, background: T.accent }} />
                             </span>
                           )}
-                          <div className="relative pl-2.5 pr-2.5 py-1.5">
-                            <div className="flex items-center gap-2">
+                          <div className={`relative pl-2.5 pr-2.5 ${h < 28 ? "h-full py-0" : "py-1.5"}`}>
+                            <div className={`nb-event-row flex items-center gap-2 ${h < 28 ? "h-full" : ""}`}>
                               {/* the category dot is the card's only colour, so it stays
                                   legible at 22px height where a left rail would vanish */}
                               <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: held ? T.accent : catColor(e.cat) }} />
-                              <span className="nb-lead truncate flex-1">{e.title}</span>
-                              {conflictIds.has(e.id) && <span title="Overlaps another event" style={{ color: NOW_RED }} className="text-xs shrink-0">⚠</span>}
-                              {e.repeat && <span style={{ fontFamily: MONO, color: T.dimText }} className="text-xs shrink-0">↻</span>}
+                              <span title={e.title} className="nb-lead min-w-0 truncate flex-1">{e.title}</span>
+                              {conflictIds.has(e.id) && <span title="Overlaps another event" style={{ color: NOW_RED }} className="nb-event-secondary text-xs shrink-0">⚠</span>}
+                              {e.repeat && <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-event-secondary text-xs shrink-0">↻</span>}
                               {normalizeMeetingLink(e.link) && (
                                 <a href={normalizeMeetingLink(e.link)} target="_blank" rel="noopener noreferrer" draggable={false}
                                   onPointerDown={(ev) => ev.stopPropagation()} onPointerUp={(ev) => ev.stopPropagation()} onClick={(ev) => ev.stopPropagation()}
@@ -3878,11 +3889,11 @@ export default function Planner() {
                                   style={{ fontFamily: MONO, color: T.accentText }} className="text-xs font-bold tracking-widest shrink-0">JOIN ↗</a>
                               )}
                               {e.alerts && e.alerts.length > 0 && (
-                                <span style={{ color: T.dimText }} className="shrink-0" title="Has a reminder"><BellIcon /></span>
+                                <span style={{ color: T.dimText }} className="nb-event-secondary shrink-0" title="Has a reminder"><BellIcon /></span>
                               )}
-                              {live && <span style={{ fontFamily: MONO, background: T.accent, color: T.on, borderRadius: 4 }} className="shrink-0 px-1 nb-data">{Math.round(pct)}%</span>}
+                              {live && <span style={{ fontFamily: MONO, background: T.accent, color: T.on, borderRadius: 4 }} className="nb-event-secondary shrink-0 px-1 nb-data">{Math.round(pct)}%</span>}
                               {held && <span style={{ fontFamily: MONO, background: T.accent, color: T.on, borderRadius: 4 }} className="shrink-0 px-1 nb-data">{gesture.overDay ? fmtDay(gesture.overDay) : tm(e.start)}</span>}
-                              {!held && !live && h < 38 && <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data shrink-0">{tm(e.start)}</span>}
+                              {!held && !live && h < 38 && <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-event-secondary nb-data shrink-0">{tm(e.start)}</span>}
                             </div>
                             {h >= 38 && (
                               <span style={{ fontFamily: MONO, color: T.dimText }} className="block nb-data truncate mt-0.5 pl-4">

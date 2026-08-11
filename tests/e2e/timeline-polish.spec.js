@@ -51,6 +51,28 @@ test.describe("short mobile timeline density", () => {
     expect(workshopBox.height).toBeLessThanOrEqual(streamBox.height - 4);
   });
 
+  test("a short meeting keeps its title when it shares a narrow lane", async ({ page }) => {
+    await openPlanner(page, { keepSample: true });
+    await page.getByRole("button", { name: "Next day" }).click();
+
+    /* Standup overlaps Roadmap workshop and also carries recurrence, alert, JOIN,
+       conflict and time metadata. Those badges used to consume its entire lane,
+       leaving the title at exactly zero pixels wide. */
+    const standup = page.locator("[data-event-id]").filter({ hasText: "Standup" });
+    const title = standup.getByText("Standup", { exact: true });
+    await standup.scrollIntoViewIfNeeded();
+    const [cardBox, titleBox, width] = await Promise.all([
+      standup.boundingBox(),
+      title.boundingBox(),
+      title.evaluate((node) => ({ visible: node.clientWidth, needed: node.scrollWidth })),
+    ]);
+
+    expect(width.visible, "secondary badges must yield before the event title").toBeGreaterThanOrEqual(width.needed);
+    expect(titleBox.y, "the title must start inside the short card").toBeGreaterThanOrEqual(cardBox.y - 1);
+    expect(titleBox.y + titleBox.height, "the title must end inside the short card")
+      .toBeLessThanOrEqual(cardBox.y + cardBox.height + 1);
+  });
+
   test("events and actions at the same time share lanes without covering each other", async ({ page }) => {
     const today = await atTime(page, 9, 30);
     const blank = createBlankPlannerState({});
