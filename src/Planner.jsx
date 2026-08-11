@@ -215,6 +215,12 @@ const CAT_COLOR = {
 const catColor = (cat) => CAT_COLOR[cat] || "#8A8A96";
 const CARD_R = 10;
 const HOUR_H = 68;
+/* How close the now marker has to get to an hour before that hour's label steps
+   aside. The marker and a label are each about eighteen pixels tall, so inside
+   this distance they overlap and read as one smudged mark rather than two
+   times — and at that distance the marker *is* the hour, so there is nothing
+   the label was still saying. */
+const NOW_LABEL_CLEARANCE_MIN = Math.round((18 / HOUR_H) * 60);
 const DAY_H = HOUR_H * 24;
 const HOLD_MS = 420;
 const LIFT_MS = 300;
@@ -2926,7 +2932,17 @@ export default function Planner() {
                     {/* The label owns its gutter: rules and banding start after it, so
                         the times read on clean card instead of sitting across the
                         grid lines they annotate. */}
-                    <span style={{ fontFamily: MONO, color: T.dim, transform: h === 0 ? "none" : "translateY(-50%)" }}
+                    {/* The hour yields to the now marker when the marker is on top
+                        of it. Two times a few pixels apart is not more
+                        information than one — it is the same information,
+                        illegible. Fading rather than unmounting so the label
+                        returns as the minute moves on. */}
+                    <span style={{
+                      fontFamily: MONO, color: T.dim,
+                      transform: h === 0 ? "none" : "translateY(-50%)",
+                      opacity: isToday && liveEvent && Math.abs(nowMin - h * 60) < NOW_LABEL_CLEARANCE_MIN ? 0 : 1,
+                      transition: "opacity 200ms ease",
+                    }}
                       className="w-14 shrink-0 pr-3 text-right text-xs tracking-widest">{fmtHour(h, clock)}</span>
                     <div className="flex-1 h-full" style={{
                       /* Depth comes from banding, not from rules. A hairline every hour
@@ -4190,7 +4206,6 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromote
   const surface = isDark(T.bg) ? mixHex(T.card, "#FFFFFF", 0.13) : mixHex(T.card, "#000000", 0.06);
   const checklist = t.checklist ?? [];
   const subDone = checklist.filter((s) => s.done).length;
-  const subPct = checklist.length ? (subDone / checklist.length) * 100 : 0;
   const dueLeft = t.deadline.date ? diffDays(t.deadline.date, todayKey) : null;
   const isDone = t.status === "completed";
 
@@ -4254,9 +4269,26 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromote
                 </span>
               )}
             </div>
+            {/* One segment per step, not one bar filled to a fraction. A
+                continuous bar says "roughly two-thirds done"; segments say
+                "four of six", which is the thing a checklist actually knows —
+                and it makes a single tick a visible, countable event rather
+                than a few pixels of growth. Rounded ends and a gap keep them
+                reading as separate steps at 3px tall. */}
             {checklist.length > 0 && (
-              <div className="h-0.5 mt-2" style={{ background: T.faint }}>
-                <div className="h-full" style={{ background: T.accent, width: `${subPct}%`, transition: "width 220ms ease" }} />
+              <div className="flex gap-1 mt-2" role="progressbar"
+                aria-valuemin={0} aria-valuemax={checklist.length} aria-valuenow={subDone}
+                aria-label={`${subDone} of ${checklist.length} steps done`}>
+                {checklist.map((step, index) => (
+                  <span key={step.id} className="flex-1" style={{
+                    height: 3,
+                    borderRadius: 999,
+                    background: step.done ? T.accent : T.faint,
+                    /* Staggered so finishing the last step reads as the row
+                       completing, rather than every segment blinking at once. */
+                    transition: `background 260ms ease ${index * 18}ms`,
+                  }} />
+                ))}
               </div>
             )}
           </div>
