@@ -2603,6 +2603,26 @@ export default function Planner() {
           0%,30%{opacity:1}
           100%{opacity:0;transform:translate(calc(var(--fluid-x) * .24),calc(var(--fluid-y) * .24)) scale(.88);border-radius:32px}
         }
+        /* The notch morph: one object changing shape, rather than a panel fading
+           in. The shape never fades — it travels and stretches from the pill at
+           full opacity, so the eye follows a thing moving instead of watching
+           one image replaced by another. The body is held back until the shape
+           has most of its size, and on the way out it leaves first, so the
+           panel is empty by the time it folds back into the button. */
+        .nb-fluid[data-fluid-origin="notch"]{animation-name:nbnotchin;animation-duration:440ms}
+        @keyframes nbnotchin{
+          0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y)) scale(var(--fluid-sx),var(--fluid-sy));border-radius:999px}
+          100%{opacity:1;transform:translate(0,0) scale(1);border-radius:24px}
+        }
+        .nb-fluid[data-fluid-origin="notch"] .nb-notch-body{animation:nbnotchbody 300ms ease 150ms both}
+        @keyframes nbnotchbody{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"]{animation:nbnotchout 320ms cubic-bezier(.4,0,.3,1) forwards}
+        @keyframes nbnotchout{
+          0%{opacity:1;transform:translate(0,0) scale(1);border-radius:24px}
+          100%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y)) scale(var(--fluid-sx),var(--fluid-sy));border-radius:999px}
+        }
+        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-notch-body{animation:nbnotchbodyout 140ms ease forwards}
+        @keyframes nbnotchbodyout{to{opacity:0;transform:translateY(6px)}}
         @media(min-width:640px){.nb-fluid{transform-origin:center;border-radius:24px}}
         .nb-scrim{animation:nbscrim 300ms ease forwards}
         @keyframes nbscrim{from{opacity:0;backdrop-filter:blur(0)}to{opacity:1;backdrop-filter:blur(3px)}}
@@ -2688,7 +2708,7 @@ export default function Planner() {
           <GooeySearch T={T} surface={surface} reduced={reducedMotion}
             onOpen={() => { beep("click"); setSearchQuery(""); setSearch(true); }} />
           <button onClick={() => { beep("click"); setSettings(true); }} style={{ color: T.dim }} className="nb-tap w-8 h-8 text-sm" aria-label="Settings">⋯</button>
-          <button onClick={() => { beep("click"); setComposer({ kind: "event", start: startSlot(nowMin), dur: 60 }); }} style={{ background: T.accent, color: T.on, fontFamily: MONO }} className="nb-tap nb-liquid px-2 py-1.5 text-xs font-bold tracking-widest">NEW</button>
+          <button data-test="new-entry" onClick={() => { beep("click"); setComposer({ kind: "event", start: startSlot(nowMin), dur: 60, notch: true }); }} style={{ background: T.accent, color: T.on, fontFamily: MONO }} className="nb-tap nb-liquid px-2 py-1.5 text-xs font-bold tracking-widest">NEW</button>
         </div>
       </header>
 
@@ -2701,7 +2721,7 @@ export default function Planner() {
           <div className="flex items-center gap-2">
             {/* Timeline answers "when, and for how long"; agenda answers "what is
                 coming". Same days, same data, two questions. */}
-            <PillNav T={T} ariaLabel="View mode" value={viewMode}
+            <PillNav T={T} reduced={reducedMotion} ariaLabel="View mode" value={viewMode}
               options={[["timeline", "TIMELINE"], ["agenda", "AGENDA"], ["actions", "ACTIONS"]]}
               onPick={(mode) => { beep("tick"); setViewMode(mode); if (mode === "actions") setSheet(false); }}
               style={{ border: `1px solid ${T.line}` }} />
@@ -3144,7 +3164,7 @@ export default function Planner() {
             <span style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest">{openCount} OPEN</span>
             {isToday && overdue.length > 0 && <span style={{ fontFamily: MONO, color: NOW_RED }} className="text-xs tracking-widest">{overdue.length} LATE</span>}
           </button>
-          <button onClick={() => { beep("click"); setComposer({ kind: "task" }); }} style={{ background: T.accent, color: T.on, fontFamily: MONO }} className="nb-tap nb-liquid px-3 py-1.5 text-xs font-bold tracking-widest">+ ACTION</button>
+          <button data-test="new-action" onClick={() => { beep("click"); setComposer({ kind: "task", notch: true }); }} style={{ background: T.accent, color: T.on, fontFamily: MONO }} className="nb-tap nb-liquid px-3 py-1.5 text-xs font-bold tracking-widest">+ ACTION</button>
         </div>
         <div className="nb-s flex-1 overflow-y-auto px-3 pb-6">{actionsPanel}</div>
       </div>
@@ -3331,7 +3351,7 @@ export default function Planner() {
                 <DetailRow T={T} icon="▦" divider>
                   {detailEditing ? (
                     <div className="flex flex-col gap-2">
-                      <PillNav T={T} ariaLabel="Action planning state"
+                      <PillNav T={T} reduced={reducedMotion} ariaLabel="Action planning state"
                         value={inspectDraft.planned.date ? "day" : "inbox"}
                         options={[["day", "ON A DAY"], ["inbox", "INBOX"]]}
                         onPick={(value) => editEntry(value === "inbox"
@@ -3440,7 +3460,7 @@ export default function Planner() {
                 {inspectDraft.status === "completed" ? (
                   <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">COMPLETED</span>
                 ) : (
-                  <PillNav T={T} ariaLabel="Action status" value={inspectDraft.status}
+                  <PillNav T={T} reduced={reducedMotion} ariaLabel="Action status" value={inspectDraft.status}
                     options={[["open", "OPEN"], ["in_progress", "DOING"], ["waiting", "WAITING"]]}
                     onPick={(status) => editEntry({ status })} style={{ border: `1px solid ${T.line}` }} />
                 )}
@@ -3754,7 +3774,8 @@ export default function Planner() {
       )}
 
       {composer && (
-        <Sheet T={T} title={composer.id ? "EDIT" : "NEW"} onClose={() => { beep("click"); setComposer(null); }}>
+        <Sheet T={T} title={composer.id ? "EDIT" : "NEW"} morph={composer.notch ? "notch" : "auto"}
+          onClose={() => { beep("click"); setComposer(null); }}>
           <Composer T={T} initial={composer} dateLabel={fmtDay(dateKey)} dateKey={dateKey} onSubmit={saveEntry} onTick={() => beep("tick")} weekStart={weekStart} />
         </Sheet>
       )}
@@ -5230,14 +5251,39 @@ function LiquidFill({ T, on, radius = 999 }) {
   );
 }
 
-function PillNav({ T, value, options, onPick, ariaLabel, surface = "transparent", className = "", style = {} }) {
+function PillNav({ T, value, options, onPick, ariaLabel, surface = "transparent", className = "", style = {}, reduced = false }) {
   const wrapRef = useRef(null);
   const { box, stretch, settled } = useLiquidPill(wrapRef, [value, options.length]);
+  const filterId = useRef(`goo-pill-${Math.random().toString(36).slice(2, 9)}`).current;
+  const [osReduced] = useState(() => (
+    typeof window !== "undefined" && Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches)
+  ));
+
+  /* A single shape sliding is a shape sliding. What makes it read as liquid is a
+     second one: a droplet is left at the old position, lags, and is pulled in —
+     and the goo filter is what turns "two blobs near each other" into one
+     surface necking between them. It only exists while the pill is in flight,
+     which is also the only time the filter is worth its cost. */
+  const travelling = !settled || stretch !== 1;
+  const goo = travelling && !reduced && !osReduced && Boolean(box);
 
   return (
     <div ref={wrapRef} role="tablist" aria-label={ariaLabel} className={`relative flex ${className}`}
       style={{ background: surface, borderRadius: 999, ...style }}>
-      <LiquidPillIndicator T={T} box={box} stretch={stretch} settled={settled} />
+      {goo && <GooeyFilter id={filterId} blur={6} />}
+      <span aria-hidden="true" className="absolute inset-0 pointer-events-none"
+        style={{ filter: goo ? `url(#${filterId})` : "none", borderRadius: 999 }}>
+        <LiquidPillIndicator T={T} box={box} stretch={stretch} settled={settled} />
+        {goo && (
+          <span className="absolute" style={{
+            left: box.left, top: box.top, width: box.width, height: box.height,
+            background: T.accent, borderRadius: 999,
+            transform: `scale(${Math.max(0.42, 2 - stretch * 1.6)})`,
+            transformOrigin: "center",
+            transition: "left 520ms cubic-bezier(.22,1.1,.28,1), transform 300ms ease",
+          }} />
+        )}
+      </span>
       {options.map(([key, label]) => {
         const on = key === value;
         return (
@@ -5340,7 +5386,7 @@ function Row({ T, k, v }) {
   );
 }
 
-function Sheet({ T, onClose, title, children, headerAction = null, beforeClose = null }) {
+function Sheet({ T, onClose, title, children, headerAction = null, beforeClose = null, morph = "auto" }) {
   /* Ignore a backdrop dismissal that arrives in the same tap that opened the sheet.
      Belt and braces alongside preventDefault at the source: any future path that
      opens a sheet from a touch inherits the protection. */
@@ -5350,6 +5396,8 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
   const openerRef = useRef(null);
   const closeTimer = useRef(null);
   const closingRef = useRef(false);
+  const morphRef = useRef(morph);
+  morphRef.current = morph;
   const onCloseRef = useRef(onClose);
   const beforeCloseRef = useRef(beforeClose);
   const [closing, setClosing] = useState(false);
@@ -5368,7 +5416,7 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
       window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
       || (panel && window.getComputedStyle(panel).animationName === "none")
     );
-    closeTimer.current = window.setTimeout(() => onCloseRef.current(), reduced ? 0 : 240);
+    closeTimer.current = window.setTimeout(() => onCloseRef.current(), reduced ? 0 : (morphRef.current === "notch" ? 320 : 240));
   }, []);
   useLayoutEffect(() => {
     const content = contentRef.current;
@@ -5383,7 +5431,7 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
     observer?.observe(content);
     window.addEventListener("resize", measure);
     return () => { observer?.disconnect(); window.removeEventListener("resize", measure); };
-  }, []);
+  }, [morph]);
   const guardedClose = useCallback(() => {
     if (Date.now() - openedAt.current < 350) return;
     requestClose();
@@ -5413,12 +5461,15 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
     }
     if (panel && triggerRect) {
       const panelRect = panel.getBoundingClientRect();
-      const morph = fluidMorphFromRects(triggerRect, panelRect);
-      panel.dataset.fluidOrigin = "trigger";
-      panel.style.setProperty("--fluid-x", `${morph.translateX}px`);
-      panel.style.setProperty("--fluid-y", `${morph.translateY}px`);
-      panel.style.setProperty("--fluid-sx", String(morph.scaleX));
-      panel.style.setProperty("--fluid-sy", String(morph.scaleY));
+      /* Named `geometry`, not `morph`: the prop of that name says *how* to move,
+         this says *how far*, and letting the local shadow the prop silently
+         compared an object to a string and lost the notch every time. */
+      const geometry = fluidMorphFromRects(triggerRect, panelRect);
+      panel.dataset.fluidOrigin = morphRef.current === "notch" ? "notch" : "trigger";
+      panel.style.setProperty("--fluid-x", `${geometry.translateX}px`);
+      panel.style.setProperty("--fluid-y", `${geometry.translateY}px`);
+      panel.style.setProperty("--fluid-sx", String(geometry.scaleX));
+      panel.style.setProperty("--fluid-sy", String(geometry.scaleY));
     }
     const frame = window.requestAnimationFrame(() => focusDialogOnOpen(dialogRef.current));
     return () => {
@@ -5431,7 +5482,7 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId.current} data-test="sheet" data-sheet-title={title || "Details"}
         onKeyDown={(event) => trapDialogTab(event, dialogRef.current)} onClick={(e) => e.stopPropagation()}
         className={`nb-fluid nb-sheet-scroll ${heightReady ? "nb-sheet-h" : ""} ${closing ? "nb-fluid-closing" : ""} w-full sm:max-w-md overflow-y-auto nb-s`} style={{ background: T.card, color: T.text, maxHeight: "88vh", height: sheetHeight == null ? "auto" : sheetHeight }}>
-        <div ref={contentRef}>
+        <div ref={contentRef} className="nb-notch-body">
         <div className="sticky top-0 flex items-center justify-between px-4 sm:px-5 pt-3 pb-2" style={{ background: T.card, zIndex: 3 }}>
           <span id={titleId.current} style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">{title || "Details"}</span>
           <div className="flex items-center gap-1.5">
@@ -5815,6 +5866,20 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick, weekStart 
   const toTime = (m) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
   const fromTime = (s) => { const [h, m] = s.split(":").map(Number); return h * 60 + m; };
   const setFreq = (f) => { onTick(); setRepeat(f ? { freq: f, interval: 1, byDay: f === "weekly" ? [parseKey(date).getDay()] : undefined, until: (repeat && repeat.until) || "", endMode: "never", missingDatePolicy: "skip" } : null); };
+  const dayFilterId = useRef(`goo-days-${Math.random().toString(36).slice(2, 9)}`).current;
+  const [osReducedDays] = useState(() => (
+    typeof window !== "undefined" && Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches)
+  ));
+  /* Mounted only when two selected days actually sit next to each other in the
+     order the grid is drawing them — with no run there is nothing to merge, and
+     the filter would be paid for a picture nobody sees. */
+  const dayRunGoo = useMemo(() => {
+    if (osReducedDays || repeat?.freq !== "weekly") return false;
+    const selected = new Set(repeat.byDay || []);
+    const order = Array.from({ length: 7 }, (_, offset) => (weekStart + offset) % 7);
+    return order.some((day, index) => index > 0 && selected.has(day) && selected.has(order[index - 1]));
+  }, [osReducedDays, repeat?.freq, repeat?.byDay, weekStart]);
+
   const toggleDay = (i) => {
     onTick();
     const days = (repeat.byDay || []).includes(i) ? repeat.byDay.filter((d) => d !== i) : [...(repeat.byDay || []), i].sort();
@@ -5959,13 +6024,21 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick, weekStart 
                 <input type="date" value={repeat.until || ""} onChange={(e) => setRepeat({ ...repeat, until: e.target.value })}
                   style={{ background: "transparent", border: "none", fontFamily: MONO }} className="text-sm" />
               </div>
+              {/* The one place the goo says something rather than decorates: a
+                  weekly rule of Mon–Wed–Fri is three separate marks, and one of
+                  Mon–Tue–Wed is a *run*. Letting adjacent selected days merge
+                  into a single bar makes that difference visible at a glance,
+                  which is the actual question this control is asking. */}
               {repeat.freq === "weekly" && (
-                <div className="flex gap-1">
+                <div className="flex gap-1" style={{ filter: dayRunGoo ? `url(#${dayFilterId})` : "none" }}>
+                  {dayRunGoo && <GooeyFilter id={dayFilterId} blur={5} />}
                   {Array.from({ length: 7 }, (_, offset) => (weekStart + offset) % 7).map((i) => {
                     const d = DAY_LETTERS[i];
                     const on = (repeat.byDay || []).includes(i);
                     return (
-                      <button key={d} onClick={() => toggleDay(i)} className="nb-tap relative flex-1 py-1 text-xs tracking-widest"
+                      <button key={d} data-test="weekday-chip" data-weekday={i} data-on={on ? "true" : "false"}
+                        aria-pressed={on} aria-label={DAY_LETTERS[i]}
+                        onClick={() => toggleDay(i)} className="nb-tap relative flex-1 py-1 text-xs tracking-widest"
                         style={{ fontFamily: MONO, borderRadius: 999, background: "transparent", color: on ? T.on : T.dim,
                           border: `1px solid ${on ? "transparent" : T.line}`, transition: "color 260ms ease, border-color 180ms ease" }}>
                         <LiquidFill T={T} on={on} />
