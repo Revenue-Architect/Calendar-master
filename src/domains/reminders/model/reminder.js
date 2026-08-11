@@ -2,6 +2,9 @@ import { assertLocalDateTime } from "../../../shared/time/localDateTime.js";
 
 export const REMINDER_STATUSES = Object.freeze([
   "scheduled", "delivered", "snoozed", "dismissed", "cancelled", "failed", "superseded",
+  /* Its moment passed while nothing was running to say so. Terminal, and
+     distinct from `delivered`: the record should not claim it reached anyone. */
+  "missed",
 ]);
 
 function text(value, field) {

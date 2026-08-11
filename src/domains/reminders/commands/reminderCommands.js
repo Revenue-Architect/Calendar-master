@@ -53,6 +53,18 @@ export function snoozeReminder(records, reminderId, { now, until } = {}) {
   }));
 }
 
+/* Marking a batch rather than one at a time, because that is how they are found:
+   a report of everything the notebook missed, closed in one gesture. Unknown ids
+   are ignored rather than thrown on — the set is gathered from the same ledger it
+   is applied to, and a reconcile between the two is not an error. */
+export function markRemindersMissed(records, reminderIds, { now } = {}) {
+  const wanted = new Set(reminderIds ?? []);
+  if (!wanted.size) return records;
+  return (records ?? []).map((record) => (wanted.has(record.id)
+    ? { ...normalizeReminderRecord(record), status: "missed", updatedAt: now }
+    : record));
+}
+
 export function dismissReminder(records, reminderId, { now } = {}) {
   return updateRecord(records, reminderId, (record) => ({
     ...record, status: "dismissed", dismissedAt: now, updatedAt: now,

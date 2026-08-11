@@ -121,7 +121,10 @@ import {
   deliverReminder,
   dismissReminder,
   getDueReminders,
+  getExpiredReminders,
+  getMissedReminders,
   getReminderIntents,
+  markRemindersMissed,
   reconcileReminders,
   snoozeReminder,
 } from "./domains/reminders/index.js";
@@ -705,6 +708,11 @@ export default function Planner() {
   const [firstRun, setFirstRun] = useState(false);
   const [reminderRecords, setReminderRecords] = useState([]);
   const [remindersReady, setRemindersReady] = useState(false);
+  /* What came due while nothing was running to say so. Gathered once, on the
+     open that finds it, and then reported rather than rung. */
+  const [missedReport, setMissedReport] = useState(null);
+  const [missedSheet, setMissedSheet] = useState(false);
+  const missedChecked = useRef(false);
   const [preferences, setPreferences] = useState(null);
   const [motivationLedger, setMotivationLedger] = useState(null);
   const [diagnostics, setDiagnostics] = useState(null);
@@ -1139,6 +1147,35 @@ export default function Planner() {
       return JSON.stringify(next) === JSON.stringify(records) ? records : next;
     });
   }, [db, remindersReady, nowLocal, todayKey]);
+
+  /* A web page cannot set an alarm for a time when it is not running: the only
+     mechanisms are a push from a server or a notification-trigger API that never
+     shipped, and this notebook has no server by design. So the honest thing is
+     not to pretend, but to say what was missed as soon as there is someone to
+     say it to — once per open, after the ledger has been reconciled, so the list
+     reflects the notebook as it stands rather than as it was left. */
+  useEffect(() => {
+    if (!db || !remindersReady || missedChecked.current) return;
+    missedChecked.current = true;
+    const missed = getMissedReminders(reminderRecords, nowLocal);
+    const expired = getExpiredReminders(reminderRecords, nowLocal);
+    /* Too old to be worth mentioning, but they cannot stay active or every open
+       would examine them again for the life of the notebook. */
+    if (expired.length) {
+      setReminderRecords((records) => markRemindersMissed(records, expired.map((r) => r.id), { now: nowLocal }));
+    }
+    if (missed.length) setMissedReport(missed);
+  }, [db, remindersReady, reminderRecords, nowLocal]);
+
+  const closeMissedReport = useCallback(() => {
+    setMissedSheet(false);
+    setMissedReport((report) => {
+      if (report?.length) {
+        setReminderRecords((records) => markRemindersMissed(records, report.map((r) => r.id), { now: nowLocal }));
+      }
+      return null;
+    });
+  }, [nowLocal]);
 
   useEffect(() => {
     if (!db || !remindersReady || alertToast) return;
@@ -3130,6 +3167,30 @@ export default function Planner() {
         </div>
       </div>
 
+      {/* A report, not an alarm. The moments have gone, and ringing for them now
+          would be a lie about what time it is — but saying nothing was worse: the
+          notebook knew it had missed something and kept it to itself. It sits in
+          the flow of the page rather than floating over it, because unlike a
+          toast there is no hurry and nothing underneath it needs reading first. */}
+      {missedReport && missedReport.length > 0 && (
+        <div className="px-3 sm:px-5 pb-3">
+          <div data-test="missed-reminders" className="nb-up flex items-center gap-3 px-3 py-2"
+            style={{ background: surface, borderRadius: CARD_R, boxShadow: `inset 0 0 0 1px ${T.line}` }}>
+            <span style={{ color: T.dim }} className="shrink-0"><BellIcon size={13} /></span>
+            <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">WHILE YOU WERE AWAY</span>
+            <span className="text-sm truncate flex-1">
+              {missedReport.length === 1
+                ? missedReport[0].title
+                : `${missedReport.length} reminders came due`}
+            </span>
+            <button data-test="missed-reminders-review" onClick={() => { beep("click"); setMissedSheet(true); }}
+              style={{ fontFamily: MONO, color: T.accent }} className="nb-tap text-xs font-bold tracking-widest shrink-0 underline">REVIEW</button>
+            <button data-test="missed-reminders-dismiss" onClick={() => { beep("tick"); closeMissedReport(); }}
+              style={{ fontFamily: MONO, color: T.dim }} className="nb-tap text-xs tracking-widest shrink-0">CLEAR</button>
+          </div>
+        </div>
+      )}
+
       {/* ══ BODY ══ */}
       <main className="nb-main px-3 sm:px-5 grid grid-cols-1 lg:grid-cols-12 gap-5 flex-1 min-h-0"
         style={{ "--sheet-pad": sheetPad }}>
@@ -4190,6 +4251,34 @@ export default function Planner() {
         </Sheet>
       )}
 
+      {missedSheet && missedReport && (
+        <Sheet T={T} title="WHILE YOU WERE AWAY" onClose={closeMissedReport}>
+          <p style={{ color: T.dim }} className="text-sm mb-3">
+            {/* Said plainly, because the alternative is that it looks like a bug.
+                A page cannot set an alarm for a time when it is not running, and
+                this notebook has no server to send one. */}
+            These came due while the notebook was closed. Nothing on this device can
+            raise an alert while the app is not open, so they are reported here instead.
+          </p>
+          <div className="flex flex-col gap-1.5">
+            {missedReport.map((reminder) => (
+              <div key={reminder.id} data-test="missed-reminder-row" className="px-3 py-2"
+                style={{ background: surface, borderRadius: CARD_R }}>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-sm font-semibold truncate flex-1">{reminder.title}</span>
+                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">
+                    {plannedLabel(reminder.scheduledFor.slice(0, 10), todayKey)} {fmtTime(fromHhmm(reminder.scheduledFor.slice(11, 16)), clock)}
+                  </span>
+                </div>
+                {reminder.body && <span style={{ color: T.dim }} className="block text-xs mt-0.5">{reminder.body}</span>}
+              </div>
+            ))}
+          </div>
+          <button onClick={closeMissedReport} style={{ background: T.accent, color: T.on, borderRadius: 999, fontFamily: MONO }}
+            className="nb-tap w-full mt-4 py-2.5 text-xs font-bold tracking-widest">GOT IT</button>
+        </Sheet>
+      )}
+
       {shortcuts && (
         <Sheet T={T} title="SHORTCUTS" onClose={() => { beep("click"); setShortcuts(false); }}>
           <h2 className="text-2xl font-bold tracking-tight">Keyboard</h2>
@@ -4217,9 +4306,17 @@ export default function Planner() {
               <span className="text-sm">Week starts</span>
               <span style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest">{weekStart === 1 ? "MONDAY" : "SUNDAY"}</span>
             </button>
-            <button onClick={askNotifs} className="w-full flex items-center justify-between py-2.5" style={{ borderBottom: `1px solid ${T.line}` }}>
-              <span className="text-sm">System notifications</span>
-              <span style={{ fontFamily: MONO, color: preferences.notifications.systemEnabled ? T.accent : T.dim }} className="text-xs tracking-widest">{preferences.notifications.systemEnabled ? "ON" : "ALLOW"}</span>
+            {/* The limit is stated rather than left to be discovered. A toggle
+                called "system notifications" implies the system will notify you,
+                and it will not: a page cannot set an alarm for a time when it is
+                not running, and a notebook with no server has nothing to send one.
+                What arrives instead is a report, the next time the app is open. */}
+            <button onClick={askNotifs} className="w-full flex items-start justify-between gap-3 py-2.5 text-left" style={{ borderBottom: `1px solid ${T.line}` }}>
+              <span className="min-w-0">
+                <span className="block text-sm">System notifications</span>
+                <span style={{ color: T.dim }} className="block text-xs mt-0.5">Only while the app is open. Anything missed is reported next time.</span>
+              </span>
+              <span style={{ fontFamily: MONO, color: preferences.notifications.systemEnabled ? T.accent : T.dim }} className="text-xs tracking-widest shrink-0 pt-0.5">{preferences.notifications.systemEnabled ? "ON" : "ALLOW"}</span>
             </button>
           </div>
 
