@@ -39,6 +39,18 @@ ${styles}
   #root:empty { background: ${GROUND}; }
 </style>
 <div id="root"></div>
+<script>
+  /* The host writes this page's <head>, so the app's own viewport meta never
+     ships with it. Without it a touch browser is free to zoom the whole page
+     when a sheet autofocuses a field, and a pinch back out leaves every
+     fixed-position sheet mis-painted. Added here rather than in the app, because
+     standalone the real <head> already says this. */
+  (function () {
+    var meta = document.querySelector('meta[name="viewport"]');
+    if (!meta) { meta = document.createElement("meta"); meta.name = "viewport"; document.head.appendChild(meta); }
+    meta.setAttribute("content", "width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1");
+  })();
+</script>
 <script type="module">
 ${bundle}
 </script>

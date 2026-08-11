@@ -2605,6 +2605,15 @@ export default function Planner() {
   return (
     <div className="nb-root flex flex-col" style={{ background: T.bg, color: T.text, fontFamily: SANS }}>
       <style>{`
+        /* A touch browser zooms the whole viewport when it focuses a field whose
+           text is under 16px, and every sheet here autofocuses one. Standalone
+           the viewport meta suppresses it; embedded, the host writes <head> and
+           it does not — so the fix belongs on the fields themselves. Desktop
+           keeps the small type; a coarse pointer gets 16px, which is easier to
+           hit anyway. */
+        @media (pointer: coarse){
+          input,textarea,select,[contenteditable="true"]{font-size:16px}
+        }
         .nb-s::-webkit-scrollbar{width:5px;height:5px}
         .nb-s::-webkit-scrollbar-thumb{background:${T.faint};border-radius:999px}
         .nb-s::-webkit-scrollbar-track{background:transparent}
@@ -2654,11 +2663,16 @@ export default function Planner() {
           100%{opacity:1;transform:translate(0,0) scale(1);border-radius:24px}
         }
         .nb-fluid.nb-fluid-closing{animation:nbfluidout 240ms cubic-bezier(.4,0,.4,1) forwards;pointer-events:none}
-        .nb-fluid.nb-fluid-closing[data-fluid-origin="trigger"]{animation-name:nbfluidoriginout}
+        .nb-fluid.nb-fluid-closing[data-fluid-origin="trigger"]{animation-name:nbfluidoriginout;animation-duration:300ms}
         @keyframes nbfluidout{0%,30%{opacity:1}100%{opacity:0;transform:translateY(12px) scale(.97);border-radius:30px}}
+        /* The exit retraces the entry. It used to travel a quarter of the way back
+           and stop at scale(.88), so a sheet that flew out of its card drifted
+           vaguely downward on the way out — the two halves of one gesture did not
+           describe the same path. Same distance, same scale, reversed. */
         @keyframes nbfluidoriginout{
-          0%,30%{opacity:1}
-          100%{opacity:0;transform:translate(calc(var(--fluid-x) * .24),calc(var(--fluid-y) * .24)) scale(.88);border-radius:32px}
+          0%{opacity:1;transform:translate(0,0) scale(1);border-radius:24px}
+          70%{opacity:1}
+          100%{opacity:0;transform:translate(var(--fluid-x),var(--fluid-y)) scale(var(--fluid-sx),var(--fluid-sy));border-radius:999px}
         }
         /* The notch morph: one object changing shape, rather than a panel fading
            in. The shape never fades — it travels and stretches from the pill at
@@ -5502,7 +5516,7 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
       window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
       || (panel && window.getComputedStyle(panel).animationName === "none")
     );
-    closeTimer.current = window.setTimeout(() => onCloseRef.current(), reduced ? 0 : (morphRef.current === "notch" ? 260 : 240));
+    closeTimer.current = window.setTimeout(() => onCloseRef.current(), reduced ? 0 : (morphRef.current === "notch" ? 260 : 300));
   }, []);
   useLayoutEffect(() => {
     const content = contentRef.current;

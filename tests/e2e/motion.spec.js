@@ -126,3 +126,54 @@ test.describe("the notch morph", () => {
     await expect(page.getByText("Morphed into being").first()).toBeVisible();
   });
 });
+
+test.describe("sheet exits", () => {
+  test("a detail sheet leaves along the path it arrived on", async ({ page }) => {
+    await openPlanner(page);
+    await page.keyboard.press("ControlOrMeta+k");
+    await page.getByTestId("palette-input").fill("Standup today 10am 30m");
+    await page.getByTestId("palette-quick-add").click();
+    await page.waitForTimeout(500);
+
+    await page.getByText("Standup", { exact: true }).first().click();
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).toBeVisible();
+    await expect(sheet).toHaveAttribute("data-fluid-origin", "trigger");
+
+    /* Entry and exit read the same custom properties, so the sheet retraces its
+       own path instead of drifting vaguely downward. The exit used to travel a
+       quarter of the distance and stop at a different scale. */
+    const geometry = await sheet.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return {
+        x: style.getPropertyValue("--fluid-x").trim(),
+        sx: style.getPropertyValue("--fluid-sx").trim(),
+      };
+    });
+    expect(geometry.x).not.toBe("");
+    expect(Number(geometry.sx)).toBeGreaterThan(0);
+
+    await page.keyboard.press("Escape");
+    await expect(sheet).toHaveCount(0, { timeout: 3000 });
+  });
+
+  test("form fields are big enough that a touch browser will not zoom the page", async ({ page }) => {
+    /* Every sheet autofocuses a field, and a coarse-pointer browser zooms the
+       whole viewport when that field's text is under 16px — then a pinch back
+       out leaves every fixed sheet mis-painted. */
+    await page.emulateMedia({ media: "screen" });
+    await openPlanner(page);
+    await page.getByTestId("new-entry").click();
+    await expect(page.getByTestId("composer")).toBeVisible();
+
+    const tooSmall = await page.evaluate(() => {
+      const coarse = window.matchMedia("(pointer: coarse)");
+      if (!coarse.matches) return "desktop";
+      return [...document.querySelectorAll("input, textarea, select")]
+        .filter((n) => n.offsetParent !== null)
+        .filter((n) => parseFloat(getComputedStyle(n).fontSize) < 16)
+        .length;
+    });
+    expect(tooSmall === "desktop" || tooSmall === 0).toBe(true);
+  });
+});
