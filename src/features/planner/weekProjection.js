@@ -80,3 +80,80 @@ export function busyFractionForDay(state, dateKey, {
   }
   return Math.min(1, busy / (windowEndMinute - windowStartMinute));
 }
+
+/* The month, in two queries instead of eighty-four.
+ *
+ * A month grid is 42 cells, and each one used to ask the domain two questions of
+ * its own: what occurs on this day, and how much of its working window is
+ * booked. Every one of those is a range query that walks the recurrence rules
+ * from scratch, so stepping one month forward cost 84 of them — about a tenth of
+ * a second of blocked main thread on a small notebook, and far worse on a real
+ * one, all of it spent re-deriving the same six weeks over and over.
+ *
+ * These ask once for the whole grid and hand back a lookup. The arithmetic per
+ * day is unchanged — `busyFractionsForRange` computes exactly what
+ * `busyFractionForDay` does, and there is a test asserting they agree — the only
+ * difference is how many times the recurrence expansion runs.
+ */
+export function monthDensitiesForRange(state, startDate, days, { calendarIds } = {}) {
+  const counts = new Map();
+  if (!state || days <= 0) return counts;
+  const endExclusive = addDaysToKey(startDate, days);
+  for (let key = startDate; key < endExclusive; key = addDaysToKey(key, 1)) counts.set(key, 0);
+
+  /* `segments: true` matters and is not an optimisation detail. Asked for one
+     day, a range query returns a multi-day event once because it overlaps that
+     day — so each of the days it spans counts it. Asked for six weeks it would
+     also return it once, and only its first day would count it. Segmenting makes
+     the wide read say the same thing as the narrow ones. */
+  for (const occurrence of getVisibleOccurrencesForRange(state, startDate, endExclusive, { calendarIds, segments: true })) {
+    const key = occurrenceDate(occurrence);
+    if (counts.has(key)) counts.set(key, counts.get(key) + 1);
+  }
+  /* Tasks still go a day at a time: `getDayTasks` materialises a recurring task's
+     occurrence for a specific date, and there is no range form of that to call.
+     It walks the task list rather than expanding calendar recurrence, which is
+     the cheap half of what the month was paying for. */
+  for (let key = startDate; key < endExclusive; key = addDaysToKey(key, 1)) {
+    const open = getDayTasks(state, key).filter((task) => task.status !== "completed").length;
+    counts.set(key, counts.get(key) + open);
+  }
+  return counts;
+}
+
+export function busyFractionsForRange(state, startDate, days, {
+  windowStartMinute = 6 * 60,
+  windowEndMinute = 22 * 60,
+  viewerTimeZone,
+} = {}) {
+  const fractions = new Map();
+  if (!state || days <= 0) return fractions;
+  const endExclusive = addDaysToKey(startDate, days);
+
+  const perDay = new Map();
+  for (let key = startDate; key < endExclusive; key = addDaysToKey(key, 1)) perDay.set(key, []);
+
+  /* One expansion for the whole grid; each interval is then clipped into every
+     day it touches, so an event running past midnight still counts on both. */
+  for (const interval of getTimedBusyIntervals(state, startDate, endExclusive, { viewerTimeZone })) {
+    for (const [key, list] of perDay) {
+      const dayStart = localDateTimeToEpochMinutes(`${key}T00:00`);
+      const start = Math.max(interval.start - dayStart, windowStartMinute);
+      const end = Math.min(interval.end - dayStart, windowEndMinute);
+      if (end > start) list.push([start, end]);
+    }
+  }
+
+  const span = windowEndMinute - windowStartMinute;
+  for (const [key, list] of perDay) {
+    list.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    let busy = 0;
+    let cursor = windowStartMinute;
+    for (const [start, end] of list) {
+      busy += Math.max(0, end - Math.max(start, cursor));
+      cursor = Math.max(cursor, end);
+    }
+    fractions.set(key, Math.min(1, busy / span));
+  }
+  return fractions;
+}

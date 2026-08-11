@@ -102,7 +102,9 @@ import {
 import { resolveTaskForInspection } from "./features/planner/taskInspection.js";
 import { projectPlannerDay } from "./features/planner/dayProjection.js";
 import { findOpenSlots } from "./features/planner/slotSearch.js";
-import { busyFractionForDay, projectDayPeek, projectPlannerWeek } from "./features/planner/weekProjection.js";
+import {
+  busyFractionForDay, busyFractionsForRange, monthDensitiesForRange, projectDayPeek, projectPlannerWeek,
+} from "./features/planner/weekProjection.js";
 import {
   applyDetailDraft,
   buildDetailEntryPayload,
@@ -1216,6 +1218,20 @@ export default function Planner() {
     setReminderRecords((records) => dismissReminder(records, alertToast.reminderId, { now: nowLocal }));
     setAlertToast(null); beep("click");
   };
+
+  /* The month grid asks these of 42 cells. Asked one cell at a time they are 84
+     range queries per step, each re-expanding the same six weeks of recurrence;
+     asked once for the whole grid they are two. Keyed by the grid's first day so
+     the work is redone when the grid moves and not when anything else renders. */
+  const monthStartKey = monthGrid.length ? keyOf(monthGrid[0]) : todayKey;
+  const monthDensities = useMemo(
+    () => (db && zoom === "month" ? monthDensitiesForRange(db, monthStartKey, monthGrid.length) : null),
+    [db, zoom, monthStartKey, monthGrid.length],
+  );
+  const monthBusy = useMemo(
+    () => (db && zoom === "month" ? busyFractionsForRange(db, monthStartKey, monthGrid.length) : null),
+    [db, zoom, monthStartKey, monthGrid.length],
+  );
 
   const densityOf = useCallback((d) => {
     if (!db) return 0;
@@ -3048,8 +3064,8 @@ export default function Planner() {
             <div className="grid grid-cols-7 gap-px" style={{ background: T.line }}>
               {monthGrid.map((d, i) => {
                 const k = keyOf(d);
-                const n = densityOf(d);
-                const bf = busyFractionOf(d);
+                const n = monthDensities?.get(k) ?? densityOf(d);
+                const bf = monthBusy?.get(k) ?? busyFractionOf(d);
                 const inMonth = d.getMonth() === monthCursor.getMonth();
                 const sel = k === dateKey;
                 /* The tint is the heat — how much of the working day is booked —
