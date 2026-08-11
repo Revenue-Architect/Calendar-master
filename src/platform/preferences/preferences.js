@@ -5,7 +5,13 @@ export const DEFAULT_PREFERENCES = Object.freeze({
   /* `weekStart` is a weekday index the way `Date#getDay` counts, so 0 is Sunday
      and 1 is Monday. It is a display preference like the clock: it changes which
      column a week opens on, never what a stored record means. */
-  display: Object.freeze({ themeId: "obsidian-acid", clock: "12", weekStart: 0, reducedMotion: false }),
+  /* `litSurfaces` is off, and that is the point of it existing at all. A theme
+     in this app has always been one flat accent on one ground, and that is the
+     identity — so the lit variant, where the accent carries a shallow gradient
+     derived from itself, is something you turn on rather than something that
+     happens to you. Off, every accent renders exactly the flat colour it always
+     has; the only difference is that `--accent-fill` resolves to the solid. */
+  display: Object.freeze({ themeId: "obsidian-acid", clock: "12", weekStart: 0, reducedMotion: false, litSurfaces: false }),
   feedback: Object.freeze({ sound: true, haptics: false }),
   notifications: Object.freeze({ systemEnabled: false }),
   motivation: Object.freeze({ points: true, levels: true, streaks: true, celebrations: true }),
@@ -41,6 +47,7 @@ export function createPreferences(input = {}) {
       clock: display.clock === "24" ? "24" : "12",
       weekStart: display.weekStart === 1 ? 1 : DEFAULT_PREFERENCES.display.weekStart,
       reducedMotion: boolean(display.reducedMotion, DEFAULT_PREFERENCES.display.reducedMotion),
+      litSurfaces: boolean(display.litSurfaces, DEFAULT_PREFERENCES.display.litSurfaces),
     },
     feedback: {
       sound: boolean(feedback.sound, DEFAULT_PREFERENCES.feedback.sound),

@@ -88,7 +88,7 @@ export class ErrorBoundary extends React.Component {
       <div role="alert" style={{
         minHeight: "100dvh", background: GROUND, color: INK,
         display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
-        fontFamily: "Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+        fontFamily: "var(--font-display, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif)",
       }}>
         <div style={{ maxWidth: 460, width: "100%" }}>
           <p style={{ fontFamily: MONO, fontSize: 12, letterSpacing: "0.14em", color: ACCENT, margin: 0 }}>

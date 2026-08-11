@@ -170,30 +170,11 @@ import {
 import { addDays, addDaysToKey, diffDays, isDateKey, keyOf, parseKey } from "./shared/time/dateKey.js";
 import { addMinutesToLocalDateTime, localDateTimeToEpochMinutes } from "./shared/time/localDateTime.js";
 import { getOffsetCandidates } from "./shared/time/timezone.js";
+import { THEMES } from "./design/themes.js";
+import { readable } from "./design/contrast.js";
 
 /* ═══════════════════════ TOKENS ═══════════════════════ */
 
-const THEMES = [
-  { id: "obsidian-acid", name: "Obsidian / Acid", bg: "#0A0A0C", card: "#121216", line: "#1E1E26", text: "#F2F2F5", dim: "#797987", faint: "#2A2A34", accent: "#CCFF00", on: "#000000" },
-  { id: "obsidian-cyan", name: "Obsidian / Cyan", bg: "#0A0A0C", card: "#121216", line: "#1E1E26", text: "#F2F2F5", dim: "#797987", faint: "#2A2A34", accent: "#00F0FF", on: "#000000" },
-  { id: "ink-violet", name: "Ink / Violet", bg: "#0C0B12", card: "#15131E", line: "#221F2E", text: "#F1EFF7", dim: "#7C778C", faint: "#2B2739", accent: "#A855F7", on: "#150A22" },
-  { id: "ember", name: "Ember / Orange", bg: "#0B0908", card: "#151110", line: "#211B18", text: "#F5F1EE", dim: "#857C75", faint: "#2C2521", accent: "#FF5500", on: "#1B0A02" },
-  { id: "signal", name: "Obsidian / Crimson", bg: "#0A0A0C", card: "#121216", line: "#1E1E26", text: "#F2F2F5", dim: "#797987", faint: "#2A2A34", accent: "#FF2A55", on: "#1F0208" },
-  { id: "raw-amber", name: "Raw Paper / Amber", bg: "#1A1917", card: "#221F1C", line: "#2C2822", text: "#F0EBE1", dim: "#8B8477", faint: "#38332B", accent: "#D97706", on: "#1B1102" },
-  { id: "cream-terracotta", name: "Cream / Terracotta", bg: "#F4F1EA", card: "#FFFFFF", line: "#E4DED2", text: "#14141A", dim: "#79736A", faint: "#DED7C9", accent: "#C85A32", on: "#FFFFFF" },
-  { id: "cream-sage", name: "Cream / Sage", bg: "#F4F1EA", card: "#FFFFFF", line: "#E4DED2", text: "#14141A", dim: "#79736A", faint: "#DED7C9", accent: "#789078", on: "#000000" },
-  { id: "cream-slate", name: "Cream / Slate", bg: "#F1F2F4", card: "#FFFFFF", line: "#E1E3E7", text: "#14141A", dim: "#71757C", faint: "#D8DBE0", accent: "#5B7C99", on: "#FFFFFF" },
-  { id: "linen-dusty", name: "Linen / Dusty Rose", bg: "#F7F3F4", card: "#FFFFFF", line: "#E9E0E2", text: "#1A1418", dim: "#7C7074", faint: "#E0D4D7", accent: "#C48B9F", on: "#000000" },
-
-
-  /* Same neutrals as the sets above, new accents only. A theme here is a ground plus
-     one colour, so a new accent is a new theme rather than a new palette. */
-  { id: "obsidian-red", name: "Obsidian / Timepage Red", bg: "#0A0A0C", card: "#121216", line: "#1E1E26", text: "#F2F2F5", dim: "#797987", faint: "#2A2A34", accent: "#E23B2E", on: "#FFFFFF" },
-  { id: "obsidian-blue", name: "Obsidian / Actions Blue", bg: "#0A0A0C", card: "#121216", line: "#1E1E26", text: "#F2F2F5", dim: "#797987", faint: "#2A2A34", accent: "#1BA3C4", on: "#00161C" },
-  { id: "obsidian-forest", name: "Obsidian / Forest", bg: "#0A0A0C", card: "#121216", line: "#1E1E26", text: "#F2F2F5", dim: "#797987", faint: "#2A2A34", accent: "#34C77B", on: "#03210F" },
-  { id: "cream-red", name: "Cream / Timepage Red", bg: "#F4F1EA", card: "#FFFFFF", line: "#E4DED2", text: "#14141A", dim: "#79736A", faint: "#DED7C9", accent: "#C8221B", on: "#FFFFFF" },
-  { id: "cream-blue", name: "Cream / Actions Blue", bg: "#F1F2F4", card: "#FFFFFF", line: "#E1E3E7", text: "#14141A", dim: "#71757C", faint: "#D8DBE0", accent: "#0E7F99", on: "#FFFFFF" },
-];
 
 /* §4.6/§4.7. The frequencies an entry can be set to from its own detail view. The
    fuller rule — selected weekdays, an end date, a count — still belongs to the
@@ -263,9 +244,25 @@ const SHORTCUTS = [
   { group: "ELSEWHERE", keys: ["Esc"], does: "Close whatever is open" },
 ];
 
-const MONO = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
-const SANS = "Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif";
-const SERIF = "Georgia, Cambria, Times New Roman, serif";
+/* Three voices, and the face is how you know which one is speaking.
+ *
+ * DISPLAY is what the app says to you — titles, headings, controls, the labels
+ * on its own sections. MONO is what it measures: times, durations, counts, the
+ * hour rail. VOICE is what was written rather than computed — a note's body, and
+ * the app's own asides.
+ *
+ * Mono stays because a calendar is a table of numbers. "10:00 AM" and "11:30 AM"
+ * are the same width, times align down the rail, and durations stack in columns
+ * without a single alignment hack. It just stops doing everyone else's job as
+ * well: it used to be on 229 elements, including every title and button.
+ *
+ * The stacks themselves live in index.css as custom properties, so the CSS and
+ * the inline styles cannot drift apart. `SANS` is gone — it named Inter, which
+ * was never shipped in any build, so the stack silently fell through to the
+ * system face for the life of the project. */
+const DISPLAY = "var(--font-display)";
+const MONO = "var(--font-data)";
+const SERIF = "var(--font-voice)";
 
 /* ═══════════════════════ UTILS ═══════════════════════ */
 
@@ -948,7 +945,25 @@ export default function Planner() {
 
   useEffect(() => { const i = setInterval(() => setNow(new Date()), 15000); return () => clearInterval(i); }, []);
 
-  const T = useMemo(() => THEMES.find((t) => t.id === preferences?.display.themeId) || THEMES[0], [preferences]);
+  /* The theme, plus the same colours as they have to be to be *read*.
+     Thirteen of the fifteen themes had at least one text pair below the
+     legibility floor and nothing had ever checked — Dusty Rose on linen was
+     2.53:1 against a 4.5 bar. Editing the accents would have edited the themes,
+     so `dim` and `accent` keep their authored values everywhere they fill,
+     border or dot, and `dimText`/`accentText` are the versions that go on a
+     glyph. On a theme that already passed they are the same string.
+     src/design/contrast.test.js holds all fifteen to it. */
+  const T = useMemo(() => {
+    const theme = THEMES.find((t) => t.id === preferences?.display.themeId) || THEMES[0];
+    const read = readable(theme);
+    return {
+      ...theme,
+      dimText: read.dimOnBg,
+      dimOnCard: read.dimOnCard,
+      accentText: read.accentOnBg,
+      accentOnCard: read.accentOnCard,
+    };
+  }, [preferences]);
   const beep = useSynth(preferences?.feedback.sound ?? true);
   const buzz = useCallback((pattern) => {
     if (preferences?.feedback.haptics) buzzDevice(pattern);
@@ -1016,10 +1031,37 @@ export default function Planner() {
      composer legible instead of dark-on-dark. */
   useEffect(() => {
     document.body.style.background = T.bg;
-    document.documentElement.style.colorScheme = isDark(T.bg) ? "dark" : "light";
+    const ground = isDark(T.bg) ? "dark" : "light";
+    document.documentElement.style.colorScheme = ground;
+    /* Shadows and the sheen are per-ground and live in index.css. This is the
+       app's own fifteen themes, not the operating system's preference, so it is
+       stamped from the theme rather than read from a media query — someone
+       running a cream theme on a dark OS must get the cream shadows. */
+    document.documentElement.dataset.ground = ground;
+    /* The accent as a lit surface rather than a flat fill — derived, never
+       authored. Fifteen themes times two hand-picked gradient stops is thirty
+       hex values to keep in agreement, and a theme in this app has always been
+       one colour on one ground. So the two stops come out of the accent itself
+       and a new theme still costs exactly one hex.
+
+       It goes on the three places the accent already dominates — the primary
+       button, the selected day, the elapsed fill — and never behind text. */
+    const root = document.documentElement.style;
+    root.setProperty("--accent-solid", T.accent);
+    root.setProperty("--accent-lit", mixHex(T.accent, "#FFFFFF", 0.18));
+    root.setProperty("--accent-deep", mixHex(T.accent, "#000000", 0.12));
+    root.setProperty("--nb-line", T.line);
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.setAttribute("content", T.bg);
   }, [T]);
+
+  /* Opt-in, and absent by default: with no `data-surfaces` the accent fill is
+     the flat colour the theme has always been. */
+  useEffect(() => {
+    const lit = Boolean(preferences?.display?.litSurfaces);
+    if (lit) document.documentElement.dataset.surfaces = "lit";
+    else delete document.documentElement.dataset.surfaces;
+  }, [preferences?.display?.litSurfaces]);
 
   const todayKey = keyOf(now);
   /* Fingerprinting a few hundred kilobytes is ~1ms, but there is no reason to do
@@ -2666,7 +2708,7 @@ export default function Planner() {
 
   if (!ready || !db) {
     return (
-      <div style={{ background: THEMES[0].bg, color: THEMES[0].dim, fontFamily: MONO, minHeight: "100vh" }} className="flex items-center justify-center text-xs tracking-widest">
+      <div style={{ background: THEMES[0].bg, color: THEMES[0].dim, fontFamily: MONO, minHeight: "100vh" }} className="flex items-center justify-center nb-data">
         OPENING THE NOTEBOOK
       </div>
     );
@@ -2959,7 +3001,7 @@ export default function Planner() {
   );
 
   return (
-    <div data-test="nav-shell" data-nav-state={navPhase} className="nb-nav-shell" style={{ fontFamily: SANS }}>
+    <div data-test="nav-shell" data-nav-state={navPhase} className="nb-nav-shell" style={{ fontFamily: DISPLAY }}>
       <NavigationShell
         phase={navPhase}
         firstItemRef={navFirstItemRef}
@@ -2976,7 +3018,7 @@ export default function Planner() {
           event.preventDefault();
           closeNavigation();
         }}
-        style={{ background: T.bg, color: T.text, fontFamily: SANS }}>
+        style={{ background: T.bg, color: T.text, fontFamily: DISPLAY }}>
       <button data-test="mobile-calendar-return" type="button" aria-label="Return to calendar" onClick={closeNavigation} className="nb-mobile-calendar-return">CALENDAR</button>
       <style>{`
         /* A touch browser zooms the whole viewport when it focuses a field whose
@@ -3034,7 +3076,7 @@ export default function Planner() {
         .nb-nav-membership{margin-top:auto;padding:15px 12px;border:1px solid #37383d;border-radius:12px;color:#aaa9a2}
         .nb-shell-control{color:#f4f2ec;border:1px solid #3a3b40;background:#24252a;border-radius:9px;font-family:${MONO};font-size:13px;letter-spacing:.06em}
         .nb-shell-control:hover,.nb-shell-control:focus-visible{background:#313238;outline:2px solid #f4f2ec;outline-offset:2px}
-        .nb-shell-info{border-radius:999px;font-family:${SANS};font-weight:700;letter-spacing:0}
+        .nb-shell-info{border-radius:999px;font-family:${DISPLAY};font-weight:700;letter-spacing:0}
         .nb-mobile-calendar-return{display:none}
         @media(max-width:639px){
           .nb-nav-shell{--nav-width:min(78vw,320px);--nav-gap:11px;--nav-page-scale:.94;--nav-page-radius:16px}
@@ -3059,8 +3101,82 @@ export default function Planner() {
         .nb-main{padding-bottom:var(--sheet-pad);transition:padding-bottom 260ms cubic-bezier(.2,.8,.25,1)}
         @media(min-width:1024px){.nb-main{padding-bottom:2rem}}
         .nb-stream{flex:1 1 auto;min-height:0}
-        .nb-tap{transition:transform 90ms ease,opacity 120ms ease}
-        .nb-tap:active{transform:scale(0.96)}
+
+        /* ── THE SCALE ──────────────────────────────────────────────────
+           A polish, not a reskin. The identity of this app is monospace
+           capitals on a ground-plus-one-accent theme, and that survives intact:
+           every rail, chip, button and time label is still mono, still tracked
+           wide, still shouting. What was actually broken is that *content* was
+           set in the same 12px mono as the chrome — an event's title, a note's
+           body and a section rail were typographically the same thing, so
+           hierarchy had nothing left to carry it but colour.
+
+           So the geometric face takes the content and only the content: titles,
+           body, headings. Mono keeps the chrome and the data, which is the half
+           it was always right about — "10:00 AM" and "11:30 AM" are the same
+           width, and times align down the rail without a single hack.
+
+           Sizes are set against the geometry that already exists rather than a
+           theoretical ratio: 16px is what fits a 31px half-hour card once its
+           padding is paid for, and picking 17 would have clipped every short
+           event on the timeline. */
+        .nb-display{font-family:var(--font-data);font-size:var(--t-display);font-weight:var(--t-display-w);letter-spacing:var(--t-display-ls);line-height:.95;font-variant-numeric:tabular-nums}
+        .nb-title{font-family:var(--font-display);font-size:var(--t-title);font-weight:var(--t-title-w);letter-spacing:var(--t-title-ls);line-height:1.2;text-wrap:balance}
+        .nb-heading{font-family:var(--font-display);font-size:var(--t-heading);font-weight:var(--t-heading-w);letter-spacing:var(--t-heading-ls);line-height:1.3}
+        .nb-lead{font-family:var(--font-display);font-size:var(--t-lead);font-weight:var(--t-lead-w);letter-spacing:var(--t-lead-ls);line-height:1.3}
+        .nb-body{font-family:var(--font-display);font-size:var(--t-body);font-weight:var(--t-body-w);letter-spacing:var(--t-body-ls);line-height:1.5}
+        /* What was written rather than computed. The only warm thing on the
+           surface, and it earns that by being rare. */
+        .nb-voice{font-family:var(--font-voice);font-size:var(--t-body);font-style:italic;line-height:1.6}
+        /* The interface voice. Capitals and wide tracking survive — that
+           rhythm is the app's own — but they are set in the geometric now,
+           which is where the Timepage resemblance actually lives and what
+           separates a label the app is speaking from a number it is reporting.
+           13px rather than 12: the difference between a label and a smudge on a
+           phone, and what lets a control reach a 44px target without padding
+           that looks apologetic. */
+        .nb-label{font-family:var(--font-display);font-size:var(--t-label);font-weight:var(--t-label-w);letter-spacing:var(--t-label-ls);text-transform:uppercase;line-height:1.3}
+        /* Data keeps the monospace and the tabular figures, which is the whole
+           reason monospace survived this change. */
+        .nb-data{font-family:var(--font-data);font-size:var(--t-data);font-weight:var(--t-data-w);letter-spacing:var(--t-data-ls);font-variant-numeric:tabular-nums;line-height:1.35}
+        .nb-data-b{font-weight:700}
+        .nb-micro{font-family:var(--font-data);font-size:var(--t-micro);font-weight:var(--t-micro-w);letter-spacing:var(--t-micro-ls);font-variant-numeric:tabular-nums;line-height:1.3}
+
+        /* ── MATERIAL ───────────────────────────────────────────────────
+           Every surface used to be flat with a hairline border, which reads as
+           a diagram rather than a thing. Three elevations and no more: flush,
+           resting, lifted — each one encoding state (a card at rest, a card in
+           your hand, a sheet over the day) rather than decorating it. */
+        .nb-e0{box-shadow:inset 0 0 0 1px ${T.line}}
+        .nb-e1{box-shadow:var(--e1),var(--sheen)}
+        .nb-e2{box-shadow:var(--e2),var(--sheen)}
+        /* Nothing responded to being pressed. This is the cheapest line in the
+           whole design and it is most of what "tactile" means — imperceptible
+           once, and the difference between an interface and an object over a
+           day of use. */
+        .nb-tap{transition:transform var(--press-out) var(--spring),opacity 120ms ease}
+        .nb-tap:active{transform:scale(0.97);transition-duration:var(--press-in)}
+        /* A 13px label with a little padding measures about 62 x 25, and the
+           floor for a finger is 44 x 44. Fifteen controls had been under it for
+           the life of the project and nothing had ever measured them.
+           The target grows, the button does not: a centred pseudo-element takes
+           the press on behalf of a control that stays exactly the size it was
+           drawn. Padding would have worked too and would have cost forty pixels
+           of header on a screen where the timeline is already down to 44% —
+           the wrong trade on the one surface the app exists to show. */
+        @media(pointer:coarse){
+          .nb-tap{position:relative}
+          .nb-tap::after{
+            content:"";position:absolute;left:50%;top:50%;
+            width:max(100%,44px);height:max(100%,44px);
+            transform:translate(-50%,-50%);
+          }
+        }
+        .nb-press{transition:transform var(--press-out) var(--spring)}
+        .nb-press:active{transform:scale(0.97);transition-duration:var(--press-in)}
+        @media(prefers-reduced-motion:reduce){
+          .nb-tap:active,.nb-press:active{transform:none}
+        }
         /* A stamp hides its native control, so the focus it takes has to be drawn
            on the wrapper instead — otherwise a keyboard user sees nothing. */
         .nb-stamp{transition:box-shadow 160ms ease}
@@ -3225,7 +3341,7 @@ export default function Planner() {
             onClick={() => { beep("click"); navOpen ? closeNavigation() : openNavigation(); }} className="nb-shell-control nb-tap w-8 h-8" title="Navigation">▤</button>
           <div className="flex items-baseline gap-2 min-w-0">
           {level != null && <>
-            <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">LVL</span>
+            <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label">LVL</span>
             <span style={{ fontFamily: MONO }} className="text-sm font-bold">{level}</span>
             <div style={{ background: T.faint }} className="w-14 h-1 mx-1"><div style={{ background: T.accent, width: `${levelPct}%` }} className="h-full" /></div>
           </>}
@@ -3245,7 +3361,7 @@ export default function Planner() {
       {/* ══ NAVIGATOR ══ */}
       <div onTouchStart={onTouchStartNav} onTouchMove={onTouchMoveNav} style={{ borderBottom: `1px solid ${T.line}` }}>
         <div className="flex items-center justify-between px-3 sm:px-5 py-1.5">
-          <button data-test="zoom-out" onClick={zoomOut} style={{ fontFamily: MONO, color: T.dim }} className="nb-tap text-xs tracking-widest" disabled={zoom === "month"}>
+          <button data-test="zoom-out" onClick={zoomOut} style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-data" disabled={zoom === "month"}>
             {zoom === "day" ? "◂ WEEK" : zoom === "week" ? "◂ MONTH" : `${MO[monthCursor.getMonth()]} ${monthCursor.getFullYear()}`}
           </button>
           <div className="flex items-center gap-2">
@@ -3257,11 +3373,11 @@ export default function Planner() {
               style={{ border: `1px solid ${T.line}` }} />
             {zoom === "month" && (
               <>
-                <button onClick={() => { beep("page"); setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() - 1, 1)); }} style={{ color: T.dim }} className="nb-tap px-2 text-xs">◂</button>
-                <button onClick={() => { beep("page"); setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1)); }} style={{ color: T.dim }} className="nb-tap px-2 text-xs">▸</button>
+                <button onClick={() => { beep("page"); setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() - 1, 1)); }} style={{ color: T.dimText }} className="nb-tap px-2 text-xs">◂</button>
+                <button onClick={() => { beep("page"); setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1)); }} style={{ color: T.dimText }} className="nb-tap px-2 text-xs">▸</button>
               </>
             )}
-            <button data-test="zoom-in" onClick={zoomIn} style={{ fontFamily: MONO, color: T.dim }} className="nb-tap text-xs tracking-widest" disabled={zoom === "day"}>
+            <button data-test="zoom-in" onClick={zoomIn} style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-data" disabled={zoom === "day"}>
               {zoom === "month" ? "WEEK ▸" : zoom === "week" ? "DAY ▸" : ""}
             </button>
           </div>
@@ -3269,7 +3385,7 @@ export default function Planner() {
 
         {zoom === "month" && (
           <div className="px-3 sm:px-5 pb-3">
-            <div className="grid grid-cols-7 mb-1">{weekdayOrder.map((d) => <span key={d} style={{ fontFamily: MONO, color: T.dim }} className="text-center text-xs tracking-widest">{WD1[d]}</span>)}</div>
+            <div className="grid grid-cols-7 mb-1">{weekdayOrder.map((d) => <span key={d} style={{ fontFamily: MONO, color: T.dimText }} className="text-center nb-data">{WD1[d]}</span>)}</div>
             <div className="grid grid-cols-7 gap-px" style={{ background: T.line }}>
               {monthGrid.map((d, i) => {
                 const k = keyOf(d);
@@ -3337,7 +3453,7 @@ export default function Planner() {
         {(zoom === "week" || zoom === "day") && (
           <div className="flex items-center">
             {zoom === "day" && (
-              <button onClick={() => goDay(-1)} aria-label="Previous day" style={{ color: T.dim }} className="nb-tap shrink-0 px-2 sm:px-3 py-1">◂</button>
+              <button onClick={() => goDay(-1)} aria-label="Previous day" style={{ color: T.dimText }} className="nb-tap shrink-0 px-2 sm:px-3 py-1">◂</button>
             )}
             <div ref={stripRef} style={stripFade} className="nb-x overflow-x-auto flex-1 min-w-0">
             <div className="flex min-w-max">
@@ -3359,9 +3475,9 @@ export default function Planner() {
                       boxShadow: !on && k === todayKey ? `inset 0 0 0 1.5px ${T.faint}` : "none",
                     }} />
                     <span className="relative block">
-                      <span style={{ fontFamily: MONO, color: on ? T.on : T.dim }} className="block text-xs tracking-widest">{WD[d.getDay()]}</span>
+                      <span style={{ fontFamily: MONO, color: on ? T.on : T.dim }} className="block nb-data">{WD[d.getDay()]}</span>
                       <span style={{ fontFamily: MONO, color: on ? T.on : T.text }} className="block text-xl font-bold tracking-tight">{pad(d.getDate())}</span>
-                      <span style={{ fontFamily: MONO, color: on ? T.on : T.dim }} className="block text-xs tracking-widest">{k === todayKey ? "NOW" : MO[d.getMonth()]}</span>
+                      <span style={{ fontFamily: MONO, color: on ? T.on : T.dim }} className="block nb-data">{k === todayKey ? "NOW" : MO[d.getMonth()]}</span>
                       {/* Density as a countable mark rather than a wash of colour. */}
                       <span className="flex items-center justify-center gap-0.5 h-1.5 mt-1">
                         {Array.from({ length: Math.min(3, n) }).map((_, dot) => (
@@ -3375,7 +3491,7 @@ export default function Planner() {
             </div>
             </div>
             {zoom === "day" && (
-              <button onClick={() => goDay(1)} aria-label="Next day" style={{ color: T.dim }} className="nb-tap shrink-0 px-2 sm:px-3 py-1">▸</button>
+              <button onClick={() => goDay(1)} aria-label="Next day" style={{ color: T.dimText }} className="nb-tap shrink-0 px-2 sm:px-3 py-1">▸</button>
             )}
           </div>
         )}
@@ -3384,9 +3500,9 @@ export default function Planner() {
       {/* ══ HERO ══ */}
       <div data-test="day-heading" data-date={dateKey} className="px-3 sm:px-5 pt-4 pb-3">
         <div className="flex items-end gap-3">
-          <span style={{ fontFamily: MONO }} className="text-6xl sm:text-7xl font-bold tracking-tighter leading-none">{pad(activeDate.getDate())}</span>
+          <span style={{ fontFamily: MONO }} className="nb-display">{pad(activeDate.getDate())}</span>
           <span className="pb-1.5">
-            <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest">{WD[activeDate.getDay()]} · {MO[activeDate.getMonth()]} {activeDate.getFullYear()}</span>
+            <span style={{ fontFamily: MONO, color: T.dimText }} className="block nb-data">{WD[activeDate.getDay()]} · {MO[activeDate.getMonth()]} {activeDate.getFullYear()}</span>
             <span className="block text-sm font-semibold leading-snug mt-0.5">{briefing}</span>
           </span>
         </div>
@@ -3401,17 +3517,17 @@ export default function Planner() {
         <div className="px-3 sm:px-5 pb-3">
           <div data-test="missed-reminders" className="nb-up flex items-center gap-3 px-3 py-2"
             style={{ background: surface, borderRadius: CARD_R, boxShadow: `inset 0 0 0 1px ${T.line}` }}>
-            <span style={{ color: T.dim }} className="shrink-0"><BellIcon size={13} /></span>
-            <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">WHILE YOU WERE AWAY</span>
-            <span className="text-sm truncate flex-1">
+            <span style={{ color: T.dimText }} className="shrink-0"><BellIcon size={13} /></span>
+            <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label shrink-0">WHILE YOU WERE AWAY</span>
+            <span className="nb-body truncate flex-1">
               {missedReport.length === 1
                 ? missedReport[0].title
                 : `${missedReport.length} reminders came due`}
             </span>
             <button data-test="missed-reminders-review" onClick={() => { beep("click"); setMissedSheet(true); }}
-              style={{ fontFamily: MONO, color: T.accent }} className="nb-tap text-xs font-bold tracking-widest shrink-0 underline">REVIEW</button>
+              style={{ fontFamily: MONO, color: T.accentText }} className="nb-tap text-xs font-bold tracking-widest shrink-0 underline">REVIEW</button>
             <button data-test="missed-reminders-dismiss" onClick={() => { beep("tick"); closeMissedReport(); }}
-              style={{ fontFamily: MONO, color: T.dim }} className="nb-tap text-xs tracking-widest shrink-0">CLEAR</button>
+              style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-label shrink-0">CLEAR</button>
           </div>
         </div>
       )}
@@ -3435,13 +3551,13 @@ export default function Planner() {
         <div className="px-3 sm:px-5 pb-3">
           <div data-test="backup-nudge" className="nb-up flex items-center gap-3 px-3 py-2"
             style={{ background: surface, color: T.text, borderRadius: CARD_R, boxShadow: `inset 0 0 0 1px ${T.line}` }}>
-            <span style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest shrink-0">BACK UP</span>
-            <span className="text-sm truncate flex-1">This notebook only exists on this device.</span>
+            <span style={{ fontFamily: MONO, color: T.accentText }} className="nb-label shrink-0">BACK UP</span>
+            <span className="nb-body truncate flex-1">This notebook only exists on this device.</span>
             <button data-test="backup-nudge-save" onClick={() => { beep("click"); exportJson(); }}
-              style={{ fontFamily: MONO, color: T.accent }} className="nb-tap text-xs font-bold tracking-widest shrink-0 underline">SAVE A COPY</button>
+              style={{ fontFamily: MONO, color: T.accentText }} className="nb-tap text-xs font-bold tracking-widest shrink-0 underline">SAVE A COPY</button>
             <button data-test="backup-nudge-dismiss"
               onClick={() => { beep("click"); setBackupRecord((current) => recordBackupDismissed(current, { state: db, today: todayKey })); }}
-              style={{ fontFamily: MONO, color: T.dim }} className="nb-tap text-xs tracking-widest shrink-0" aria-label="Not now">NOT NOW</button>
+              style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-data shrink-0" aria-label="Not now">NOT NOW</button>
           </div>
         </div>
       )}
@@ -3459,8 +3575,8 @@ export default function Planner() {
             {viewMode === "actions" ? (
               <div className="nb-s overflow-y-auto min-h-0 flex-1">
                 <div className="flex items-center justify-between pb-2">
-                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">ALL ACTIONS</span>
-                  <button onClick={() => setViewMode("timeline")} style={{ fontFamily: MONO, color: T.accent }} className="nb-tap text-xs tracking-widest">BACK TO DAY</button>
+                  <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label">ALL ACTIONS</span>
+                  <button onClick={() => setViewMode("timeline")} style={{ fontFamily: MONO, color: T.accentText }} className="nb-tap nb-label">BACK TO DAY</button>
                 </div>
                 {actionsPanel}
               </div>
@@ -3476,7 +3592,7 @@ export default function Planner() {
                 {/* "Find a slot": pick a duration and the next open gaps across the
                     coming days light up in the grid, ready to book. */}
                 <div className="flex items-center gap-1.5 flex-wrap pb-2 shrink-0">
-                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest mr-0.5">FIND A SLOT</span>
+                  <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label mr-0.5">FIND A SLOT</span>
                   {[30, 60, 120].map((d) => (
                     <button key={d} onClick={() => { beep("tick"); setSlotDur((cur) => (cur === d ? null : d)); }}
                       className="nb-tap px-2 py-0.5 text-xs font-bold tracking-widest"
@@ -3485,13 +3601,13 @@ export default function Planner() {
                     </button>
                   ))}
                   {slotDur != null && (slotMatches.length === 0 ? (
-                    <span style={{ fontFamily: MONO, color: NOW_RED }} className="text-xs tracking-widest">NO OPEN GAPS IN 14 DAYS</span>
+                    <span style={{ fontFamily: MONO, color: NOW_RED }} className="nb-label">NO OPEN GAPS IN 14 DAYS</span>
                   ) : (
                     slotMatches.slice(0, 3).map((s) => (
                       <button key={`${s.date}-${s.start}`}
                         onClick={() => { beep("click"); if (s.date !== dateKey) jumpTo(s.date); setComposer({ kind: "event", date: s.date, start: s.start, dur: s.dur }); }}
-                        className="nb-tap px-2 py-0.5 text-xs tracking-widest"
-                        style={{ fontFamily: MONO, color: T.accent, borderRadius: 999, border: `1.5px dashed ${T.accent}` }}>
+                        className="nb-tap px-2 py-0.5 nb-data"
+                        style={{ fontFamily: MONO, color: T.accentText, borderRadius: 999, border: `1.5px dashed ${T.accent}` }}>
                         {plannedLabel(s.date, todayKey).toUpperCase()} {tm(s.start)}
                       </button>
                     ))
@@ -3512,7 +3628,7 @@ export default function Planner() {
             <>
             {(allDay.length > 0 || dayTasks.some((task) => task.planned.startMinute == null)) && (
               <div style={{ background: T.card, borderTopLeftRadius: 16, borderTopRightRadius: 16, borderBottom: `1px solid ${T.line}` }} className="px-3 pt-3 pb-2 flex flex-col gap-1.5">
-                {allDay.length > 0 && <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">ALL DAY</span>}
+                {allDay.length > 0 && <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label">ALL DAY</span>}
                 {allDay.map((e) => {
                   const span = e.endDate ? diffDays(e.endDate, e.date) + 1 : 1;
                   const idx = diffDays(dateKey, e.date) + 1;
@@ -3521,14 +3637,14 @@ export default function Planner() {
                       padding="px-2.5 py-2"
                       onOpen={() => { beep("click"); setInspect({ kind: "event", id: e.id }); }}>
                       <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: catColor(e.cat) }} />
-                      <span className="text-xs font-semibold truncate flex-1">{e.title}</span>
-                      {span > 1 && <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">{idx}/{span}</span>}
+                      <span className="nb-lead truncate flex-1">{e.title}</span>
+                      {span > 1 && <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data shrink-0">{idx}/{span}</span>}
                     </RowWithJoin>
                   );
                 })}
                 {dayTasks.some((task) => task.planned.startMinute == null) && (
                   <>
-                    <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest mt-1">ANY TIME</span>
+                    <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label mt-1">ANY TIME</span>
                     <div ref={anyTimeRef} style={anyTimeFade} className="flex gap-1.5 overflow-x-auto nb-x pb-0.5">
                       {dayTasks.filter((task) => task.planned.startMinute == null).map((task) => (
                         <button key={task.id}
@@ -3563,12 +3679,12 @@ export default function Planner() {
                         illegible. Fading rather than unmounting so the label
                         returns as the minute moves on. */}
                     <span style={{
-                      fontFamily: MONO, color: T.dim,
+                      fontFamily: MONO, color: T.dimText,
                       transform: h === 0 ? "none" : "translateY(-50%)",
                       opacity: isToday && liveEvent && Math.abs(nowMin - h * 60) < NOW_LABEL_CLEARANCE_MIN ? 0 : 1,
                       transition: "opacity 200ms ease",
                     }}
-                      className="w-14 shrink-0 pr-3 text-right text-xs tracking-widest">{fmtHour(h, clock)}</span>
+                      className="w-14 shrink-0 pr-3 text-right nb-data">{fmtHour(h, clock)}</span>
                     <div className="flex-1 h-full" style={{
                       /* Depth comes from banding, not from rules. A hairline every hour
                          reads as a table; alternating fills give the same reading
@@ -3577,7 +3693,7 @@ export default function Planner() {
                       background: h % 2 ? hourBand : "transparent",
                     }}>
                       {suggested.includes(h) && !gesture && (
-                        <span style={{ fontFamily: MONO, color: T.faint }} className="block mr-2 mt-1.5 text-xs tracking-widest">FREE</span>
+                        <span style={{ fontFamily: MONO, color: T.faint }} className="block mr-2 mt-1.5 nb-label">FREE</span>
                       )}
                     </div>
                   </div>
@@ -3609,7 +3725,7 @@ export default function Planner() {
                           the times, or the elapsed fill it is meant to be reading —
                           so it steps out into the hour gutter, which is where every
                           other time label on this surface already lives. */}
-                      <span className="absolute px-1.5 py-0.5 text-xs tracking-widest pointer-events-none"
+                      <span className="absolute px-1.5 py-0.5 nb-data pointer-events-none"
                         style={{
                           fontFamily: MONO, background: T.accent, color: T.on, borderRadius: 4,
                           /* Opaque, because in the gutter it lands on whichever hour
@@ -3670,29 +3786,29 @@ export default function Planner() {
                               {/* the category dot is the card's only colour, so it stays
                                   legible at 22px height where a left rail would vanish */}
                               <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: held ? T.accent : catColor(e.cat) }} />
-                              <span className="text-xs font-semibold truncate flex-1">{e.title}</span>
+                              <span className="nb-lead truncate flex-1">{e.title}</span>
                               {conflictIds.has(e.id) && <span title="Overlaps another event" style={{ color: NOW_RED }} className="text-xs shrink-0">⚠</span>}
-                              {e.repeat && <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs shrink-0">↻</span>}
+                              {e.repeat && <span style={{ fontFamily: MONO, color: T.dimText }} className="text-xs shrink-0">↻</span>}
                               {normalizeMeetingLink(e.link) && (
                                 <a href={normalizeMeetingLink(e.link)} target="_blank" rel="noopener noreferrer" draggable={false}
                                   onPointerDown={(ev) => ev.stopPropagation()} onPointerUp={(ev) => ev.stopPropagation()} onClick={(ev) => ev.stopPropagation()}
                                   aria-label={`Join ${e.title}`}
-                                  style={{ fontFamily: MONO, color: T.accent }} className="text-xs font-bold tracking-widest shrink-0">JOIN ↗</a>
+                                  style={{ fontFamily: MONO, color: T.accentText }} className="text-xs font-bold tracking-widest shrink-0">JOIN ↗</a>
                               )}
                               {e.alerts && e.alerts.length > 0 && (
-                                <span style={{ color: T.dim }} className="shrink-0" title="Has a reminder"><BellIcon /></span>
+                                <span style={{ color: T.dimText }} className="shrink-0" title="Has a reminder"><BellIcon /></span>
                               )}
-                              {live && <span style={{ fontFamily: MONO, background: T.accent, color: T.on, borderRadius: 4 }} className="shrink-0 px-1 text-xs tracking-widest">{Math.round(pct)}%</span>}
-                              {held && <span style={{ fontFamily: MONO, background: T.accent, color: T.on, borderRadius: 4 }} className="shrink-0 px-1 text-xs tracking-widest">{gesture.overDay ? fmtDay(gesture.overDay) : tm(e.start)}</span>}
-                              {!held && !live && h < 38 && <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">{tm(e.start)}</span>}
+                              {live && <span style={{ fontFamily: MONO, background: T.accent, color: T.on, borderRadius: 4 }} className="shrink-0 px-1 nb-data">{Math.round(pct)}%</span>}
+                              {held && <span style={{ fontFamily: MONO, background: T.accent, color: T.on, borderRadius: 4 }} className="shrink-0 px-1 nb-data">{gesture.overDay ? fmtDay(gesture.overDay) : tm(e.start)}</span>}
+                              {!held && !live && h < 38 && <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data shrink-0">{tm(e.start)}</span>}
                             </div>
                             {h >= 38 && (
-                              <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest truncate mt-0.5 pl-4">
+                              <span style={{ fontFamily: MONO, color: T.dimText }} className="block nb-data truncate mt-0.5 pl-4">
                                 {tm(e.start)} → {tm(e.start + e.dur)}
                               </span>
                             )}
                             {h >= 88 && (e.place || e.note) && (
-                              <span style={{ color: T.dim }} className="block text-xs mt-1 truncate pl-4">{e.place || e.note}</span>
+                              <span style={{ color: T.dimText }} className="block text-xs mt-1 truncate pl-4">{e.place || e.note}</span>
                             )}
                           </div>
                           {/* Both ends are draggable. Only the bottom one used to be,
@@ -3733,7 +3849,7 @@ export default function Planner() {
                   {gesture && gesture.mode === "draft" && (
                     <div className="absolute left-0 right-2 pointer-events-none flex items-center justify-center"
                       style={{ top: (gesture.start / 1440) * DAY_H, height: (gesture.dur / 1440) * DAY_H, borderRadius: CARD_R, boxShadow: `inset 0 0 0 1.5px ${T.accent}`, background: `${T.accent}14` }}>
-                      <span style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest">
+                      <span style={{ fontFamily: MONO, color: T.accentText }} className="nb-data">
                         {tm(gesture.start)} – {tm(gesture.start + gesture.dur)}
                       </span>
                     </div>
@@ -3753,13 +3869,13 @@ export default function Planner() {
                         style={{ display: "flex", flexDirection: "column", justifyContent: "flex-start", top: (t.planned.startMinute / 1440) * DAY_H + 2, height: h, borderRadius: CARD_R, border: `1px dashed ${sizing ? T.accent : T.faint}`, background: block ? `${T.accent}0D` : "transparent", opacity: t.status === "completed" ? 0.4 : 1, zIndex: sizing ? 20 : 5, pointerEvents: "auto" }}>
                         <span className="flex items-center gap-2 px-2.5 py-1">
                           <span className="w-2 h-2 shrink-0 rounded-full" style={{ background: t.status === "completed" ? T.accent : "transparent", boxShadow: `inset 0 0 0 1.5px ${T.accent}` }} />
-                          <span className="text-xs font-semibold truncate" style={{ textDecoration: t.status === "completed" ? "line-through" : "none" }}>{t.title}</span>
-                          <span style={{ fontFamily: MONO, color: sizing ? T.accent : T.dim }} className="ml-auto text-xs tracking-widest shrink-0">
+                          <span className="nb-lead truncate" style={{ textDecoration: t.status === "completed" ? "line-through" : "none" }}>{t.title}</span>
+                          <span style={{ fontFamily: MONO, color: sizing ? T.accent : T.dim }} className="ml-auto nb-data shrink-0">
                             {sizing ? dur(estimate) : tm(t.planned.startMinute)}
                           </span>
                         </span>
                         {block && h >= 40 && (
-                          <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest truncate px-2.5 pl-7">{dur(estimate)}</span>
+                          <span style={{ fontFamily: MONO, color: T.dimText }} className="block nb-data truncate px-2.5 pl-7">{dur(estimate)}</span>
                         )}
                         {/* Only an action that has an estimate gets a handle: with no
                             length there is nothing for the gesture to change. */}
@@ -3776,7 +3892,7 @@ export default function Planner() {
                   {dropMin != null && (
                     <div className="absolute left-0 right-2 pointer-events-none" style={{ top: (dropMin / 1440) * DAY_H, zIndex: 30 }}>
                       <div style={{ background: T.accent, height: 2 }} />
-                      <span style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="absolute right-0 -top-2 px-1 text-xs tracking-widest">{tm(dropMin)}</span>
+                      <span style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="absolute right-0 -top-2 px-1 nb-data">{tm(dropMin)}</span>
                     </div>
                   )}
                 </div>
@@ -3808,11 +3924,11 @@ export default function Planner() {
       <div className="nb-msheet lg:hidden fixed inset-x-0 bottom-0 z-40 flex flex-col"
         style={{ height: "76vh", background: T.card, borderTop: `1px solid ${T.line}`, transform: sheet ? "translateY(0)" : "translateY(calc(100% - 52px))", transition: "transform 420ms cubic-bezier(.22,1.12,.28,1)" }}>
         <div className="flex items-center gap-3 px-3 shrink-0" style={{ height: 52 }}>
-          <button onClick={() => { beep("tick"); setSheet(!sheet); }} className="flex-1 flex items-center gap-2 text-left" aria-label="Toggle actions">
+          <button onClick={() => { beep("tick"); setSheet(!sheet); }} className="nb-tap flex-1 flex items-center gap-2 text-left" aria-label="Toggle actions">
             <span style={{ background: T.faint }} className="w-8 h-0.5" />
-            <span style={{ fontFamily: MONO }} className="text-xs tracking-widest">ACTIONS</span>
-            <span style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest">{openCount} OPEN</span>
-            {isToday && overdue.length > 0 && <span style={{ fontFamily: MONO, color: NOW_RED }} className="text-xs tracking-widest">{overdue.length} LATE</span>}
+            <span style={{ fontFamily: MONO }} className="nb-label">ACTIONS</span>
+            <span style={{ fontFamily: MONO, color: T.accentText }} className="nb-data">{openCount} OPEN</span>
+            {isToday && overdue.length > 0 && <span style={{ fontFamily: MONO, color: NOW_RED }} className="nb-data">{overdue.length} LATE</span>}
           </button>
           <button data-test="new-action" onClick={() => { beep("click"); setComposer({ kind: "task", notch: true }); }} style={{ background: T.accent, color: T.on, fontFamily: MONO }} className="nb-tap nb-liquid px-3 py-1.5 text-xs font-bold tracking-widest">+ ACTION</button>
         </div>
@@ -3833,7 +3949,7 @@ export default function Planner() {
         <div className="fixed inset-x-0 top-14 z-50 flex justify-center px-3 pointer-events-none">
           <div role="alert" className="nb-up flex items-center gap-3 px-3 py-2 w-full sm:w-auto pointer-events-auto"
             style={{ background: NOW_RED, color: "#FFFFFF", borderRadius: CARD_R }}>
-            <span style={{ fontFamily: MONO }} className="text-xs tracking-widest shrink-0">NOT SAVING</span>
+            <span style={{ fontFamily: MONO }} className="nb-label shrink-0">NOT SAVING</span>
             <span className="text-sm truncate">Changes are staying in this tab only.</span>
             <button onClick={() => { beep("click"); setSettings(true); }}
               style={{ fontFamily: MONO }} className="text-xs font-bold tracking-widest shrink-0 underline">EXPORT</button>
@@ -3844,9 +3960,9 @@ export default function Planner() {
       {alertShown && (
         <div className="fixed inset-x-0 top-16 z-50 flex justify-center px-3 pointer-events-none">
           <div role="alert" className={`${alertLeaving ? "nb-toast-out" : "nb-up"} flex items-center gap-3 px-3 py-2 w-full sm:w-auto ${alertLeaving ? "" : "pointer-events-auto"}`} style={{ background: NOW_RED, color: "#FFFFFF" }}>
-            <span style={{ fontFamily: MONO }} className="text-xs tracking-widest shrink-0">REMINDER</span>
-            <span className="text-sm font-semibold truncate">{alertShown.title}</span>
-            <span style={{ fontFamily: MONO }} className="text-xs tracking-widest shrink-0">{alertShown.body}</span>
+            <span style={{ fontFamily: MONO }} className="nb-label shrink-0">REMINDER</span>
+            <span className="nb-lead truncate">{alertShown.title}</span>
+            <span style={{ fontFamily: MONO }} className="nb-data shrink-0">{alertShown.body}</span>
             {alertShown.reminderId && <>
               <button onClick={snoozeAlert} style={{ fontFamily: MONO }} className="text-xs font-bold tracking-widest underline shrink-0">SNOOZE 10M</button>
               <button onClick={dismissAlert} style={{ fontFamily: MONO }} className="text-xs font-bold tracking-widest underline shrink-0">DISMISS</button>
@@ -3858,15 +3974,15 @@ export default function Planner() {
       {undoShown && (
         <div className="fixed inset-x-0 z-50 flex justify-center pointer-events-none" style={{ bottom: 68 }}>
           <div role="status" aria-live="polite" className={`${undoLeaving ? "nb-toast-out" : "nb-up"} flex items-center gap-3 px-3 py-2 ${undoLeaving ? "" : "pointer-events-auto"}`} style={{ background: T.text, color: T.bg }}>
-            <span style={{ fontFamily: MONO }} className="text-xs tracking-widest">{undoShown.label}</span>
-            {undoShown.payload && <button onClick={runUndo} style={{ fontFamily: MONO, color: T.accent }} className="text-xs font-bold tracking-widest">UNDO</button>}
+            <span style={{ fontFamily: MONO }} className="nb-data">{undoShown.label}</span>
+            {undoShown.payload && <button onClick={runUndo} style={{ fontFamily: MONO, color: T.accentText }} className="text-xs font-bold tracking-widest">UNDO</button>}
           </div>
         </div>
       )}
 
       {reward && (
         <div className="fixed inset-x-0 top-1/3 z-50 flex justify-center pointer-events-none">
-          <span key={reward.k} className="nb-rw text-7xl font-bold tracking-tighter" style={{ fontFamily: MONO, color: T.accent }}>+{reward.xp}</span>
+          <span key={reward.k} className="nb-rw text-7xl font-bold tracking-tighter" style={{ fontFamily: MONO, color: T.accentText }}>+{reward.xp}</span>
         </div>
       )}
       {levelShown && (
@@ -3887,17 +4003,17 @@ export default function Planner() {
           <Sheet T={T} title={fmtDay(peekDay)} onClose={() => setPeekDay(null)}
             headerAction={(
               <button onClick={() => { setPeekDay(null); beep("tick"); jumpTo(peekDay); setZoom("day"); }}
-                style={{ fontFamily: MONO, color: T.accent }} className="nb-tap px-2 py-1 text-xs font-bold tracking-widest">OPEN DAY ▸</button>
+                style={{ fontFamily: MONO, color: T.accentText }} className="nb-tap px-2 py-1 text-xs font-bold tracking-widest">OPEN DAY ▸</button>
             )}>
             <div className="flex flex-col gap-1.5">
               {allDayP.length + timedP.length + tasksP.length === 0 && (
-                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest py-3">NOTHING SCHEDULED — ALL FREE</span>
+                <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label py-3">NOTHING SCHEDULED — ALL FREE</span>
               )}
               {allDayP.map((e) => (
                 <button key={e.id} onClick={() => openFrom("event", e.id)} className="nb-tap flex items-center gap-2.5 px-3 py-2.5 text-left" style={{ background: surface, borderRadius: CARD_R }}>
                   <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: catColor(e.cat) }} />
                   <span className="flex-1 text-sm font-semibold truncate">{e.title}</span>
-                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">ALL DAY</span>
+                  <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label shrink-0">ALL DAY</span>
                 </button>
               ))}
               {timedP.map((e) => (
@@ -3905,16 +4021,16 @@ export default function Planner() {
                   <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: catColor(e.cat) }} />
                   <span className="flex-1 min-w-0">
                     <span className="block text-sm font-semibold truncate">{e.title}</span>
-                    {e.place && <span style={{ color: T.dim }} className="block text-xs truncate">{e.place}</span>}
+                    {e.place && <span style={{ color: T.dimText }} className="block text-xs truncate">{e.place}</span>}
                   </span>
-                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">{tm(e.start)} · {dur(e.dur)}</span>
+                  <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data shrink-0">{tm(e.start)} · {dur(e.dur)}</span>
                 </button>
               ))}
               {tasksP.map((t) => (
                 <button key={t.id} onClick={() => openFrom("task", t.id)} className="nb-tap flex items-center gap-2.5 px-3 py-2.5 text-left" style={{ background: surface, borderRadius: CARD_R, opacity: t.status === "completed" ? 0.45 : 1 }}>
                   <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, boxShadow: `inset 0 0 0 1.5px ${catColor(t.category)}`, background: t.status === "completed" ? catColor(t.category) : "transparent" }} />
                   <span className="flex-1 text-sm font-semibold truncate" style={{ textDecoration: t.status === "completed" ? "line-through" : "none" }}>{t.title}</span>
-                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">{t.planned.startMinute != null ? tm(t.planned.startMinute) : "ACTION"}</span>
+                  <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data shrink-0">{t.planned.startMinute != null ? tm(t.planned.startMinute) : "ACTION"}</span>
                 </button>
               ))}
             </div>
@@ -3945,7 +4061,7 @@ export default function Planner() {
                 className="text-2xl font-bold tracking-tight leading-tight" />
               <div className="flex items-center gap-2 mt-1.5">
                 <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: catColor(inspectDraft.category) }} />
-                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">
+                <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data">
                   {(db.taskLists.find((l) => l.id === inspectDraft.listId) || {}).name || "—"} · {inspectDraft.category}
                 </span>
               </div>
@@ -3966,8 +4082,8 @@ export default function Planner() {
                     {/* Structure edits write to the record immediately rather than the
                         draft, so they stay behind the editing state — otherwise Revert
                         would appear to cover a change it cannot take back. */}
-                    {detailEditing && <button onClick={() => promoteSub(inspect.id, item.id)} style={{ color: T.dim }} className="text-xs px-1" aria-label="Promote step to a subtask">↥</button>}
-                    {detailEditing && <button onClick={() => removeSub(inspect.id, item.id)} style={{ color: T.dim }} className="text-xs px-1" aria-label="Remove step">✕</button>}
+                    {detailEditing && <button onClick={() => promoteSub(inspect.id, item.id)} style={{ color: T.dimText }} className="text-xs px-1" aria-label="Promote step to a subtask">↥</button>}
+                    {detailEditing && <button onClick={() => removeSub(inspect.id, item.id)} style={{ color: T.dimText }} className="text-xs px-1" aria-label="Remove step">✕</button>}
                   </div>
                 ))}
                 {detailEditing && <InlineAdd T={T} surface={surface} onAdd={(v) => addSub(inspect.id, v)} />}
@@ -3981,7 +4097,7 @@ export default function Planner() {
                       background: T.accent, transition: "width 220ms ease",
                     }} />
                   </span>
-                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">
+                  <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data">
                     {inspectDraft.checklist.filter((x) => x.done).length} / {inspectDraft.checklist.length}
                   </span>
                 </div>
@@ -3990,7 +4106,7 @@ export default function Planner() {
               <div className="flex items-start gap-3 px-3 py-3 mt-4" style={{ background: surface, borderRadius: CARD_R }}>
                 <InlineText T={T} value={inspectDraft.note} placeholder="Add a note" ariaLabel="Note" multiline
                   onCommit={(note) => editEntry({ note })} onBeginEdit={beginDetailEdit} className="text-sm leading-relaxed" />
-                <span style={{ color: T.dim }} className="text-sm shrink-0 pt-0.5">≡</span>
+                <span style={{ color: T.dimText }} className="text-sm shrink-0 pt-0.5">≡</span>
               </div>
 
               {/* The governing facts, grouped as one card so they read as a block of
@@ -4021,7 +4137,7 @@ export default function Planner() {
                       <DurationPicker T={T} label="ESTIMATE" value={inspectDraft.planned.estimateMinutes}
                         onPick={(estimate) => editEntry({ estimate })} />
                       <label className="flex items-center gap-2">
-                        <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">REPEATS</span>
+                        <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label shrink-0">REPEATS</span>
                         <select value={inspectDraft.recurrence?.frequency ?? "never"} aria-label="Repeats"
                           onChange={(e) => editEntry({ repeat: repeatFor(e.target.value, inspectDraft.recurrence
                             ? { ...inspectDraft.recurrence, freq: inspectDraft.recurrence.frequency }
@@ -4035,7 +4151,7 @@ export default function Planner() {
                   ) : (
                     <button onClick={() => { beep("click"); beginDetailEdit(); }} className="block w-full text-left" aria-label="Edit planning">
                       <span className="block text-sm">{inspectDraft.planned.date ? plannedLabel(inspectDraft.planned.date, todayKey) : "Unplanned"}</span>
-                      <span style={{ color: T.dim }} className="block text-xs mt-0.5">
+                      <span style={{ color: T.dimText }} className="block text-xs mt-0.5">
                         {inspectDraft.planned.startMinute != null ? tm(inspectDraft.planned.startMinute) : "Any time"}
                         {inspectDraft.planned.estimateMinutes ? ` · ${dur(inspectDraft.planned.estimateMinutes)} estimate` : " · No estimate"}
                         {` · ${inspectDraft.recurrence ? repeatLabel({ ...inspectDraft.recurrence, freq: inspectDraft.recurrence.frequency, byDay: inspectDraft.recurrence.byWeekday }) : "Does not repeat"}`}
@@ -4056,7 +4172,7 @@ export default function Planner() {
                   }] })} />
                 <DetailRow T={T} icon="⌛" divider>
                   <div className="flex items-center gap-2">
-                    <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">DUE</span>
+                    <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label shrink-0">DUE</span>
                     <InlineStamp T={T} dark={dark} type="date" ariaLabel="Deadline"
                       value={inspectDraft.deadline.date || ""} onCommit={(v) => editEntry({ due: v })}
                       display={inspectDraft.deadline.date ? fmtDay(inspectDraft.deadline.date) : "No deadline"}
@@ -4064,7 +4180,7 @@ export default function Planner() {
                       style={{ color: inspectDraft.deadline.date && inspectDraft.deadline.date < todayKey ? NOW_RED : T.text }}
                       className="text-sm" />
                     {inspectDraft.deadline.date && (
-                      <button onClick={() => editEntry({ due: "" })} style={{ color: T.dim }} className="nb-tap text-xs px-1" aria-label="Clear deadline">✕</button>
+                      <button onClick={() => editEntry({ due: "" })} style={{ color: T.dimText }} className="nb-tap text-xs px-1" aria-label="Clear deadline">✕</button>
                     )}
                   </div>
                 </DetailRow>
@@ -4084,7 +4200,7 @@ export default function Planner() {
                   <button
                     onClick={() => { beep("click"); beginDetailEdit(); setListPicker({ taskId: inspect.id, draft: true }); }} className="text-left w-full">
                     <span className="block text-sm">{(db.taskLists.find((l) => l.id === inspectDraft.listId) || {}).name || "—"}</span>
-                    <span style={{ color: T.dim }} className="block text-xs mt-0.5">Tap to move to another list</span>
+                    <span style={{ color: T.dimText }} className="block text-xs mt-0.5">Tap to move to another list</span>
                   </button>
                 </DetailRow>
                 <InlineChoiceRow T={T} icon="◑" divider onBeginEdit={beginDetailEdit} label={inspectDraft.category} dot={catColor}
@@ -4100,7 +4216,7 @@ export default function Planner() {
                         style={{ color: blocker.status === "completed" ? T.dim : NOW_RED, textDecoration: blocker.status === "completed" ? "line-through" : "none" }}>
                         Blocked by {blocker.title}
                       </span>
-                      {detailEditing && <button onClick={() => unblockTask(inspect.id, blocker.id)} style={{ color: T.dim }} className="text-xs px-1" aria-label="Remove dependency">✕</button>}
+                      {detailEditing && <button onClick={() => unblockTask(inspect.id, blocker.id)} style={{ color: T.dimText }} className="text-xs px-1" aria-label="Remove dependency">✕</button>}
                     </div>
                   </DetailRow>
                 ))}
@@ -4108,7 +4224,7 @@ export default function Planner() {
 
               <div className="flex items-center justify-between gap-2 mt-4">
                 {inspectDraft.status === "completed" ? (
-                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">COMPLETED</span>
+                  <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label">COMPLETED</span>
                 ) : (
                   <PillNav T={T} ariaLabel="Action status" value={inspectDraft.status}
                     options={[["open", "OPEN"], ["in_progress", "DOING"], ["waiting", "WAITING"]]}
@@ -4117,11 +4233,11 @@ export default function Planner() {
                 {/* Dependency edits also write immediately, so the affordance belongs
                     to the editing state rather than the read view. */}
                 {detailEditing && <button onClick={() => { beep("click"); setDependencyPicker({ taskId: parseTaskOccurrenceId(inspect.id).seriesId }); }}
-                  style={{ fontFamily: MONO, color: T.accent }} className="nb-tap text-xs tracking-widest shrink-0">+ BLOCK ON</button>}
+                  style={{ fontFamily: MONO, color: T.accentText }} className="nb-tap nb-data shrink-0">+ BLOCK ON</button>}
               </div>
 
               {earliestStart && inspectDraft.planned.date && inspectDraft.planned.date < earliestStart && (
-                <p style={{ fontFamily: MONO, color: NOW_RED }} className="text-xs tracking-widest mt-3">
+                <p style={{ fontFamily: MONO, color: NOW_RED }} className="nb-data mt-3">
                   PLANNED BEFORE ITS BLOCKERS LAND — EARLIEST {fmtDay(earliestStart)}
                 </p>
               )}
@@ -4142,7 +4258,7 @@ export default function Planner() {
                 <InlineStamp T={T} dark={dark} type="time" ariaLabel="Starts" value={hhmm(inspectDraft.start)}
                   display={tm(inspectDraft.start)} onCommit={(v) => v && editEntry({ start: fromHhmm(v) })} onBeginEdit={beginDetailEdit}
                   className="text-base font-semibold" />
-                <span style={{ color: T.dim }} className="text-base">–</span>
+                <span style={{ color: T.dimText }} className="text-base">–</span>
                 <InlineStamp T={T} dark={dark} type="time" ariaLabel="Ends" value={hhmm((inspectDraft.start + inspectDraft.dur) % 1440)}
                   display={tm((inspectDraft.start + inspectDraft.dur) % 1440)}
                   onCommit={(v) => {
@@ -4157,7 +4273,7 @@ export default function Planner() {
               display={fmtDay(splitId(inspect.id).date || inspectDraft.date || dateKey)}
               onCommit={(v) => v && editEntry({ date: v })}
               onBeginEdit={beginDetailEdit}
-              style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest mt-1" />
+              style={{ fontFamily: MONO, color: T.dimText }} className="nb-data mt-1" />
           </div>
 
           {detailEditing && (
@@ -4172,7 +4288,7 @@ export default function Planner() {
               <span className="block text-2xl font-semibold tracking-tight">
                 {inspect.kind === "event" ? (inspectDraft.allDay ? "—" : dur(inspectDraft.dur)) : `+${inspectDraft.reward}`}
               </span>
-              <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest mt-0.5">
+              <span style={{ fontFamily: MONO, color: T.dimText }} className="block nb-data mt-0.5">
                 {inspect.kind === "event" ? "LENGTH" : "REWARD"}
               </span>
             </div>
@@ -4182,7 +4298,7 @@ export default function Planner() {
                   ? (inspectDraft.allDay ? "—" : countdownLabel(dateKey, inspectDraft.start, todayKey, nowMin))
                   : `${(inspectDraft.checklist ?? []).filter((x) => x.done).length}/${(inspectDraft.checklist ?? []).length}`}
               </span>
-              <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest mt-0.5">
+              <span style={{ fontFamily: MONO, color: T.dimText }} className="block nb-data mt-0.5">
                 {inspect.kind === "event" ? "STARTS" : "STEPS"}
               </span>
             </div>
@@ -4201,7 +4317,7 @@ export default function Planner() {
 
             {inspectDraft.allDay && (
               <InlineField T={T} surface={surface} icon="→">
-                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">THROUGH</span>
+                <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label shrink-0">THROUGH</span>
                 <InlineStamp T={T} dark={dark} type="date" ariaLabel="Last day"
                   value={inspectDraft.endDate || inspectDraft.date || dateKey} min={inspectDraft.date || dateKey}
                   display={fmtDay(inspectDraft.endDate || inspectDraft.date || dateKey)}
@@ -4246,7 +4362,7 @@ export default function Planner() {
                   className="nb-tap px-2.5 py-1 text-xs font-bold tracking-widest shrink-0">JOIN</a>
               )}
               {inspectDraft.link && !normalizeMeetingLink(inspectDraft.link) && (
-                <span style={{ fontFamily: MONO, color: NOW_RED }} className="text-xs tracking-widest shrink-0">NOT A LINK</span>
+                <span style={{ fontFamily: MONO, color: NOW_RED }} className="nb-label shrink-0">NOT A LINK</span>
               )}
             </InlineField>
 
@@ -4255,14 +4371,14 @@ export default function Planner() {
             )}
 
             <div className="flex items-start gap-3 px-3 py-2.5" style={{ background: surface, borderRadius: CARD_R }}>
-              <span style={{ color: T.dim }} className="text-sm shrink-0 w-4 text-center pt-0.5">≡</span>
+              <span style={{ color: T.dimText }} className="text-sm shrink-0 w-4 text-center pt-0.5">≡</span>
               <InlineText T={T} value={inspectDraft.note} placeholder="Add a note" ariaLabel="Note" multiline
                 onCommit={(note) => editEntry({ note })} onBeginEdit={beginDetailEdit} className="text-sm leading-relaxed" />
             </div>
           </div>
 
           {!inspectDraft.allDay && minutesUntil(dateKey, inspectDraft.start, todayKey, nowMin) > 0 && (
-            <p className="text-center text-sm mt-5" style={{ color: T.dim }}>
+            <p className="text-center text-sm mt-5" style={{ color: T.dimText }}>
               <span className="font-bold" style={{ color: T.text }}>{countdownLabel(dateKey, inspectDraft.start, todayKey, nowMin, inspectDraft.dur)}</span> away
             </p>
           )}
@@ -4282,7 +4398,7 @@ export default function Planner() {
               style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="nb-tap nb-liquid w-full py-3 mt-5 text-xs font-bold tracking-widest">
               {inspect.kind === "event" ? "DUPLICATE" : inspectDraft.status === "completed" ? "REOPEN" : "MARK COMPLETE"}
             </button>
-            <button onClick={() => removeItem(inspect.kind, inspect.id)} style={{ fontFamily: MONO, color: NOW_RED, border: `1px solid ${T.line}` }} className="nb-tap w-full py-3 mt-2 text-xs tracking-widest">DELETE</button>
+            <button onClick={() => removeItem(inspect.kind, inspect.id)} style={{ fontFamily: MONO, color: NOW_RED, border: `1px solid ${T.line}` }} className="nb-tap w-full py-3 mt-2 nb-label">DELETE</button>
           </>}
         </Sheet>
       )}
@@ -4290,7 +4406,7 @@ export default function Planner() {
       {discardAsk && (
         <Sheet T={T} title="UNSAVED CHANGES" onClose={() => { beep("click"); setDiscardAsk(false); }}>
           <h2 className="text-xl font-bold tracking-tight">Discard this edit?</h2>
-          <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic mt-1 mb-4">
+          <p style={{ fontFamily: SERIF, color: T.dimText }} className="nb-voice mt-1 mb-4">
             The saved {inspect?.kind === "event" ? "event" : "action"} will stay as it was.
           </p>
           <div className="flex flex-col gap-2">
@@ -4302,7 +4418,7 @@ export default function Planner() {
               setDetailEditing(false);
               setDiscardAsk(false);
               setInspect(null);
-            }} style={{ fontFamily: MONO, color: NOW_RED, border: `1px solid ${T.line}` }} className="nb-tap py-3 text-xs tracking-widest">DISCARD CHANGES</button>
+            }} style={{ fontFamily: MONO, color: NOW_RED, border: `1px solid ${T.line}` }} className="nb-tap py-3 nb-label">DISCARD CHANGES</button>
           </div>
         </Sheet>
       )}
@@ -4311,7 +4427,7 @@ export default function Planner() {
           decide, rather than silently completing or flatly refusing. */}
       {confirmComplete && (
         <Sheet T={T} onClose={() => { beep("click"); setConfirmComplete(null); }} title="Still blocked">
-          <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic mt-1 mb-3">
+          <p style={{ fontFamily: SERIF, color: T.dimText }} className="nb-voice mt-1 mb-3">
             {confirmComplete.reasons.map((reason) => (reason.kind === "dependencies"
               ? `Waiting on ${reason.blockers.map((b) => b.title).join(", ")}.`
               : `${reason.remaining} step${reason.remaining === 1 ? "" : "s"} still open.`)).join(" ")}
@@ -4320,7 +4436,7 @@ export default function Planner() {
             <button onClick={() => completeTask(confirmComplete.id, true)}
               style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="nb-tap py-3 text-xs font-bold tracking-widest">COMPLETE ANYWAY</button>
             <button onClick={() => { beep("click"); setConfirmComplete(null); }}
-              style={{ fontFamily: MONO, border: `1px solid ${T.line}` }} className="nb-tap py-3 text-xs tracking-widest">KEEP IT OPEN</button>
+              style={{ fontFamily: MONO, border: `1px solid ${T.line}` }} className="nb-tap py-3 nb-label">KEEP IT OPEN</button>
           </div>
         </Sheet>
       )}
@@ -4328,7 +4444,7 @@ export default function Planner() {
       {firstRun && (
         <Sheet T={T} onClose={() => setFirstRun(false)} title="Welcome">
           <h2 className="text-2xl font-bold tracking-tight">Start how you like</h2>
-          <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic mt-1 mb-4">
+          <p style={{ fontFamily: SERIF, color: T.dimText }} className="nb-voice mt-1 mb-4">
             There's a sample week loaded so you can see how everything behaves. Keep it
             to explore, or clear it and make the notebook yours.
           </p>
@@ -4340,7 +4456,7 @@ export default function Planner() {
               mutate((d) => ({ ...d, events: [], tasks: [], notes: [], noteTags: [], noteAttachments: [], eventExceptions: [], taskExceptions: [], occurrenceAliases: [], overrides: {}, xp: 0 }));
               setMotivationLedger(createMotivationLedger());
               setFirstRun(false);
-            }} style={{ fontFamily: MONO, background: surface, borderRadius: CARD_R }} className="nb-tap py-3 text-xs tracking-widest">START EMPTY</button>
+            }} style={{ fontFamily: MONO, background: surface, borderRadius: CARD_R }} className="nb-tap py-3 nb-label">START EMPTY</button>
           </div>
         </Sheet>
       )}
@@ -4352,7 +4468,7 @@ export default function Planner() {
               <button key={list.id} onClick={() => setList(listPicker.taskId, list.id)}
                 className="nb-row flex items-center gap-2 py-2.5 text-left" style={{ borderBottom: `1px solid ${T.line}` }}>
                 <span className="flex-1 text-sm">{list.name}</span>
-                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">{getTasksByList(db.tasks, list.id).length}</span>
+                <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data">{getTasksByList(db.tasks, list.id).length}</span>
               </button>
             ))}
           </div>
@@ -4362,7 +4478,7 @@ export default function Planner() {
       {dependencyPicker && (
         <Sheet T={T} onClose={() => { beep("click"); setDependencyPicker(null); }} title="What has to happen first?">
           {dependencyPicker.error && (
-            <p style={{ fontFamily: MONO, color: NOW_RED }} className="text-xs tracking-widest mb-2">{dependencyPicker.error.toUpperCase()}</p>
+            <p style={{ fontFamily: MONO, color: NOW_RED }} className="nb-data mb-2">{dependencyPicker.error.toUpperCase()}</p>
           )}
           <div className="flex flex-col max-h-80 overflow-y-auto nb-s">
             {db.tasks
@@ -4370,7 +4486,7 @@ export default function Planner() {
               .map((candidate) => (
                 <button key={candidate.id} onClick={() => blockOn(dependencyPicker.taskId, candidate.id)}
                   className="nb-row flex items-center gap-2 py-2.5 text-left" style={{ borderBottom: `1px solid ${T.line}` }}>
-                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0 w-12">
+                  <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data shrink-0 w-12">
                     {candidate.status === "completed" ? "DONE" : "OPEN"}
                   </span>
                   <span className="flex-1 text-sm truncate">{candidate.title}</span>
@@ -4382,7 +4498,7 @@ export default function Planner() {
 
       {listManager && (
         <Sheet T={T} onClose={() => { beep("click"); setListManager(false); }} title="Lists and tags">
-          <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">LISTS</span>
+          <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label">LISTS</span>
           <div className="flex flex-col mt-1">
             {db.taskLists.map((list) => (
               <div key={list.id} className="flex items-center gap-2 py-2" style={{ borderBottom: `1px solid ${T.line}` }}>
@@ -4398,25 +4514,25 @@ export default function Planner() {
                   onKeyDown={(e) => e.key === "Enter" && e.target.blur()}
                   style={{ background: "transparent", border: "none", color: list.isSystem ? T.dim : T.text }}
                   className="flex-1 text-sm py-0.5" />
-                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">
+                <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data">
                   {getTasksByList(db.tasks, list.id).length}
                 </span>
                 {!list.isSystem && !list.isDefault && (
                   <button onClick={() => { beep("delete"); mutate((d) => { const r = deleteTaskList(d.taskLists, d.tasks, list.id); return { ...d, taskLists: r.lists, tasks: r.tasks }; }); }}
-                    style={{ color: T.dim }} className="text-xs px-1" aria-label="Delete list">✕</button>
+                    style={{ color: T.dimText }} className="text-xs px-1" aria-label="Delete list">✕</button>
                 )}
               </div>
             ))}
           </div>
           <NewListField T={T} onAdd={(name) => { beep("schedule"); mutate((d) => ({ ...d, taskLists: createTaskList(d.taskLists, { id: `list-${uid()}`, name }) })); }} />
 
-          <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest mt-5">TAGS</span>
+          <span style={{ fontFamily: MONO, color: T.dimText }} className="block nb-label mt-5">TAGS</span>
           {allTags(db.tasks).length === 0
-            ? <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic mt-1">No tags yet. Add them when composing an action.</p>
+            ? <p style={{ fontFamily: SERIF, color: T.dimText }} className="nb-voice mt-1">No tags yet. Add them when composing an action.</p>
             : (
               <div className="flex flex-wrap gap-1 mt-1">
                 {allTags(db.tasks).map((tag) => (
-                  <span key={tag} style={{ fontFamily: MONO, color: T.dim, border: `1px solid ${T.line}` }} className="px-2 py-1 text-xs tracking-widest">{tag}</span>
+                  <span key={tag} style={{ fontFamily: MONO, color: T.dimText, border: `1px solid ${T.line}` }} className="px-2 py-1 nb-data">{tag}</span>
                 ))}
               </div>
             )}
@@ -4437,15 +4553,15 @@ export default function Planner() {
       {scopeAsk && (
         <Sheet T={T} title="REPEATING ITEM" onClose={() => { beep("click"); setScopeAsk(null); }}>
           <h2 className="text-xl font-bold tracking-tight">This repeats</h2>
-          <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic mt-1 mb-4">Change this one day, or every day it appears?</p>
+          <p style={{ fontFamily: SERIF, color: T.dimText }} className="nb-voice mt-1 mb-4">Change this one day, or every day it appears?</p>
           <div className="flex flex-col gap-2">
             <button onClick={() => (scopeAsk.action === "delete" ? doDelete(scopeAsk.kind, scopeAsk.id, "one") : commitSave(scopeAsk.payload, "one"))}
-              style={{ fontFamily: MONO, border: `1px solid ${T.line}` }} className="nb-tap py-3 text-xs tracking-widest">THIS DAY ONLY</button>
+              style={{ fontFamily: MONO, border: `1px solid ${T.line}` }} className="nb-tap py-3 nb-label">THIS DAY ONLY</button>
             {scopeAsk.kind === "event" && canonicalOccurrenceIdentity(scopeAsk.id || scopeAsk.payload?.id) && (
               <button onClick={() => (scopeAsk.action === "delete"
                 ? doDelete(scopeAsk.kind, scopeAsk.id, "following")
                 : commitSave(scopeAsk.payload, "following"))}
-                style={{ fontFamily: MONO, border: `1px solid ${T.line}` }} className="nb-tap py-3 text-xs tracking-widest">THIS AND FOLLOWING</button>
+                style={{ fontFamily: MONO, border: `1px solid ${T.line}` }} className="nb-tap py-3 nb-label">THIS AND FOLLOWING</button>
             )}
             <button onClick={() => (scopeAsk.action === "delete" ? doDelete(scopeAsk.kind, scopeAsk.id, "all") : commitSave(scopeAsk.payload, "all"))}
               style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="nb-tap py-3 text-xs font-bold tracking-widest">THE WHOLE SERIES</button>
@@ -4493,7 +4609,7 @@ export default function Planner() {
 
       {missedSheet && missedReport && (
         <Sheet T={T} title="WHILE YOU WERE AWAY" onClose={closeMissedReport}>
-          <p style={{ color: T.dim }} className="text-sm mb-3">
+          <p style={{ color: T.dimText }} className="text-sm mb-3">
             {/* Said plainly, because the alternative is that it looks like a bug.
                 A page cannot set an alarm for a time when it is not running, and
                 this notebook has no server to send one. */}
@@ -4505,12 +4621,12 @@ export default function Planner() {
               <div key={reminder.id} data-test="missed-reminder-row" className="px-3 py-2"
                 style={{ background: surface, borderRadius: CARD_R }}>
                 <div className="flex items-baseline gap-2">
-                  <span className="text-sm font-semibold truncate flex-1">{reminder.title}</span>
-                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">
+                  <span className="nb-lead truncate flex-1">{reminder.title}</span>
+                  <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data shrink-0">
                     {plannedLabel(reminder.scheduledFor.slice(0, 10), todayKey)} {fmtTime(fromHhmm(reminder.scheduledFor.slice(11, 16)), clock)}
                   </span>
                 </div>
-                {reminder.body && <span style={{ color: T.dim }} className="block text-xs mt-0.5">{reminder.body}</span>}
+                {reminder.body && <span style={{ color: T.dimText }} className="block text-xs mt-0.5">{reminder.body}</span>}
               </div>
             ))}
           </div>
@@ -4531,20 +4647,20 @@ export default function Planner() {
           <h2 className="text-2xl font-bold tracking-tight">Settings</h2>
 
           <div className="mt-4">
-            <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">FEEDBACK</span>
+            <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label">FEEDBACK</span>
             <button onClick={() => { beep("tick"); setPreferences((current) => current ? { ...current, feedback: { ...current.feedback, sound: !current.feedback.sound } } : current); }} className="w-full flex items-center justify-between py-2.5" style={{ borderBottom: `1px solid ${T.line}` }}>
               <span className="text-sm">Sound</span>
-              <span style={{ fontFamily: MONO, color: preferences.feedback.sound ? T.accent : T.dim }} className="text-xs tracking-widest">{preferences.feedback.sound ? "ON" : "OFF"}</span>
+              <span style={{ fontFamily: MONO, color: preferences.feedback.sound ? T.accent : T.dim }} className="nb-data">{preferences.feedback.sound ? "ON" : "OFF"}</span>
             </button>
             <button onClick={() => { beep("tick"); setPreferences((current) => current ? { ...current, display: { ...current.display, clock: current.display.clock === "24" ? "12" : "24" } } : current); }} className="w-full flex items-center justify-between py-2.5" style={{ borderBottom: `1px solid ${T.line}` }}>
               <span className="text-sm">Clock</span>
-              <span style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest">{clock === "24" ? "24-HOUR" : "12-HOUR"}</span>
+              <span style={{ fontFamily: MONO, color: T.accentText }} className="nb-data">{clock === "24" ? "24-HOUR" : "12-HOUR"}</span>
             </button>
             <button data-test="week-start-toggle"
               onClick={() => { beep("tick"); setPreferences((current) => current ? { ...current, display: { ...current.display, weekStart: current.display.weekStart === 1 ? 0 : 1 } } : current); }}
               className="w-full flex items-center justify-between py-2.5" style={{ borderBottom: `1px solid ${T.line}` }}>
               <span className="text-sm">Week starts</span>
-              <span style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest">{weekStart === 1 ? "MONDAY" : "SUNDAY"}</span>
+              <span style={{ fontFamily: MONO, color: T.accentText }} className="nb-data">{weekStart === 1 ? "MONDAY" : "SUNDAY"}</span>
             </button>
             {/* The limit is stated rather than left to be discovered. A toggle
                 called "system notifications" implies the system will notify you,
@@ -4554,14 +4670,14 @@ export default function Planner() {
             <button onClick={askNotifs} className="w-full flex items-start justify-between gap-3 py-2.5 text-left" style={{ borderBottom: `1px solid ${T.line}` }}>
               <span className="min-w-0">
                 <span className="block text-sm">System notifications</span>
-                <span style={{ color: T.dim }} className="block text-xs mt-0.5">Only while the app is open. Anything missed is reported next time.</span>
+                <span style={{ color: T.dimText }} className="block text-xs mt-0.5">Only while the app is open. Anything missed is reported next time.</span>
               </span>
-              <span style={{ fontFamily: MONO, color: preferences.notifications.systemEnabled ? T.accent : T.dim }} className="text-xs tracking-widest shrink-0 pt-0.5">{preferences.notifications.systemEnabled ? "ON" : "ALLOW"}</span>
+              <span style={{ fontFamily: MONO, color: preferences.notifications.systemEnabled ? T.accent : T.dim }} className="nb-data shrink-0 pt-0.5">{preferences.notifications.systemEnabled ? "ON" : "ALLOW"}</span>
             </button>
           </div>
 
           <div className="mt-5">
-            <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">THEME</span>
+            <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label">THEME</span>
             <div className="flex flex-col mt-1">
               {THEMES.map((th) => (
                 <button key={th.id} onClick={() => { beep("tick"); setPreferences((current) => current ? { ...current, display: { ...current.display, themeId: th.id } } : current); }} className="nb-row flex items-center gap-3 py-2 px-1 text-left" style={{ borderBottom: `1px solid ${T.line}` }}>
@@ -4571,14 +4687,14 @@ export default function Planner() {
                     <span className="w-4 h-6" style={{ background: th.accent }} />
                   </span>
                   <span className="flex-1 text-sm font-semibold">{th.name}</span>
-                  {th.id === T.id && <span className="nb-pop text-xs tracking-widest" style={{ fontFamily: MONO, color: T.accent }}>ON</span>}
+                  {th.id === T.id && <span className="nb-pop nb-data" style={{ fontFamily: MONO, color: T.accentText }}>ON</span>}
                 </button>
               ))}
             </div>
           </div>
 
           <div className="mt-5">
-            <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">PACE</span>
+            <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label">PACE</span>
             {[
               ["reducedMotion", "Reduce motion", preferences.display.reducedMotion, (current) => ({ ...current, display: { ...current.display, reducedMotion: !current.display.reducedMotion } })],
               ["points", "Points", preferences.motivation.points, (current) => ({ ...current, motivation: { ...current.motivation, points: !current.motivation.points } })],
@@ -4588,22 +4704,22 @@ export default function Planner() {
             ].map(([id, label, enabled, update]) => (
               <button key={id} onClick={() => { beep("tick"); setPreferences((current) => current ? update(current) : current); }} className="w-full flex items-center justify-between py-2.5" style={{ borderBottom: `1px solid ${T.line}` }}>
                 <span className="text-sm">{label}</span>
-                <span style={{ fontFamily: MONO, color: enabled ? T.accent : T.dim }} className="text-xs tracking-widest">{enabled ? "ON" : "OFF"}</span>
+                <span style={{ fontFamily: MONO, color: enabled ? T.accent : T.dim }} className="nb-data">{enabled ? "ON" : "OFF"}</span>
               </button>
             ))}
           </div>
 
           <div className="mt-5">
-            <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">YOUR DATA</span>
-            <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic mt-1 mb-2">Everything lives on this device. There's no account to sync with — take it with you as a file instead.</p>
+            <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label">YOUR DATA</span>
+            <p style={{ fontFamily: SERIF, color: T.dimText }} className="nb-voice mt-1 mb-2">Everything lives on this device. There's no account to sync with — take it with you as a file instead.</p>
             {storageBad && (
-              <p style={{ fontFamily: MONO, color: NOW_RED }} className="text-xs tracking-widest mb-2">SAVING TO THIS DEVICE FAILED — EXPORT A COPY</p>
+              <p style={{ fontFamily: MONO, color: NOW_RED }} className="nb-label mb-2">SAVING TO THIS DEVICE FAILED — EXPORT A COPY</p>
             )}
             <Reveal open={Boolean(pendingImport)}>
               {pendingImportShown && (
                 <div className="flex items-center gap-2 mb-2 p-2" style={{ boxShadow: `inset 0 0 0 1px ${NOW_RED}` }}>
                   <span className="flex-1 text-xs">Replace everything on this device?</span>
-                  <button onClick={() => { setPendingImport(null); beep("abort"); }} style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">CANCEL</button>
+                  <button onClick={() => { setPendingImport(null); beep("abort"); }} style={{ fontFamily: MONO, color: T.dimText }} className="nb-label">CANCEL</button>
                   <button onClick={() => {
                     if (!pendingImport) return;
                     setDb(pendingImport);
@@ -4617,9 +4733,9 @@ export default function Planner() {
               )}
             </Reveal>
             <div className="flex flex-wrap gap-2">
-              <button onClick={exportIcs} style={{ fontFamily: MONO, border: `1px solid ${T.line}` }} className="nb-tap px-3 py-2 text-xs tracking-widest">EXPORT .ICS</button>
-              <button onClick={exportJson} style={{ fontFamily: MONO, border: `1px solid ${T.line}` }} className="nb-tap px-3 py-2 text-xs tracking-widest">EXPORT .JSON</button>
-              <label style={{ fontFamily: MONO, border: `1px solid ${T.line}` }} className="nb-tap px-3 py-2 text-xs tracking-widest cursor-pointer">
+              <button onClick={exportIcs} style={{ fontFamily: MONO, border: `1px solid ${T.line}` }} className="nb-tap px-3 py-2 nb-data">EXPORT .ICS</button>
+              <button onClick={exportJson} style={{ fontFamily: MONO, border: `1px solid ${T.line}` }} className="nb-tap px-3 py-2 nb-data">EXPORT .JSON</button>
+              <label style={{ fontFamily: MONO, border: `1px solid ${T.line}` }} className="nb-tap px-3 py-2 nb-data cursor-pointer">
                 IMPORT .JSON
                 <input type="file" accept="application/json" style={{ display: "none" }} onChange={(e) => e.target.files[0] && importJson(e.target.files[0])} />
               </label>
@@ -4630,17 +4746,17 @@ export default function Planner() {
             <Reveal open={confirmWipe}>
               <div className="flex items-center gap-2 p-2" style={{ boxShadow: `inset 0 0 0 1px ${NOW_RED}` }}>
                 <span className="flex-1 text-xs">Erase every event, action and note?</span>
-                <button onClick={() => setConfirmWipe(false)} style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">KEEP</button>
+                <button onClick={() => setConfirmWipe(false)} style={{ fontFamily: MONO, color: T.dimText }} className="nb-label">KEEP</button>
                 <button onClick={wipeAll} style={{ fontFamily: MONO, color: NOW_RED }} className="text-xs font-bold tracking-widest">ERASE</button>
               </div>
             </Reveal>
             <Reveal open={!confirmWipe}>
-              <button onClick={() => { beep("click"); setConfirmWipe(true); }} style={{ fontFamily: MONO, color: T.dim, border: `1px solid ${T.line}` }} className="nb-tap px-3 py-2 text-xs tracking-widest">START A BLANK NOTEBOOK</button>
+              <button onClick={() => { beep("click"); setConfirmWipe(true); }} style={{ fontFamily: MONO, color: T.dimText, border: `1px solid ${T.line}` }} className="nb-tap px-3 py-2 nb-label">START A BLANK NOTEBOOK</button>
             </Reveal>
           </div>
 
           <div className="mt-5">
-            <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">SHORTCUTS</span>
+            <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label">SHORTCUTS</span>
             <div className="mt-1">
               <Row T={T} k="← →" v="PREVIOUS / NEXT DAY" />
               <Row T={T} k="T" v="TODAY" />
@@ -4710,40 +4826,40 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
       <div className="hidden lg:flex items-baseline justify-between mb-3">
         <h2 className="text-2xl font-bold tracking-tight">Actions</h2>
         <div className="flex items-center gap-3">
-          <button onClick={() => (selection ? onCancelSelect() : onStartSelect(null))} style={{ fontFamily: MONO, color: T.dim }} className="nb-tap text-xs tracking-widest">SELECT</button>
-          <button onClick={onManageLists} style={{ fontFamily: MONO, color: T.dim }} className="nb-tap text-xs tracking-widest">LISTS</button>
-          <button onClick={onAddTask} style={{ fontFamily: MONO, color: T.accent }} className="nb-tap text-xs tracking-widest">+ ADD</button>
+          <button onClick={() => (selection ? onCancelSelect() : onStartSelect(null))} style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-label">SELECT</button>
+          <button onClick={onManageLists} style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-label">LISTS</button>
+          <button onClick={onAddTask} style={{ fontFamily: MONO, color: T.accentText }} className="nb-tap nb-data">+ ADD</button>
           {onCollapse && (
-            <button data-test="actions-collapse" onClick={onCollapse} style={{ fontFamily: MONO, color: T.dim }}
-              className="nb-tap text-xs tracking-widest" aria-label="Collapse Actions column">COLLAPSE ›</button>
+            <button data-test="actions-collapse" onClick={onCollapse} style={{ fontFamily: MONO, color: T.dimText }}
+              className="nb-tap nb-data" aria-label="Collapse Actions column">COLLAPSE ›</button>
           )}
         </div>
       </div>
 
       {selection && (
         <div className="flex flex-wrap items-center gap-1 mb-2 px-2 py-2" style={{ boxShadow: `inset 0 0 0 1px ${T.accent}`, borderRadius: CARD_R }}>
-          <span style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest mr-1">{selection.size} SELECTED</span>
+          <span style={{ fontFamily: MONO, color: T.accentText }} className="nb-data mr-1">{selection.size} SELECTED</span>
           {[["complete", "COMPLETE"], ["today", "TODAY"], ["defer", "TOMORROW"]].map(([action, label]) => (
-            <button key={action} onClick={() => onBulk(action)} className="nb-tap px-2 py-1 text-xs tracking-widest"
+            <button key={action} onClick={() => onBulk(action)} className="nb-tap px-2 py-1 nb-data"
               style={{ fontFamily: MONO, borderRadius: 999, color: T.text, border: `1px solid ${T.line}` }}>{label}</button>
           ))}
           {/* §11.3. The three that benefit most from being done at once, each
               borrowing the single-task command so the rules stay identical. */}
           <select onChange={(e) => { if (e.target.value) { onBulk("list", e.target.value); e.target.value = ""; } }} defaultValue=""
-            style={{ fontFamily: MONO, borderRadius: 999, background: "transparent", color: T.dim, border: `1px solid ${T.line}` }} className="px-2 py-1 text-xs tracking-widest">
+            style={{ fontFamily: MONO, borderRadius: 999, background: "transparent", color: T.dimText, border: `1px solid ${T.line}` }} className="px-2 py-1 nb-data">
             <option value="">MOVE TO…</option>
             {lists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
           </select>
           <select onChange={(e) => { if (e.target.value) { onBulk("priority", e.target.value); e.target.value = ""; } }} defaultValue=""
-            style={{ fontFamily: MONO, borderRadius: 999, background: "transparent", color: T.dim, border: `1px solid ${T.line}` }} className="px-2 py-1 text-xs tracking-widest">
+            style={{ fontFamily: MONO, borderRadius: 999, background: "transparent", color: T.dimText, border: `1px solid ${T.line}` }} className="px-2 py-1 nb-data">
             <option value="">PRIORITY…</option>
             {["urgent", "high", "normal", "low", "none"].map((v) => <option key={v} value={v}>{v.toUpperCase()}</option>)}
           </select>
           <button onClick={() => { const t = prompt("Tag to add"); if (t && t.trim()) onBulk("tag", t.trim()); }}
-            className="nb-tap px-2 py-1 text-xs tracking-widest" style={{ fontFamily: MONO, borderRadius: 999, color: T.text, border: `1px solid ${T.line}` }}>TAG…</button>
-          <button onClick={() => onBulk("delete")} className="nb-tap px-2 py-1 text-xs tracking-widest"
+            className="nb-tap px-2 py-1 nb-data" style={{ fontFamily: MONO, borderRadius: 999, color: T.text, border: `1px solid ${T.line}` }}>TAG…</button>
+          <button onClick={() => onBulk("delete")} className="nb-tap px-2 py-1 nb-data"
             style={{ fontFamily: MONO, borderRadius: 999, color: NOW_RED, border: `1px solid ${T.line}` }}>DELETE</button>
-          <button onClick={onCancelSelect} style={{ fontFamily: MONO, color: T.dim }} className="ml-auto text-xs tracking-widest">CANCEL</button>
+          <button onClick={onCancelSelect} style={{ fontFamily: MONO, color: T.dimText }} className="ml-auto nb-label">CANCEL</button>
         </div>
       )}
 
@@ -4753,7 +4869,7 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
           const count = viewCounts?.[view.id] ?? 0;
           if (!on && count === 0 && view.id !== "today") return null;
           return (
-            <button key={view.id} onClick={() => onSmartView(view.id)} className="shrink-0 px-2 py-1 text-xs tracking-widest"
+            <button key={view.id} onClick={() => onSmartView(view.id)} className="nb-tap shrink-0 px-2 py-1 nb-label"
               style={{ fontFamily: MONO, background: on ? T.accent : "transparent", color: on ? T.on : T.dim, border: `1px solid ${on ? T.accent : T.line}` }}>
               {view.label}{count ? ` ${count}` : ""}
             </button>
@@ -4765,15 +4881,15 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
           planned onto today would make the button a visible no-op. */}
       {showOverdue && pullable.length > 0 && (
         <button onClick={onPullOverdue} className="w-full flex items-center gap-2 px-3 py-2 mb-2 text-left" style={{ boxShadow: `inset 0 0 0 1px ${NOW_RED}` }}>
-          <span style={{ fontFamily: MONO, color: NOW_RED }} className="text-xs tracking-widest shrink-0">{pullable.length} OVERDUE</span>
-          <span className="flex-1 text-xs truncate" style={{ color: T.dim }}>{pullable.map((t) => t.title).join(" · ")}</span>
-          <span style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest shrink-0">PLAN TODAY</span>
+          <span style={{ fontFamily: MONO, color: NOW_RED }} className="nb-data shrink-0">{pullable.length} OVERDUE</span>
+          <span className="flex-1 text-xs truncate" style={{ color: T.dimText }}>{pullable.map((t) => t.title).join(" · ")}</span>
+          <span style={{ fontFamily: MONO, color: T.accentText }} className="nb-label shrink-0">PLAN TODAY</span>
         </button>
       )}
 
       {deadlines.length > 0 && (
         <div className="mb-3">
-          <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">DEADLINES</span>
+          <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label">DEADLINES</span>
           <div className="flex flex-col mt-1">
             {deadlines.slice(0, 4).map((t) => {
               const dLeft = diffDays(t.deadline.date, todayKey);
@@ -4782,7 +4898,7 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
                   {/* The chip sizes to its longest word instead of being clipped to a
                       fixed width, which was overlapping the title. */}
                   <span style={{ fontFamily: MONO, color: dLeft <= 1 ? NOW_RED : T.dim, borderRadius: 999, border: `1px solid ${dLeft <= 1 ? NOW_RED : T.line}` }}
-                    className="px-2 py-0.5 text-xs tracking-widest shrink-0 whitespace-nowrap">
+                    className="px-2 py-0.5 nb-data shrink-0 whitespace-nowrap">
                     {dLeft === 0 ? "TODAY" : dLeft === 1 ? "TOM" : `${dLeft}D`}
                   </span>
                   <span className="flex-1 text-xs truncate min-w-0">{t.title}</span>
@@ -4795,7 +4911,7 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
 
       {tasks.length === 0 && !selection && (
         <button onClick={onAddTask} className="w-full py-8 text-center" style={{ border: `1px dashed ${T.faint}` }}>
-          <span style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic">Nothing claimed for this day yet. Add the one thing that matters.</span>
+          <span style={{ fontFamily: SERIF, color: T.dimText }} className="nb-voice">Nothing claimed for this day yet. Add the one thing that matters.</span>
         </button>
       )}
 
@@ -4808,7 +4924,7 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
 
       {done.length > 0 && (
         <div className="mt-4">
-          <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">DONE · {done.length}</span>
+          <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data">DONE · {done.length}</span>
           <div className="flex flex-col gap-2 mt-2">
             {done.map((t) => (
               <TaskCard key={t.id} T={T} t={t} beep={beep} buzz={buzz} todayKey={todayKey} blockers={blockersFor(t)} onPromoteSub={onPromoteSub} clock={clock} selection={selection} onToggleSelect={onToggleSelect} onStartSelect={onStartSelect}
@@ -4820,8 +4936,8 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
 
       <div className="mt-6">
         <div className="flex items-baseline justify-between">
-          <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">NOTES</span>
-          <button onClick={() => onEditNote(notes[0] ?? null)} style={{ fontFamily: MONO, color: T.accent }} className="nb-tap text-xs tracking-widest">{notes.length ? "EDIT" : "+ WRITE"}</button>
+          <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label">NOTES</span>
+          <button onClick={() => onEditNote(notes[0] ?? null)} style={{ fontFamily: MONO, color: T.accentText }} className="nb-tap nb-data">{notes.length ? "EDIT" : "+ WRITE"}</button>
         </div>
         <div className="flex flex-col gap-3 mt-2">
           {notes.map((n) => (
@@ -4837,15 +4953,15 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
                   {/* §7.2. Once a line has become a task the affordance goes away, so
                       the same line cannot be turned into a second one. */}
                   {!block.extractedTaskId
-                    ? <button onClick={() => onExtract(n.id, block.id, plainText(block.text))} style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest shrink-0">+ ACTION</button>
-                    : <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">TRACKED</span>}
+                    ? <button onClick={() => onExtract(n.id, block.id, plainText(block.text))} style={{ fontFamily: MONO, color: T.accentText }} className="nb-data shrink-0">+ ACTION</button>
+                    : <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label shrink-0">TRACKED</span>}
                 </div>
               ) : (
                 <NoteBlock key={block.id} T={T} block={block} ordinal={orderedIndex(all, i)} onOpen={() => onEditNote(n)} />
               )))}
             </div>
           ))}
-          {notes.length === 0 && <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic pl-3">No notes on this page yet.</p>}
+          {notes.length === 0 && <p style={{ fontFamily: SERIF, color: T.dimText }} className="nb-voice pl-3">No notes on this page yet.</p>}
         </div>
       </div>
     </div>
@@ -4859,7 +4975,7 @@ function Inline({ T, text }) {
   return parseInline(text).map((run, i) => {
     if (run.mark === "strong") return <strong key={i} className="font-bold not-italic">{run.text}</strong>;
     if (run.mark === "em") return <em key={i} className="italic">{run.text}</em>;
-    if (run.mark === "strike") return <span key={i} style={{ textDecoration: "line-through", color: T.dim }}>{run.text}</span>;
+    if (run.mark === "strike") return <span key={i} style={{ textDecoration: "line-through", color: T.dimText }}>{run.text}</span>;
     if (run.mark === "code") {
       return <code key={i} style={{ fontFamily: MONO, background: T.faint, color: T.text }} className="text-xs not-italic px-1 py-0.5">{run.text}</code>;
     }
@@ -4887,20 +5003,20 @@ function NoteBlock({ T, block, ordinal, onOpen }) {
     <p style={{ fontFamily: MONO, color: T.text }}
       className={`${block.level === 1 ? "text-sm" : "text-xs"} font-bold tracking-widest uppercase pt-2 pb-0.5`}>{marked}</p>
   ) : block.type === "quote" ? (
-    <p style={{ fontFamily: SERIF, color: T.dim, borderLeft: `2px solid ${T.accent}` }}
-      className="text-sm italic leading-relaxed py-0.5 pl-2.5 my-1">{marked}</p>
+    <p style={{ fontFamily: SERIF, color: T.dimText, borderLeft: `2px solid ${T.accent}` }}
+      className="nb-voice leading-relaxed py-0.5 pl-2.5 my-1">{marked}</p>
   ) : block.type === "code" ? (
     <span style={{ fontFamily: MONO, background: T.faint, color: T.text, display: "block", whiteSpace: "pre-wrap" }}
       className="text-xs leading-relaxed p-2.5 my-1 overflow-x-auto">{block.text}</span>
   ) : block.type === "bulleted" || block.type === "numbered" ? (
     <span className="flex gap-2 py-0.5">
-      <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs shrink-0 pt-1 tabular-nums">
+      <span style={{ fontFamily: MONO, color: T.dimText }} className="text-xs shrink-0 pt-1 tabular-nums">
         {block.type === "numbered" ? `${ordinal}.` : "—"}
       </span>
-      <span style={{ fontFamily: SERIF }} className="flex-1 text-sm italic leading-relaxed">{marked}</span>
+      <span style={{ fontFamily: SERIF }} className="flex-1 nb-voice leading-relaxed">{marked}</span>
     </span>
   ) : (
-    <p style={{ fontFamily: SERIF }} className="text-sm italic leading-relaxed py-0.5">{marked}</p>
+    <p style={{ fontFamily: SERIF }} className="nb-voice leading-relaxed py-0.5">{marked}</p>
   );
   return <button onClick={onOpen} className="text-left w-full">{body}</button>;
 }
@@ -4969,8 +5085,8 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromote
   return (
     <div data-task={t.id} className="relative overflow-hidden" style={{ background: "transparent", borderRadius: CARD_R, boxShadow: target ? `inset 0 2px 0 ${T.accent}` : "none" }}>
       <div className="absolute inset-0 flex items-center justify-between px-4" style={{ fontFamily: MONO }}>
-        <span className="text-xs tracking-widest" style={{ color: T.accent, opacity: dx > 20 ? 1 : 0 }}>COMPLETE</span>
-        <span className="text-xs tracking-widest" style={{ color: T.dim, opacity: dx < -20 ? 1 : 0 }}>TOMORROW</span>
+        <span className="nb-data" style={{ color: T.accentText, opacity: dx > 20 ? 1 : 0 }}>COMPLETE</span>
+        <span className="nb-data" style={{ color: T.dimText, opacity: dx < -20 ? 1 : 0 }}>TOMORROW</span>
       </div>
 
       <article className="relative" style={{ background: surface, borderRadius: CARD_R, transform: `translateX(${dx}px)`, transition: dx === 0 ? "transform 220ms cubic-bezier(.2,.8,.25,1)" : "none", opacity: isDone ? 0.55 : 1, touchAction: "pan-y", userSelect: "none", WebkitUserSelect: "none" }}
@@ -5005,23 +5121,23 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromote
             <div className="flex flex-wrap items-center gap-2 mt-1" style={{ fontFamily: MONO }}>
               <span className="inline-flex items-center gap-1.5">
                 <span className="shrink-0 rounded-full" style={{ width: 7, height: 7, background: catColor(t.category) }} />
-                <span style={{ color: T.dim }} className="text-xs tracking-widest">{t.category}</span>
+                <span style={{ color: T.dimText }} className="nb-data">{t.category}</span>
               </span>
               {/* Open is the default and stays quiet; the two states you set on
                   purpose announce themselves, so changing status in the detail view
                   has a visible effect out here on the row. */}
               {!isDone && t.status === "in_progress" && (
-                <span style={{ color: T.accent, border: `1px solid ${T.accent}`, borderRadius: 999 }} className="px-1.5 py-0.5 text-xs tracking-widest shrink-0">DOING</span>
+                <span style={{ color: T.accentText, border: `1px solid ${T.accent}`, borderRadius: 999 }} className="px-1.5 py-0.5 nb-label shrink-0">DOING</span>
               )}
               {!isDone && t.status === "waiting" && (
-                <span style={{ color: T.dim, border: `1px solid ${T.line}`, borderRadius: 999 }} className="px-1.5 py-0.5 text-xs tracking-widest shrink-0">WAITING</span>
+                <span style={{ color: T.dimText, border: `1px solid ${T.line}`, borderRadius: 999 }} className="px-1.5 py-0.5 nb-label shrink-0">WAITING</span>
               )}
-              {t.recurrence && <span style={{ color: T.dim }} className="text-xs">↻</span>}
-              {t.planned.startMinute != null && <button onClick={() => onUnschedule(t.id)} style={{ color: T.accent }} className="text-xs tracking-widest">{fmtTime(t.planned.startMinute, clock)}</button>}
-              {dueLeft != null && <span style={{ color: dueLeft <= 0 ? NOW_RED : T.dim }} className="text-xs tracking-widest">DUE {dueLeft === 0 ? "TODAY" : dueLeft < 0 ? `${-dueLeft}D LATE` : `${dueLeft}D`}</span>}
-              {checklist.length > 0 && <span style={{ color: T.dim }} className="text-xs tracking-widest">{subDone}/{checklist.length}</span>}
+              {t.recurrence && <span style={{ color: T.dimText }} className="text-xs">↻</span>}
+              {t.planned.startMinute != null && <button onClick={() => onUnschedule(t.id)} style={{ color: T.accentText }} className="nb-data">{fmtTime(t.planned.startMinute, clock)}</button>}
+              {dueLeft != null && <span style={{ color: dueLeft <= 0 ? NOW_RED : T.dim }} className="nb-data">DUE {dueLeft === 0 ? "TODAY" : dueLeft < 0 ? `${-dueLeft}D LATE` : `${dueLeft}D`}</span>}
+              {checklist.length > 0 && <span style={{ color: T.dimText }} className="nb-data">{subDone}/{checklist.length}</span>}
               {blockers.length > 0 && (
-                <span title={blockers.map((b) => b.title).join(", ")} style={{ color: NOW_RED }} className="text-xs tracking-widest">
+                <span title={blockers.map((b) => b.title).join(", ")} style={{ color: NOW_RED }} className="nb-data">
                   ⛌ BLOCKED BY {blockers.length === 1 ? blockers[0].title : `${blockers.length} TASKS`}
                 </span>
               )}
@@ -5066,7 +5182,7 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromote
 
           <button onPointerDown={(e) => { e.stopPropagation(); onDragStart(t.id, e.clientX, e.clientY); }}
             onContextMenu={(e) => { e.preventDefault(); if (!selection) onStartSelect(t.id); }}
-            style={{ color: T.dim, touchAction: "none" }}
+            style={{ color: T.dimText, touchAction: "none" }}
             className="nb-tap shrink-0 w-7 h-8 text-xs" aria-label="Drag to schedule, reorder, or move to another day">⣿</button>
         </div>
 
@@ -5088,8 +5204,8 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromote
                     <span className="w-3 h-3 shrink-0" style={{ background: s.done ? T.accent : "transparent", boxShadow: `inset 0 0 0 1px ${s.done ? T.accent : T.faint}` }} />
                     <span className="text-xs" style={{ textDecoration: s.done ? "line-through" : "none", color: s.done ? T.dim : T.text }}>{s.title}</span>
                   </button>
-                  <button onClick={() => onPromoteSub(t.id, s.id)} style={{ color: T.dim }} className="text-xs px-1" aria-label="Promote step to a subtask" title="Needs its own planning? Promote to a subtask">↥</button>
-                  <button onClick={() => onRemoveSub(t.id, s.id)} style={{ color: T.dim }} className="text-xs px-1" aria-label="Remove step">✕</button>
+                  <button onClick={() => onPromoteSub(t.id, s.id)} style={{ color: T.dimText }} className="text-xs px-1" aria-label="Promote step to a subtask" title="Needs its own planning? Promote to a subtask">↥</button>
+                  <button onClick={() => onRemoveSub(t.id, s.id)} style={{ color: T.dimText }} className="text-xs px-1" aria-label="Remove step">✕</button>
                 </div>
               ))}
               <SubComposer T={T} onAdd={(v) => onAddSub(t.id, v)} />
@@ -5287,7 +5403,7 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
             const sel = day.key === dateKey;
             return (
               <button key={day.key} onClick={() => onOpenDay(day.key)} className="nb-tap flex-1 min-w-0 py-1.5 text-center" style={{ borderLeft: `1px solid ${hourRule}` }} aria-label={`Open ${fmtDay(day.key)}`}>
-                <span style={{ fontFamily: MONO, color: sel ? T.accent : T.dim }} className="block text-xs tracking-widest">{WD[d.getDay()]}</span>
+                <span style={{ fontFamily: MONO, color: sel ? T.accent : T.dim }} className="block nb-data">{WD[d.getDay()]}</span>
                 <span className="inline-flex items-center justify-center w-7 h-7 text-sm font-bold" style={{
                   fontFamily: MONO, borderRadius: 999,
                   background: isToday ? T.accent : "transparent",
@@ -5300,7 +5416,7 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
         </div>
         {hasAllDay && (
           <div className="flex shrink-0" style={{ borderBottom: `1px solid ${T.line}` }}>
-            <span className="w-12 shrink-0 self-center pr-2 text-right text-xs tracking-widest" style={{ fontFamily: MONO, color: T.dim, fontSize: 9 }}>ALL DAY</span>
+            <span className="w-12 shrink-0 self-center pr-2 text-right nb-data" style={{ fontFamily: MONO, color: T.dimText, fontSize: 9 }}>ALL DAY</span>
             {week.map((day) => (
               <div key={day.key} className="flex-1 min-w-0 px-0.5 py-1 flex flex-col gap-0.5" style={{ borderLeft: `1px solid ${hourRule}` }}>
                 {day.allDay.map((e) => (
@@ -5318,7 +5434,7 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
           <div className="relative flex" style={{ height: DAY_H, userSelect: "none", WebkitUserSelect: "none" }}>
             <div className="relative w-12 shrink-0">
               {Array.from({ length: 24 }).map((_, h) => h > 0 && (
-                <span key={h} className="absolute right-2 tracking-widest" style={{ top: h * HOUR_H, transform: "translateY(-50%)", fontFamily: MONO, color: T.dim, fontSize: 9 }}>{fmtHour(h, clock)}</span>
+                <span key={h} className="absolute right-2 tracking-widest" style={{ top: h * HOUR_H, transform: "translateY(-50%)", fontFamily: MONO, color: T.dimText, fontSize: 9 }}>{fmtHour(h, clock)}</span>
               ))}
             </div>
             {week.map((day) => {
@@ -5402,7 +5518,7 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
                       className="absolute flex items-start justify-center"
                       style={{ left: 2, right: 2, top: (s.start / 1440) * DAY_H + 1, height: (s.dur / 1440) * DAY_H - 2, borderRadius: 6, border: `1.5px dashed ${T.accent}`, background: `${T.accent}14`, zIndex: 4 }}
                       aria-label={`Book ${fmtTime(s.start, clock)} on ${fmtDay(s.date)}`}>
-                      <span className="tracking-widest pt-0.5" style={{ fontFamily: MONO, color: T.accent, fontSize: 9 }}>{fmtTime(s.start, clock)}</span>
+                      <span className="tracking-widest pt-0.5" style={{ fontFamily: MONO, color: T.accentText, fontSize: 9 }}>{fmtTime(s.start, clock)}</span>
                     </button>
                   ))}
                   {isToday && (
@@ -5443,7 +5559,7 @@ function RowWithJoin({ T, surface, link, title, onOpen, className = "", padding 
         <a href={href} target="_blank" rel="noopener noreferrer" draggable={false}
           onClick={(e) => e.stopPropagation()}
           aria-label={`Join ${title}`}
-          style={{ fontFamily: MONO, color: T.accent }}
+          style={{ fontFamily: MONO, color: T.accentText }}
           className="nb-tap absolute right-2 top-1/2 -translate-y-1/2 px-1.5 py-1 text-xs font-bold tracking-widest">JOIN ↗</a>
       )}
     </div>
@@ -5462,18 +5578,18 @@ function Agenda({ T, surface, days, dateKey, todayKey, clock, onOpenEvent, onOpe
             <button onClick={() => onJump(day.key)} className="shrink-0 w-16 py-3 text-center" style={{ background: T.bg }}>
               <span className="inline-flex flex-col items-center px-2 py-1"
                 style={{ borderRadius: CARD_R, boxShadow: isToday ? `inset 0 0 0 1.5px ${T.text}` : "none" }}>
-                <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest">{WD[d.getDay()]}</span>
+                <span style={{ fontFamily: MONO, color: T.dimText }} className="block nb-data">{WD[d.getDay()]}</span>
                 <span style={{ fontFamily: MONO }} className="block text-xl font-bold tracking-tight">{pad(d.getDate())}</span>
               </span>
             </button>
             <div className="flex-1 min-w-0 flex flex-col gap-1.5 py-2 pr-2 pl-2">
-              {count === 0 && <span style={{ fontFamily: MONO, color: T.faint }} className="text-xs tracking-widest py-2">—</span>}
+              {count === 0 && <span style={{ fontFamily: MONO, color: T.faint }} className="nb-data py-2">—</span>}
               {day.allDay.map((e) => (
                 <RowWithJoin key={e.id} T={T} surface={surface} link={e.link} title={e.title}
                   onOpen={() => onOpenEvent(e.id, day.key)}>
                   <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: catColor(e.cat) }} />
                   <span className="flex-1 text-sm font-semibold truncate">{e.title}</span>
-                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">ALL DAY</span>
+                  <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label shrink-0">ALL DAY</span>
                 </RowWithJoin>
               ))}
               {day.timed.map((e) => (
@@ -5482,9 +5598,9 @@ function Agenda({ T, surface, days, dateKey, todayKey, clock, onOpenEvent, onOpe
                   <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: catColor(e.cat) }} />
                   <span className="flex-1 min-w-0">
                     <span className="block text-sm font-semibold truncate">{e.title}</span>
-                    {e.place && <span style={{ color: T.dim }} className="block text-xs truncate">{e.place}</span>}
+                    {e.place && <span style={{ color: T.dimText }} className="block text-xs truncate">{e.place}</span>}
                   </span>
-                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">{fmtTime(e.start, clock)}</span>
+                  <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data shrink-0">{fmtTime(e.start, clock)}</span>
                 </RowWithJoin>
               ))}
               {day.tasks.map((t) => (
@@ -5492,7 +5608,7 @@ function Agenda({ T, surface, days, dateKey, todayKey, clock, onOpenEvent, onOpe
                   style={{ background: surface, borderRadius: CARD_R, opacity: t.status === "completed" ? 0.45 : 1 }}>
                   <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, boxShadow: `inset 0 0 0 1.5px ${catColor(t.category)}`, background: t.status === "completed" ? catColor(t.category) : "transparent" }} />
                   <span className="flex-1 text-sm font-semibold truncate" style={{ textDecoration: t.status === "completed" ? "line-through" : "none" }}>{t.title}</span>
-                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">
+                  <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data shrink-0">
                     {t.planned.startMinute != null ? fmtTime(t.planned.startMinute, clock) : "ACTION"}
                   </span>
                 </button>
@@ -5518,11 +5634,11 @@ function TagField({ T, tags, onChange, editable = true, onBeginEdit = null }) {
       {tags.map((tag) => (
         editable ? (
           <button key={tag} onClick={() => onChange(tags.filter((x) => x !== tag))}
-            className="px-2 py-0.5 text-xs tracking-widest" title="Remove tag"
-            style={{ fontFamily: MONO, borderRadius: 999, color: T.dim, border: `1px solid ${T.line}` }}>{tag} ✕</button>
+            className="px-2 py-0.5 nb-data" title="Remove tag"
+            style={{ fontFamily: MONO, borderRadius: 999, color: T.dimText, border: `1px solid ${T.line}` }}>{tag} ✕</button>
         ) : (
-          <span key={tag} className="px-2 py-0.5 text-xs tracking-widest"
-            style={{ fontFamily: MONO, borderRadius: 999, color: T.dim, border: `1px solid ${T.line}` }}>{tag}</span>
+          <span key={tag} className="px-2 py-0.5 nb-data"
+            style={{ fontFamily: MONO, borderRadius: 999, color: T.dimText, border: `1px solid ${T.line}` }}>{tag}</span>
         )
       ))}
       {editable ? (
@@ -5530,7 +5646,7 @@ function TagField({ T, tags, onChange, editable = true, onBeginEdit = null }) {
           onFocus={(event) => onBeginEdit?.(event.currentTarget)}
           placeholder={tags.length ? "Add tag" : "No tags"} style={{ background: "transparent", border: "none" }}
           className="text-sm py-0.5 flex-1 min-w-20" />
-      ) : !tags.length ? <span style={{ color: T.dim }} className="text-sm">No tags</span> : null}
+      ) : !tags.length ? <span style={{ color: T.dimText }} className="text-sm">No tags</span> : null}
     </div>
   );
 }
@@ -5570,7 +5686,7 @@ function DetailRow({ T, icon, children, divider = false }) {
   return (
     <div className="flex items-center gap-3 px-3 py-3" style={{ borderBottom: divider ? `1px solid ${T.line}` : "none" }}>
       <div className="flex-1 min-w-0">{children}</div>
-      <span style={{ color: T.dim }} className="text-sm shrink-0">{icon}</span>
+      <span style={{ color: T.dimText }} className="text-sm shrink-0">{icon}</span>
     </div>
   );
 }
@@ -5582,10 +5698,10 @@ function InlineAdd({ T, surface, onAdd }) {
   const go = () => { if (v.trim()) { onAdd(v.trim()); setV(""); } };
   return (
     <div className="flex items-center gap-3 px-3 py-2.5" style={{ background: surface, borderRadius: 999 }}>
-      <span style={{ color: T.dim }} className="text-base shrink-0 w-5 text-center">+</span>
+      <span style={{ color: T.dimText }} className="text-base shrink-0 w-5 text-center">+</span>
       <input value={v} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => e.key === "Enter" && go()}
         placeholder="Add a step" style={{ background: "transparent", border: "none" }} className="flex-1 text-sm py-0.5" />
-      {v.trim() && <button onClick={go} style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest">ADD</button>}
+      {v.trim() && <button onClick={go} style={{ fontFamily: MONO, color: T.accentText }} className="nb-label">ADD</button>}
     </div>
   );
 }
@@ -5673,7 +5789,7 @@ function InlineChoice({ T, surface, icon, label, options, value, onPick, tint = 
       <button disabled={!editable} onClick={(event) => { if (!open) onBeginEdit?.(event.currentTarget); setOpen(!open); }} className="nb-tap flex items-center gap-3 px-3 py-2.5 w-full text-left disabled:opacity-100">
         <span style={{ color: tint || T.dim }} className="text-sm shrink-0 w-4 text-center">{icon}</span>
         <span className="flex-1 text-sm truncate" style={{ color: tint || T.text }}>{label}</span>
-        {editable && <span style={{ color: T.dim, transform: open ? "rotate(180deg)" : "none", transition: "transform 200ms cubic-bezier(.2,.8,.25,1)" }}
+        {editable && <span style={{ color: T.dimText, transform: open ? "rotate(180deg)" : "none", transition: "transform 200ms cubic-bezier(.2,.8,.25,1)" }}
           className="text-xs shrink-0">▾</span>}
       </button>
       <div style={{
@@ -5694,7 +5810,7 @@ function InlineChoice({ T, surface, icon, label, options, value, onPick, tint = 
               return (
                 <button key={String(key)} data-active={on ? "true" : "false"}
                   onClick={() => { onPick(key); setOpen(false); }}
-                  className="nb-tap relative inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs tracking-widest"
+                  className="nb-tap relative inline-flex items-center gap-1.5 px-2.5 py-1.5 nb-data"
                   style={{
                     fontFamily: MONO, borderRadius: 999, zIndex: 1,
                     background: "transparent",
@@ -5754,7 +5870,7 @@ function InlineNative({ T, type, value, onCommit, ariaLabel, className = "", sty
 function LabeledNative({ T, dark, label, type, value, onCommit, ariaLabel, min }) {
   return (
     <label className="block px-2.5 py-2" style={{ border: `1px solid ${T.line}`, borderRadius: 12 }}>
-      <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest mb-0.5">{label}</span>
+      <span style={{ fontFamily: MONO, color: T.dimText }} className="block nb-data mb-0.5">{label}</span>
       <InlineNative T={T} dark={dark} type={type} value={value} min={min} onCommit={onCommit} ariaLabel={ariaLabel}
         className="w-full text-sm" style={{ fontFamily: MONO }} />
     </label>
@@ -5772,7 +5888,7 @@ function DurationPicker({ T, label, value, onPick, allowNone = true }) {
   ];
   return (
     <div>
-      <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest mb-1">{label}</span>
+      <span style={{ fontFamily: MONO, color: T.dimText }} className="block nb-data mb-1">{label}</span>
       <PillNav T={T} ariaLabel={label} value={value ?? null} options={options} onPick={onPick}
         className="w-full [&>button]:flex-1 [&>button]:px-1.5 [&>button]:py-1.5"
         style={{ border: `1px solid ${T.line}` }} />
@@ -5836,8 +5952,8 @@ function FluidEditActions({ T, editing, dirty, label, onEdit, onRevert, onSave }
       </button>
       <div className="nb-edit-face absolute inset-0 grid grid-cols-2" inert={!editing}
         style={{ opacity: editing ? 1 : 0, transform: editing ? "none" : "scale(.9)", pointerEvents: editing ? "auto" : "none" }}>
-        <button onClick={onRevert} disabled={!editing} className="text-xs tracking-widest"
-          style={{ fontFamily: MONO, color: T.dim }}>{dirty ? "REVERT" : "CANCEL"}</button>
+        <button onClick={onRevert} disabled={!editing} className="nb-data"
+          style={{ fontFamily: MONO, color: T.dimText }}>{dirty ? "REVERT" : "CANCEL"}</button>
         <button onClick={onSave} disabled={!editing} className="relative text-xs font-bold tracking-widest"
           style={{ fontFamily: MONO, color: T.on, borderRadius: 999 }}>
           {dirty ? "SAVE" : "DONE"}
@@ -5980,15 +6096,15 @@ function GooeySearch({ T, surface, reduced, onOpen }) {
             width: expanded ? 104 : 32,
             borderRadius: 999,
             background: expanded ? surface : "transparent",
-            color: T.dim,
+            color: T.dimText,
             transition: reduced ? "none" : "width 380ms cubic-bezier(.22,1.1,.28,1), background 220ms ease",
           }}>
           <span className="text-sm shrink-0">⌕</span>
           <span style={{
-            fontFamily: MONO, color: T.dim,
+            fontFamily: MONO, color: T.dimText,
             opacity: expanded ? 1 : 0,
             transition: reduced ? "none" : "opacity 180ms ease 120ms",
-          }} className="text-xs tracking-widest whitespace-nowrap">⌘K</span>
+          }} className="nb-data whitespace-nowrap">⌘K</span>
         </button>
       </div>
     </div>
@@ -6038,8 +6154,8 @@ function PillNav({ T, value, options, onPick, ariaLabel, surface = "transparent"
         return (
           <button key={String(key)} role="tab" aria-selected={on} data-active={on ? "true" : "false"}
             onClick={() => onPick(key)}
-            className="relative px-3 py-1 text-xs tracking-widest"
-            style={{ fontFamily: MONO, color: on ? T.on : T.dim, borderRadius: 999, zIndex: 1, transition: "color 260ms ease" }}>
+            className="nb-tap relative px-3 py-1 nb-label"
+            style={{ color: on ? T.on : T.dim, borderRadius: 999, zIndex: 1, transition: "color 260ms ease" }}>
             {label}
           </button>
         );
@@ -6064,11 +6180,11 @@ function InlineChoiceRow({ T, icon, label, sub, options, value, onPick, dot = nu
             {dot && <span className="rounded-full shrink-0" style={{ width: 8, height: 8, background: dot(value) }} />}
             <span className="block text-sm truncate">{label}</span>
           </span>
-          {sub && <span style={{ color: T.dim }} className="block text-xs mt-0.5">{sub}</span>}
+          {sub && <span style={{ color: T.dimText }} className="block text-xs mt-0.5">{sub}</span>}
         </span>
-        {editable && <span style={{ color: T.dim, transform: open ? "rotate(180deg)" : "none", transition: "transform 200ms cubic-bezier(.2,.8,.25,1)" }}
+        {editable && <span style={{ color: T.dimText, transform: open ? "rotate(180deg)" : "none", transition: "transform 200ms cubic-bezier(.2,.8,.25,1)" }}
           className="text-xs shrink-0">▾</span>}
-        <span style={{ color: T.dim }} className="text-sm shrink-0">{icon}</span>
+        <span style={{ color: T.dimText }} className="text-sm shrink-0">{icon}</span>
       </button>
       <div style={{ display: "grid", gridTemplateRows: open ? "1fr" : "0fr", transition: "grid-template-rows 240ms cubic-bezier(.2,.8,.25,1)" }}>
         <div className="overflow-hidden" inert={!open}
@@ -6080,7 +6196,7 @@ function InlineChoiceRow({ T, icon, label, sub, options, value, onPick, dot = nu
               return (
                 <button key={String(key)} data-active={on ? "true" : "false"}
                   onClick={() => { onPick(key); setOpen(false); }}
-                  className="nb-tap relative inline-flex items-center gap-1.5 px-2.5 py-1 text-xs tracking-widest"
+                  className="nb-tap relative inline-flex items-center gap-1.5 px-2.5 py-1 nb-data"
                   style={{
                     fontFamily: MONO, borderRadius: 999, zIndex: 1,
                     background: "transparent", color: on ? T.on : T.dim,
@@ -6129,8 +6245,8 @@ function InlineField({ T, surface, icon, children, tint = null }) {
 function Row({ T, k, v }) {
   return (
     <div className="flex items-center justify-between py-2" style={{ borderBottom: `1px solid ${T.line}`, fontFamily: MONO }}>
-      <span style={{ color: T.dim }} className="text-xs tracking-widest">{k}</span>
-      <span className="text-xs tracking-widest">{v}</span>
+      <span style={{ color: T.dimText }} className="nb-data">{k}</span>
+      <span className="nb-data">{v}</span>
     </div>
   );
 }
@@ -6276,10 +6392,10 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
         className={`nb-fluid nb-sheet-scroll ${heightReady ? "nb-sheet-h" : ""} ${closing ? "nb-fluid-closing" : ""} w-full sm:max-w-md overflow-y-auto nb-s`} style={{ background: T.card, color: T.text, maxHeight: "88vh", height: sheetHeight == null ? "auto" : sheetHeight }}>
         <div ref={contentRef} className="nb-notch-body">
         <div className="sticky top-0 flex items-center justify-between px-4 sm:px-5 pt-3 pb-2" style={{ background: T.card, zIndex: 3 }}>
-          <span id={titleId.current} style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">{title || "Details"}</span>
+          <span id={titleId.current} style={{ fontFamily: MONO, color: T.dimText }} className="nb-data">{title || "Details"}</span>
           <div className="flex items-center gap-1.5">
             {headerAction}
-            <button onClick={requestClose} aria-label="Close" style={{ color: T.dim, fontFamily: MONO }} className="nb-tap -mr-1 px-2 py-1 text-sm">✕</button>
+            <button onClick={requestClose} aria-label="Close" style={{ color: T.dimText, fontFamily: MONO }} className="nb-tap -mr-1 px-2 py-1 text-sm">✕</button>
           </div>
         </div>
         {/* Padding deeper than the panel's 24px corner radius, so the last row
@@ -6306,7 +6422,7 @@ function NewListField({ T, onAdd }) {
     <div className="flex items-center gap-2 py-2">
       <input value={v} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => e.key === "Enter" && go()}
         placeholder="New list" style={{ background: "transparent", border: `1px solid ${T.line}` }} className="flex-1 px-2 py-1.5 text-sm" />
-      {v.trim() && <button onClick={go} style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest">ADD</button>}
+      {v.trim() && <button onClick={go} style={{ fontFamily: MONO, color: T.accentText }} className="nb-label">ADD</button>}
     </div>
   );
 }
@@ -6318,7 +6434,7 @@ function SubComposer({ T, onAdd }) {
     <div className="flex items-center gap-2 py-1.5">
       <span className="w-3 h-3 shrink-0" style={{ boxShadow: `inset 0 0 0 1px ${T.faint}` }} />
       <input value={v} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => e.key === "Enter" && go()} placeholder="Add a step" style={{ background: "transparent", border: "none" }} className="flex-1 text-xs py-0.5" />
-      {v.trim() && <button onClick={go} style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest">ADD</button>}
+      {v.trim() && <button onClick={go} style={{ fontFamily: MONO, color: T.accentText }} className="nb-label">ADD</button>}
     </div>
   );
 }
@@ -6328,11 +6444,11 @@ function SubComposer({ T, onAdd }) {
    place of a good document would be worse than losing the snapshot. */
 function NoteHistory({ T, clock, revisions, onRestore }) {
   if (!revisions.length) {
-    return <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic py-4">No earlier versions yet. Every save from here keeps one.</p>;
+    return <p style={{ fontFamily: SERIF, color: T.dimText }} className="nb-voice py-4">No earlier versions yet. Every save from here keeps one.</p>;
   }
   return (
     <div className="flex flex-col">
-      <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic pb-3">
+      <p style={{ fontFamily: SERIF, color: T.dimText }} className="nb-voice pb-3">
         {revisions.length === 1 ? "One earlier version" : `${revisions.length} earlier versions`}, newest first. Going back keeps the current one too.
       </p>
       {revisions.map((r) => {
@@ -6340,16 +6456,16 @@ function NoteHistory({ T, clock, revisions, onRestore }) {
         const stamp = r.at ? `${fmtDay(r.at.slice(0, 10))} · ${fmtTime(Number(r.at.slice(11, 13)) * 60 + Number(r.at.slice(14, 16)), clock)}` : "UNDATED";
         return (
           <div key={r.id} className="flex items-center gap-3 py-3" style={{ borderBottom: `1px solid ${T.line}` }}>
-            <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0 w-10 tabular-nums">v{r.revision}</span>
+            <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data shrink-0 w-10 tabular-nums">v{r.revision}</span>
             <div className="flex-1 min-w-0">
-              <p style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">{stamp}</p>
-              <p style={{ fontFamily: SERIF }} className="text-sm italic truncate">
+              <p style={{ fontFamily: MONO, color: T.dimText }} className="nb-data">{stamp}</p>
+              <p style={{ fontFamily: SERIF }} className="nb-voice truncate">
                 {r.blocks.map((b) => plainText(b.text)).filter(Boolean).join(" · ") || "Empty page"}
               </p>
             </div>
             {intact
-              ? <button onClick={() => onRestore(r)} style={{ fontFamily: MONO, color: T.accent }} className="nb-tap text-xs tracking-widest shrink-0">GO BACK</button>
-              : <span style={{ fontFamily: MONO, color: NOW_RED }} className="text-xs tracking-widest shrink-0">DAMAGED</span>}
+              ? <button onClick={() => onRestore(r)} style={{ fontFamily: MONO, color: T.accentText }} className="nb-tap nb-label shrink-0">GO BACK</button>
+              : <span style={{ fontFamily: MONO, color: NOW_RED }} className="nb-label shrink-0">DAMAGED</span>}
           </div>
         );
       })}
@@ -6369,19 +6485,19 @@ function EntityNotes({ T, notes, kind, onNew, onOpen }) {
   return (
     <div className="mt-5 pt-4" style={{ borderTop: `1px solid ${T.line}` }}>
       <div className="flex items-baseline justify-between gap-3">
-        <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">
+        <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data">
           NOTES · {notes.length}
         </span>
-        <button onClick={onNew} style={{ fontFamily: MONO, color: T.accent }} className="nb-tap text-xs tracking-widest">+ NEW NOTE</button>
+        <button onClick={onNew} style={{ fontFamily: MONO, color: T.accentText }} className="nb-tap nb-data">+ NEW NOTE</button>
       </div>
       {notes.length === 0 ? (
-        <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic mt-2">Keep the thinking beside this {kind}, not inside a field it will outgrow.</p>
+        <p style={{ fontFamily: SERIF, color: T.dimText }} className="nb-voice mt-2">Keep the thinking beside this {kind}, not inside a field it will outgrow.</p>
       ) : (
         <div className="flex flex-col mt-2">
           {notes.map((note) => (
             <button key={note.id} onClick={() => onOpen(note)} className="nb-row text-left py-2.5" style={{ borderBottom: `1px solid ${T.line}` }}>
               <span className="block text-sm truncate">{note.title || noteExcerpt(note, 90) || "Untitled note"}</span>
-              <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest mt-0.5">
+              <span style={{ fontFamily: MONO, color: T.dimText }} className="block nb-data mt-0.5">
                 {note.pinned ? "PINNED · " : ""}{note.updatedAt ? "UPDATED" : "NEW"}
               </span>
             </button>
@@ -6407,17 +6523,17 @@ function NotebookPanel({ T, view, notes, onView, onNew, onOpen, onPin, onArchive
           <div key={note.id} className="flex items-center gap-2 py-3" style={{ borderBottom: `1px solid ${T.line}` }}>
             <button onClick={() => onOpen(note)} className="nb-row text-left flex-1 min-w-0">
               <span className="block text-sm truncate">{note.title || noteExcerpt(note, 100) || "Untitled note"}</span>
-              <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest mt-0.5 truncate">
+              <span style={{ fontFamily: MONO, color: T.dimText }} className="block nb-data mt-0.5 truncate">
                 {noteContextLabel(note)}{note.pinned ? " · PINNED" : ""}
               </span>
             </button>
             {view !== "archived" && <button onClick={() => onPin(note)} aria-label={note.pinned ? "Unpin note" : "Pin note"}
               style={{ color: note.pinned ? T.accent : T.dim }} className="nb-tap p-2 text-sm">{note.pinned ? "★" : "☆"}</button>}
             <button onClick={() => onArchive(note)} aria-label={note.archived ? "Restore note" : "Archive note"}
-              style={{ fontFamily: MONO, color: T.dim }} className="nb-tap p-2 text-xs tracking-widest">{note.archived ? "RESTORE" : "ARCHIVE"}</button>
+              style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap p-2 nb-data">{note.archived ? "RESTORE" : "ARCHIVE"}</button>
           </div>
         ))}
-        {notes.length === 0 && <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic py-6 text-center">
+        {notes.length === 0 && <p style={{ fontFamily: SERIF, color: T.dimText }} className="nb-voice py-6 text-center">
           {view === "pinned" ? "Pin the notes worth returning to." : view === "archived" ? "Nothing archived yet." : "A blank notebook is a good place to start."}
         </p>}
       </div>
@@ -6455,12 +6571,12 @@ function NoteEditor({ T, note, onSave, onDelete, history = 0, onHistory, onPin, 
   return (
     <div>
       <div className="flex items-baseline justify-between gap-3">
-        <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">{note.id ? "EDIT NOTE" : "NEW NOTE"}</span>
-        <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest truncate">{noteContextLabel(note)}</span>
-        {history > 0 && <button onClick={onHistory} style={{ fontFamily: MONO, color: T.accent }} className="nb-tap text-xs tracking-widest shrink-0">HISTORY · {history}</button>}
+        <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data">{note.id ? "EDIT NOTE" : "NEW NOTE"}</span>
+        <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data truncate">{noteContextLabel(note)}</span>
+        {history > 0 && <button onClick={onHistory} style={{ fontFamily: MONO, color: T.accentText }} className="nb-tap nb-data shrink-0">HISTORY · {history}</button>}
       </div>
       <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Untitled"
-        style={{ background: "transparent", borderBottom: `1px solid ${T.line}`, fontFamily: SANS, width: "100%" }} className="text-xl font-semibold py-3 mt-2" />
+        style={{ background: "transparent", borderBottom: `1px solid ${T.line}`, fontFamily: DISPLAY, width: "100%" }} className="text-xl font-semibold py-3 mt-2" />
       {templates.length > 0 && (
         <div data-test="note-templates" className="flex flex-wrap gap-1.5 mt-3">
           {templates.map((template) => {
@@ -6471,7 +6587,7 @@ function NoteEditor({ T, note, onSave, onDelete, history = 0, onHistory, onPin, 
                   fontFamily: MONO, borderRadius: 999,
                   background: on ? T.accent : "transparent", color: on ? T.on : T.dim,
                   border: `1px solid ${on ? T.accent : T.line}`,
-                }} className="nb-tap px-2.5 py-1 text-xs tracking-widest">
+                }} className="nb-tap px-2.5 py-1 nb-data">
                 {template.name.toUpperCase()}
               </button>
             );
@@ -6479,13 +6595,13 @@ function NoteEditor({ T, note, onSave, onDelete, history = 0, onHistory, onPin, 
         </div>
       )}
       <textarea autoFocus value={v} onChange={(e) => setV(e.target.value)} rows={6} placeholder="Write it down.&#10;&#10;# Heading   - list   [ ] to-do   > quote&#10;**bold**  *italic*  `code`"
-        style={{ background: "transparent", border: `1px solid ${T.line}`, fontFamily: SERIF, resize: "none", width: "100%" }} className="text-sm italic leading-relaxed p-3 mt-3" />
+        style={{ background: "transparent", border: `1px solid ${T.line}`, fontFamily: SERIF, resize: "none", width: "100%" }} className="nb-voice leading-relaxed p-3 mt-3" />
       {note.id && <div className="flex gap-2 mt-3">
-        <button onClick={onPin} style={{ fontFamily: MONO, color: note.pinned ? T.accent : T.dim, border: `1px solid ${T.line}` }} className="nb-tap flex-1 py-2 text-xs tracking-widest">{note.pinned ? "UNPIN" : "PIN"}</button>
-        <button onClick={onArchive} style={{ fontFamily: MONO, color: T.dim, border: `1px solid ${T.line}` }} className="nb-tap flex-1 py-2 text-xs tracking-widest">{note.archived ? "RESTORE" : "ARCHIVE"}</button>
+        <button onClick={onPin} style={{ fontFamily: MONO, color: note.pinned ? T.accent : T.dim, border: `1px solid ${T.line}` }} className="nb-tap flex-1 py-2 nb-data">{note.pinned ? "UNPIN" : "PIN"}</button>
+        <button onClick={onArchive} style={{ fontFamily: MONO, color: T.dimText, border: `1px solid ${T.line}` }} className="nb-tap flex-1 py-2 nb-data">{note.archived ? "RESTORE" : "ARCHIVE"}</button>
       </div>}
       <div className="flex gap-2 mt-3">
-        {note.id && <button onClick={onDelete} style={{ fontFamily: MONO, color: NOW_RED, border: `1px solid ${T.line}` }} className="nb-tap flex-1 py-3 text-xs tracking-widest">DELETE</button>}
+        {note.id && <button onClick={onDelete} style={{ fontFamily: MONO, color: NOW_RED, border: `1px solid ${T.line}` }} className="nb-tap flex-1 py-3 nb-label">DELETE</button>}
         <button onClick={() => canSave && onSave(v.trim(), title.trim(), provenance)} disabled={!canSave} style={{ fontFamily: MONO, background: canSave ? T.accent : "transparent", color: canSave ? T.on : T.dim, border: `1px solid ${canSave ? T.accent : T.faint}` }} className="nb-tap flex-1 py-3 text-xs font-bold tracking-widest">SAVE</button>
       </div>
     </div>
@@ -6523,26 +6639,26 @@ function CommandPalette({ T, surface, query, onQueryChange, rows, placeholder, f
       <input autoFocus data-test="palette-input" value={query} onChange={(e) => onQueryChange(e.target.value)}
         onKeyDown={onKeyDown} placeholder={placeholder} aria-label="Search or run a command"
         style={{ background: "transparent", border: `1px solid ${T.line}` }} className="w-full px-3 py-3 text-base font-semibold" />
-      {footer && <p style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest pt-2">{footer}</p>}
+      {footer && <p style={{ fontFamily: MONO, color: T.dimText }} className="nb-data pt-2">{footer}</p>}
       <div ref={listRef} className="mt-3 flex flex-col" data-test="palette-rows">
-        {queryIssues.length > 0 && <p style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest py-2">IGNORED FILTER · {queryIssues[0].token.toUpperCase()}</p>}
-        {query && rows.length === 0 && <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic py-4">Nothing matches that. Try a shorter word.</p>}
+        {queryIssues.length > 0 && <p style={{ fontFamily: MONO, color: T.dimText }} className="nb-data py-2">IGNORED FILTER · {queryIssues[0].token.toUpperCase()}</p>}
+        {query && rows.length === 0 && <p style={{ fontFamily: SERIF, color: T.dimText }} className="nb-voice py-4">Nothing matches that. Try a shorter word.</p>}
         {rows.map((row, index) => {
           const header = row.group !== lastGroup ? row.group : null;
           lastGroup = row.group;
           const on = index === active;
           return (
             <React.Fragment key={row.key}>
-              {header && <p style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest pt-3 pb-1">{header}</p>}
+              {header && <p style={{ fontFamily: MONO, color: T.dimText }} className="nb-data pt-3 pb-1">{header}</p>}
               <button data-test={row.testId} data-active={on} onClick={row.run} onMouseEnter={() => setActive(index)}
                 className="nb-row flex items-center gap-2 py-2.5 px-2 text-left" style={{
                   borderBottom: `1px solid ${T.line}`,
                   background: on ? surface : "transparent",
                   borderRadius: on ? 8 : 0,
                 }}>
-                <span style={{ fontFamily: MONO, color: row.tint ?? T.dim }} className="text-xs tracking-widest shrink-0 w-12">{row.badge}</span>
+                <span style={{ fontFamily: MONO, color: row.tint ?? T.dim }} className="nb-data shrink-0 w-12">{row.badge}</span>
                 <span className="flex-1 text-sm truncate">{row.label}</span>
-                {row.meta && <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">{row.meta}</span>}
+                {row.meta && <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data shrink-0">{row.meta}</span>}
               </button>
             </React.Fragment>
           );
@@ -6563,7 +6679,7 @@ function ShortcutSheet({ T, surface }) {
         lastGroup = shortcut.group;
         return (
           <React.Fragment key={shortcut.keys.join("+")}>
-            {header && <p style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest pt-4 pb-1">{header}</p>}
+            {header && <p style={{ fontFamily: MONO, color: T.dimText }} className="nb-data pt-4 pb-1">{header}</p>}
             <div className="flex items-center gap-3 py-2" style={{ borderBottom: `1px solid ${T.line}` }}>
               <span className="flex gap-1 shrink-0">
                 {shortcut.keys.map((key) => (
@@ -6576,7 +6692,7 @@ function ShortcutSheet({ T, surface }) {
           </React.Fragment>
         );
       })}
-      <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic pt-4">
+      <p style={{ fontFamily: SERIF, color: T.dimText }} className="nb-voice pt-4">
         Shortcuts are ignored while you are typing in a field.
       </p>
     </div>
@@ -6588,14 +6704,14 @@ function ShortcutSheet({ T, surface }) {
 function QuickAddHint({ T }) {
   return (
     <div data-test="quick-add-hint" className="pt-1">
-      <p style={{ fontFamily: SERIF, color: T.dim }} className="text-sm italic pb-2">
+      <p style={{ fontFamily: SERIF, color: T.dimText }} className="nb-voice pb-2">
         Type a whole line and it will be read as one — “Lunch w/ Sara Tue 1pm 45m”.
       </p>
       <div className="flex flex-col gap-0.5">
         {QUICK_ADD_SYNTAX.map((entry) => (
           <div key={entry.token} className="flex items-baseline gap-2">
-            <span style={{ fontFamily: MONO, color: T.accent }} className="text-xs shrink-0 w-44 truncate">{entry.token}</span>
-            <span style={{ color: T.dim }} className="text-xs">{entry.means}</span>
+            <span style={{ fontFamily: MONO, color: T.accentText }} className="text-xs shrink-0 w-44 truncate">{entry.token}</span>
+            <span style={{ color: T.dimText }} className="text-xs">{entry.means}</span>
           </div>
         ))}
       </div>
@@ -6722,7 +6838,7 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick, weekStart 
           placeholder={kind === "event" ? "What's happening?" : "What gets finished?"}
           style={{ background: "transparent", border: "none" }}
           className={`w-full text-2xl font-bold tracking-tight leading-tight ${kind === "event" ? "text-center" : ""}`} />
-        <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest mt-1.5">
+        <span style={{ fontFamily: MONO, color: T.dimText }} className="block nb-data mt-1.5">
           {editing ? "EDITING" : dateLabel}
         </span>
       </div>
@@ -6736,15 +6852,15 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick, weekStart 
               options={[["timed", "AT A TIME"], ["all", "ALL DAY"]]} />
             {!allDay && (
               <div className="flex items-center gap-2 px-3 py-2.5" style={{ background: surface, borderRadius: CARD_R }}>
-                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">FROM</span>
+                <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label shrink-0">FROM</span>
                 <input type="time" step={60} value={toTime(start)} onChange={(e) => e.target.value && setStart(fromTime(e.target.value))}
                   style={{ background: "transparent", border: "none", fontFamily: MONO }} className="text-sm" />
-                <span style={{ color: T.dim }} className="text-sm">&#8594;</span>
+                <span style={{ color: T.dimText }} className="text-sm">&#8594;</span>
                 <input type="time" step={60} value={endLocal.slice(11)} onChange={(e) => {
                   if (!e.target.value) return;
                   setLen(durationFromClockRange(start, fromTime(e.target.value)));
                 }} style={{ background: "transparent", border: "none", fontFamily: MONO }} className="text-sm" />
-                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest ml-auto shrink-0">{dur(len)}</span>
+                <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data ml-auto shrink-0">{dur(len)}</span>
               </div>
             )}
             {!allDay && (
@@ -6758,7 +6874,7 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick, weekStart 
               options={[["day", "ON A DAY"], ["inbox", "INBOX"]]} />
             {!unplanned && (
               <div className="flex items-center gap-2 px-3 py-2.5" style={{ background: surface, borderRadius: CARD_R }}>
-                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">ON</span>
+                <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label shrink-0">ON</span>
                 <input type="date" value={date} onChange={(e) => e.target.value && setDate(e.target.value)}
                   style={{ background: "transparent", border: "none", fontFamily: MONO }} className="text-sm flex-1" />
               </div>
@@ -6771,7 +6887,7 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick, weekStart 
       </div>
 
       <button onClick={() => { onTick(); setMore(!more); }}
-        style={{ fontFamily: MONO, color: T.dim }} className="nb-tap w-full py-3 text-xs tracking-widest">
+        style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap w-full py-3 nb-data">
         {more ? "FEWER OPTIONS" : "MORE OPTIONS"}
       </button>
 
@@ -6784,14 +6900,14 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick, weekStart 
         <div className="flex flex-col gap-2 pb-1">
           {kind === "event" && allDay && (
             <div className="flex items-center gap-2 px-3 py-2.5" style={{ background: surface, borderRadius: CARD_R }}>
-              <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">THROUGH</span>
+              <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label shrink-0">THROUGH</span>
               <input type="date" value={endDate} min={date} onChange={(e) => setEndDate(e.target.value)}
                 style={{ background: "transparent", border: "none", fontFamily: MONO }} className="text-sm flex-1" />
             </div>
           )}
           {kind === "event" && !initial.instance && (
             <div className="flex items-center gap-2 px-3 py-2.5" style={{ background: surface, borderRadius: CARD_R }}>
-              <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">ON</span>
+              <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label shrink-0">ON</span>
               <input type="date" value={date} onChange={(e) => e.target.value && setDate(e.target.value)}
                 style={{ background: "transparent", border: "none", fontFamily: MONO }} className="text-sm flex-1" />
             </div>
@@ -6807,7 +6923,7 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick, weekStart 
               <input value={link} onChange={(e) => setLink(e.target.value)} placeholder="Meeting link — Meet, Zoom, Teams…" inputMode="url"
                 style={{ background: surface, border: "none", borderRadius: CARD_R }} className="w-full px-3 py-2.5 text-sm" />
               {!linkOk && (
-                <span style={{ fontFamily: MONO, color: NOW_RED }} className="px-1 text-xs tracking-widest">DOESN'T LOOK LIKE A LINK</span>
+                <span style={{ fontFamily: MONO, color: NOW_RED }} className="px-1 nb-label">DOESN'T LOOK LIKE A LINK</span>
               )}
             </>
           ) : (
@@ -6817,10 +6933,10 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick, weekStart 
               <DurationPicker T={T} label="ESTIMATE" value={estimate} onPick={(value) => { onTick(); setEstimate(value); }} />
               {!unplanned && (
                 <div className="flex items-center gap-2 px-3 py-2.5" style={{ background: surface, borderRadius: CARD_R }}>
-                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">AT</span>
+                  <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label shrink-0">AT</span>
                   <input type="time" step={60} value={at != null ? toTime(at) : ""} onChange={(e) => setAt(e.target.value ? fromTime(e.target.value) : null)}
                     style={{ background: "transparent", border: "none", fontFamily: MONO }} className="text-sm" />
-                  <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0 ml-auto">DUE</span>
+                  <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label shrink-0 ml-auto">DUE</span>
                   <input type="date" value={due} onChange={(e) => setDue(e.target.value)}
                     style={{ background: "transparent", border: "none", fontFamily: MONO }} className="text-sm" />
                 </div>
@@ -6835,14 +6951,14 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick, weekStart 
           {repeat && (
             <div className="flex flex-col gap-2 px-3 py-2.5" style={{ background: surface, borderRadius: CARD_R }}>
               <div className="flex items-center gap-2">
-                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">EVERY</span>
+                <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label">EVERY</span>
                 <input type="number" min={1} max={30} value={repeat.interval || 1}
                   onChange={(e) => setRepeat({ ...repeat, interval: Math.max(1, Number(e.target.value) || 1) })}
                   style={{ background: "transparent", border: "none", fontFamily: MONO }} className="w-12 text-sm" />
-                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">
+                <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data">
                   {repeat.freq === "daily" ? "DAYS" : repeat.freq === "weekly" ? "WEEKS" : repeat.freq === "monthly" ? "MONTHS" : "YEARS"}
                 </span>
-                <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest ml-auto">UNTIL</span>
+                <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label ml-auto">UNTIL</span>
                 <input type="date" value={repeat.until || ""} onChange={(e) => setRepeat({ ...repeat, until: e.target.value })}
                   style={{ background: "transparent", border: "none", fontFamily: MONO }} className="text-sm" />
               </div>
@@ -6860,7 +6976,7 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick, weekStart 
                     return (
                       <button key={d} data-test="weekday-chip" data-weekday={i} data-on={on ? "true" : "false"}
                         aria-pressed={on} aria-label={DAY_LETTERS[i]}
-                        onClick={() => toggleDay(i)} className="nb-tap relative flex-1 py-1 text-xs tracking-widest"
+                        onClick={() => toggleDay(i)} className="nb-tap relative flex-1 py-1 nb-data"
                         style={{ fontFamily: MONO, borderRadius: 999, background: "transparent", color: on ? T.on : T.dim,
                           border: `1px solid ${on ? "transparent" : T.line}`, transition: "color 260ms ease, border-color 180ms ease" }}>
                         <LiquidFill T={T} on={on} />
@@ -6875,7 +6991,7 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick, weekStart 
 
           <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Notes"
             style={{ background: surface, border: "none", borderRadius: CARD_R, fontFamily: SERIF, resize: "none" }}
-            className="w-full px-3 py-2.5 text-sm italic" />
+            className="w-full px-3 py-2.5 nb-voice" />
         </div>
       </div>
 
@@ -6901,14 +7017,14 @@ function Chips({ T, surface, label, value, onChange, options, multi = false, wra
   };
   return (
     <div>
-      {label && <span style={{ fontFamily: MONO, color: T.dim }} className="block text-xs tracking-widest mb-1">{label}</span>}
+      {label && <span style={{ fontFamily: MONO, color: T.dimText }} className="block nb-data mb-1">{label}</span>}
       <div ref={wrapRef} className={`relative flex gap-1 ${wrap ? "flex-wrap" : ""}`}>
         {!multi && <LiquidPillIndicator T={T} box={box} stretch={stretch} settled={settled} z={1} />}
         {options.map(([key, text]) => {
           const on = selected(key);
           return (
             <button key={String(key)} onClick={() => pick(key)} data-active={!multi && on ? "true" : "false"}
-              className={`nb-tap relative ${wrap ? "" : "flex-1"} inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs tracking-widest`}
+              className={`nb-tap relative ${wrap ? "" : "flex-1"} inline-flex items-center justify-center gap-1.5 px-3 py-2 nb-data`}
               style={{
                 fontFamily: MONO, borderRadius: 999,
                 background: multi || !on ? surface : "transparent",

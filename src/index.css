@@ -1,5 +1,111 @@
 @import "tailwindcss";
 
+/* ═══════════════════════ THE FACE ═══════════════════════
+ *
+ * Jost*, by indestructible type*, under the SIL Open Font License 1.1 — the
+ * licence text sits beside the file in src/assets/fonts/OFL.txt. It is a Futura
+ * revival, which is the brief: the app is pitched at Moleskine Timepage's warm
+ * geometry, and Futura itself cannot be embedded without a commercial web
+ * licence. `--font-display` is ordered so that licensing Futura PT later is a
+ * one-line change and nothing else moves.
+ *
+ * One variable file, weight 100–900 on a single axis, Latin subset, 26 kB. Four
+ * static weights would have been three used and four downloaded.
+ *
+ * `font-display: block` on purpose. There is no network fetch behind a data URI,
+ * so the hold is a frame or two — and an app shell that reflows its entire
+ * interface a beat after paint is worse than that hold by a wide margin.
+ */
+@font-face {
+  font-family: "Jost";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: block;
+  src: url("./assets/fonts/jost-latin-variable.woff2") format("woff2");
+}
+
+:root {
+  /* ── families ──────────────────────────────────────────
+     Three voices, and each one owns a category of meaning rather than a
+     category of size: what the app says, what it measures, and what you wrote.
+     See docs — the rule is what keeps the other decisions from being arbitrary. */
+  --font-display: "Futura PT", "Jost", "Avenir Next", "Century Gothic",
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+  --font-data: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-voice: Georgia, Cambria, "Times New Roman", serif;
+
+  /* ── type scale ────────────────────────────────────────
+     Nine steps, each with one job. The old scale was a barbell — 86% of all
+     text at 12 or 14px, then a leap to a 72px numeral — so hierarchy was
+     carried entirely by colour and capitals. Sizes are px because this is an
+     app shell, not a document that should reflow with a reader's preference. */
+  --t-display: 64px;   --t-display-w: 800;  --t-display-ls: -0.035em;
+  --t-title:   24px;   --t-title-w:   700;  --t-title-ls:   -0.018em;
+  --t-heading: 19px;   --t-heading-w: 600;  --t-heading-ls: -0.01em;
+  --t-lead:    16px;   --t-lead-w:    600;  --t-lead-ls:    -0.008em;
+  --t-body:    15px;   --t-body-w:    400;  --t-body-ls:    0;
+  --t-label:   13px;   --t-label-w:   700;  --t-label-ls:   0.1em;
+  --t-data:    13px;   --t-data-w:    400;  --t-data-ls:    0.02em;
+  --t-micro:   11px;   --t-micro-w:   400;  --t-micro-ls:   0.02em;
+
+  /* ── geometry ──────────────────────────────────────────
+     10px chips, 14px cards, 24px sheets, 999px pills. The 14 is new: anything
+     that lifts and holds more than one line should read softer than a chip is
+     round. */
+  --r-chip: 10px;
+  --r-card: 14px;
+  --r-sheet: 24px;
+  --r-pill: 999px;
+
+  /* ── elevation ─────────────────────────────────────────
+     Three levels and no more. E0 is flush and hairlined, E1 rests, E2 is
+     lifted — a dragged card, an open sheet. The sheen is the cheap part that
+     does the most work: one lit pixel along the top edge, so a card catches
+     light from above and reads as an object rather than a rectangle of a
+     different colour.
+
+     The alphas are per-ground and must stay tokens: a shadow that is legible on
+     cream is invisible on obsidian, and one that reads on obsidian is a smear
+     on cream. `--nb-line` is set from the active theme in Planner.jsx. */
+  --e1: 0 1px 2px rgb(0 0 0 / 0.06), 0 2px 8px rgb(0 0 0 / 0.05);
+  --e2: 0 2px 4px rgb(0 0 0 / 0.07), 0 8px 24px rgb(0 0 0 / 0.09);
+  --sheen: inset 0 1px 0 rgb(255 255 255 / 0.9);
+
+  /* ── motion ────────────────────────────────────────────
+     One spring for arrivals, one ease for departures. Named here so a new
+     interaction cannot invent a fourteenth curve. */
+  --spring: cubic-bezier(0.22, 1.12, 0.28, 1);
+  --exit: cubic-bezier(0.4, 0, 0.4, 1);
+  --press-in: 90ms;
+  --press-out: 260ms;
+}
+
+/* The accent is a flat colour, and stays one unless you ask otherwise.
+ *
+ * A theme in this app has always been one ground plus one accent, and that
+ * restraint is the identity — so the lit variant is opt-in, not a reskin.
+ * Every call site paints `var(--accent-fill)`, which resolves to the solid
+ * accent by default and to a shallow gradient derived from it only when
+ * `display.litSurfaces` is on. Nothing else changes, and no gradient ever goes
+ * behind text: it is for the primary button, the selected day, and the elapsed
+ * fill, which are the three places the accent already dominates. */
+:root {
+  --accent-fill: var(--accent-solid);
+}
+:root[data-surfaces="lit"] {
+  --accent-fill: linear-gradient(158deg, var(--accent-lit), var(--accent-deep));
+}
+
+/* A dark ground needs roughly eight times the shadow alpha to be visible at
+   all, and a highlight two orders of magnitude fainter not to look like frost.
+   Planner.jsx stamps `data-ground` from the active theme, because the app's
+   fifteen themes are its own choice and have nothing to do with the OS. */
+:root[data-ground="dark"] {
+  --e1: 0 1px 2px rgb(0 0 0 / 0.5), 0 2px 10px rgb(0 0 0 / 0.4);
+  --e2: 0 2px 6px rgb(0 0 0 / 0.55), 0 10px 30px rgb(0 0 0 / 0.5);
+  --sheen: inset 0 1px 0 rgb(255 255 255 / 0.055);
+}
+
 html,
 body,
 #root {
@@ -12,4 +118,5 @@ body {
   overscroll-behavior: none;
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
+  font-family: var(--font-display);
 }
