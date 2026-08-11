@@ -84,6 +84,84 @@ function anchorWithinUntil(anchor, until) {
   return until.includes("T") ? anchor <= until : anchor.slice(0, 10) <= until;
 }
 
+
+/* ── Scanning a rule without walking every day of its history ──
+ *
+ * The obvious loop steps one day at a time from the series start. It is
+ * correct and it is O(days since the series began): a standup started three
+ * years ago costs eleven hundred wasted steps every time any view asks what is
+ * on next Tuesday, and the month grid asks eighty-four times. That was 1.8
+ * seconds to open a month on a year-old notebook.
+ *
+ * Two changes, both of which have to preserve the answer exactly:
+ *
+ * 1. **Start at the range, not at the beginning of time.** Nothing before the
+ *    range can change what is inside it — *unless* the rule has a `count`, in
+ *    which case every earlier occurrence has to be counted before we know
+ *    whether the series has already run out. So a counted rule still scans from
+ *    the start; everything else jumps.
+ *
+ * 2. **Step by the rule's own stride.** A day that cannot possibly match is
+ *    skipped wholesale: an off-interval week jumps to the next on-interval one,
+ *    a month the rule excludes jumps to the first of the next month.
+ *
+ * Every jump here is deliberately conservative — landing early costs a few
+ * iterations, landing late loses an occurrence — and `recurrence-equivalence`
+ * asserts the output against the naive walk over thousands of rule/range pairs.
+ */
+
+function firstOfNextMonth(dateKey) {
+  const { year, month } = dateParts(dateKey);
+  return month === 12
+    ? `${year + 1}-01-01`
+    : `${year}-${String(month + 1).padStart(2, "0")}-01`;
+}
+
+/* The month cannot contain a match: wrong month for a `byMonth` rule, or off
+   the monthly/yearly interval. Nothing in it needs looking at. */
+function monthIsExcluded(rule, candidate, start) {
+  if (rule.byMonth?.length && !rule.byMonth.includes(candidate.month)) return true;
+  if (rule.frequency === "monthly") return monthDifference(candidate, start) % rule.interval !== 0;
+  if (rule.frequency === "yearly") return (candidate.year - start.year) % rule.interval !== 0;
+  return false;
+}
+
+/* The first date at or before the range that the scan can safely begin from.
+   Never later than the true first match, and never before the series start. */
+function scanStartFor(rule, startDate, rangeStart) {
+  if (rangeStart <= startDate) return startDate;
+  if (rule.frequency === "daily") {
+    /* Exact phase: the stride below is `interval` days, so landing off-phase
+       would step straight past every occurrence. */
+    const elapsed = diffDays(rangeStart, startDate);
+    const stride = rule.interval;
+    return addDaysToKey(startDate, Math.ceil(elapsed / stride) * stride);
+  }
+  if (rule.frequency === "weekly") return weekStart(rangeStart, rule.weekStart);
+  /* Monthly and yearly are scanned within a month, so the first of the range's
+     month is always safe. */
+  return `${rangeStart.slice(0, 7)}-01`;
+}
+
+/* The next date worth testing after one that did not match. */
+function nextCandidate(rule, date, startDate) {
+  if (rule.frequency === "daily") return addDaysToKey(date, rule.interval);
+  const candidate = dateParts(date);
+  const start = dateParts(startDate);
+  if (rule.frequency === "weekly") {
+    const week = weekStart(date, rule.weekStart);
+    const weeks = Math.floor(diffDays(week, weekStart(startDate, rule.weekStart)) / 7);
+    /* An off-interval week holds nothing; skip to the next one that counts. */
+    if (weeks % rule.interval !== 0) {
+      const ahead = rule.interval - (((weeks % rule.interval) + rule.interval) % rule.interval);
+      return addDaysToKey(week, ahead * 7);
+    }
+    return addDaysToKey(date, 1);
+  }
+  if (monthIsExcluded(rule, candidate, start)) return firstOfNextMonth(date);
+  return addDaysToKey(date, 1);
+}
+
 export function generateRecurrenceAnchors(event, rangeStart, rangeEndExclusive, limit = 10_000) {
   assertDateKey(rangeStart, "range start");
   assertDateKey(rangeEndExclusive, "range end");
@@ -100,9 +178,15 @@ export function generateRecurrenceAnchors(event, rangeStart, rangeEndExclusive, 
   const anchors = [];
   let generated = 0;
   let iterations = 0;
-  for (let date = startDate; date < rangeEndExclusive; date = addDaysToKey(date, 1)) {
+  /* A counted rule has to know how many occurrences came before the range, so it
+     scans from the start. Anything else can begin at the range itself. */
+  let date = rule.count ? startDate : scanStartFor(rule, startDate, rangeStart);
+  while (date < rangeEndExclusive) {
     if (++iterations > 200_000) throw new RangeError("recurrence expansion exceeded its safety bound");
-    if (!matchesRule(rule, date, startDate)) continue;
+    if (!matchesRule(rule, date, startDate)) {
+      date = nextCandidate(rule, date, startDate);
+      continue;
+    }
     const anchor = anchorFor(timing, date);
     if (!anchorWithinUntil(anchor, rule.until)) break;
     generated += 1;
@@ -111,6 +195,10 @@ export function generateRecurrenceAnchors(event, rangeStart, rangeEndExclusive, 
       anchors.push(anchor);
       if (anchors.length >= limit) break;
     }
+    /* A day that matched cannot also be skipped past by a stride that assumes it
+       did not, so a match always advances by one day — except for daily, whose
+       stride *is* its period. */
+    date = rule.frequency === "daily" ? addDaysToKey(date, rule.interval) : addDaysToKey(date, 1);
   }
   return anchors;
 }
