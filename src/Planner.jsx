@@ -825,6 +825,11 @@ export default function Planner() {
      reserve room in — and the sheet it would reserve for is hidden in that mode. */
   const sheetPad = viewMode === "actions" ? "0px" : (sheet ? "76dvh" : "64px");
   const clock = preferences?.display.clock ?? "12";
+  /* Both switches mean the same thing to motion: the in-app preference and the
+     OS one. The global CSS kill-switch handles animation and transition, but a
+     filter is neither, so components that mount one ask directly. */
+  const reducedMotion = Boolean(preferences?.display.reducedMotion)
+    || (typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
   const tm = (m) => fmtTime(m, clock);
 
   /* The theme lives in state, so the page around the app has to follow it: the body
@@ -2680,7 +2685,8 @@ export default function Planner() {
         <div className="flex items-center gap-1">
           <button onClick={() => { jumpTo(todayKey); setMonthCursor(new Date()); }} style={{ fontFamily: MONO, color: T.dim }} className="nb-tap px-2 py-1 text-xs tracking-widest">TODAY</button>
           <button onClick={() => { beep("click"); setNotebook("all"); }} style={{ fontFamily: MONO, color: T.dim }} className="nb-tap px-2 py-1 text-xs tracking-widest">NOTES</button>
-          <button onClick={() => { beep("click"); setSearchQuery(""); setSearch(true); }} style={{ color: T.dim }} className="nb-tap w-8 h-8 text-sm" aria-label="Search">⌕</button>
+          <GooeySearch T={T} surface={surface} reduced={reducedMotion}
+            onOpen={() => { beep("click"); setSearchQuery(""); setSearch(true); }} />
           <button onClick={() => { beep("click"); setSettings(true); }} style={{ color: T.dim }} className="nb-tap w-8 h-8 text-sm" aria-label="Settings">⋯</button>
           <button onClick={() => { beep("click"); setComposer({ kind: "event", start: startSlot(nowMin), dur: 60 }); }} style={{ background: T.accent, color: T.on, fontFamily: MONO }} className="nb-tap nb-liquid px-2 py-1.5 text-xs font-bold tracking-widest">NEW</button>
         </div>
@@ -5111,6 +5117,94 @@ function useLiquidPill(wrapRef, deps) {
   }, deps);
 
   return { box, stretch, settled };
+}
+
+/* The goo.
+ *
+ * A blur followed by a steep alpha curve: neighbouring shapes bleed into each
+ * other's blur, the curve snaps the result back to hard edges, and what was two
+ * separate elements becomes one surface with a meniscus between them. It is the
+ * whole effect, and it is four lines of SVG — which is why it is written here
+ * rather than pulled in. This app has no animation library on purpose.
+ *
+ * The filter is expensive enough to matter, so it is only mounted where it is
+ * used, and never while motion is reduced — under `prefers-reduced-motion` the
+ * elements simply do not travel, and a filter over stationary shapes is cost
+ * with no picture. */
+function GooeyFilter({ id, blur = 5 }) {
+  return (
+    <svg aria-hidden="true" className="absolute w-0 h-0" style={{ position: "absolute" }}>
+      <defs>
+        <filter id={id} x="-50%" y="-50%" width="200%" height="200%" colorInterpolationFilters="sRGB">
+          <feGaussianBlur in="SourceGraphic" stdDeviation={blur} result="blur" />
+          <feColorMatrix in="blur" type="matrix"
+            values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 20 -10" result="goo" />
+          <feComposite in="SourceGraphic" in2="goo" operator="atop" />
+        </filter>
+      </defs>
+    </svg>
+  );
+}
+
+/* Search, as a control that says what it is.
+ *
+ * It was a bare ⌕ with no label and no hint that ⌘K reaches it — the fastest way
+ * into the app, and the least legible thing in the header. On hover or focus the
+ * glyph's bubble separates, travels, and merges into a pill carrying the word and
+ * the shortcut; the goo filter is what makes those two shapes read as one
+ * material stretching rather than two divs moving.
+ *
+ * The flourish never delays anything: the click opens the palette on the way
+ * down, whatever the animation is doing. Reduced motion gets the label without
+ * the travel. */
+function GooeySearch({ T, surface, reduced, onOpen }) {
+  const [open, setOpen] = useState(false);
+  const filterId = useRef(`goo-search-${Math.random().toString(36).slice(2, 9)}`).current;
+  const expanded = open && !reduced;
+
+  return (
+    /* The expanded width is reserved at rest and the control is right-aligned
+       inside it. Growing a flex child on hover would otherwise shove TODAY and
+       NOTES sideways every time the pointer crossed this corner — a flourish
+       that moves other people's buttons is a bug. */
+    <div className="relative flex items-center justify-end" style={{ width: 104 }}
+      onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+      {expanded && <GooeyFilter id={filterId} blur={4} />}
+      <div className="flex items-center justify-end" style={{ filter: expanded ? `url(#${filterId})` : "none" }}>
+        {/* The bubble is a second shape that exists only to merge with the pill.
+            It sits under the label and shares its surface, so the goo has two
+            like-coloured things to join. */}
+        <span aria-hidden="true" className="absolute rounded-full" style={{
+          width: 26, height: 26, right: expanded ? 74 : 3, background: surface,
+          opacity: expanded ? 1 : 0,
+          transition: reduced ? "none" : "right 380ms cubic-bezier(.22,1.1,.28,1), opacity 220ms ease",
+          pointerEvents: "none",
+        }} />
+        <button
+          onFocus={() => setOpen(true)}
+          onBlur={() => setOpen(false)}
+          onClick={() => { setOpen(false); onOpen(); }}
+          data-test="search-control"
+          aria-label="Search, or run a command"
+          aria-keyshortcuts="Meta+K Control+K"
+          className="nb-tap relative flex items-center justify-center gap-1.5 h-8 overflow-hidden"
+          style={{
+            width: expanded ? 104 : 32,
+            borderRadius: 999,
+            background: expanded ? surface : "transparent",
+            color: T.dim,
+            transition: reduced ? "none" : "width 380ms cubic-bezier(.22,1.1,.28,1), background 220ms ease",
+          }}>
+          <span className="text-sm shrink-0">⌕</span>
+          <span style={{
+            fontFamily: MONO, color: T.dim,
+            opacity: expanded ? 1 : 0,
+            transition: reduced ? "none" : "opacity 180ms ease 120ms",
+          }} className="text-xs tracking-widest whitespace-nowrap">⌘K</span>
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function LiquidPillIndicator({ T, box, stretch, settled = true, z = 0 }) {
