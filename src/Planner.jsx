@@ -815,7 +815,9 @@ export default function Planner() {
      the surface contracts instead of running underneath something opaque. The
      breakpoint stays in CSS rather than being read from window at render time,
      which would not survive a resize. */
-  const sheetPad = sheet ? "76dvh" : "64px";
+  /* Full-screen Actions replaces the day surface, so there is no surface left to
+     reserve room in — and the sheet it would reserve for is hidden in that mode. */
+  const sheetPad = viewMode === "actions" ? "0px" : (sheet ? "76dvh" : "64px");
   const clock = preferences?.display.clock ?? "12";
   const tm = (m) => fmtTime(m, clock);
 
@@ -2689,7 +2691,7 @@ export default function Planner() {
                 coming". Same days, same data, two questions. */}
             <PillNav T={T} ariaLabel="View mode" value={viewMode}
               options={[["timeline", "TIMELINE"], ["agenda", "AGENDA"], ["actions", "ACTIONS"]]}
-              onPick={(mode) => { beep("tick"); setViewMode(mode); }}
+              onPick={(mode) => { beep("tick"); setViewMode(mode); if (mode === "actions") setSheet(false); }}
               style={{ border: `1px solid ${T.line}` }} />
             {zoom === "month" && (
               <>
@@ -3107,7 +3109,10 @@ export default function Planner() {
         )}
       </main>
 
-      {/* ══ MOBILE SHEET ══ */}
+      {/* ══ MOBILE SHEET ══
+          Not rendered while Actions owns the whole screen: it is the same list,
+          and left mounted it sits over the view it duplicates. */}
+      {viewMode !== "actions" && (
       <div className="nb-msheet lg:hidden fixed inset-x-0 bottom-0 z-40 flex flex-col"
         style={{ height: "76vh", background: T.card, borderTop: `1px solid ${T.line}`, transform: sheet ? "translateY(0)" : "translateY(calc(100% - 52px))", transition: "transform 420ms cubic-bezier(.22,1.12,.28,1)" }}>
         <div className="flex items-center gap-3 px-3 shrink-0" style={{ height: 52 }}>
@@ -3121,6 +3126,7 @@ export default function Planner() {
         </div>
         <div className="nb-s flex-1 overflow-y-auto px-3 pb-6">{actionsPanel}</div>
       </div>
+      )}
 
       {draggingTask && (
         <div className="fixed z-50 pointer-events-none px-2 py-1" style={{ left: gesture.x - 60, top: gesture.y - 18, background: T.accent, color: T.on }}>
