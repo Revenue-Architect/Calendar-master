@@ -29,6 +29,15 @@ test.describe("the floating navigation shell", () => {
     await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
   });
 
+  test("shortcuts move into the side navigation", async ({ page }) => {
+    await openPlanner(page);
+    await page.getByTestId("nav-toggle").click();
+    await page.getByRole("button", { name: "Shortcuts", exact: true }).click();
+
+    await expect(page.getByRole("dialog", { name: "SHORTCUTS" })).toBeVisible();
+    await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
+  });
+
   test("outside press closes the panel", async ({ page }) => {
     await openPlanner(page);
     await page.getByTestId("nav-toggle").click();
@@ -36,14 +45,18 @@ test.describe("the floating navigation shell", () => {
     await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
   });
 
-  test("mobile retains the floating-card treatment", async ({ page }) => {
+  test("mobile resolves the open calendar into a return rail", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await openPlanner(page);
+    await expect(page.getByTestId("new-entry")).toBeVisible();
     await page.getByTestId("nav-toggle").click();
 
     const surface = page.getByTestId("app-surface");
     await expect(surface).toHaveClass(/nb-app-surface-open/);
     await expect(surface).toHaveCSS("border-top-left-radius", "16px");
+    await expect(page.getByTestId("mobile-calendar-return")).toBeVisible();
+    await page.getByTestId("mobile-calendar-return").click();
+    await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
   });
 
   test("reduced motion retains navigation semantics without staged movement", async ({ page }) => {

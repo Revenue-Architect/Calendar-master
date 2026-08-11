@@ -2967,15 +2967,17 @@ export default function Planner() {
         onActions={() => { beep("tick"); setViewMode("actions"); setSheet(false); closeNavigation(); }}
         onSetup={() => { beep("click"); setSettings(true); closeNavigation(); }}
         onNotes={() => { beep("click"); setNotebook("all"); closeNavigation(); }}
+        onShortcuts={() => { beep("click"); setShortcuts(true); closeNavigation(); }}
         onToday={() => { jumpTo(todayKey); setMonthCursor(new Date()); closeNavigation(); }}
       />
       <div data-test="app-surface" className={`nb-root nb-app-surface ${navOpen ? "nb-app-surface-open" : ""} flex flex-col`}
         onPointerDown={(event) => {
-          if (!navOpen || event.target.closest("[data-test='nav-toggle']")) return;
+          if (!navOpen || event.target.closest("[data-test='nav-toggle'], [data-test='mobile-calendar-return']")) return;
           event.preventDefault();
           closeNavigation();
         }}
         style={{ background: T.bg, color: T.text, fontFamily: SANS }}>
+      <button data-test="mobile-calendar-return" type="button" aria-label="Return to calendar" onClick={closeNavigation} className="nb-mobile-calendar-return">CALENDAR</button>
       <style>{`
         /* A touch browser zooms the whole viewport when it focuses a field whose
            text is under 16px, and every sheet here autofocuses one. Standalone
@@ -3017,7 +3019,7 @@ export default function Planner() {
         }
         .nb-root{height:100%;overflow:hidden}
         .nb-app-surface{
-          position:absolute;inset:0;z-index:2;overflow:hidden;transform:translate3d(0,0,0) scale(1);
+          position:absolute;inset:0;z-index:2;height:auto;overflow:hidden;transform:translate3d(0,0,0) scale(1);
           transform-origin:top left;border-radius:0;box-shadow:none;
           transition:inset var(--nav-page-duration) var(--nav-ease),transform var(--nav-page-duration) var(--nav-ease),border-radius var(--nav-page-duration) var(--nav-ease),box-shadow var(--nav-page-duration) var(--nav-ease);
         }
@@ -3026,17 +3028,30 @@ export default function Planner() {
         .nb-navigation[aria-hidden="true"]{visibility:hidden;pointer-events:none}
         .nb-nav-brand,.nb-nav-item,.nb-nav-membership{opacity:0;transform:translate3d(-10px,0,0);transition:opacity var(--nav-content-duration) var(--nav-ease),transform var(--nav-content-duration) var(--nav-ease)}
         .nb-nav-shell[data-nav-state="open"] .nb-nav-brand,.nb-nav-shell[data-nav-state="open"] .nb-nav-item,.nb-nav-shell[data-nav-state="open"] .nb-nav-membership{opacity:1;transform:translate3d(0,0,0);transition-delay:calc(var(--nav-index, 0) * var(--nav-item-stagger))}
-        .nb-nav-shell[data-nav-state="closing"] .nb-nav-brand,.nb-nav-shell[data-nav-state="closing"] .nb-nav-item,.nb-nav-shell[data-nav-state="closing"] .nb-nav-membership{transition-delay:calc((6 - var(--nav-index, 0)) * 18ms)}
+        .nb-nav-shell[data-nav-state="closing"] .nb-nav-brand,.nb-nav-shell[data-nav-state="closing"] .nb-nav-item,.nb-nav-shell[data-nav-state="closing"] .nb-nav-membership{transition-delay:calc((7 - var(--nav-index, 0)) * 18ms)}
         .nb-nav-item{font-family:${MONO};font-size:15px;letter-spacing:.1em;text-align:left;padding:13px 12px;border-radius:10px;color:#c8c7c0}
         .nb-nav-item:hover,.nb-nav-item:focus-visible{background:#2a2b2f;color:#fff;outline:none}
         .nb-nav-membership{margin-top:auto;padding:15px 12px;border:1px solid #37383d;border-radius:12px;color:#aaa9a2}
         .nb-shell-control{color:#f4f2ec;border:1px solid #3a3b40;background:#24252a;border-radius:9px;font-family:${MONO};font-size:13px;letter-spacing:.06em}
         .nb-shell-control:hover,.nb-shell-control:focus-visible{background:#313238;outline:2px solid #f4f2ec;outline-offset:2px}
         .nb-shell-info{border-radius:999px;font-family:${SANS};font-weight:700;letter-spacing:0}
+        .nb-mobile-calendar-return{display:none}
         @media(max-width:639px){
           .nb-nav-shell{--nav-width:min(78vw,320px);--nav-gap:11px;--nav-page-scale:.94;--nav-page-radius:16px}
-          .nb-app-surface-open{inset:14px 9px 14px calc(var(--nav-width) + var(--nav-gap))}
+          /* The desktop card would be only a narrow, unusable slice on a phone.
+             Here it deliberately resolves into a tactile calendar rail: tapping
+             it restores the full planner instead of leaving a cramped miniature. */
+          .nb-app-surface-open{inset:14px 9px 14px auto;width:40px;transform:none;border-radius:16px}
+          .nb-app-surface-open>*:not(.nb-mobile-calendar-return){visibility:hidden;pointer-events:none}
+          .nb-app-surface-open .nb-mobile-calendar-return{display:flex;position:absolute;z-index:40;inset:0;align-items:center;justify-content:center;border:0;background:${T.accent};color:${T.on};font-family:${MONO};font-size:10px;font-weight:700;letter-spacing:.12em;writing-mode:vertical-rl;transform:rotate(180deg)}
           .nb-navigation{padding:18px 12px}
+          .nb-hud{padding:.45rem .65rem;gap:.35rem}
+          .nb-hud-left{gap:.35rem}
+          .nb-hud-left .w-14{width:36px}
+          .nb-hud-actions{gap:0}
+          .nb-search-wrap{width:32px!important}
+          .nb-hud-notes{display:none}
+          .nb-hud-settings{display:none}
         }
         .nb-main{padding-bottom:var(--sheet-pad);transition:padding-bottom 260ms cubic-bezier(.2,.8,.25,1)}
         @media(min-width:1024px){.nb-main{padding-bottom:2rem}}
@@ -3201,11 +3216,10 @@ export default function Planner() {
       `}</style>
 
       {/* ══ HUD ══ */}
-      <header style={{ background: T.bg, borderBottom: `1px solid ${T.line}`, color: T.text }} className="sticky top-0 z-30 px-3 sm:px-5 py-2 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2 min-w-0">
+      <header style={{ background: T.bg, borderBottom: `1px solid ${T.line}`, color: T.text }} className="nb-hud sticky top-0 z-30 px-3 sm:px-5 py-2 flex items-center justify-between gap-3">
+        <div className="nb-hud-left flex items-center gap-2 min-w-0">
           <button ref={navToggleRef} data-test="nav-toggle" type="button" aria-label="Toggle primary navigation" aria-controls="planner-navigation" aria-expanded={navOpen}
             onClick={() => { beep("click"); navOpen ? closeNavigation() : openNavigation(); }} className="nb-shell-control nb-tap w-8 h-8" title="Navigation">▤</button>
-          <button type="button" aria-label="Open shortcuts and app information" onClick={() => { beep("click"); setShortcuts(true); }} className="nb-shell-control nb-shell-info nb-tap w-7 h-7" title="Shortcuts and information">i</button>
           <div className="flex items-baseline gap-2 min-w-0">
           {level != null && <>
             <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">LVL</span>
@@ -3215,12 +3229,12 @@ export default function Planner() {
           {streak != null && streak > 0 && <span style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest">{streak}d</span>}
           </div>
         </div>
-        <div className="flex items-center gap-1">
-          <button onClick={() => { jumpTo(todayKey); setMonthCursor(new Date()); }} style={{ fontFamily: MONO, color: T.dim }} className="nb-tap px-2 py-1 text-xs tracking-widest">TODAY</button>
-          <button onClick={() => { beep("click"); setNotebook("all"); }} style={{ fontFamily: MONO, color: T.dim }} className="nb-tap px-2 py-1 text-xs tracking-widest">NOTES</button>
+        <div className="nb-hud-actions flex items-center gap-1 shrink-0">
+          <button onClick={() => { jumpTo(todayKey); setMonthCursor(new Date()); }} style={{ fontFamily: MONO, color: T.dim }} className="nb-hud-today nb-tap px-2 py-1 text-xs tracking-widest">TODAY</button>
+          <button onClick={() => { beep("click"); setNotebook("all"); }} style={{ fontFamily: MONO, color: T.dim }} className="nb-hud-notes nb-tap px-2 py-1 text-xs tracking-widest">NOTES</button>
           <GooeySearch T={T} surface={surface} reduced={reducedMotion}
             onOpen={() => { beep("click"); setSearchQuery(""); setSearch(true); }} />
-          <button onClick={() => { beep("click"); setSettings(true); }} style={{ color: T.dim }} className="nb-tap w-8 h-8 text-sm" aria-label="Settings">⋯</button>
+          <button onClick={() => { beep("click"); setSettings(true); }} style={{ color: T.dim }} className="nb-hud-settings nb-tap w-8 h-8 text-sm" aria-label="Settings">⋯</button>
           <button data-test="new-entry" onClick={() => { beep("click"); setComposer({ kind: "event", start: startSlot(nowMin), dur: 60, notch: true }); }} style={{ background: T.accent, color: T.on, fontFamily: MONO }} className="nb-tap nb-liquid px-2 py-1.5 text-xs font-bold tracking-widest">NEW</button>
         </div>
       </header>
@@ -4644,7 +4658,7 @@ export default function Planner() {
   );
 }
 
-function NavigationShell({ phase, firstItemRef, onTimeline, onActions, onSetup, onNotes, onToday }) {
+function NavigationShell({ phase, firstItemRef, onTimeline, onActions, onSetup, onNotes, onShortcuts, onToday }) {
   const items = [
     ["Timeline", onTimeline],
     ["Actions", onActions],
@@ -4652,6 +4666,7 @@ function NavigationShell({ phase, firstItemRef, onTimeline, onActions, onSetup, 
   ];
   const utilityItems = [
     ["Notes", onNotes],
+    ["Shortcuts", onShortcuts],
     ["Today", onToday],
   ];
   const hidden = phase === "closed";
@@ -4673,7 +4688,7 @@ function NavigationShell({ phase, firstItemRef, onTimeline, onActions, onSetup, 
             className="nb-nav-item" style={{ "--nav-index": index + 4 }}>{label}</button>
         ))}
       </div>
-      <div className="nb-nav-membership" style={{ "--nav-index": 6 }}>
+      <div className="nb-nav-membership" style={{ "--nav-index": 7 }}>
         <p className="text-xs tracking-[.14em]" style={{ fontFamily: MONO }}>LOCAL FIRST</p>
         <p className="text-base mt-1 leading-snug">Everything in this planner stays on this device.</p>
       </div>
@@ -5932,7 +5947,7 @@ function GooeySearch({ T, surface, reduced, onOpen }) {
        inside it. Growing a flex child on hover would otherwise shove TODAY and
        NOTES sideways every time the pointer crossed this corner — a flourish
        that moves other people's buttons is a bug. */
-    <div className="relative flex items-center justify-end" style={{ width: 104 }}
+    <div className="nb-search-wrap relative flex items-center justify-end" style={{ width: 104 }}
       onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
       {/* Mounted for as long as the control is, and applied unconditionally.
           Switching `filter` on and off around a transition re-rasterises the
