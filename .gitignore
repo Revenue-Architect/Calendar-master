@@ -15,3 +15,7 @@ dist/
 
 # Agent workspaces
 /.worktrees/
+
+# the visual review page is generated, not source
+review.html
+contact-sheet/
