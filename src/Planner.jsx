@@ -448,8 +448,9 @@ const repeatLabel = (r) => {
    edge is simply cut in half against the panel's corner. This reports which ends
    still have something beyond them, so the row can fade there and only there: a
    fade on a row that already fits would just be a chip with a dimmed corner. */
-function useEdgeFade() {
-  const ref = useRef(null);
+function useEdgeFade(externalRef = null) {
+  const ownRef = useRef(null);
+  const ref = externalRef ?? ownRef;
   const [edges, setEdges] = useState({ start: false, end: false });
   const measure = useCallback(() => {
     const el = ref.current;
@@ -480,6 +481,23 @@ function useEdgeFade() {
   const mask = `linear-gradient(to right, transparent 0, #000 ${edges.start ? 18 : 0}px,`
     + ` #000 calc(100% - ${edges.end ? 22 : 0}px), transparent 100%)`;
   return [ref, { maskImage: mask, WebkitMaskImage: mask }];
+}
+
+/* A reminder is a bell.
+   The job was being done by `◔`, a quarter-filled clock face, which at 12px in
+   dim grey reads as a smudge rather than a symbol — it sat on a card beside ⚠, ↻
+   and ↗, all of which say what they are at a glance. Drawn rather than typed, so
+   it is the same shape at every size and in every font, and inherits the colour
+   of whatever it is standing next to. */
+function BellIcon({ size = 11 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor"
+      strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"
+      aria-hidden="true" focusable="false" style={{ display: "block" }}>
+      <path d="M4.1 6.6a3.9 3.9 0 0 1 7.8 0c0 2.8.9 3.7 1.4 4.3h-10.6c.5-.6 1.4-1.5 1.4-4.3Z" />
+      <path d="M6.4 13.1a1.75 1.75 0 0 0 3.2 0" />
+    </svg>
+  );
 }
 
 function useSynth(enabled) {
@@ -728,6 +746,10 @@ export default function Planner() {
   /* The last lane layout computed while nothing was being dragged — see `events`. */
   const laneFreeze = useRef(null);
   const [anyTimeRef, anyTimeFade] = useEdgeFade();
+  /* The strip is a scroll container too, and the same argument applies: without
+     this the day cell at the edge is sliced down the middle by the arrow beside
+     it, which reads as a rendering fault rather than "there is more this way". */
+  const [, stripFade] = useEdgeFade(stripRef);
   const startGesture = (g) => { gestureRef.current = g; setGesture(g); };
   const endGesture = () => { gestureRef.current = null; setGesture(null); };
 
@@ -1076,7 +1098,7 @@ export default function Planner() {
   }, [level, preferences, beep, buzz]);
 
   useEffect(() => {
-    if (ready && zoom === "week" && activeRef.current && stripRef.current) {
+    if (ready && (zoom === "week" || zoom === "day") && activeRef.current && stripRef.current) {
       stripRef.current.scrollTo({ left: activeRef.current.offsetLeft - 24, behavior: mounted ? "smooth" : "auto" });
     }
   }, [dateKey, ready, zoom]);
@@ -3031,8 +3053,19 @@ export default function Planner() {
           </div>
         )}
 
-        {zoom === "week" && (
-          <div ref={stripRef} className="nb-x overflow-x-auto">
+        {/* One ribbon of days, in the day view as well as the week.
+            The day view used to offer a single arrow either side of a date, which
+            said what day you were on but nothing about the days around it — and
+            gave a dragged event nowhere to land but the day already open. The
+            strip is the same control in both: it shows where you are in the
+            fortnight, it is a row of drop targets, and the arrows survive on the
+            ends of it for stepping one day at a time. */}
+        {(zoom === "week" || zoom === "day") && (
+          <div className="flex items-center">
+            {zoom === "day" && (
+              <button onClick={() => goDay(-1)} aria-label="Previous day" style={{ color: T.dim }} className="nb-tap shrink-0 px-2 sm:px-3 py-1">◂</button>
+            )}
+            <div ref={stripRef} style={stripFade} className="nb-x overflow-x-auto flex-1 min-w-0">
             <div className="flex min-w-max">
               {days.map((d, i) => {
                 const k = keyOf(d);
@@ -3066,20 +3099,16 @@ export default function Planner() {
                 );
               })}
             </div>
-          </div>
-        )}
-
-        {zoom === "day" && (
-          <div className="flex items-center justify-between px-3 sm:px-5 pb-2">
-            <button onClick={() => goDay(-1)} style={{ color: T.dim }} className="nb-tap px-3 py-1">◂</button>
-            <span style={{ fontFamily: MONO }} className="text-sm font-bold tracking-widest">{fmtDay(dateKey)}</span>
-            <button onClick={() => goDay(1)} style={{ color: T.dim }} className="nb-tap px-3 py-1">▸</button>
+            </div>
+            {zoom === "day" && (
+              <button onClick={() => goDay(1)} aria-label="Next day" style={{ color: T.dim }} className="nb-tap shrink-0 px-2 sm:px-3 py-1">▸</button>
+            )}
           </div>
         )}
       </div>
 
       {/* ══ HERO ══ */}
-      <div className="px-3 sm:px-5 pt-4 pb-3">
+      <div data-test="day-heading" data-date={dateKey} className="px-3 sm:px-5 pt-4 pb-3">
         <div className="flex items-end gap-3">
           <span style={{ fontFamily: MONO }} className="text-6xl sm:text-7xl font-bold tracking-tighter leading-none">{pad(activeDate.getDate())}</span>
           <span className="pb-1.5">
@@ -3322,7 +3351,9 @@ export default function Planner() {
                                   aria-label={`Join ${e.title}`}
                                   style={{ fontFamily: MONO, color: T.accent }} className="text-xs font-bold tracking-widest shrink-0">JOIN ↗</a>
                               )}
-                              {e.alerts && e.alerts.length > 0 && <span style={{ color: T.dim }} className="text-xs shrink-0">◔</span>}
+                              {e.alerts && e.alerts.length > 0 && (
+                                <span style={{ color: T.dim }} className="shrink-0" title="Has a reminder"><BellIcon /></span>
+                              )}
                               {live && <span style={{ fontFamily: MONO, background: T.accent, color: T.on, borderRadius: 4 }} className="shrink-0 px-1 text-xs tracking-widest">{Math.round(pct)}%</span>}
                               {held && <span style={{ fontFamily: MONO, background: T.accent, color: T.on, borderRadius: 4 }} className="shrink-0 px-1 text-xs tracking-widest">{gesture.overDay ? fmtDay(gesture.overDay) : tm(e.start)}</span>}
                               {!held && !live && h < 38 && <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest shrink-0">{tm(e.start)}</span>}
@@ -3699,7 +3730,7 @@ export default function Planner() {
                     </button>
                   )}
                 </DetailRow>
-                <InlineChoiceRow T={T} icon="◔" divider onBeginEdit={beginDetailEdit}
+                <InlineChoiceRow T={T} icon={<BellIcon size={13} />} divider onBeginEdit={beginDetailEdit}
                   label={(inspectDraft.reminders ?? []).length
                     ? (inspectDraft.reminders[0].offsetMinutes === 0
                       ? `When it starts${inspectDraft.planned.startMinute != null ? `, ${tm(inspectDraft.planned.startMinute)}` : ""}`
@@ -3879,7 +3910,7 @@ export default function Planner() {
               options={REPEATS}
               onPick={(freq) => editEntry({ repeat: repeatFor(freq, inspectDraft.repeat, inspectDraft.date || dateKey) })} />
 
-            <InlineChoice T={T} surface={surface} icon="◔" onBeginEdit={beginDetailEdit}
+            <InlineChoice T={T} surface={surface} icon={<BellIcon size={13} />} onBeginEdit={beginDetailEdit}
               label={(inspectDraft.alerts || []).length
                 ? inspectDraft.alerts.map((a) => (a === 0 ? "When it starts" : `${dur(a)} before`)).join(", ")
                 : "No reminder"}

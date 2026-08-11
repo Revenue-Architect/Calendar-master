@@ -91,3 +91,33 @@ test.describe("the shell", () => {
     expect(await firstColumnOfWeek()).toBe(nowStartsOn);
   });
 });
+
+test.describe("the day ribbon", () => {
+  /* The day view used to offer one arrow either side of a date: it said which day
+     you were on and nothing about the days around it, and gave a dragged event
+     nowhere to land but the day already open. */
+  test("the timeline carries the same fortnight strip the week view does", async ({ page }) => {
+    await openPlanner(page);
+    const cells = page.locator("[data-day]");
+    await expect(cells.first()).toBeVisible();
+    expect(await cells.count(), "the strip should span a fortnight").toBe(14);
+
+    /* Each cell is a drop target, which is the point of having it here. */
+    await expect(cells.first()).toHaveAttribute("data-day", /^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  test("a day in the strip selects that day, and the arrows still step one at a time", async ({ page }) => {
+    await openPlanner(page);
+    const heading = page.getByTestId("day-heading");
+    const cells = page.locator("[data-day]");
+
+    const target = await cells.nth(9).getAttribute("data-day");
+    await cells.nth(9).click();
+    await expect(heading, "clicking a day in the strip should open it").toHaveAttribute("data-date", target);
+
+    await page.getByRole("button", { name: "Next day" }).click();
+    await expect(heading).not.toHaveAttribute("data-date", target);
+    await page.getByRole("button", { name: "Previous day" }).click();
+    await expect(heading, "the arrows should step one day either way").toHaveAttribute("data-date", target);
+  });
+});
