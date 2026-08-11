@@ -12,3 +12,6 @@ dist/
 
 # Single-file artifact build output
 /artifact/
+
+# Agent workspaces
+/.worktrees/
