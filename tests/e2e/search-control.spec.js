@@ -3,7 +3,8 @@ import { openPlanner } from "./helpers.js";
 
 /* The search control was a bare ⌕ with no label and no hint that ⌘K reaches it —
  * the fastest way into the app and the least legible thing in the header. It now
- * expands on hover or focus into a pill carrying the shortcut.
+ * expands on hover or focus into a pill carrying the shortcut, two shapes merging
+ * through an SVG goo filter.
  *
  * A flourish earns its place by costing nothing. These assert the three ways it
  * could cost something: moving its neighbours, delaying the thing it opens, or
@@ -68,12 +69,20 @@ test.describe("the search control", () => {
     await expect(page.getByTestId("palette-input")).toBeFocused();
   });
 
-  test("does not mount a runtime filter while it expands", async ({ page }) => {
+  test("its filter is mounted for the life of the control, not toggled", async ({ page }) => {
     await openPlanner(page);
-    /* One stable pill does not need an SVG filter at rest or in motion. */
-    expect(await page.locator('filter[id^="goo-search"]').count()).toBe(0);
+    /* Switching `filter` on and off around the expand re-rasterises the element
+       at both ends — a snap in and a snap out on every hover. Over two static
+       shapes leaving it on costs nothing visible. */
+    expect(await page.locator('filter[id^="goo-search"]').count()).toBe(1);
     await control(page).hover();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(400);
+    expect(await page.locator('filter[id^="goo-search"]').count()).toBe(1);
+  });
+
+  test("no filter at all for someone who asked for less motion", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await openPlanner(page);
     expect(await page.locator('filter[id^="goo-search"]').count()).toBe(0);
   });
 });

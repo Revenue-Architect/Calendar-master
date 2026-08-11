@@ -73,47 +73,74 @@ test.describe("checklist progress", () => {
 
   test("is one segment per step, not a fraction of one bar", async ({ page }) => {
     await seedPlanner(page, withSteps(2, 5));
-    const bar = page.getByRole("progressbar", { name: /steps done/ });
+    const bar = page.getByRole("progressbar", { name: /steps done/ }).first();
     await expect(bar).toBeVisible();
-    await expect(bar.locator("[data-segment-index]")).toHaveCount(5);
+    await expect(bar.locator("> span")).toHaveCount(5);
     await expect(bar).toHaveAttribute("aria-valuenow", "2");
     await expect(bar).toHaveAttribute("aria-valuemax", "5");
   });
 
   test("the segments are evenly sized, so the count is readable at a glance", async ({ page }) => {
     await seedPlanner(page, withSteps(1, 4));
-    const widths = await page.getByRole("progressbar").locator("[data-segment-index]")
+    const widths = await page.getByRole("progressbar").first().locator("> span")
       .evaluateAll((nodes) => nodes.map((n) => Math.round(n.getBoundingClientRect().width)));
     expect(widths).toHaveLength(4);
     expect(Math.max(...widths) - Math.min(...widths)).toBeLessThanOrEqual(1);
   });
 
+  const fills = (page) => page.locator('[role="progressbar"] > span > span').first()
+    .locator("xpath=../..").locator("> span > span");
+
   test("ticking a step fills exactly one more segment", async ({ page }) => {
     await seedPlanner(page, withSteps(2, 5));
-    const bar = page.getByRole("progressbar");
-    const filled = async () => bar.locator('[data-filled="true"]').count();
+    const bar = page.getByRole("progressbar").first();
+    const filled = async () => bar.locator("> span > span").evaluateAll(
+      (nodes) => nodes.filter((n) => n.getBoundingClientRect().width > 1).length,
+    );
     expect(await filled()).toBe(2);
 
-    await page.getByRole("button", { name: /Step 3/ }).click();
-    await page.waitForTimeout(500);
+    await page.getByRole("button", { name: /Step 3/ }).first().click();
+    await page.waitForTimeout(700);
     await expect(bar).toHaveAttribute("aria-valuenow", "3");
     expect(await filled()).toBe(3);
   });
 
-  test("fills left to right when a later step is completed first", async ({ page }) => {
-    await seedPlanner(page, withSteps(0, 4));
-    const bar = page.getByRole("progressbar");
+  test("segments fill by count, whichever step was ticked", async ({ page }) => {
+    /* A checklist is a quantity of work remaining, not an ordered pipeline. A
+       bar that lit segment five because you started at the bottom would be
+       reporting the order you worked in rather than how much is left. */
+    await seedPlanner(page, withSteps(0, 5));
+    const bar = page.getByRole("progressbar").first();
+    const widths = async () => bar.locator("> span > span").evaluateAll(
+      (nodes) => nodes.map((n) => Math.round(n.getBoundingClientRect().width)),
+    );
+    expect((await widths()).every((w) => w === 0)).toBe(true);
 
-    await page.getByRole("button", { name: /Step 2/ }).click();
-    await page.waitForTimeout(500);
-    await expect(bar.locator('[data-segment-index="0"] [data-filled="true"]')).toHaveCount(1);
-    await expect(bar.locator('[data-segment-index="1"] [data-filled="true"]')).toHaveCount(0);
+    /* Tick the last step. The first segment is the one that fills. */
+    await page.getByRole("button", { name: /Step 5/ }).first().click();
+    await page.waitForTimeout(700);
+    const after = await widths();
+    expect(after[0]).toBeGreaterThan(1);
+    expect(after.slice(1).every((w) => w <= 1)).toBe(true);
+  });
 
-    await page.getByRole("button", { name: /Step 4/ }).click();
-    await page.waitForTimeout(500);
-    await expect(bar.locator('[data-filled="true"]')).toHaveCount(2);
-    await expect(bar.locator('[data-segment-index="1"] [data-filled="true"]')).toHaveCount(1);
-    await expect(bar.locator('[data-segment-index="3"] [data-filled="true"]')).toHaveCount(0);
+  test("a segment grows rather than switching on", async ({ page }) => {
+    await seedPlanner(page, withSteps(0, 5));
+    const bar = page.getByRole("progressbar").first();
+    const firstWidth = async () => bar.locator("> span > span").first()
+      .evaluate((n) => n.getBoundingClientRect().width);
+
+    await page.getByRole("button", { name: /Step 1/ }).first().click();
+    await page.waitForTimeout(60);
+    const midway = await firstWidth();
+    await page.waitForTimeout(700);
+    const settled = await firstWidth();
+
+    /* Caught between empty and full: a colour swap would only ever be one or the
+       other. */
+    expect(settled).toBeGreaterThan(1);
+    expect(midway).toBeGreaterThan(0);
+    expect(midway).toBeLessThan(settled);
   });
 
   test("an action with no steps shows no bar at all", async ({ page }) => {
