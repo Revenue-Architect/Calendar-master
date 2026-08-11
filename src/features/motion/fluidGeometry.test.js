@@ -29,6 +29,6 @@ test("sheet morph starts at the trigger center and clamps tiny scales", () => {
       { left: 20, top: 10, width: 40, height: 20 },
       { left: 100, top: 100, width: 400, height: 500 },
     ),
-    { translateX: -260, translateY: -330, scaleX: 0.12, scaleY: 0.12 },
+    { translateX: -260, translateY: -330, scale: 0.12, scaleX: 0.12, scaleY: 0.12 },
   );
 });

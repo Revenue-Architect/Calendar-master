@@ -2902,7 +2902,7 @@ export default function Planner() {
         }
         .nb-fluid[data-fluid-origin="trigger"]{animation-name:nbfluidorigin;transform-origin:center}
         @keyframes nbfluidorigin{
-          0%{opacity:.25;transform:translate(var(--fluid-x),var(--fluid-y)) scale(var(--fluid-sx),var(--fluid-sy));border-radius:999px}
+          0%{opacity:.25;transform:translate(var(--fluid-x),var(--fluid-y)) scale(var(--fluid-s));border-radius:999px}
           52%{opacity:1}
           100%{opacity:1;transform:translate(0,0) scale(1);border-radius:24px}
         }
@@ -2916,7 +2916,7 @@ export default function Planner() {
         @keyframes nbfluidoriginout{
           0%{opacity:1;transform:translate(0,0) scale(1);border-radius:24px}
           70%{opacity:1}
-          100%{opacity:0;transform:translate(var(--fluid-x),var(--fluid-y)) scale(var(--fluid-sx),var(--fluid-sy));border-radius:999px}
+          100%{opacity:0;transform:translate(var(--fluid-x),var(--fluid-y)) scale(var(--fluid-s));border-radius:999px}
         }
         /* The notch morph: one object changing shape, rather than a panel fading
            in. The shape never fades — it travels and stretches from the pill at
@@ -2926,7 +2926,7 @@ export default function Planner() {
            panel is empty by the time it folds back into the button. */
         .nb-fluid[data-fluid-origin="notch"]{animation-name:nbnotchin;animation-duration:380ms}
         @keyframes nbnotchin{
-          0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y)) scale(var(--fluid-sx),var(--fluid-sy));border-radius:999px}
+          0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y)) scale(var(--fluid-s));border-radius:999px}
           100%{opacity:1;transform:translate(0,0) scale(1);border-radius:24px}
         }
         .nb-fluid[data-fluid-origin="notch"] .nb-notch-body{animation:nbnotchbody 260ms ease 130ms both}
@@ -2934,7 +2934,7 @@ export default function Planner() {
         .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"]{animation:nbnotchout 260ms cubic-bezier(.4,0,.3,1) forwards}
         @keyframes nbnotchout{
           0%{opacity:1;transform:translate(0,0) scale(1);border-radius:24px}
-          100%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y)) scale(var(--fluid-sx),var(--fluid-sy));border-radius:999px}
+          100%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y)) scale(var(--fluid-s));border-radius:999px}
         }
         .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-notch-body{animation:nbnotchbodyout 140ms ease forwards}
         @keyframes nbnotchbodyout{to{opacity:0;transform:translateY(6px)}}
@@ -5990,8 +5990,9 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
       panel.dataset.fluidOrigin = morphRef.current === "notch" ? "notch" : "trigger";
       panel.style.setProperty("--fluid-x", `${geometry.translateX}px`);
       panel.style.setProperty("--fluid-y", `${geometry.translateY}px`);
-      panel.style.setProperty("--fluid-sx", String(geometry.scaleX));
-      panel.style.setProperty("--fluid-sy", String(geometry.scaleY));
+      /* One number, deliberately. Animating a container on two scales at once
+         stretches everything inside it — see fluidGeometry.js. */
+      panel.style.setProperty("--fluid-s", String(geometry.scale));
     }
     const frame = window.requestAnimationFrame(() => focusDialogOnOpen(dialogRef.current));
     /* `nb-sheet-h` transitions height, and it used to switch on one frame into

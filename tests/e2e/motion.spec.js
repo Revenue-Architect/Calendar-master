@@ -165,11 +165,11 @@ test.describe("sheet exits", () => {
       const style = getComputedStyle(node);
       return {
         x: style.getPropertyValue("--fluid-x").trim(),
-        sx: style.getPropertyValue("--fluid-sx").trim(),
+        s: style.getPropertyValue("--fluid-s").trim(),
       };
     });
     expect(geometry.x).not.toBe("");
-    expect(Number(geometry.sx)).toBeGreaterThan(0);
+    expect(Number(geometry.s)).toBeGreaterThan(0);
 
     await page.keyboard.press("Escape");
     await expect(sheet).toHaveCount(0, { timeout: 3000 });
@@ -209,8 +209,7 @@ test.describe("the shape a sheet grows from", () => {
     return {
       x: Number(style.getPropertyValue("--fluid-x").replace("px", "")),
       y: Number(style.getPropertyValue("--fluid-y").replace("px", "")),
-      sx: Number(style.getPropertyValue("--fluid-sx")),
-      sy: Number(style.getPropertyValue("--fluid-sy")),
+      s: Number(style.getPropertyValue("--fluid-s")),
       panel: { top: rect.top, left: rect.left, width: rect.width, height: rect.height },
     };
   });
@@ -239,9 +238,9 @@ test.describe("the shape a sheet grows from", () => {
       "the morph's travel does not match the distance between the button and the panel",
     ).toBeLessThan(2);
 
-    const expectedSx = Math.max(0.12, Math.min(1, box.width / g.panel.width));
+    const expectedScale = Math.max(0.12, Math.min(1, box.width / g.panel.width));
     expect(
-      Math.abs(g.sx - expectedSx),
+      Math.abs(g.s - expectedScale),
       "the morph's scale does not match the button's width against the panel's",
     ).toBeLessThan(0.005);
   });
@@ -308,5 +307,81 @@ test.describe("the shape a sheet grows from", () => {
       await page.waitForTimeout(120);
     }
     expect(new Set(radii).size, `the blur radius changed over time: ${radii.join(" → ")}`).toBe(1);
+  });
+});
+
+test.describe("a sheet must not stretch what is inside it", () => {
+  /* The reported symptom was "it zooms in intensely and glitches" when opening
+     New event or New action -- the two routes that use the notch morph. The cause
+     was a container animating on two different scales at once. Measured on a
+     phone: the composer opened 0.234 wide and 0.12 tall, an aspect ratio 1.95x
+     wrong, and spent 380ms un-squashing every label and field inside it.
+
+     The clamp was making it worse, not safer: a 28px button against a 437px panel
+     is a true ratio of 0.064, and the floor lifted it to 0.12 while the width
+     ratio stayed honest -- so the floor itself produced most of the distortion. */
+  const scaleVars = (sheet) => sheet.evaluate((node) => {
+    const style = getComputedStyle(node);
+    return {
+      s: style.getPropertyValue("--fluid-s").trim(),
+      sx: style.getPropertyValue("--fluid-sx").trim(),
+      sy: style.getPropertyValue("--fluid-sy").trim(),
+      transform: style.transform,
+    };
+  });
+
+  for (const [label, testId] of [["New event", "new-entry"], ["New action", "new-action"]]) {
+    test(`${label} opens on one scale, not two`, async ({ page }) => {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await openPlanner(page);
+      await page.getByTestId(testId).click();
+      const sheet = page.getByTestId("sheet");
+      await expect(sheet).toHaveAttribute("data-fluid-origin", "notch");
+
+      const vars = await scaleVars(sheet);
+      expect(Number(vars.s), "the morph needs a scale to animate from").toBeGreaterThan(0);
+      expect(vars.sx, "the two-axis pair must be gone, not merely unused").toBe("");
+      expect(vars.sy).toBe("");
+    });
+  }
+
+  test("the panel keeps its aspect ratio all the way through, not just at the ends", async ({ page }) => {
+    /* The endpoints were never the problem: at 0% and 100% a stretched morph
+       looks perfectly correct. The animation is held at a series of mid-points
+       rather than sampled by wall clock, which is both deterministic and the only
+       way to be sure the samples land while it is still running. */
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openPlanner(page);
+    /* The mobile create button, deliberately: it is 91px against a 390px panel,
+       so the width ratio is 0.23 while the height ratio floors at 0.12. The
+       narrow NEW button in the header happens to floor on both axes, which makes
+       it the one case that looked fine while everything else stretched. */
+    await page.getByTestId("new-action").click();
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).toBeVisible();
+
+    const samples = await sheet.evaluate((node) => {
+      const animation = node.getAnimations().find((a) => a.effect?.getTiming);
+      if (!animation) return "the panel has no entry animation to hold";
+      const duration = animation.effect.getComputedTiming().duration;
+      animation.pause();
+      const out = [];
+      for (const fraction of [0.05, 0.2, 0.4, 0.6, 0.8, 0.95]) {
+        animation.currentTime = duration * fraction;
+        const m = new DOMMatrixReadOnly(getComputedStyle(node).transform);
+        out.push({ fraction, across: m.a, down: m.d });
+      }
+      animation.play();
+      return out;
+    });
+
+    expect(Array.isArray(samples), String(samples)).toBe(true);
+    for (const { fraction, across, down } of samples) {
+      expect(across, `nothing was scaled at ${fraction}`).toBeGreaterThan(0);
+      expect(
+        Math.abs(across - down),
+        `at ${fraction} through, the panel was scaled ${across.toFixed(3)} across and ${down.toFixed(3)} down`,
+      ).toBeLessThan(0.01);
+    }
   });
 });
