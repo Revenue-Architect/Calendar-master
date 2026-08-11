@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { openPlanner, seedPlanner } from "./helpers.js";
+import { openPlanner, quickAdd, seedPlanner } from "./helpers.js";
 import { createBlankPlannerState } from "../../src/platform/persistence/plannerStateImport.js";
 import { createEvent } from "../../src/domains/calendar/index.js";
 import { createTask, updateTask } from "../../src/domains/tasks/index.js";
@@ -171,5 +171,39 @@ test.describe("cards sit where their time is", () => {
     for (const { height, offset } of offsets) {
       expect(offset, `a ${Math.round(height)}px card put its title ${Math.round(offset)}px down`).toBeLessThan(8);
     }
+  });
+});
+
+test.describe("rows that scroll sideways say so", () => {
+  test("the any-time row fades only when there is more past the edge", async ({ page }) => {
+    /* No scrollbar and no cue makes a scrolling row look like a broken one: the
+       last chip is cut in half against the panel's corner and nothing suggests
+       swiping. The fade has to be conditional, though — on a row that already
+       fits it would just be a chip with a dimmed corner. */
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openPlanner(page);
+
+    await quickAdd(page, "Buy milk");
+    await expect(page.getByText("Buy milk").first()).toBeVisible();
+
+    const oneChip = await page.evaluate(() => {
+      const el = [...document.querySelectorAll("div.overflow-x-auto")].find((n) => n.scrollWidth > 0 && n.querySelector("button"));
+      return el ? { overflowing: el.scrollWidth - el.clientWidth > 2, mask: getComputedStyle(el).maskImage } : null;
+    });
+    expect(oneChip, "the any-time row should exist once something is undated").not.toBeNull();
+    if (!oneChip.overflowing) {
+      expect(oneChip.mask, "a row that fits must not be masked").toBe("none");
+    }
+
+    /* Enough chips that the row cannot possibly fit at 390px. */
+    for (const name of ["Call the bank about the transfer", "Renew the parking permit", "Book the dentist appointment", "Order more printer paper"]) {
+      await quickAdd(page, name);
+    }
+    await page.waitForTimeout(300);
+    const many = await page.evaluate(() => {
+      const el = [...document.querySelectorAll("div.overflow-x-auto")].find((n) => n.scrollWidth - n.clientWidth > 2 && n.querySelector("button"));
+      return el ? getComputedStyle(el).maskImage : "no overflowing row";
+    });
+    expect(many, "an overflowing row should fade at the end it can scroll towards").toContain("gradient");
   });
 });
