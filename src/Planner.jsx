@@ -10,7 +10,9 @@ import {
   getDailyNote,
   getNotebookNotes,
   getNotesForEntity,
+  instantiateBuiltInNoteTemplate,
   isEmptyNote,
+  listBuiltInNoteTemplates,
   markBlockExtracted,
   migrateV6ToV7,
   migrateV7ToV8,
@@ -2008,7 +2010,7 @@ export default function Planner() {
      question a recurring entry has to ask. */
   const entryPayload = (kind, item) => buildDetailEntryPayload(kind, item, dateKey);
 
-  const saveNote = (draft, text, title) => {
+  const saveNote = (draft, text, title, provenance = null) => {
     beep("click");
     mutate((d) => {
       const kind = draft.kind || "daily";
@@ -2042,6 +2044,10 @@ export default function Planner() {
           ...(kind === "daily" ? { date: draft.date || dateKey } : {}),
           title,
           links: draft.links || [],
+          /* Which template this came from, and which version of it. The note
+             model has recorded this since v8 and nothing has ever been able to
+             set it, because nothing could offer a template to start from. */
+          ...(provenance ? { templateProvenance: provenance } : {}),
           blocks: textToNoteBlocks(text, [], uid),
         }, { now: nowStamp() }).notes,
       };
@@ -4231,7 +4237,7 @@ export default function Planner() {
 
       {noteEdit && (
         <Sheet T={T} title="NOTE" onClose={() => { beep("click"); setNoteEdit(null); }}>
-          <NoteEditor T={T} note={noteEdit} onSave={(text, title) => saveNote(noteEdit, text, title)} onDelete={() => noteEdit.id && doDelete("note", noteEdit.id, "all")}
+          <NoteEditor T={T} note={noteEdit} onSave={(text, title, provenance) => saveNote(noteEdit, text, title, provenance)} onDelete={() => noteEdit.id && doDelete("note", noteEdit.id, "all")}
             history={noteEdit.id ? revisionsFor(db.noteRevisions, noteEdit.id).length : 0}
             onHistory={() => { beep("click"); setNoteHistory(noteEdit.id); }}
             onPin={() => noteEdit.id && setNotePinned(noteEdit)}
@@ -6165,11 +6171,28 @@ function NoteEditor({ T, note, onSave, onDelete, history = 0, onHistory, onPin, 
      checklist on the next save instead of being silently flattened to prose. */
   const [v, setV] = useState(() => blocksToShorthand(note.blocks ?? []));
   const [title, setTitle] = useState(() => note.title ?? "");
+  /* Which template this note was started from, carried to the save so the record
+     says where it came from. The note model has stored this since v8; until now
+     nothing could set it, because nothing could offer a template. */
+  const [provenance, setProvenance] = useState(() => note.templateProvenance ?? null);
   useEffect(() => {
     setV(blocksToShorthand(note.blocks ?? []));
     setTitle(note.title ?? "");
+    setProvenance(note.templateProvenance ?? null);
   }, [note.id]);
   const canSave = Boolean(title.trim() || v.trim());
+  /* Offered on a blank page only. A template is a way to start, not a way to
+     restructure something already written — applying one to an existing note
+     would either overwrite it or need a merge nobody asked for. */
+  const templates = useMemo(() => (note.id ? [] : listBuiltInNoteTemplates()), [note.id]);
+  const startFrom = (template) => {
+    const started = instantiateBuiltInNoteTemplate(template.id, { createBlockId: uid });
+    setV(blocksToShorthand(started.blocks));
+    /* The blank template genuinely means blank: no provenance to record, because
+       "started from nothing" is what every note without one already says. */
+    setProvenance(started.blocks.length ? started.templateProvenance : null);
+    if (started.title) setTitle(started.title);
+  };
   return (
     <div>
       <div className="flex items-baseline justify-between gap-3">
@@ -6179,6 +6202,23 @@ function NoteEditor({ T, note, onSave, onDelete, history = 0, onHistory, onPin, 
       </div>
       <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Untitled"
         style={{ background: "transparent", borderBottom: `1px solid ${T.line}`, fontFamily: SANS, width: "100%" }} className="text-xl font-semibold py-3 mt-2" />
+      {templates.length > 0 && (
+        <div data-test="note-templates" className="flex flex-wrap gap-1.5 mt-3">
+          {templates.map((template) => {
+            const on = provenance?.id === template.id;
+            return (
+              <button key={template.id} data-test={`note-template-${template.id}`} onClick={() => startFrom(template)}
+                style={{
+                  fontFamily: MONO, borderRadius: 999,
+                  background: on ? T.accent : "transparent", color: on ? T.on : T.dim,
+                  border: `1px solid ${on ? T.accent : T.line}`,
+                }} className="nb-tap px-2.5 py-1 text-xs tracking-widest">
+                {template.name.toUpperCase()}
+              </button>
+            );
+          })}
+        </div>
+      )}
       <textarea autoFocus value={v} onChange={(e) => setV(e.target.value)} rows={6} placeholder="Write it down.&#10;&#10;# Heading   - list   [ ] to-do   > quote&#10;**bold**  *italic*  `code`"
         style={{ background: "transparent", border: `1px solid ${T.line}`, fontFamily: SERIF, resize: "none", width: "100%" }} className="text-sm italic leading-relaxed p-3 mt-3" />
       {note.id && <div className="flex gap-2 mt-3">
@@ -6187,7 +6227,7 @@ function NoteEditor({ T, note, onSave, onDelete, history = 0, onHistory, onPin, 
       </div>}
       <div className="flex gap-2 mt-3">
         {note.id && <button onClick={onDelete} style={{ fontFamily: MONO, color: NOW_RED, border: `1px solid ${T.line}` }} className="nb-tap flex-1 py-3 text-xs tracking-widest">DELETE</button>}
-        <button onClick={() => canSave && onSave(v.trim(), title.trim())} disabled={!canSave} style={{ fontFamily: MONO, background: canSave ? T.accent : "transparent", color: canSave ? T.on : T.dim, border: `1px solid ${canSave ? T.accent : T.faint}` }} className="nb-tap flex-1 py-3 text-xs font-bold tracking-widest">SAVE</button>
+        <button onClick={() => canSave && onSave(v.trim(), title.trim(), provenance)} disabled={!canSave} style={{ fontFamily: MONO, background: canSave ? T.accent : "transparent", color: canSave ? T.on : T.dim, border: `1px solid ${canSave ? T.accent : T.faint}` }} className="nb-tap flex-1 py-3 text-xs font-bold tracking-widest">SAVE</button>
       </div>
     </div>
   );
