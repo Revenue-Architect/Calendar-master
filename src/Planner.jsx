@@ -3006,10 +3006,13 @@ export default function Planner() {
           --nav-page-scale:.965;
           --nav-page-radius:18px;
           --nav-page-shadow:0 18px 48px rgb(0 0 0 / .28);
-          --nav-page-duration:320ms;
-          --nav-content-duration:240ms;
+          --nav-page-duration:340ms;
+          --nav-content-duration:260ms;
           --nav-item-stagger:28ms;
-          --nav-ease:cubic-bezier(.16,1,.3,1);
+          /* Deliberate ease-out, not a spring: every property lands once and
+             stays there. Keeping the curve below 1 avoids the bounce that made
+             the first pass feel disconnected from the shell. */
+          --nav-ease:cubic-bezier(.22,.61,.36,1);
           position:relative;height:100dvh;overflow:hidden;background:#17181b;
         }
         .nb-root{height:100%;overflow:hidden}
@@ -3018,21 +3021,21 @@ export default function Planner() {
           transform-origin:top left;border-radius:0;box-shadow:none;
           transition:inset var(--nav-page-duration) var(--nav-ease),transform var(--nav-page-duration) var(--nav-ease),border-radius var(--nav-page-duration) var(--nav-ease),box-shadow var(--nav-page-duration) var(--nav-ease);
         }
-        .nb-app-surface-open{inset:12px 22px 12px calc(var(--nav-width) + var(--nav-gap));transform:translate3d(0,0,0) scale(var(--nav-page-scale));border-radius:var(--nav-page-radius);box-shadow:var(--nav-page-shadow)}
+        .nb-app-surface-open{inset:18px 22px 18px calc(var(--nav-width) + var(--nav-gap));transform:translate3d(0,0,0) scale(var(--nav-page-scale));border-radius:var(--nav-page-radius);box-shadow:var(--nav-page-shadow)}
         .nb-navigation{position:absolute;z-index:1;inset:0 auto 0 0;width:var(--nav-width);padding:22px 18px;color:#f2f0ea;display:flex;flex-direction:column;overflow:auto}
         .nb-navigation[aria-hidden="true"]{visibility:hidden;pointer-events:none}
         .nb-nav-brand,.nb-nav-item,.nb-nav-membership{opacity:0;transform:translate3d(-10px,0,0);transition:opacity var(--nav-content-duration) var(--nav-ease),transform var(--nav-content-duration) var(--nav-ease)}
         .nb-nav-shell[data-nav-state="open"] .nb-nav-brand,.nb-nav-shell[data-nav-state="open"] .nb-nav-item,.nb-nav-shell[data-nav-state="open"] .nb-nav-membership{opacity:1;transform:translate3d(0,0,0);transition-delay:calc(var(--nav-index, 0) * var(--nav-item-stagger))}
         .nb-nav-shell[data-nav-state="closing"] .nb-nav-brand,.nb-nav-shell[data-nav-state="closing"] .nb-nav-item,.nb-nav-shell[data-nav-state="closing"] .nb-nav-membership{transition-delay:calc((6 - var(--nav-index, 0)) * 18ms)}
-        .nb-nav-item{font-family:${MONO};font-size:12px;letter-spacing:.12em;text-align:left;padding:11px 12px;border-radius:10px;color:#c8c7c0}
+        .nb-nav-item{font-family:${MONO};font-size:15px;letter-spacing:.1em;text-align:left;padding:13px 12px;border-radius:10px;color:#c8c7c0}
         .nb-nav-item:hover,.nb-nav-item:focus-visible{background:#2a2b2f;color:#fff;outline:none}
-        .nb-nav-membership{margin-top:auto;padding:13px 12px;border:1px solid #37383d;border-radius:12px;color:#aaa9a2}
+        .nb-nav-membership{margin-top:auto;padding:15px 12px;border:1px solid #37383d;border-radius:12px;color:#aaa9a2}
         .nb-shell-control{color:#f4f2ec;border:1px solid #3a3b40;background:#24252a;border-radius:9px;font-family:${MONO};font-size:13px;letter-spacing:.06em}
         .nb-shell-control:hover,.nb-shell-control:focus-visible{background:#313238;outline:2px solid #f4f2ec;outline-offset:2px}
         .nb-shell-info{border-radius:999px;font-family:${SANS};font-weight:700;letter-spacing:0}
         @media(max-width:639px){
           .nb-nav-shell{--nav-width:min(78vw,320px);--nav-gap:11px;--nav-page-scale:.94;--nav-page-radius:16px}
-          .nb-app-surface-open{inset:10px 9px 10px calc(var(--nav-width) + var(--nav-gap))}
+          .nb-app-surface-open{inset:14px 9px 14px calc(var(--nav-width) + var(--nav-gap))}
           .nb-navigation{padding:18px 12px}
         }
         .nb-main{padding-bottom:var(--sheet-pad);transition:padding-bottom 260ms cubic-bezier(.2,.8,.25,1)}
@@ -3198,26 +3201,26 @@ export default function Planner() {
       `}</style>
 
       {/* ══ HUD ══ */}
-      <header style={{ background: "#17181b", borderBottom: "1px solid #2c2d31", color: "#f4f2ec" }} className="sticky top-0 z-30 px-3 sm:px-5 py-2 flex items-center justify-between gap-3">
+      <header style={{ background: T.bg, borderBottom: `1px solid ${T.line}`, color: T.text }} className="sticky top-0 z-30 px-3 sm:px-5 py-2 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2 min-w-0">
           <button ref={navToggleRef} data-test="nav-toggle" type="button" aria-label="Toggle primary navigation" aria-controls="planner-navigation" aria-expanded={navOpen}
             onClick={() => { beep("click"); navOpen ? closeNavigation() : openNavigation(); }} className="nb-shell-control nb-tap w-8 h-8" title="Navigation">▤</button>
           <button type="button" aria-label="Open shortcuts and app information" onClick={() => { beep("click"); setShortcuts(true); }} className="nb-shell-control nb-shell-info nb-tap w-7 h-7" title="Shortcuts and information">i</button>
           <div className="flex items-baseline gap-2 min-w-0">
           {level != null && <>
-            <span style={{ fontFamily: MONO, color: "#aaa9a2" }} className="text-xs tracking-widest">LVL</span>
+            <span style={{ fontFamily: MONO, color: T.dim }} className="text-xs tracking-widest">LVL</span>
             <span style={{ fontFamily: MONO }} className="text-sm font-bold">{level}</span>
-            <div style={{ background: "#393a3f" }} className="w-14 h-1 mx-1"><div style={{ background: T.accent, width: `${levelPct}%` }} className="h-full" /></div>
+            <div style={{ background: T.faint }} className="w-14 h-1 mx-1"><div style={{ background: T.accent, width: `${levelPct}%` }} className="h-full" /></div>
           </>}
           {streak != null && streak > 0 && <span style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest">{streak}d</span>}
           </div>
         </div>
         <div className="flex items-center gap-1">
-          <button onClick={() => { jumpTo(todayKey); setMonthCursor(new Date()); }} style={{ fontFamily: MONO, color: "#c8c7c0" }} className="nb-tap px-2 py-1 text-xs tracking-widest">TODAY</button>
-          <button onClick={() => { beep("click"); setNotebook("all"); }} style={{ fontFamily: MONO, color: "#c8c7c0" }} className="nb-tap px-2 py-1 text-xs tracking-widest">NOTES</button>
+          <button onClick={() => { jumpTo(todayKey); setMonthCursor(new Date()); }} style={{ fontFamily: MONO, color: T.dim }} className="nb-tap px-2 py-1 text-xs tracking-widest">TODAY</button>
+          <button onClick={() => { beep("click"); setNotebook("all"); }} style={{ fontFamily: MONO, color: T.dim }} className="nb-tap px-2 py-1 text-xs tracking-widest">NOTES</button>
           <GooeySearch T={T} surface={surface} reduced={reducedMotion}
             onOpen={() => { beep("click"); setSearchQuery(""); setSearch(true); }} />
-          <button onClick={() => { beep("click"); setSettings(true); }} style={{ color: "#c8c7c0" }} className="nb-tap w-8 h-8 text-sm" aria-label="Settings">⋯</button>
+          <button onClick={() => { beep("click"); setSettings(true); }} style={{ color: T.dim }} className="nb-tap w-8 h-8 text-sm" aria-label="Settings">⋯</button>
           <button data-test="new-entry" onClick={() => { beep("click"); setComposer({ kind: "event", start: startSlot(nowMin), dur: 60, notch: true }); }} style={{ background: T.accent, color: T.on, fontFamily: MONO }} className="nb-tap nb-liquid px-2 py-1.5 text-xs font-bold tracking-widest">NEW</button>
         </div>
       </header>
@@ -4656,7 +4659,7 @@ function NavigationShell({ phase, firstItemRef, onTimeline, onActions, onSetup, 
     <aside id="planner-navigation" role="navigation" aria-label="Primary navigation" aria-hidden={hidden} className="nb-navigation">
       <div className="nb-nav-brand mb-7" style={{ "--nav-index": 0 }}>
         <p className="text-xs tracking-[.18em]" style={{ fontFamily: MONO, color: "#8f908b" }}>CALENDAR MASTER</p>
-        <p className="text-xl font-semibold tracking-tight mt-1">Your day, in view.</p>
+        <p className="text-2xl font-semibold tracking-tight mt-1">Your day, in view.</p>
       </div>
       <div className="flex flex-col gap-1">
         {items.map(([label, onClick], index) => (
@@ -4672,7 +4675,7 @@ function NavigationShell({ phase, firstItemRef, onTimeline, onActions, onSetup, 
       </div>
       <div className="nb-nav-membership" style={{ "--nav-index": 6 }}>
         <p className="text-xs tracking-[.14em]" style={{ fontFamily: MONO }}>LOCAL FIRST</p>
-        <p className="text-sm mt-1 leading-snug">Everything in this planner stays on this device.</p>
+        <p className="text-base mt-1 leading-snug">Everything in this planner stays on this device.</p>
       </div>
     </aside>
   );
