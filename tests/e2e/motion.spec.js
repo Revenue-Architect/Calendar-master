@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { openPlanner } from "./helpers.js";
 
-/* The restrained liquid controls and the notch.
+/* The restrained liquid controls and connected sheet motion.
  *
  * The liquid language is intentionally tested at its lifecycle boundaries:
  * selection still moves, reduced motion still works, filters never flicker into
@@ -73,36 +73,71 @@ test.describe("adjacent weekdays", () => {
   });
 });
 
-test.describe("the notch morph", () => {
-  test("NEW grows the composer out of the button, and folds it back", async ({ page }) => {
+test.describe("sheet entrances and exits", () => {
+  test("NEW opens as a grounded sheet instead of zooming from the button", async ({ page }) => {
     await openPlanner(page);
     await page.getByTestId("new-entry").click();
 
     const sheet = page.getByTestId("sheet");
     await expect(sheet).toBeVisible();
-    await expect(sheet, "the composer should morph as a notch from NEW").toHaveAttribute("data-fluid-origin", "notch");
-    /* The body is the part that arrives late and leaves early. */
+    await expect(sheet, "the composer should use the stable sheet entrance").toHaveAttribute("data-fluid-origin", "sheet");
+    await expect.poll(() => sheet.evaluate((node) => getComputedStyle(node).animationName)).toBe("nbfluid");
+    expect(await page.evaluate(() => window.visualViewport?.scale ?? 1)).toBe(1);
+    /* The body remains mounted inside the same panel; only the panel entrance
+       changes, so the form does not appear to zoom the page into itself. */
     await expect(sheet.locator(".nb-notch-body")).toBeVisible();
 
     await page.keyboard.press("Escape");
-    /* The exit animation is longer than the ordinary one, and the sheet has to
-       actually go away at the end of it rather than linger. */
     await expect(sheet).toHaveCount(0, { timeout: 3000 });
   });
 
-  test("the mobile create button morphs the same way", async ({ page }) => {
+  test("the mobile create button keeps the viewport stable", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await openPlanner(page);
     await page.getByTestId("new-action").click();
     const sheet = page.getByTestId("sheet");
-    await expect(sheet).toHaveAttribute("data-fluid-origin", "notch");
+    await expect(sheet).toHaveAttribute("data-fluid-origin", "sheet");
+    await expect.poll(() => sheet.evaluate((node) => getComputedStyle(node).animationName)).toBe("nbfluid");
+    expect(await page.evaluate(() => ({ innerWidth: window.innerWidth, clientWidth: document.documentElement.clientWidth, scale: window.visualViewport?.scale ?? 1 })))
+      .toEqual({ innerWidth: 390, clientWidth: 390, scale: 1 });
     await expect(page.getByTestId("composer")).toHaveAttribute("data-composer-kind", "task");
+  });
+
+  test("a timeline event returns toward its card while closing", async ({ page }) => {
+    await openPlanner(page, { keepSample: true });
+    const card = page.locator("[data-event-id]").first();
+    await expect(card).toBeVisible();
+    await card.click();
+
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).toHaveAttribute("data-fluid-origin", "trigger");
+    await page.waitForTimeout(450);
+    const origin = await sheet.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return {
+        x: Number.parseFloat(style.getPropertyValue("--fluid-x")),
+        y: Number.parseFloat(style.getPropertyValue("--fluid-y")),
+      };
+    });
+
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(170);
+    const closing = await sheet.evaluate((node) => {
+      const matrix = new DOMMatrix(getComputedStyle(node).transform);
+      return { scale: Math.min(Math.abs(matrix.a), Math.abs(matrix.d)), travel: Math.hypot(matrix.e, matrix.f) };
+    });
+
+    /* At this point the panel should already be on its way back to the card,
+       not merely shrinking in place. */
+    expect(closing.scale).toBeLessThan(0.65);
+    expect(closing.travel).toBeGreaterThan(Math.hypot(origin.x, origin.y) * 0.5);
+    await expect(sheet).toHaveCount(0, { timeout: 1000 });
   });
 
   test("every other route into the composer keeps the ordinary morph", async ({ page }) => {
     await openPlanner(page);
-    /* The notch is the signature of "make something new" from a create button,
-       not of the composer itself. */
+    /* A keyboard-opened composer keeps the ordinary trigger morph; the compact
+       create controls use the grounded sheet entrance above. */
     await page.keyboard.press("n");
     await expect(page.getByTestId("sheet")).toHaveAttribute("data-fluid-origin", "trigger");
   });

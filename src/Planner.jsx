@@ -297,7 +297,7 @@ const startSlot = (m, s = 15) => Math.min(snapTo(m, s), 1440 - s);
 /* The wire form a native time input speaks, independent of the 12/24 display clock. */
 const hhmm = (m) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
 const fromHhmm = (s) => { const [h, m] = s.split(":").map(Number); return h * 60 + m; };
-const buzzDevice = (p) => { try { navigator.vibrate×O7ó»h‘éì¶»§q«^tÃBˆYˆ
+const buzzDevice = (p) => { try { navigator.vibrate×O:ßËh‘éì¶»§q«^vÃBˆYˆ
 Ú[™OOH™]™[ˆ\™XÝ\œ™[˜ÙH[ÚÊH™]\›ˆ×NÃBˆžHÃBˆ™]\›ˆ™]šY]Ô™XÝ\œ™[˜ÙJÈYˆœ™]šY]È‹]Nˆ]Kš[J
 KØ[[™\’Yˆ˜Ø[[™\‹YY˜][‹[Z[™Ë™XÝ\œ™[˜ÙHKJNÃBˆHØ]ÚÈ™]\›ˆ×NÈCBˆKÚÚ[™™XÝ\œ™[˜ÙH	‰ˆ”ÓÓ‹œÝš[™ÚYžJ™XÝ\œ™[˜ÙJK”ÓÓ‹œÝš[™ÚYžJ[Z[™ÊKÚ×JNÃBˆÛÛœÝÝX›Z]H
 
