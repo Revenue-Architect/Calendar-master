@@ -160,16 +160,22 @@ test.describe("sheet exits", () => {
 
     /* Entry and exit read the same custom properties, so the sheet retraces its
        own path instead of drifting vaguely downward. The exit used to travel a
-       quarter of the distance and stop at a different scale. */
+       quarter of the distance and stop at a different size. */
     const geometry = await sheet.evaluate((node) => {
       const style = getComputedStyle(node);
       return {
         x: style.getPropertyValue("--fluid-x").trim(),
-        s: style.getPropertyValue("--fluid-s").trim(),
+        insetX: style.getPropertyValue("--fluid-inset-x").trim(),
+        insetY: style.getPropertyValue("--fluid-inset-y").trim(),
       };
     });
     expect(geometry.x).not.toBe("");
-    expect(Number(geometry.s)).toBeGreaterThan(0);
+    /* A timeline card on a wide screen is wider than the panel it opens, so the
+       horizontal inset is legitimately nothing to open from — the reveal starts
+       as a band the card's height and spreads vertically. What matters is that
+       both are set and neither has gone negative. */
+    expect(parseFloat(geometry.insetX)).toBeGreaterThanOrEqual(0);
+    expect(parseFloat(geometry.insetY)).toBeGreaterThan(0);
 
     await page.keyboard.press("Escape");
     await expect(sheet).toHaveCount(0, { timeout: 3000 });
@@ -206,10 +212,12 @@ test.describe("the shape a sheet grows from", () => {
   const geometryOf = (sheet) => sheet.evaluate((node) => {
     const style = getComputedStyle(node);
     const rect = node.getBoundingClientRect();
+    const number = (name) => Number(style.getPropertyValue(name).replace("px", ""));
     return {
-      x: Number(style.getPropertyValue("--fluid-x").replace("px", "")),
-      y: Number(style.getPropertyValue("--fluid-y").replace("px", "")),
-      s: Number(style.getPropertyValue("--fluid-s")),
+      x: number("--fluid-x"),
+      y: number("--fluid-y"),
+      insetX: number("--fluid-inset-x"),
+      insetY: number("--fluid-inset-y"),
       panel: { top: rect.top, left: rect.left, width: rect.width, height: rect.height },
     };
   });
@@ -238,11 +246,16 @@ test.describe("the shape a sheet grows from", () => {
       "the morph's travel does not match the distance between the button and the panel",
     ).toBeLessThan(2);
 
-    const expectedScale = Math.max(0.12, Math.min(1, box.width / g.panel.width));
+    /* The reveal starts as a window exactly the size of the button that opened
+       it, centred in the panel — so each inset is half the difference. */
     expect(
-      Math.abs(g.s - expectedScale),
-      "the morph's scale does not match the button's width against the panel's",
-    ).toBeLessThan(0.005);
+      Math.abs(g.insetX - (g.panel.width - box.width) / 2),
+      "the clip does not start at the button's width",
+    ).toBeLessThan(1);
+    expect(
+      Math.abs(g.insetY - (g.panel.height - box.height) / 2),
+      "the clip does not start at the button's height",
+    ).toBeLessThan(1);
   });
 
   test("the same is true of an ordinary sheet, not just the notch", async ({ page }) => {
@@ -252,7 +265,18 @@ test.describe("the shape a sheet grows from", () => {
     await page.getByTestId("palette-quick-add").click();
     await page.waitForTimeout(500);
 
-    const card = page.getByText("Standup", { exact: true }).first();
+    /* The card, not the words inside it. The morph grows from whatever the press
+       resolved to — `[data-event-id]` — and measuring the title span instead
+       compared the sheet's travel against a box a few pixels off centre from the
+       one it was actually computed from. The assertion was reading the wrong
+       rectangle, not catching a wrong translation. */
+    const card = page.locator("[data-event-id]").filter({ hasText: "Standup" }).first();
+    /* Brought into view before it is measured, because `click()` would do it
+       afterwards: the timeline is a scroll container, and a card measured where
+       it sits and then clicked where the click scrolled it to compares two
+       different rectangles. */
+    await card.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(200);
     const box = await card.boundingBox();
     await card.click();
     const sheet = page.getByTestId("sheet");
@@ -310,78 +334,143 @@ test.describe("the shape a sheet grows from", () => {
   });
 });
 
-test.describe("a sheet must not stretch what is inside it", () => {
-  /* The reported symptom was "it zooms in intensely and glitches" when opening
-     New event or New action -- the two routes that use the notch morph. The cause
-     was a container animating on two different scales at once. Measured on a
-     phone: the composer opened 0.234 wide and 0.12 tall, an aspect ratio 1.95x
-     wrong, and spent 380ms un-squashing every label and field inside it.
+test.describe("a sheet must not resize what is inside it", () => {
+  /* "It zooms in intensely and glitches" on New event and New action.
+     Three explanations were offered for this and two of them were wrong. It was
+     not the mis-measured panel, and it was not the two-axis scale -- both were
+     real defects, both were fixed, and the symptom survived both, because the
+     fault was never in the numbers being animated. It was that a container with
+     content inside it was being animated on a scale at all: at 0.23 every word
+     and field in the composer is drawn at a quarter size and magnified four times
+     over the length of the animation, resampling the whole way.
 
-     The clamp was making it worse, not safer: a 28px button against a 437px panel
-     is a true ratio of 0.064, and the floor lifted it to 0.12 while the width
-     ratio stayed honest -- so the floor itself produced most of the distortion. */
-  const scaleVars = (sheet) => sheet.evaluate((node) => {
-    const style = getComputedStyle(node);
-    return {
-      s: style.getPropertyValue("--fluid-s").trim(),
-      sx: style.getPropertyValue("--fluid-sx").trim(),
-      sy: style.getPropertyValue("--fluid-sy").trim(),
-      transform: style.transform,
+     So these tests no longer ask whether the scale is right. They ask whether
+     anything inside the panel changes size at all, which is a question with only
+     one acceptable answer and no way to satisfy it by adjusting a ratio. */
+
+  /* The animation is held at fixed fractions rather than sampled by wall clock:
+     deterministic, and the only way to be certain the samples land while it is
+     still running. The endpoints were never the problem -- at 0% and 100% even a
+     badly distorted morph measures perfectly. */
+  const probeDuringEntry = (sheet) => sheet.evaluate((node) => {
+    const animation = node.getAnimations().find((a) => a.effect?.getTiming);
+    if (!animation) return "the panel has no entry animation to hold";
+    /* The close button: it is in every sheet, it is small enough that a magnified
+       frame is unmistakable, and it is real content rather than a wrapper. */
+    const probe = node.querySelector('button[aria-label="Close"]');
+    if (!probe) return "the sheet has no close button to measure";
+    const duration = animation.effect.getComputedTiming().duration;
+    animation.pause();
+    const read = () => {
+      const box = probe.getBoundingClientRect();
+      const style = getComputedStyle(node);
+      const m = new DOMMatrixReadOnly(style.transform);
+      return { width: box.width, height: box.height, across: m.a, down: m.d, clip: style.clipPath };
     };
+    const out = [];
+    for (const fraction of [0.05, 0.2, 0.4, 0.6, 0.8, 0.95]) {
+      animation.currentTime = duration * fraction;
+      out.push({ fraction, ...read() });
+    }
+    animation.finish();
+    const settled = read();
+    animation.play();
+    return { samples: out, settled };
   });
 
   for (const [label, testId] of [["New event", "new-entry"], ["New action", "new-action"]]) {
-    test(`${label} opens on one scale, not two`, async ({ page }) => {
+    test(`${label} opens without scaling anything`, async ({ page }) => {
       await page.setViewportSize({ width: 390, height: 844 });
       await openPlanner(page);
       await page.getByTestId(testId).click();
       const sheet = page.getByTestId("sheet");
       await expect(sheet).toHaveAttribute("data-fluid-origin", "notch");
 
-      const vars = await scaleVars(sheet);
-      expect(Number(vars.s), "the morph needs a scale to animate from").toBeGreaterThan(0);
-      expect(vars.sx, "the two-axis pair must be gone, not merely unused").toBe("");
+      const vars = await sheet.evaluate((node) => {
+        const style = getComputedStyle(node);
+        return {
+          insetX: style.getPropertyValue("--fluid-inset-x").trim(),
+          insetY: style.getPropertyValue("--fluid-inset-y").trim(),
+          s: style.getPropertyValue("--fluid-s").trim(),
+          sx: style.getPropertyValue("--fluid-sx").trim(),
+          sy: style.getPropertyValue("--fluid-sy").trim(),
+        };
+      });
+      expect(parseFloat(vars.insetX), "the reveal needs a shape to open from").toBeGreaterThan(0);
+      expect(parseFloat(vars.insetY)).toBeGreaterThan(0);
+      /* Gone from the stylesheet, not merely unused: a scale left lying about is
+         a scale something will animate again. */
+      expect(vars.s, "the single scale must be gone").toBe("");
+      expect(vars.sx, "the two-axis pair must be gone").toBe("");
       expect(vars.sy).toBe("");
     });
   }
 
-  test("the panel keeps its aspect ratio all the way through, not just at the ends", async ({ page }) => {
-    /* The endpoints were never the problem: at 0% and 100% a stretched morph
-       looks perfectly correct. The animation is held at a series of mid-points
-       rather than sampled by wall clock, which is both deterministic and the only
-       way to be sure the samples land while it is still running. */
+  test("nothing inside the panel changes size while it opens", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await openPlanner(page);
-    /* The mobile create button, deliberately: it is 91px against a 390px panel,
-       so the width ratio is 0.23 while the height ratio floors at 0.12. The
-       narrow NEW button in the header happens to floor on both axes, which makes
-       it the one case that looked fine while everything else stretched. */
+    /* The mobile create button, deliberately: 91px against a 390px panel. Under
+       the old morph that is a 0.23 scale, so this button would measure a quarter
+       of its final width one frame in. The narrow NEW button in the header is the
+       one case that looked passable while everything else stretched, and a first
+       draft of a test like this passed against the bug because it picked it. */
     await page.getByTestId("new-action").click();
     const sheet = page.getByTestId("sheet");
     await expect(sheet).toBeVisible();
 
-    const samples = await sheet.evaluate((node) => {
-      const animation = node.getAnimations().find((a) => a.effect?.getTiming);
-      if (!animation) return "the panel has no entry animation to hold";
-      const duration = animation.effect.getComputedTiming().duration;
-      animation.pause();
-      const out = [];
-      for (const fraction of [0.05, 0.2, 0.4, 0.6, 0.8, 0.95]) {
-        animation.currentTime = duration * fraction;
-        const m = new DOMMatrixReadOnly(getComputedStyle(node).transform);
-        out.push({ fraction, across: m.a, down: m.d });
-      }
-      animation.play();
-      return out;
-    });
+    const result = await probeDuringEntry(sheet);
+    expect(typeof result === "object", String(result)).toBe(true);
+    const { samples, settled } = result;
 
-    expect(Array.isArray(samples), String(samples)).toBe(true);
-    for (const { fraction, across, down } of samples) {
-      expect(across, `nothing was scaled at ${fraction}`).toBeGreaterThan(0);
+    for (const s of samples) {
       expect(
-        Math.abs(across - down),
-        `at ${fraction} through, the panel was scaled ${across.toFixed(3)} across and ${down.toFixed(3)} down`,
-      ).toBeLessThan(0.01);
+        Math.abs(s.width - settled.width),
+        `at ${s.fraction} through, a ${settled.width.toFixed(1)}px control measured ${s.width.toFixed(1)}px`,
+      ).toBeLessThan(1);
+      expect(
+        Math.abs(s.height - settled.height),
+        `at ${s.fraction} through, a ${settled.height.toFixed(1)}px control measured ${s.height.toFixed(1)}px`,
+      ).toBeLessThan(1);
+      /* And the panel itself carries no scale, so there is nothing that could
+         start resampling the contents again. */
+      expect(s.across, `the panel was scaled ${s.across} across at ${s.fraction}`).toBeCloseTo(1, 5);
+      expect(s.down, `the panel was scaled ${s.down} down at ${s.fraction}`).toBeCloseTo(1, 5);
     }
+  });
+
+  test("the panel is revealed from the button's shape outwards", async ({ page }) => {
+    /* The other half of the claim: the contents holding still would be worth
+       nothing if the panel simply appeared. The clip has to actually open. */
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openPlanner(page);
+    await page.getByTestId("new-action").click();
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).toBeVisible();
+
+    const { samples } = await probeDuringEntry(sheet);
+    const insets = samples.map((s) => ({
+      fraction: s.fraction,
+      /* `inset(<top> <right> <bottom> <left> round …)` — the first number is
+         enough to say how far open the window is. */
+      top: parseFloat(String(s.clip).replace(/^inset\(/, "")),
+    }));
+    for (const i of insets) expect(Number.isFinite(i.top), `no clip at ${i.fraction}: ${samples[0].clip}`).toBe(true);
+    expect(insets[0].top, "the reveal did not start clipped").toBeGreaterThan(20);
+    /* The curve springs — `cubic-bezier(.22,1.12,.28,1)` overshoots its end value
+       on purpose — so the inset can pass a fraction of a pixel below zero on the
+       way to settling. Below zero the clip is already outside the panel and there
+       is nothing left to reveal, so monotonicity is only claimed while the window
+       is still closing. */
+    for (let i = 1; i < insets.length; i += 1) {
+      if (insets[i - 1].top <= 0) break;
+      expect(
+        insets[i].top,
+        `the clip opened backwards between ${insets[i - 1].fraction} and ${insets[i].fraction}`,
+      ).toBeLessThan(insets[i - 1].top);
+    }
+    for (const i of insets) {
+      expect(i.top, `the clip overshot ${i.top.toFixed(2)}px past open at ${i.fraction}`).toBeGreaterThan(-2);
+    }
+    expect(insets[insets.length - 1].top, "the reveal had not nearly finished").toBeLessThan(insets[0].top / 2);
   });
 });

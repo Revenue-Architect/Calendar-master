@@ -23,12 +23,31 @@ test("fluid pill stretch grows with travel and stays bounded", () => {
   assert.equal(fluidPillStretch({ left: 0 }, { left: 1000 }), 1.18);
 });
 
-test("sheet morph starts at the trigger center and clamps tiny scales", () => {
+test("sheet morph starts centred on the trigger, clipped to the trigger's size", () => {
   assert.deepEqual(
     fluidMorphFromRects(
       { left: 20, top: 10, width: 40, height: 20 },
       { left: 100, top: 100, width: 400, height: 500 },
     ),
-    { translateX: -260, translateY: -330, scale: 0.12, scaleX: 0.12, scaleY: 0.12 },
+    /* Panel centre travels to the trigger centre, and the clip leaves exactly a
+       40x20 window in the middle of a 400x500 panel: (400-40)/2, (500-20)/2. */
+    { translateX: -260, translateY: -330, insetX: 180, insetY: 240 },
   );
+});
+
+test("a trigger bigger than the panel insets nothing rather than inverting", () => {
+  const geometry = fluidMorphFromRects(
+    { left: 0, top: 0, width: 900, height: 60 },
+    { left: 100, top: 100, width: 400, height: 500 },
+  );
+  assert.equal(geometry.insetX, 0);
+  assert.equal(geometry.insetY, 220);
+});
+
+test("the morph never reports a scale — a sheet's contents are not resampled", () => {
+  const geometry = fluidMorphFromRects(
+    { left: 0, top: 0, width: 40, height: 20 },
+    { left: 0, top: 0, width: 400, height: 500 },
+  );
+  assert.deepEqual(Object.keys(geometry).sort(), ["insetX", "insetY", "translateX", "translateY"]);
 });

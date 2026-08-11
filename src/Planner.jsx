@@ -727,7 +727,25 @@ export default function Planner() {
 
   const stripRef = useRef(null);
   const activeRef = useRef(null);
+  /* The timeline's touch gestures are delegated to the stream element rather than
+     bound per card, so the effect that installs them has to know when that element
+     is *replaced* — and it is, routinely: the page wrapper is keyed on the day
+     turn, so every step to another day, and every change of zoom, builds a new
+     stream node. A plain ref cannot say that. It changes silently, the effect does
+     not re-run, and the listeners are left on a node that is no longer in the
+     document: on a phone the whole timeline goes dead from the first time you move
+     off today — no tap opens a card, no press lifts one, nothing at all. A mouse
+     never noticed, because its handlers are React props that every render puts
+     back.
+     Holding the node in state as well as a ref makes the identity of the element
+     an ordinary dependency, so the listeners follow it wherever it goes rather
+     than relying on someone remembering to list every cause of a remount. */
   const streamRef = useRef(null);
+  const [streamNode, setStreamNode] = useState(null);
+  const attachStream = useCallback((node) => {
+    streamRef.current = node;
+    setStreamNode(node);
+  }, []);
   const listRef = useRef(null);
   const saveT = useRef(null);
   const reminderSaveT = useRef(null);
@@ -2233,6 +2251,16 @@ export default function Planner() {
   const dateKeyRef = useRef(dateKey);
   const applyRef = useRef(() => {});
   const finishRef = useRef(() => {});
+  /* An edge held but not yet dragged, and the call that turns it into a drag —
+     both read from the window listener below, which outlives the render that
+     installed it. */
+  const armedResizeRef = useRef(null);
+  const beginResizeRef = useRef(() => {});
+  /* When the gesture that just ended did so, so a click chasing it can be told
+     apart from a click that means something. A touch's compatibility click can
+     trail its release by ~300ms. */
+  const gestureEndedAt = useRef(0);
+  const clickFollowsGesture = () => Date.now() - gestureEndedAt.current < 350;
 
   const applyMove = (x, y) => {
     const g = gestureRef.current;
@@ -2265,6 +2293,10 @@ export default function Planner() {
     const g = gestureRef.current;
     endGesture();
     if (!g) return;
+    /* A drag that ends inside the control it began in still produces a click.
+       Letting go of an action's grip would otherwise open the action it had just
+       finished resizing. */
+    gestureEndedAt.current = Date.now();
     const key = dateKeyRef.current;
     if (g.mode === "move") {
       if (g.overDay && g.overDay !== key) moveToDay("event", g.id, g.overDay);
@@ -2356,15 +2388,32 @@ export default function Planner() {
   };
   useEffect(() => {
     const move = (e) => {
+      if (gestureRef.current) return;
+      /* Movement means opposite things to the two armed states, which is the
+         point of keeping them apart: it cancels a press that was going to lift a
+         card, and it starts a press that was holding an edge. */
+      if (armedResizeRef.current && movedEnoughToCancelHold(armedResizeRef.current, { x: e.clientX, y: e.clientY }, 2)) {
+        beginResizeRef.current();
+        return;
+      }
       const armed = armedRef.current;
-      if (!armed || gestureRef.current) return;
+      if (!armed) return;
       if (movedEnoughToCancelHold(armed, { x: e.clientX, y: e.clientY })) {
         disarmHold();
         tappedRef.current = false;
       }
     };
+    /* Whatever the release lands on, an edge that was never dragged is not held
+       any more. */
+    const drop = () => { armedResizeRef.current = null; };
     window.addEventListener("pointermove", move);
-    return () => window.removeEventListener("pointermove", move);
+    window.addEventListener("pointerup", drop);
+    window.addEventListener("pointercancel", drop);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", drop);
+      window.removeEventListener("pointercancel", drop);
+    };
   }, [disarmHold]);
 
   const canvasDown = (e) => {
@@ -2407,22 +2456,37 @@ export default function Planner() {
   };
   /* `edge` is which end of the block the hand has hold of: the bottom moves the
      end and the top moves the start, and in both cases the *other* end is what
-     the person is holding still in their head. */
+     the person is holding still in their head.
+
+     A press on a grip is not yet a resize — the pointer has to move first. Under
+     a mouse that is invisible, since you cannot drag an edge without moving, but
+     it is what stops a *click* on a grip from being swallowed: the gesture used
+     to open and close having changed nothing, and the card never opened. The
+     press is left marked as a tap so the card's own release opens it. */
   const resizeDown = (e, ev, edge = "end", kind = "event") => {
-    if (e.pointerType === "touch") return;
+    if (e.pointerType === "touch" || e.button === 2) return;
     e.stopPropagation();
     disarmHold();
+    tappedRef.current = true;
+    armedResizeRef.current = { x: e.clientX, y: e.clientY, ev, edge, kind };
+  };
+  const beginArmedResize = () => {
+    const armed = armedResizeRef.current;
+    armedResizeRef.current = null;
+    if (!armed) return;
     tappedRef.current = false;
     beep("lift");
     startGesture({
-      mode: kind === "task" ? "task-resize" : `resize-${edge}`,
-      kind, id: ev.id, start: ev.start, dur: ev.dur, was: { start: ev.start, dur: ev.dur },
+      mode: armed.kind === "task" ? "task-resize" : `resize-${armed.edge}`,
+      kind: armed.kind, id: armed.ev.id, start: armed.ev.start, dur: armed.ev.dur,
+      was: { start: armed.ev.start, dur: armed.ev.dur },
     });
   };
+  beginResizeRef.current = beginArmedResize;
 
   /* ─── touch: delegated on the stream, driven entirely by touch events ─── */
   useEffect(() => {
-    const el = streamRef.current;
+    const el = streamNode;
     if (!el) return;
     const press = { t: null };
     const disarm = () => { if (press.t) { clearTimeout(press.t.timer); press.t = null; } };
@@ -2430,35 +2494,44 @@ export default function Planner() {
     const onStart = (e) => {
       if (e.touches.length !== 1 || gestureRef.current) return;
       const t = e.touches[0];
-      const node = e.target.closest ? e.target.closest("[data-event-id],[data-resize],[data-task-chip]") : null;
+      const hit = e.target.closest ? e.target.closest("[data-event-id],[data-resize],[data-task-chip]") : null;
+      /* A grip is part of the card it sits on, not a target of its own.
+         Touching one used to begin the resize on the spot, with no hold and no
+         movement, and that one line cost two things. A tap that landed on a grip
+         opened and finished a gesture that changed nothing, so the card did not
+         open — and since the grips are the top 8px and bottom 12px of every card,
+         a third of a short card was dead to the touch, including the strip the
+         title sits on. Worse, a finger that began a scroll on a card's bottom
+         edge resized the event instead of scrolling the day: a two-hour block
+         became thirty minutes, silently, while the day scrolled underneath.
+         A grip now arms like everything else on this surface, and the rule is the
+         same everywhere: hold to begin a gesture, move to scroll, tap to open. */
+      const handle = hit && hit.hasAttribute("data-resize") ? hit : null;
+      const node = handle ? handle.closest("[data-event-id],[data-task-chip]") : hit;
       const m = minutesAt(t.clientY);
-      if (node && node.hasAttribute("data-resize")) {
-        const handleId = node.getAttribute("data-resize");
-        const edge = node.getAttribute("data-resize-edge") || "end";
-        const ev = eventsRef.current.find((x) => x.id === handleId);
-        const chip = ev ? null : plannedRef.current.find((x) => x.id === handleId);
-        if (ev || chip) {
-          beep("lift"); buzz(10);
+      const chipId = node && node.getAttribute("data-task-chip");
+      const id = node && node.getAttribute("data-event-id");
+      const ev = id ? eventsRef.current.find((x) => x.id === id) : null;
+      const chip = chipId ? plannedRef.current.find((x) => x.id === chipId) : null;
+      const resizing = handle && (ev || chip)
+        ? { edge: handle.getAttribute("data-resize-edge") || "end", kind: ev ? "event" : "task" }
+        : null;
+      const p = { x: t.clientX, y: t.clientY, ev, chipId, resizing, startMin: snapTo(m), grab: ev ? m - ev.start : 0, held: false, timer: null };
+      p.timer = setTimeout(() => {
+        if (!press.t) return;
+        press.t.held = true;
+        beep("lift"); buzz(p.resizing ? 10 : 14);
+        if (p.resizing) {
           const block = ev
             ? { start: ev.start, dur: ev.dur }
             : { start: chip.planned.startMinute, dur: chip.planned.estimateMinutes };
           startGesture({
-            mode: ev ? `resize-${edge}` : "task-resize",
-            kind: ev ? "event" : "task",
-            id: handleId, ...block, was: { ...block }, x: t.clientX, y: t.clientY,
+            mode: p.resizing.kind === "task" ? "task-resize" : `resize-${p.resizing.edge}`,
+            kind: p.resizing.kind,
+            id: ev ? ev.id : chipId, ...block, was: { ...block }, x: p.x, y: p.y,
           });
         }
-        return;
-      }
-      const chipId = node && node.getAttribute("data-task-chip");
-      const id = node && node.getAttribute("data-event-id");
-      const ev = id ? eventsRef.current.find((x) => x.id === id) : null;
-      const p = { x: t.clientX, y: t.clientY, ev, chipId, startMin: snapTo(m), grab: ev ? m - ev.start : 0, held: false, timer: null };
-      p.timer = setTimeout(() => {
-        if (!press.t) return;
-        press.t.held = true;
-        beep("lift"); buzz(14);
-        if (p.ev) startGesture({ mode: "move", kind: "event", id: p.ev.id, start: p.ev.start, dur: p.ev.dur, grab: p.grab, was: { start: p.ev.start, dur: p.ev.dur }, x: p.x, y: p.y });
+        else if (p.ev) startGesture({ mode: "move", kind: "event", id: p.ev.id, start: p.ev.start, dur: p.ev.dur, grab: p.grab, was: { start: p.ev.start, dur: p.ev.dur }, x: p.x, y: p.y });
         else if (p.chipId) startGesture({ mode: "task", kind: "task", id: p.chipId, x: p.x, y: p.y });
         else startGesture({ mode: "draft", start: p.startMin, dur: 30, x: p.x, y: p.y });
       }, LIFT_MS);
@@ -2511,7 +2584,7 @@ export default function Planner() {
       el.removeEventListener("touchend", onEnd);
       el.removeEventListener("touchcancel", onCancel);
     };
-  }, [ready, viewMode]);
+  }, [streamNode, ready, viewMode]);
 
   /* mouse / pen tracking, plus touch tracking for drags that begin outside the stream */
   useEffect(() => {
@@ -2900,30 +2973,43 @@ export default function Planner() {
         /* Every menu and sheet is the same material as the control that opened it.
            When a trigger can be measured the surface grows from that exact pill;
            first-run and system sheets use the bottom-sheet fallback. */
-        .nb-fluid{animation:nbfluid 420ms cubic-bezier(.22,1.12,.28,1);transform-origin:bottom center;border-radius:24px 24px 0 0;will-change:transform,opacity,border-radius}
+        .nb-fluid{animation:nbfluid 420ms cubic-bezier(.22,1.12,.28,1);transform-origin:bottom center;border-radius:24px 24px 0 0;will-change:transform,opacity,clip-path}
         @keyframes nbfluid{
           0%{opacity:0;transform:translateY(26px) scale(.965)}
           55%{opacity:1}
           100%{opacity:1;transform:translateY(0) scale(1)}
         }
+        /* A sheet grows from its trigger by being *revealed*, not by being zoomed.
+           The panel is at its true size from the first frame, centred over the
+           button and clipped to a rounded window exactly the button's size; the
+           window opens out to the panel's own edges. Nothing inside is ever
+           scaled, so the text is laid out once and never resampled — see
+           features/motion/fluidGeometry.js for why that is the whole fix. */
         .nb-fluid[data-fluid-origin="trigger"]{animation-name:nbfluidorigin;transform-origin:center}
         @keyframes nbfluidorigin{
-          0%{opacity:.25;transform:translate(var(--fluid-x),var(--fluid-y)) scale(var(--fluid-s));border-radius:999px}
-          52%{opacity:1}
-          100%{opacity:1;transform:translate(0,0) scale(1);border-radius:24px}
+          0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round 999px)}
+          100%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px round 24px)}
         }
+        /* Full-size words seen through a button-sized window are a sliver of a
+           sentence, so the contents arrive behind the opening clip rather than
+           through it. Opacity only: a transform here would put the content back
+           on a curve of its own. */
+        .nb-fluid[data-fluid-origin="trigger"] .nb-notch-body{animation:nbmorphbody 200ms ease 130ms both}
+        @keyframes nbmorphbody{from{opacity:0}to{opacity:1}}
         .nb-fluid.nb-fluid-closing{animation:nbfluidout 240ms cubic-bezier(.4,0,.4,1) forwards;pointer-events:none}
         .nb-fluid.nb-fluid-closing[data-fluid-origin="trigger"]{animation-name:nbfluidoriginout;animation-duration:300ms}
         @keyframes nbfluidout{0%,30%{opacity:1}100%{opacity:0;transform:translateY(12px) scale(.97);border-radius:30px}}
         /* The exit retraces the entry. It used to travel a quarter of the way back
            and stop at scale(.88), so a sheet that flew out of its card drifted
            vaguely downward on the way out — the two halves of one gesture did not
-           describe the same path. Same distance, same scale, reversed. */
+           describe the same path. Same distance, same clip, reversed. */
         @keyframes nbfluidoriginout{
-          0%{opacity:1;transform:translate(0,0) scale(1);border-radius:24px}
-          70%{opacity:1}
-          100%{opacity:0;transform:translate(var(--fluid-x),var(--fluid-y)) scale(var(--fluid-s));border-radius:999px}
+          0%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px round 24px)}
+          82%{opacity:1}
+          100%{opacity:0;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round 999px)}
         }
+        .nb-fluid.nb-fluid-closing[data-fluid-origin="trigger"] .nb-notch-body{animation:nbmorphbodyout 120ms ease forwards}
+        @keyframes nbmorphbodyout{to{opacity:0}}
         /* The notch morph: one object changing shape, rather than a panel fading
            in. The shape never fades — it travels and stretches from the pill at
            full opacity, so the eye follows a thing moving instead of watching
@@ -2932,15 +3018,15 @@ export default function Planner() {
            panel is empty by the time it folds back into the button. */
         .nb-fluid[data-fluid-origin="notch"]{animation-name:nbnotchin;animation-duration:380ms}
         @keyframes nbnotchin{
-          0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y)) scale(var(--fluid-s));border-radius:999px}
-          100%{opacity:1;transform:translate(0,0) scale(1);border-radius:24px}
+          0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round 999px)}
+          100%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px round 24px)}
         }
         .nb-fluid[data-fluid-origin="notch"] .nb-notch-body{animation:nbnotchbody 260ms ease 130ms both}
         @keyframes nbnotchbody{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
         .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"]{animation:nbnotchout 260ms cubic-bezier(.4,0,.3,1) forwards}
         @keyframes nbnotchout{
-          0%{opacity:1;transform:translate(0,0) scale(1);border-radius:24px}
-          100%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y)) scale(var(--fluid-s));border-radius:999px}
+          0%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px round 24px)}
+          100%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round 999px)}
         }
         .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-notch-body{animation:nbnotchbodyout 140ms ease forwards}
         @keyframes nbnotchbodyout{to{opacity:0;transform:translateY(6px)}}
@@ -3213,6 +3299,36 @@ export default function Planner() {
         </div>
       )}
 
+      {/* Everything is on this device, and export is a manual action in Settings
+          nobody performs on a good day. This is the only thing that closes the
+          gap between "my planner" and "my planner, if this browser survives" —
+          so it is a real prompt, and it is rare enough to be believed: never for
+          an empty notebook, never twice for the same content, and "not now"
+          holds until the notebook has actually moved on. It yields to the
+          storage warning, which is the more urgent problem.
+
+          It sits in the page, like the report above it, and for the same reason:
+          it is a standing suggestion, not an alarm. Floating, it was a full-width
+          bar lying across the lower third of the timeline on a phone, and it
+          stayed there until dismissed — every card behind it was untappable, and
+          nothing on screen explained why. Docking it to a corner fixed the wide
+          layout and left the narrow one exactly as it was. A nudge with no
+          urgency has no business covering the day. */}
+      {askForBackup && !storageBad && !firstRun && (
+        <div className="px-3 sm:px-5 pb-3">
+          <div data-test="backup-nudge" className="nb-up flex items-center gap-3 px-3 py-2"
+            style={{ background: surface, color: T.text, borderRadius: CARD_R, boxShadow: `inset 0 0 0 1px ${T.line}` }}>
+            <span style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest shrink-0">BACK UP</span>
+            <span className="text-sm truncate flex-1">This notebook only exists on this device.</span>
+            <button data-test="backup-nudge-save" onClick={() => { beep("click"); exportJson(); }}
+              style={{ fontFamily: MONO, color: T.accent }} className="nb-tap text-xs font-bold tracking-widest shrink-0 underline">SAVE A COPY</button>
+            <button data-test="backup-nudge-dismiss"
+              onClick={() => { beep("click"); setBackupRecord((current) => recordBackupDismissed(current, { state: db, today: todayKey })); }}
+              style={{ fontFamily: MONO, color: T.dim }} className="nb-tap text-xs tracking-widest shrink-0" aria-label="Not now">NOT NOW</button>
+          </div>
+        </div>
+      )}
+
       {/* ══ BODY ══ */}
       <main className="nb-main px-3 sm:px-5 grid grid-cols-1 lg:grid-cols-12 gap-5 flex-1 min-h-0"
         style={{ "--sheet-pad": sheetPad }}>
@@ -3316,7 +3432,7 @@ export default function Planner() {
               </div>
             )}
 
-            <div ref={streamRef} data-test="day-stream" className="nb-s nb-stream overflow-y-auto relative" style={{ background: T.card, borderTopLeftRadius: allDay.length || dayTasks.some((task) => task.planned.startMinute == null) ? 0 : 16, userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}>
+            <div ref={attachStream} data-test="day-stream" className="nb-s nb-stream overflow-y-auto relative" style={{ background: T.card, borderTopLeftRadius: allDay.length || dayTasks.some((task) => task.planned.startMinute == null) ? 0 : 16, userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}>
               <div className="relative" style={{ height: DAY_H }}>
                 {Array.from({ length: 24 }).map((_, h) => (
                   <div key={h} className="absolute left-0 right-0 flex items-start pointer-events-none"
@@ -3472,13 +3588,23 @@ export default function Planner() {
                               most natural place to grab it — a full-width 12px handle
                               there turns "pick this up" into "make it start earlier".
                               8px is edge; anything more is content. */}
+                          {/* `pan-y`, not `none`, and the same as the card behind
+                              them. `none` told the browser this strip handles its
+                              own gestures and must never scroll — which was true
+                              only while a press on a grip meant a resize the
+                              instant it landed. Now that a grip waits for a hold
+                              like everything else here, a finger that starts on
+                              one and moves is a scroll, and the browser has to be
+                              allowed to treat it as one. The hold fires before any
+                              movement, so a real resize still claims the gesture
+                              first and `preventDefault` keeps it. */}
                           {h >= 52 && (
-                            <div data-resize={e.id} data-resize-edge="start" onPointerDown={(ev) => resizeDown(ev, e, "start")} className="absolute inset-x-0 top-0 flex items-start justify-center" style={{ height: 8, cursor: "ns-resize", touchAction: "none" }}>
+                            <div data-resize={e.id} data-resize-edge="start" onPointerDown={(ev) => resizeDown(ev, e, "start")} className="absolute inset-x-0 top-0 flex items-start justify-center" style={{ height: 8, cursor: "ns-resize", touchAction: "pan-y" }}>
                               <span style={{ background: T.faint, width: 22, height: 2, marginTop: 2, borderRadius: 2 }} />
                             </div>
                           )}
                           {h >= 32 && (
-                            <div data-resize={e.id} data-resize-edge="end" onPointerDown={(ev) => resizeDown(ev, e, "end")} className="absolute inset-x-0 bottom-0 flex items-end justify-center" style={{ height: 12, cursor: "ns-resize", touchAction: "none" }}>
+                            <div data-resize={e.id} data-resize-edge="end" onPointerDown={(ev) => resizeDown(ev, e, "end")} className="absolute inset-x-0 bottom-0 flex items-end justify-center" style={{ height: 12, cursor: "ns-resize", touchAction: "pan-y" }}>
                               <span style={{ background: T.faint, width: 22, height: 2, marginBottom: 3, borderRadius: 2 }} />
                             </div>
                           )}
@@ -3506,7 +3632,7 @@ export default function Planner() {
                     const block = isResizable(t, "task");
                     const h = block ? Math.max(28, (estimate / 1440) * DAY_H - 3) : 28;
                     return (
-                      <button key={t.id} data-task-chip={t.id} onClick={() => { beep("click"); setInspect({ kind: "task", id: t.id }); }} className="nb-tap absolute left-0 right-2 text-left overflow-hidden"
+                      <button key={t.id} data-task-chip={t.id} onClick={() => { if (clickFollowsGesture()) return; beep("click"); setInspect({ kind: "task", id: t.id }); }} className="nb-tap absolute left-0 right-2 text-left overflow-hidden"
                         style={{ display: "flex", flexDirection: "column", justifyContent: "flex-start", top: (t.planned.startMinute / 1440) * DAY_H + 2, height: h, borderRadius: CARD_R, border: `1px dashed ${sizing ? T.accent : T.faint}`, background: block ? `${T.accent}0D` : "transparent", opacity: t.status === "completed" ? 0.4 : 1, zIndex: sizing ? 20 : 5, pointerEvents: "auto" }}>
                         <span className="flex items-center gap-2 px-2.5 py-1">
                           <span className="w-2 h-2 shrink-0 rounded-full" style={{ background: t.status === "completed" ? T.accent : "transparent", boxShadow: `inset 0 0 0 1.5px ${T.accent}` }} />
@@ -3522,7 +3648,7 @@ export default function Planner() {
                             length there is nothing for the gesture to change. */}
                         {block && (
                           <span data-resize={t.id} data-resize-edge="end" onPointerDown={(ev) => resizeDown(ev, { id: t.id, start: t.planned.startMinute, dur: estimate }, "end", "task")}
-                            className="absolute inset-x-0 bottom-0 flex items-end justify-center" style={{ height: 12, cursor: "ns-resize", touchAction: "none" }}>
+                            className="absolute inset-x-0 bottom-0 flex items-end justify-center" style={{ height: 12, cursor: "ns-resize", touchAction: "pan-y" }}>
                             <span style={{ background: T.faint, width: 22, height: 2, marginBottom: 3, borderRadius: 2 }} />
                           </span>
                         )}
@@ -3594,31 +3720,6 @@ export default function Planner() {
             <span className="text-sm truncate">Changes are staying in this tab only.</span>
             <button onClick={() => { beep("click"); setSettings(true); }}
               style={{ fontFamily: MONO }} className="text-xs font-bold tracking-widest shrink-0 underline">EXPORT</button>
-          </div>
-        </div>
-      )}
-
-      {/* Everything is on this device, and export is a manual action in Settings
-          nobody performs on a good day. This is the only thing that closes the
-          gap between "my planner" and "my planner, if this browser survives" —
-          so it is a real prompt, and it is rare enough to be believed: never for
-          an empty notebook, never twice for the same content, and "not now"
-          holds until the notebook has actually moved on. It yields to the
-          storage warning, which is the more urgent problem. */}
-      {/* Centred, it straddled both columns and covered a row of each. Docked to
-          one corner on a wide screen it sits over the end of one list instead of
-          the middle of the layout, and stops being the widest thing on the page. */}
-      {askForBackup && !storageBad && !firstRun && (
-        <div className="fixed inset-x-0 bottom-20 lg:bottom-6 z-40 flex justify-center lg:justify-end px-3 lg:pr-5 pointer-events-none">
-          <div data-test="backup-nudge" className="nb-up flex items-center gap-3 px-3 py-2 w-full sm:w-auto sm:max-w-lg pointer-events-auto"
-            style={{ background: surface, color: T.text, borderRadius: CARD_R, boxShadow: `inset 0 0 0 1px ${T.line}` }}>
-            <span style={{ fontFamily: MONO, color: T.accent }} className="text-xs tracking-widest shrink-0">BACK UP</span>
-            <span className="text-sm truncate">This notebook only exists on this device.</span>
-            <button data-test="backup-nudge-save" onClick={() => { beep("click"); exportJson(); }}
-              style={{ fontFamily: MONO, color: T.accent }} className="nb-tap text-xs font-bold tracking-widest shrink-0 underline">SAVE A COPY</button>
-            <button data-test="backup-nudge-dismiss"
-              onClick={() => { beep("click"); setBackupRecord((current) => recordBackupDismissed(current, { state: db, today: todayKey })); }}
-              style={{ fontFamily: MONO, color: T.dim }} className="nb-tap text-xs tracking-widest shrink-0" aria-label="Not now">NOT NOW</button>
           </div>
         </div>
       )}
@@ -5996,9 +6097,11 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
       panel.dataset.fluidOrigin = morphRef.current === "notch" ? "notch" : "trigger";
       panel.style.setProperty("--fluid-x", `${geometry.translateX}px`);
       panel.style.setProperty("--fluid-y", `${geometry.translateY}px`);
-      /* One number, deliberately. Animating a container on two scales at once
-         stretches everything inside it — see fluidGeometry.js. */
-      panel.style.setProperty("--fluid-s", String(geometry.scale));
+      /* The shape the reveal starts from, not a scale to grow the panel by:
+         animating a scale magnifies everything inside the panel — see
+         fluidGeometry.js. */
+      panel.style.setProperty("--fluid-inset-x", `${geometry.insetX}px`);
+      panel.style.setProperty("--fluid-inset-y", `${geometry.insetY}px`);
     }
     const frame = window.requestAnimationFrame(() => focusDialogOnOpen(dialogRef.current));
     /* `nb-sheet-h` transitions height, and it used to switch on one frame into

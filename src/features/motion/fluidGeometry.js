@@ -17,37 +17,44 @@ export function fluidPillStretch(previousBox, nextBox) {
   return 1 + Math.min(0.18, distance / 400);
 }
 
-/* The uniform scale is the one the animation uses, and the reason is worth
- * stating: a container that grows from 0.23 wide and 0.12 tall does not just
- * change shape, it stretches everything inside it. Measured on a phone, the
- * composer opened at an aspect ratio 1.95x wrong and spent 380ms un-squashing —
- * every label and field distorted and re-rasterising the whole way. That is what
- * "it zooms in and glitches" was.
+/* How a sheet grows out of the control that opened it — as a shape, never as a
+ * zoom.
  *
- * The clamp made it worse rather than safer. A 28px button against a 437px panel
- * is a true ratio of 0.064; the floor lifted it to 0.12 while the width ratio
- * stayed at its honest 0.234, so the floor itself was manufacturing most of the
- * distortion.
+ * There is no scale here, and that is the entire point. A panel animated from
+ * `scale(0.23)` to `scale(1)` does not merely change shape: every word, field and
+ * button inside it is drawn at a quarter size and magnified four times over the
+ * length of the animation, re-rasterising the whole way. That is what "it zooms
+ * in intensely and glitches" is, and it survives every correction to the numbers,
+ * because the numbers were never the fault — scaling a container that has content
+ * in it was. Two scales at once made it worse (the contents stretched as well as
+ * grew); one scale made it better; neither could make it right.
  *
- * Width is the axis to keep. A sheet growing out of a button reads as that
- * button widening into a panel, so matching its width anchors the gesture; the
- * height follows proportionally and the rounded corners do the rest. `scaleX`
- * and `scaleY` are still returned — they describe the two rectangles honestly,
- * and something may yet want them — but nothing should animate a container on
- * both at once with content inside it.
+ * So the panel travels at its true size and is *revealed* instead. It starts
+ * centred on the trigger, clipped to a rounded rectangle of exactly the trigger's
+ * size, and the clip opens out to the panel's own edges. What the eye follows is
+ * a button-shaped hole growing into a panel-shaped one — the same gesture the
+ * scale was reaching for — while the text inside is laid out once, at its final
+ * size, and never resampled. The contents fade in behind the opening clip, since
+ * full-size words seen through a button-sized window would otherwise arrive as a
+ * sliver of a sentence.
+ *
+ * `insetX`/`insetY` are the distance from each edge of the panel to that starting
+ * rectangle. They are clamped at zero: a trigger wider than the panel it opens
+ * has nothing to inset, and a negative inset would grow the clip beyond the box.
  */
 export function fluidMorphFromRects(triggerRect, panelRect) {
   const triggerCenterX = finite(triggerRect.left) + finite(triggerRect.width) / 2;
   const triggerCenterY = finite(triggerRect.top) + finite(triggerRect.height) / 2;
   const panelCenterX = finite(panelRect.left) + finite(panelRect.width) / 2;
   const panelCenterY = finite(panelRect.top) + finite(panelRect.height) / 2;
-  const scale = (from, to) => Math.max(0.12, Math.min(1, to > 0 ? from / to : 1));
+  /* The clip is centred in the panel and the panel is centred on the trigger, so
+     one inset per axis describes both edges. */
+  const inset = (from, to) => Math.max(0, (finite(to) - finite(from)) / 2);
 
   return {
     translateX: triggerCenterX - panelCenterX,
     translateY: triggerCenterY - panelCenterY,
-    scale: scale(finite(triggerRect.width), finite(panelRect.width)),
-    scaleX: scale(finite(triggerRect.width), finite(panelRect.width)),
-    scaleY: scale(finite(triggerRect.height), finite(panelRect.height)),
+    insetX: inset(triggerRect.width, panelRect.width),
+    insetY: inset(triggerRect.height, panelRect.height),
   };
 }
