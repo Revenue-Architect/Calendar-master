@@ -7403,7 +7403,9 @@ function Chips({ T, surface, label, value, onChange, options, multi = false, wra
     <div>
       {label && <span style={{ fontFamily: MONO, color: T.dimText }} className="block nb-data mb-1">{label}</span>}
       <div ref={wrapRef} className={`relative flex gap-1 ${wrap ? "flex-wrap" : ""}`}>
-        {!multi && <LiquidPillIndicator T={T} box={box} stretch={stretch} settled={settled} z={1} />}
+        {/* Keep the traveling fill behind the control layer. The fill is a visual
+            surface; it must never become the paint layer that covers a tile label. */}
+        {!multi && <LiquidPillIndicator T={T} box={box} stretch={stretch} settled={settled} z={0} />}
         {options.map(([key, text]) => {
           const on = selected(key);
           return (
@@ -7411,6 +7413,7 @@ function Chips({ T, surface, label, value, onChange, options, multi = false, wra
               className={`nb-tap relative ${wrap ? "" : "flex-1"} inline-flex items-center justify-center gap-1.5 px-3 py-2 nb-data`}
               style={{
                 fontFamily: MONO, borderRadius: 999,
+                zIndex: 1,
                 background: multi || !on ? surface : "transparent",
                 color: on ? T.on : T.dim,
                 transition: "background 180ms ease, color 260ms ease, transform 120ms ease",

@@ -71,6 +71,24 @@ test.describe("the composer", () => {
     expect(box.width).toBeGreaterThan(8);
   });
 
+  test("tile labels stay above their traveling fill", async ({ page }) => {
+    await openPlanner(page);
+    await openComposer(page);
+    const composer = page.getByTestId("composer");
+    const timing = composer.getByRole("button", { name: "AT A TIME", exact: true });
+
+    const layers = await timing.evaluate((node) => {
+      const indicator = node.parentElement.querySelector('[data-test="pill-indicator"]');
+      return {
+        buttonZ: getComputedStyle(node).zIndex,
+        indicatorZ: indicator ? getComputedStyle(indicator).zIndex : null,
+      };
+    });
+
+    expect(Number(layers.buttonZ), "the tile must paint above its fill").toBeGreaterThan(Number(layers.indicatorZ));
+    await expect(timing).toBeVisible();
+  });
+
   test("the sheet stays usable after the kind changes", async ({ page }) => {
     await openPlanner(page);
     await openComposer(page);
