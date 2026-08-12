@@ -147,6 +147,12 @@ test("exceptions for a removed series are separable and removable", async () => 
   assert.deepEqual(removeTaskExceptionsForSeries(undefined, ["gone"]), [], "tolerates a notebook with no exceptions");
 });
 
+test("removeTaskException tolerates a missing exceptions array", async () => {
+  const { removeTaskException } = await import("../recurrence/taskRecurrence.js");
+  assert.deepEqual(removeTaskException(undefined, "habit", "2026-08-09"), []);
+  assert.deepEqual(removeTaskException(null, "habit", "2026-08-09"), []);
+});
+
 test("deleting a series and its exceptions leaves a state that still validates", async () => {
   const { validatePlannerStateV7 } = await import("../../notes/migrations/validatePlannerStateV7.js");
   const { deleteTask } = await import("../index.js");

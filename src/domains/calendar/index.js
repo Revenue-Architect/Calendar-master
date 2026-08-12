@@ -65,3 +65,4 @@ export {
   getSeriesExceptions,
   previewRecurrence,
 } from "./queries/occurrenceQueries.js";
+export { eventToIcs, eventsToIcs } from "./portability/eventToIcs.js";

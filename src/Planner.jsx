@@ -71,10 +71,12 @@ import {
   readPlannerRecoverySnapshot,
   savePlannerState,
 } from "./platform/persistence/plannerStateStore.js";
+import { createBlankPlannerState } from "./platform/persistence/plannerStateImport.js";
+import { readPlannerImportText } from "./platform/persistence/plannerStateRead.js";
 import {
-  createBlankPlannerState,
-  normalizeImportedPlannerState,
-} from "./platform/persistence/plannerStateImport.js";
+  replacePlannerNotebook,
+  wipePlannerNotebook,
+} from "./platform/persistence/plannerNotebookReplace.js";
 import {
   projectPlannerSearch,
   resolvePlannerSearchPick,
@@ -86,6 +88,12 @@ import { getDayTasksWithCarry } from "./features/planner/carryForward.js";
 import { planOverdueForToday, pullableOverdue } from "./features/planner/overduePull.js";
 import { AUTO_COMPLETE_DELAY_MS, autoCompleteStillValid, togglesLastOpenStep } from "./features/planner/autoComplete.js";
 import { recordBackupDismissed, recordBackupTaken, shouldPromptBackup } from "./features/planner/backupReminder.js";
+import { normalizeMeetingLink } from "./features/planner/meetingLink.js";
+import {
+  applyTaskCompleteUndo,
+  createTaskCompleteUndoPayload,
+  isTaskCompleteUndo,
+} from "./features/planner/taskCompleteUndo.js";
 import {
   gestureChangedAnything,
   EMPTY_SPACE_LIFT_MS,
@@ -110,6 +118,7 @@ import {
   restoreTaskPlannedDates,
 } from "./features/planner/taskMutations.js";
 import { resolveTaskForInspection } from "./features/planner/taskInspection.js";
+import { eventForUi } from "./features/planner/eventPresentation.js";
 import { projectPlannerDay } from "./features/planner/dayProjection.js";
 import { findOpenSlots } from "./features/planner/slotSearch.js";
 import {
@@ -177,8 +186,10 @@ import {
   resizeEvent as resizeCalendarEvent,
   restoreEvent as restoreCalendarEvent,
   updateEvent as updateCalendarEvent,
+  eventsToIcs,
 } from "./domains/calendar/index.js";
 import { addDays, addDaysToKey, diffDays, isDateKey, keyOf, parseKey } from "./shared/time/dateKey.js";
+import { createId } from "./shared/ids.js";
 import { addMinutesToLocalDateTime, localDateTimeToEpochMinutes } from "./shared/time/localDateTime.js";
 import { getOffsetCandidates } from "./shared/time/timezone.js";
 import { THEMES } from "./design/themes.js";
@@ -320,7 +331,11 @@ const fmtTime = (m, clock) => {
 };
 /* The rail drops ":00" — an hour label is a ruler mark, not a timestamp. */
 const fmtHour = (h, clock) => (clock === "24" ? pad(h) : `${h12(h)} ${meridiem(h)}`);
-const uid = () => Math.random().toString(36).slice(2, 9);
+/* Persisted records (events, tasks, notes, exceptions, awards) go through
+   createId() — crypto.randomUUID — so two writes cannot collide on a 7-char
+   Math.random token. Ephemeral React keys reuse the same helper; a UUID in a
+   toast key is harmless and keeps one id story in this file. */
+const uid = createId;
 const hexToRgb = (hex) => {
   const n = parseInt(hex.slice(1), 16);
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
@@ -403,60 +418,6 @@ const plannedLabel = (dateKey, todayKey) => {
   return fmtDay(dateKey);
 };
 const fmtDay = (k) => { const d = parseKey(k); return `${WD[d.getDay()]} ${pad(d.getDate())} ${MO[d.getMonth()]}`; };
-
-const recurrenceToRepeat = (recurrence) => recurrence ? {
-  freq: recurrence.frequency,
-  interval: recurrence.interval || 1,
-  ...(recurrence.byWeekday ? { byDay: recurrence.byWeekday.map((value) => typeof value === "number" ? value : value.weekday) } : {}),
-  until: recurrence.until || "",
-  ...(recurrence.count ? { count: recurrence.count } : {}),
-  endMode: recurrence.count ? "count" : recurrence.until ? "until" : "never",
-  missingDatePolicy: recurrence.missingDatePolicy || "skip",
-  ...(recurrence.frequency === "monthly" ? { monthlyMode: recurrence.byWeekday?.some((value) => typeof value === "object" && value.ordinal === -1) ? "last-weekday" : "day" } : {}),
-} : null;
-
-function eventForUi(event) {
-  if (!event?.timing) return event;
-  const repeat = recurrenceToRepeat(event.recurrence);
-  if (event.timing.kind === "all-day") {
-    return {
-      ...event,
-      date: event.date || event.timing.startDate,
-      allDay: true,
-      start: 0,
-      dur: event.dur || 1440,
-      endDate: addDaysToKey(event.timing.endDateExclusive, -1),
-      repeat,
-    };
-  }
-  const start = localDateTimeToEpochMinutes(event.timing.startLocal);
-  const end = localDateTimeToEpochMinutes(event.timing.endLocal);
-  return {
-    ...event,
-    date: event.date || event.timing.startLocal.slice(0, 10),
-    allDay: false,
-    start: event.start ?? ((start % 1440) + 1440) % 1440,
-    dur: event.dur || end - start,
-    endDate: event.timing.endLocal.slice(0, 10),
-    repeat,
-    timeZoneMode: event.timing.timeZoneMode,
-    timeZone: event.timing.timeZone || "",
-  };
-}
-
-/* A meeting link is stored as a full URL. Bare domains get https:// prefixed;
-   anything that still fails to parse as http(s) yields "" so a Join affordance is
-   never rendered around a link it could not open. */
-const normalizeMeetingLink = (value) => {
-  const raw = String(value || "").trim();
-  if (!raw) return "";
-  const candidate = /^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`;
-  try {
-    const url = new URL(candidate);
-    if ((url.protocol === "http:" || url.protocol === "https:") && url.hostname.includes(".")) return url.href;
-  } catch { /* not a URL */ }
-  return "";
-};
 
 function canonicalOccurrenceIdentity(id) {
   try { return parseOccurrenceId(id); } catch { return null; }
@@ -851,6 +812,8 @@ export default function Planner() {
   const [alertToast, setAlertToast] = useState(null);
   const [confirmWipe, setConfirmWipe] = useState(false);
   const [pendingImport, setPendingImport] = useState(null);
+  const [importError, setImportError] = useState(null);
+  const [notebookUnreadable, setNotebookUnreadable] = useState(false);
   const [saveBlocked, setSaveBlocked] = useState(false);
   const [confirmComplete, setConfirmComplete] = useState(null);
   const [smartView, setSmartView] = useState("today");
@@ -1105,19 +1068,23 @@ export default function Planner() {
       }
       try {
         const loaded = await loadPlannerState(storage);
+        /* Truly empty storage is a first run: the sample week is a teaching
+           notebook, and the welcome sheet asks before it becomes "yours". */
         state = loaded.state || migrateV7ToV8(migrateV6ToV7(migrateV5ToV6(migrateV4ToV5(seed()))));
         if (!loaded.state) await savePlannerState(storage, state);
         isFirstRun = !loaded.state;
         reportStorage("planner", false);
       } catch (error) {
-        /* Either the device can't be written to, or what's already stored is
-           unreadable. Open a fresh notebook in memory so the app is still usable —
-           without it `ready` flips while `db` stays null and the loader never
-           clears — but leave autosave off. Overwriting here would seed straight over
-           data that is damaged rather than gone, and export stays the way out. */
-        state = migrateV7ToV8(migrateV6ToV7(migrateV5ToV6(migrateV4ToV5(seed()))));
+        /* Unreadable storage is not a first run. Opening the sample week here
+           used to present someone else's demo as the user's notebook, and a
+           later successful save would have overwritten the damaged record.
+           Open a blank in-memory notebook, keep autosave off, and tell the
+           user the stored copy was not touched. Export still prefers the raw
+           recovery snapshot when one can be read. */
+        state = createBlankPlannerState();
         nextRecoverySnapshot = await readPlannerRecoverySnapshot(storage);
         setSaveBlocked(true);
+        setNotebookUnreadable(true);
         reportStorage("planner", true, "read-failed");
       }
       let nextPreferences = preferencesFromLegacyState(state);
@@ -2015,7 +1982,7 @@ export default function Planner() {
     }), { completed: true });
     /* §10.3. Completion is the most-used action and fires from a 420ms hold, so it
        is the one that most needs a way back. */
-    flash("Completed", { type: "task-complete", id, rewardSources: rewardSource ? [rewardSource] : [] });
+    flash("Completed", { ...createTaskCompleteUndoPayload(id), rewardSources: rewardSource ? [rewardSource] : [] });
     setConfirmComplete(null);
   };
   /* The delegated native touch listener lives longer than the render that
@@ -2427,12 +2394,7 @@ export default function Planner() {
       if (p.type === "restore-calendar-occurrence") return restoreOccurrence(d, p.snapshot).state;
       if (p.type === "restore-planner-state" && p.snapshot?.state) return structuredClone(p.snapshot.state);
       if (p.type === "drop-event") return deleteCalendarEvent(d, p.id, { scope: "series" }).state;
-      if (p.type === "task-complete") {
-        const seriesId = parseTaskOccurrenceId(p.id).seriesId;
-        const target = d.tasks.find((x) => x.id === seriesId);
-        if (target && target.status === "completed") d.tasks = reopenTaskCommand(d.tasks, seriesId).tasks;
-        d.taskExceptions = removeTaskException(d.taskExceptions, seriesId, parseTaskOccurrenceId(p.id).occurrenceDate ?? "");
-      }
+      if (isTaskCompleteUndo(p)) return applyTaskCompleteUndo(d, p);
       if (p.type === "unskip") { const o = { ...d.overrides }; delete o[p.key]; d.overrides = o; }
       /* Deferral moves the planned date, so undo moves it back — the old handler
          keyed on a payload type deferTask never emits and a field tasks no longer
@@ -2455,7 +2417,7 @@ export default function Planner() {
   const commitSave = (p, scope) => {
     beep(p.id ? "click" : "schedule");
     const patch = p.kind === "event"
-      ? { title: p.title, start: p.start, dur: p.dur, cat: p.cat, place: p.place, note: p.note, link: normalizeMeetingLink(p.link) || String(p.link || "").trim(), allDay: p.allDay, endDate: p.endDate || null, repeat: p.repeat, recurrence: p.recurrence, timing: p.timing, alerts: p.alerts }
+      ? { title: p.title, start: p.start, dur: p.dur, cat: p.cat, place: p.place, note: p.note, link: normalizeMeetingLink(p.link), allDay: p.allDay, endDate: p.endDate || null, repeat: p.repeat, recurrence: p.recurrence, timing: p.timing, alerts: p.alerts }
       : buildTaskWritePatch(p, dateKey);
     if (p.date && scope !== "one") patch.date = p.date;
     if (p.id && p.kind === "event") {
@@ -2683,52 +2645,53 @@ export default function Planner() {
     setBackupRecord((current) => recordBackupTaken(current, { state: exportState, today: todayKey }));
   };
   const exportIcs = () => {
-    const esc = (s) => String(s || "").replace(/([,;\\])/g, "\\$1").replace(/\n/g, "\\n");
-    const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Not Boring Moleskine Planner//EN"];
-    db.events.forEach((e) => {
-      const view = eventForUi(e);
-      lines.push("BEGIN:VEVENT", `UID:${e.id}@planner`, `SUMMARY:${esc(e.title)}`);
-      if (view.allDay) {
-        lines.push(`DTSTART;VALUE=DATE:${e.timing.startDate.replace(/-/g, "")}`);
-        lines.push(`DTEND;VALUE=DATE:${e.timing.endDateExclusive.replace(/-/g, "")}`);
-      } else {
-        lines.push(
-          `DTSTART:${e.timing.startLocal.replace(/[-:]/g, "")}00`,
-          `DTEND:${e.timing.endLocal.replace(/[-:]/g, "")}00`,
-        );
-      }
-      if (view.repeat) {
-        const r = view.repeat;
-        let rule = `FREQ=${r.freq.toUpperCase()};INTERVAL=${r.interval || 1}`;
-        if (r.freq === "weekly" && r.byDay && r.byDay.length) rule += `;BYDAY=${r.byDay.map((i) => DAY_LETTERS[i]).join(",")}`;
-        if (r.until) rule += `;UNTIL=${r.until.replace(/-/g, "")}T235900Z`;
-        lines.push(`RRULE:${rule}`);
-      }
-      if (e.place) lines.push(`LOCATION:${esc(e.place)}`);
-      if (normalizeMeetingLink(e.link)) lines.push(`URL:${normalizeMeetingLink(e.link)}`);
-      if (e.note) lines.push(`DESCRIPTION:${esc(e.note)}`);
-      (e.alerts || []).forEach((a) => lines.push("BEGIN:VALARM", "ACTION:DISPLAY", `TRIGGER:-PT${a}M`, `DESCRIPTION:${esc(e.title)}`, "END:VALARM"));
-      lines.push("END:VEVENT");
-    });
-    lines.push("END:VCALENDAR");
-    download(`planner-${todayKey}.ics`, lines.join("\r\n"), "text/calendar");
+    /* Series-level ICS lives in the calendar portability adapter so a bad
+       event can no longer throw out of this handler and abort the download.
+       eventForUi is injected — the adapter must not import this file. */
+    const { ics, skipped } = eventsToIcs(db.events, eventForUi, normalizeMeetingLink);
+    download(`planner-${todayKey}.ics`, ics, "text/calendar");
+    if (skipped) beep("abort");
   };
   const importJson = (file) => {
+    setImportError(null);
+    if (file.size > 2 * 1024 * 1024) {
+      setImportError("This file is larger than 2 MB.");
+      beep("abort");
+      return;
+    }
     const r = new FileReader();
     r.onload = () => {
-      try {
-        const parsed = JSON.parse(r.result);
-        if (parsed && parsed.events) setPendingImport(normalizeImportedPlannerState(parsed));
-        else beep("abort");
-      } catch (e) { beep("abort"); }
+      const result = readPlannerImportText(String(r.result || ""), { byteLength: file.size });
+      if (!result.ok) {
+        setPendingImport(null);
+        setImportError(result.error);
+        beep("abort");
+        return;
+      }
+      setPendingImport(result.state);
+      setImportError(null);
     };
     r.readAsText(file);
   };
+  const applyReplacedNotebook = (session) => {
+    /* One transaction: notebook + reminders + motivation + backup fingerprint.
+       Preferences and diagnostics stay on the device — see plannerNotebookReplace. */
+    setDb(session.state);
+    setReminderRecords(session.reminderRecords);
+    setMotivationLedger(session.motivationLedger);
+    setBackupRecord(session.backupRecord);
+    setPendingImport(null);
+    setImportError(null);
+    setNotebookUnreadable(false);
+  };
   const wipeAll = () => {
     beep("delete");
-    setDb(createBlankPlannerState());
-    setReminderRecords([]);
-    setMotivationLedger(createMotivationLedger());
+    applyReplacedNotebook(wipePlannerNotebook({
+      themeId: preferences?.display.themeId,
+      sound: preferences?.feedback.sound,
+      notifs: preferences?.notifications.systemEnabled,
+      clock: preferences?.display.clock,
+    }));
     setConfirmWipe(false);
     setSettings(false);
   };
@@ -4740,8 +4703,10 @@ export default function Planner() {
         <div className="fixed inset-x-0 top-14 z-50 flex justify-center px-3 pointer-events-none">
           <div data-test="storage-alert" role="alert" className="nb-up flex items-start sm:items-center gap-3 px-3 py-2 w-full sm:w-auto pointer-events-auto"
             style={{ background: NOW_RED, color: "#FFFFFF", borderRadius: CARD_R }}>
-            <span style={{ fontFamily: MONO }} className="nb-label shrink-0">NOT SAVING</span>
-            <span className="text-sm min-w-0 flex-1 leading-snug">Changes are staying in this tab only.</span>
+            <span style={{ fontFamily: MONO }} className="nb-label shrink-0">{notebookUnreadable ? "COULD NOT READ" : "NOT SAVING"}</span>
+            <span className="text-sm min-w-0 flex-1 leading-snug">{notebookUnreadable
+              ? "The stored notebook was not opened. Nothing on the device was overwritten."
+              : "Changes are staying in this tab only."}</span>
             <button onClick={() => { beep("click"); exportJson(); }}
               style={{ fontFamily: MONO }} className="text-xs font-bold tracking-widest shrink-0 underline">SAVE A COPY</button>
           </div>
@@ -5146,7 +5111,7 @@ export default function Planner() {
 
             <InlineField T={T} surface={surface} icon={<LinkIcon />}>
               <InlineText T={T} value={inspectDraft.link || ""} placeholder="Add a meeting link" ariaLabel="Meeting link"
-                onCommit={(link) => editEntry({ link: normalizeMeetingLink(link) || link.trim() })} onBeginEdit={beginDetailEdit} className="text-sm" />
+                onCommit={(link) => editEntry({ link: normalizeMeetingLink(link) })} onBeginEdit={beginDetailEdit} className="text-sm" />
               {normalizeMeetingLink(inspectDraft.link) && (
                 <a href={normalizeMeetingLink(inspectDraft.link)} target="_blank" rel="noopener noreferrer"
                   onClick={(e) => e.stopPropagation()}
@@ -5517,17 +5482,17 @@ export default function Planner() {
                 SOME SUPPORTING SETTINGS COULD NOT BE SAVED — YOUR NOTEBOOK IS STILL AVAILABLE
               </p>
             )}
+            {importError && (
+              <p style={{ fontFamily: MONO, color: NOW_RED }} className="nb-label mb-2">{importError}</p>
+            )}
             <Reveal open={Boolean(pendingImport)}>
               {pendingImportShown && (
                 <div className="flex items-center gap-2 mb-2 p-2" style={{ boxShadow: `inset 0 0 0 1px ${NOW_RED}` }}>
-                  <span className="flex-1 text-xs">Replace everything on this device?</span>
+                  <span className="flex-1 text-xs">Replace the notebook on this device? Theme and other settings stay.</span>
                   <button onClick={() => { setPendingImport(null); beep("abort"); }} style={{ fontFamily: MONO, color: T.dimText }} className="nb-label">CANCEL</button>
                   <button onClick={() => {
                     if (!pendingImport) return;
-                    setDb(pendingImport);
-                    setReminderRecords([]);
-                    setMotivationLedger(createMotivationLedger({ openingBalance: pendingImport.xp ?? 0 }));
-                    setPendingImport(null);
+                    applyReplacedNotebook(replacePlannerNotebook(pendingImport));
                     beep("commit");
                     setSettings(false);
                   }} style={{ fontFamily: MONO, color: NOW_RED }} className="text-xs font-bold tracking-widest">REPLACE</button>
@@ -7855,7 +7820,7 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick, weekStart 
   }, [kind, recurrence && JSON.stringify(recurrence), JSON.stringify(timing), ok]);
   const submit = () => {
     if (!ok) return;
-    onSubmit({ id: initial.id, date: unplanned && kind === "task" ? null : date, unplanned, kind, title: title.trim(), cat, start: allDay ? 0 : start, dur: allDay ? 0 : len, xp, place, link: normalizeMeetingLink(link) || link.trim(), note, at, estimate, due: due || null, allDay, endDate, alerts, repeat: repeat && repeat.freq ? repeat : null, recurrence, timing });
+    onSubmit({ id: initial.id, date: unplanned && kind === "task" ? null : date, unplanned, kind, title: title.trim(), cat, start: allDay ? 0 : start, dur: allDay ? 0 : len, xp, place, link: normalizeMeetingLink(link), note, at, estimate, due: due || null, allDay, endDate, alerts, repeat: repeat && repeat.freq ? repeat : null, recurrence, timing });
   };
   const toTime = (m) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
   const fromTime = (s) => { const [h, m] = s.split(":").map(Number); return h * 60 + m; };

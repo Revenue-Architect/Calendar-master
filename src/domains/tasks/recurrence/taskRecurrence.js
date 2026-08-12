@@ -162,7 +162,10 @@ export function taskExceptionsForSeries(exceptions, seriesIds) {
 }
 
 export function removeTaskException(exceptions, seriesId, occurrenceDate) {
-  return exceptions.filter(
+  /* A notebook that has never grown an exceptions array still has to accept
+     "undo this occurrence". Siblings already null-coalesce; this one used to
+     throw out of Planner's state updater and blank the page. */
+  return (exceptions ?? []).filter(
     (entry) => !(entry.seriesId === seriesId && entry.occurrenceDate === occurrenceDate),
   );
 }

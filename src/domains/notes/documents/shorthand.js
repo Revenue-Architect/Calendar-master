@@ -1,4 +1,5 @@
 import { normalizeBlocks } from "../model/block.js";
+import { createId } from "../../../shared/ids.js";
 
 /* §3.2. The document model has always held seven block types; nothing could create
    more than a paragraph. Rather than a formatting toolbar, a line declares its own
@@ -37,7 +38,7 @@ function classify(line) {
   return { type: "paragraph", text: trimmed };
 }
 
-export function textToBlocks(text, existing = [], newId = () => Math.random().toString(36).slice(2, 9)) {
+export function textToBlocks(text, existing = [], newId = createId) {
   const lines = String(text ?? "").split("\n");
   const blocks = [];
   let fence = null;

@@ -1,4 +1,5 @@
 import React from "react";
+import { readLocalNotebook, readHostNotebook } from "./notebookRecovery.js";
 
 /* The last thing standing between a render error and someone's notebook.
  *
@@ -15,31 +16,17 @@ import React from "react";
  *
  * It also refuses to trust its own surroundings: no theme (that lives in the
  * state that may be gone), no shared components (any of them could be the
- * thing that threw), no imports beyond React. Plain markup and inline styles,
- * so the only way this screen fails is if React itself is broken.
+ * thing that threw). The only extra import is the storage probe, which itself
+ * imports nothing. Probe order matches `src/storage.js`: host `window.storage`
+ * first (embed), then `localStorage` (standalone). A host-only notebook used
+ * to look like "nothing to rescue".
  */
-
-/* The planner's keys, oldest first. Whichever is present is the real notebook —
-   a crash during a migration is exactly when this matters most. */
-const STATE_KEYS = ["nbmp:state:v8", "nbmp:state:v7", "nbmp:state:v6", "nbmp:state:v5", "nbmp:state:v4"];
 
 const GROUND = "#0A0A0C";
 const INK = "#F4F4F5";
 const DIM = "#797987";
 const ACCENT = "#CCFF00";
 const MONO = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
-
-function readNotebook() {
-  for (const key of STATE_KEYS) {
-    try {
-      const raw = window.localStorage.getItem(key);
-      if (raw) return { key, raw };
-    } catch {
-      /* Storage itself may be the thing that is broken. Keep looking. */
-    }
-  }
-  return null;
-}
 
 function downloadNotebook(found) {
   const stamp = new Date().toISOString().slice(0, 10);
@@ -59,11 +46,11 @@ function downloadNotebook(found) {
 export class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
-    this.state = { error: null, saved: false };
+    this.state = { error: null, saved: false, hostChecked: false, hostFound: null };
   }
 
   static getDerivedStateFromError(error) {
-    return { error, saved: false };
+    return { error, saved: false, hostChecked: false, hostFound: null };
   }
 
   componentDidCatch(error, info) {
@@ -72,13 +59,35 @@ export class ErrorBoundary extends React.Component {
        how a bad record becomes a boot loop. */
     // eslint-disable-next-line no-console
     console.error("Planner crashed", error, info?.componentStack);
+    this.lookForHostNotebook();
+  }
+
+  lookForHostNotebook() {
+    Promise.resolve()
+      .then(() => readHostNotebook())
+      .then((hostFound) => {
+        if (this.state.error) this.setState({ hostChecked: true, hostFound });
+      })
+      .catch(() => {
+        if (this.state.error) this.setState({ hostChecked: true, hostFound: null });
+      });
   }
 
   render() {
-    const { error, saved } = this.state;
+    const { error, saved, hostChecked, hostFound } = this.state;
     if (!error) return this.props.children;
 
-    const found = readNotebook();
+    const localFound = readLocalNotebook();
+    const found = hostFound || localFound;
+    /* Host storage is async. Until it answers, do not claim the notebook is
+       gone — an embed keeps the only copy there, and localStorage is empty
+       on purpose. Standalone has no host, so there is nothing to wait for
+       and the empty-state copy can render on the first paint (e2e depends
+       on that). */
+    const hasHost = typeof window !== "undefined"
+      && window.storage
+      && typeof window.storage.get === "function";
+    const stillLooking = !found && hasHost && !hostChecked;
     const button = {
       fontFamily: MONO, fontSize: 12, fontWeight: 700, letterSpacing: "0.1em",
       padding: "12px 16px", borderRadius: 12, border: "none", cursor: "pointer",
@@ -122,6 +131,10 @@ export class ErrorBoundary extends React.Component {
                 </p>
               )}
             </>
+          ) : stillLooking ? (
+            <p style={{ fontSize: 15, lineHeight: 1.5, margin: "12px 0 0" }}>
+              Looking for a notebook on this device…
+            </p>
           ) : (
             <>
               <p style={{ fontSize: 15, lineHeight: 1.5, margin: "12px 0 0" }}>
