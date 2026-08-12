@@ -18,7 +18,7 @@ export function resolvePlannerSearchPick(state, result, { todayDate } = {}) {
 }
 
 export function searchResultDateLabel(result, formatDate) {
-  if (result.recurrence) return "↻";
+  if (result.recurrence) return "REPEAT";
   if (result.date) return formatDate(result.date);
   if (result.kind === "task") return "INBOX";
   return result.kind === "note" ? "NOTE" : "EVENT";

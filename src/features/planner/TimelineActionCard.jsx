@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState } from "react";
+
 export default function TimelineActionCard({
   task,
   top,
@@ -29,6 +31,19 @@ export default function TimelineActionCard({
     open();
   };
   const done = task.status === "completed";
+  const wasDone = useRef(done);
+  const [completionPulse, setCompletionPulse] = useState(false);
+  useEffect(() => {
+    if (done && !wasDone.current) {
+      setCompletionPulse(true);
+      const timer = setTimeout(() => setCompletionPulse(false), 760);
+      wasDone.current = done;
+      return () => clearTimeout(timer);
+    }
+    wasDone.current = done;
+    setCompletionPulse(false);
+    return undefined;
+  }, [done]);
 
   return (
     <div className="nb-timeline-lane absolute overflow-hidden"
@@ -36,7 +51,7 @@ export default function TimelineActionCard({
       <div aria-hidden="true" className="absolute inset-0 flex items-center pl-2"
         data-test="timeline-completion-backdrop"
         style={{ backgroundColor: theme.accent, color: theme.on, fontFamily: mono, borderRadius: cardRadius, opacity: 1 }}>
-        <span className="nb-label">✓ COMPLETE</span>
+        <span className="nb-label inline-flex items-center gap-1"><svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m3 8.2 3 3 7-7" /></svg>COMPLETE</span>
       </div>
       <div className="absolute inset-0"
         style={{
@@ -58,7 +73,7 @@ export default function TimelineActionCard({
             opacity: 1,
           }}>
           <span className="flex min-w-0 items-center gap-2 py-1 pr-2.5 pl-8">
-            <span className="nb-lead min-w-0 flex-1 truncate" style={{ textDecoration: done ? "line-through" : "none" }}>{task.title}</span>
+            <span className="nb-lead min-w-0 flex-1 truncate" style={{ color: done ? theme.dimText : theme.text }}>{task.title}</span>
             <span style={{ fontFamily: mono, color: sizing ? theme.accent : theme.dim }} className="nb-task-time ml-auto nb-data shrink-0">
               {sizing ? formatDuration(estimate) : formatTime(task.planned.startMinute)}
             </span>
@@ -83,9 +98,18 @@ export default function TimelineActionCard({
             style={{ color: theme.accent, background: "transparent", touchAction: "manipulation" }}>
             <span data-test="timeline-complete-mark" aria-hidden="true"
               className="flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold leading-none"
-              style={{ background: theme.card, boxShadow: `inset 0 0 0 1.25px ${theme.accent}` }}>✓</span>
-        </button>
+               style={{ background: theme.card, boxShadow: `inset 0 0 0 1.25px ${theme.accent}` }}>
+              <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m3 8.2 3 3 7-7" /></svg>
+            </span>
+         </button>
       </div>
+      {completionPulse && (
+        <div data-test="timeline-action-completion-overlay" aria-hidden="true"
+          className="nb-action-complete-overlay absolute inset-0 z-20 flex items-center gap-2 px-3 pointer-events-none"
+          style={{ background: theme.accent, color: theme.on, borderRadius: cardRadius, fontFamily: mono }}>
+          <span className="nb-label">COMPLETE</span>
+        </div>
+      )}
     </div>
   );
 }

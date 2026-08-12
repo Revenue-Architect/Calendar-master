@@ -531,6 +531,92 @@ function BellIcon({ size = 11 }) {
   );
 }
 
+/* Small controls use the same drawn language as the bell. Unicode arrows and
+   dingbats inherit whichever font happens to be active, so their weight and
+   baseline changed between themes and made compact controls look unfinished. */
+function UiIcon({ size = 14, viewBox = "0 0 16 16", children, fill = "none", stroke = "currentColor", strokeWidth = 1.6, style = {} }) {
+  return (
+    <svg width={size} height={size} viewBox={viewBox} fill={fill} stroke={stroke}
+      strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round"
+      aria-hidden="true" focusable="false" style={{ display: "block", flexShrink: 0, pointerEvents: "none", ...style }}>
+      {children}
+    </svg>
+  );
+}
+
+function MenuIcon({ size = 14 }) {
+  return <UiIcon size={size}><path d="M2.5 4h11M2.5 8h11M2.5 12h11" /></UiIcon>;
+}
+
+function MoreIcon({ size = 14 }) {
+  return <UiIcon size={size} fill="currentColor" stroke="none"><circle cx="3.25" cy="8" r="1.15" /><circle cx="8" cy="8" r="1.15" /><circle cx="12.75" cy="8" r="1.15" /></UiIcon>;
+}
+
+function ChevronIcon({ direction = "right", size = 12 }) {
+  const angle = direction === "left" ? 180 : direction === "up" ? -90 : direction === "down" ? 90 : 0;
+  return <UiIcon size={size} style={{ transform: `rotate(${angle}deg)` }}><path d="m5 2.75 5.25 5.25L5 13.25" /></UiIcon>;
+}
+
+function CloseIcon({ size = 14 }) {
+  return <UiIcon size={size}><path d="m4 4 8 8M12 4 4 12" /></UiIcon>;
+}
+
+function ExternalLinkIcon({ size = 12 }) {
+  return <UiIcon size={size}><path d="M9 3h4v4M13 3 7.25 8.75" /><path d="M11 8.5v3a1.5 1.5 0 0 1-1.5 1.5h-5A1.5 1.5 0 0 1 3 11.5v-5A1.5 1.5 0 0 1 4.5 5h3" /></UiIcon>;
+}
+
+function RepeatIcon({ size = 13 }) {
+  return <UiIcon size={size}><path d="M2.75 5.25h8.5l-1.75-1.75M13.25 10.75h-8.5l1.75 1.75" /><path d="M11.25 5.25A2.25 2.25 0 0 1 13 7.4M4.75 10.75A2.25 2.25 0 0 1 3 8.6" /></UiIcon>;
+}
+
+function WarningIcon({ size = 13 }) {
+  return <UiIcon size={size}><path d="m8 2.15 5.45 10.7H2.55L8 2.15Z" /><path d="M8 5.35v3.2M8 10.55h.01" /></UiIcon>;
+}
+
+function ArrowUpIcon({ size = 13 }) {
+  return <UiIcon size={size}><path d="M8 13V3M4.5 6.5 8 3l3.5 3.5" /></UiIcon>;
+}
+
+function ArrowRightIcon({ size = 13 }) {
+  return <UiIcon size={size}><path d="M3 8h10M9 4l4 4-4 4" /></UiIcon>;
+}
+
+function GripIcon({ size = 14 }) {
+  return <UiIcon size={size}><path d="M5 3.5h.01M8 3.5h.01M11 3.5h.01M5 8h.01M8 8h.01M11 8h.01M5 12.5h.01M8 12.5h.01M11 12.5h.01" strokeWidth="2.4" /></UiIcon>;
+}
+
+function SearchIcon({ size = 14 }) {
+  return <UiIcon size={size}><circle cx="7" cy="7" r="4" /><path d="m10 10 3 3" /></UiIcon>;
+}
+
+function PinIcon({ size = 14, filled = false }) {
+  return <UiIcon size={size} fill={filled ? "currentColor" : "none"}><path d="m8 2.35 1.55 3.15 3.45.5-2.5 2.45.6 3.45L8 10.3l-3.1 1.6.6-3.45L3 6l3.45-.5L8 2.35Z" /></UiIcon>;
+}
+
+function CheckIcon({ size = 12 }) {
+  return <UiIcon size={size}><path d="m3 8.2 3 3 7-7" /></UiIcon>;
+}
+
+function LocationIcon({ size = 13 }) {
+  return <UiIcon size={size}><path d="M8 13s4-3.55 4-7a4 4 0 0 0-8 0c0 3.45 4 7 4 7Z" /><circle cx="8" cy="6" r="1.25" /></UiIcon>;
+}
+
+function LinkIcon({ size = 13 }) {
+  return <UiIcon size={size}><path d="m6.25 9.75-1 1a2.1 2.1 0 0 1-3-3l1.5-1.5a2.1 2.1 0 0 1 3-.05" /><path d="m9.75 6.25 1-1a2.1 2.1 0 0 1 3 3l-1.5 1.5a2.1 2.1 0 0 1-3 .05" /><path d="m5.75 8.25 4.5-.5" /></UiIcon>;
+}
+
+function ClockIcon({ size = 13 }) {
+  return <UiIcon size={size}><circle cx="8" cy="8" r="5.25" /><path d="M8 5v3.25l2.25 1.25" /></UiIcon>;
+}
+
+function CalendarIcon({ size = 13 }) {
+  return <UiIcon size={size}><rect x="2.5" y="3.5" width="11" height="10" rx="1.5" /><path d="M5 2.5v2M11 2.5v2M2.5 6.25h11" /></UiIcon>;
+}
+
+function BlockIcon({ size = 13 }) {
+  return <UiIcon size={size}><circle cx="8" cy="8" r="5.25" /><path d="m4.5 4.5 7 7" /></UiIcon>;
+}
+
 function useSynth(enabled) {
   const ref = useRef(null);
   const ctx = () => {
@@ -790,12 +876,14 @@ export default function Planner() {
      an ordinary dependency, so the listeners follow it wherever it goes rather
      than relying on someone remembering to list every cause of a remount. */
   const streamRef = useRef(null);
+  const timelineScrollTopRef = useRef(0);
   const [streamNode, setStreamNode] = useState(null);
   const [dayHourHeight, setDayHourHeight] = useState(HOUR_H);
   const dayHeight = dayHourHeight * 24;
   const nowLabelClearanceMin = Math.round((18 / dayHourHeight) * 60);
   const attachStream = useCallback((node) => {
     streamRef.current = node;
+    timelineScrollTopRef.current = node?.scrollTop ?? 0;
     setStreamNode(node);
   }, []);
   useEffect(() => {
@@ -1341,7 +1429,9 @@ export default function Planner() {
     if (!ready || !streamRef.current) return;
     const first = timed.slice().sort((a, b) => a.start - b.start)[0];
     const anchor = isToday ? nowMin : first ? first.start : 480;
-    streamRef.current.scrollTop = Math.max(0, (anchor / 1440) * dayHeight - 140);
+    const nextScrollTop = Math.max(0, (anchor / 1440) * dayHeight - 140);
+    streamRef.current.scrollTop = nextScrollTop;
+    timelineScrollTopRef.current = nextScrollTop;
     /* `zoom` belongs here: changing it rebuilds the surface above the day, which
        remounts the stream with a scrollTop of zero. Without it, zooming out to the
        month and back left the day sitting at midnight — eight hours above anything
@@ -2790,16 +2880,24 @@ export default function Planner() {
     };
 
     const onScroll = () => {
-      /* Scroll events are the browser's verdict that this touch belongs to the
-         viewport. Do not second-guess it with a pixel comparison: composited
-         scrolling can dispatch before `scrollTop` is reflected to JS. */
-      if (el.scrollTop <= Math.max(48, dayHourHeight)) setTimelineFocused(false);
+      /* A near-midnight position is only a restore signal when the stream is
+         moving *towards* midnight. The old position-only check treated the
+         first few pixels of a downward scroll from 0 as a return to midnight,
+         so a collapsed header immediately unfolded and gave the timeline back
+         the space the user had just asked it to keep. Keep the previous value
+         in a ref because this listener is deliberately passive and can run
+         between composited scroll frames. */
+      const previousScrollTop = timelineScrollTopRef.current;
+      const nextScrollTop = el.scrollTop;
+      const movingTowardMidnight = nextScrollTop < previousScrollTop - 1;
+      timelineScrollTopRef.current = nextScrollTop;
+      if (nextScrollTop <= Math.max(48, dayHourHeight) && movingTowardMidnight) setTimelineFocused(false);
       const p = press.t;
       if (!p) return;
-      const travelled = Math.abs(el.scrollTop - p.startScrollTop);
+      const travelled = Math.abs(nextScrollTop - p.startScrollTop);
       cancelPress();
       if (!window.matchMedia?.("(max-width:1023px)").matches || viewMode !== "timeline" || zoom !== "day") return;
-      if (el.scrollTop > Math.max(48, dayHourHeight) && travelled >= 24) setTimelineFocused(true);
+      if (nextScrollTop > Math.max(48, dayHourHeight) && travelled >= 24) setTimelineFocused(true);
     };
 
     const onEnd = (e) => {
@@ -3391,7 +3489,7 @@ export default function Planner() {
         .nb-stamp{transition:box-shadow 160ms ease}
         .nb-stamp:focus-within{box-shadow:0 1px 0 0 ${T.accent}}
         .nb-row:hover{background:${T.faint}55}
-        .nb-cell{transition:opacity 420ms cubic-bezier(.2,.7,.3,1),transform 420ms cubic-bezier(.2,.7,.3,1)}
+        .nb-cell{transition:opacity 300ms cubic-bezier(.23,1,.32,1),transform 300ms cubic-bezier(.23,1,.32,1)}
         .nb-page{transform-origin:left center;backface-visibility:hidden}
         /* A day arrives from the side it came from, and it arrives quickly.
            This used to be a rotateY through a 1400px perspective — a page-flip
@@ -3405,17 +3503,24 @@ export default function Planner() {
         @keyframes turnnext{0%{opacity:.4;transform:translate3d(6%,0,0)}55%{opacity:1}100%{opacity:1;transform:translate3d(0,0,0)}}
         .nb-turn-prev{animation:turnprev 240ms cubic-bezier(.22,.9,.28,1)}
         @keyframes turnprev{0%{opacity:.4;transform:translate3d(-6%,0,0)}55%{opacity:1}100%{opacity:1;transform:translate3d(0,0,0)}}
-        .nb-up{animation:nbup 200ms cubic-bezier(.2,.9,.3,1.1)}
+        .nb-up{animation:nbup 200ms cubic-bezier(.23,1,.32,1)}
         @keyframes nbup{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
         /* Low-frequency collections get one quiet entrance so a filter change
            does not replace the whole surface on a single frame. Four pixels is
            enough to establish continuity without making readable content travel. */
         .nb-list-enter{animation:nb-list-enter 180ms cubic-bezier(.23,1,.32,1) both;animation-delay:calc(var(--nb-list-index, 0) * 30ms);will-change:transform,opacity}
         @keyframes nb-list-enter{from{opacity:0;transform:translate3d(0,4px,0)}to{opacity:1;transform:translate3d(0,0,0)}}
+        .nb-action-complete-overlay{animation:nb-action-complete 760ms cubic-bezier(.23,1,.32,1) both;will-change:clip-path,opacity}
+        @keyframes nb-action-complete{
+          0%{opacity:0;clip-path:inset(0 100% 0 0 round 14px)}
+          18%{opacity:1}
+          64%{opacity:1;clip-path:inset(0 0 0 0 round 14px)}
+          100%{opacity:0;clip-path:inset(0 0 0 100% round 14px)}
+        }
         /* Every menu and sheet is the same material as the control that opened it.
            When a trigger can be measured the surface grows from that exact pill;
            first-run and system sheets use the bottom-sheet fallback. */
-        .nb-fluid{animation:nbfluid 420ms cubic-bezier(.22,1.12,.28,1);transform-origin:bottom center;border-radius:24px 24px 0 0;will-change:transform,opacity,clip-path}
+        .nb-fluid{animation:nbfluid 420ms cubic-bezier(.23,1,.32,1);transform-origin:bottom center;border-radius:24px 24px 0 0;will-change:transform,opacity,clip-path}
         @keyframes nbfluid{
           0%{opacity:0;transform:translateY(26px) scale(.965)}
           55%{opacity:1}
@@ -3470,17 +3575,17 @@ export default function Planner() {
            sheet's own morph, which is what made the first open of a session stutter
            while that pipeline warmed up. Fading the scrim's opacity fades the blur
            in with it, so it costs one blur instead of eighteen and looks the same. */
-        .nb-scrim{animation:nbscrim 300ms ease forwards;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
+        .nb-scrim{animation:nbscrim 260ms cubic-bezier(.23,1,.32,1) forwards;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
         @keyframes nbscrim{from{opacity:0}to{opacity:1}}
         .nb-scrim.nb-fluid-closing{animation:nbscrimout 240ms ease forwards}
         @keyframes nbscrimout{0%,25%{opacity:1}100%{opacity:0}}
         .nb-sheet-h{transition:height 320ms cubic-bezier(.2,.8,.25,1)}
-        .nb-edit-actions{transition:width 420ms cubic-bezier(.22,1.12,.28,1),background-color 260ms ease,box-shadow 260ms ease}
-        .nb-edit-liquid{transition:left 420ms cubic-bezier(.22,1.12,.28,1)}
-        .nb-edit-face{transition:opacity 200ms ease,transform 420ms cubic-bezier(.22,1.12,.28,1)}
+        .nb-edit-actions{transition:width 360ms cubic-bezier(.23,1,.32,1),background-color 260ms ease,box-shadow 260ms ease}
+        .nb-edit-liquid{transition:left 360ms cubic-bezier(.23,1,.32,1)}
+        .nb-edit-face{transition:opacity 200ms ease,transform 360ms cubic-bezier(.23,1,.32,1)}
         /* A multi-select pill has no single selection to slide, so its fill grows in
            and shrinks out with the same spring the traveling pill uses. */
-        .nb-chip-fill{transition:transform 320ms cubic-bezier(.2,1.4,.3,1),opacity 200ms ease}
+        .nb-chip-fill{transition:transform 260ms cubic-bezier(.23,1,.32,1),opacity 180ms ease}
         /* Toasts leave the way they came instead of vanishing on the frame they are
            dismissed. */
         .nb-toast-out{animation:nbtoastout 200ms cubic-bezier(.4,0,.65,1) forwards;pointer-events:none}
@@ -3488,12 +3593,12 @@ export default function Planner() {
         /* The mobile sheet's spring overshoots its resting place; the extension below
            keeps the overshoot from showing a gap under the bottom edge. */
         .nb-msheet::after{content:"";position:absolute;top:100%;left:0;right:0;height:40px;background:inherit}
-        .nb-detail-editor{animation:nbrise 300ms cubic-bezier(.22,1.12,.28,1)}
+        .nb-detail-editor{animation:nbrise 260ms cubic-bezier(.23,1,.32,1)}
         /* A primary action gets a little more weight under the finger than a
            secondary one — the difference is felt before it is read. */
-        .nb-liquid{transition:scale 260ms cubic-bezier(.2,1.6,.35,1),box-shadow 260ms ease}
+        .nb-liquid{transition:scale 220ms cubic-bezier(.23,1,.32,1),box-shadow 220ms ease}
         .nb-liquid:active{scale:.94;transition:scale 90ms cubic-bezier(.4,0,.6,1)}
-        .nb-rise{animation:nbrise 260ms cubic-bezier(.22,1.12,.28,1)}
+        .nb-rise{animation:nbrise 240ms cubic-bezier(.23,1,.32,1)}
         @keyframes nbrise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
         .nb-p{animation:nbp 620ms cubic-bezier(.1,.7,.3,1) forwards}
         @keyframes nbp{from{opacity:1;transform:translate(0,0) scale(1)}to{opacity:0;transform:translate(var(--tx),var(--ty)) scale(.2)}}
@@ -3502,6 +3607,7 @@ export default function Planner() {
         .nb-blink{animation:nbb 2s ease-in-out infinite}
         @keyframes nbb{0%,100%{opacity:1}50%{opacity:.4}}
         button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible,
+        a[href]:focus-visible,summary:focus-visible,label[for]:focus-visible,[role="button"]:focus-visible,
         [data-event-id]:focus-visible,[data-task-chip]:focus-visible{outline:2px solid ${T.accent};outline-offset:2px}
         input,textarea,select{color:${T.text}}
         input::placeholder,textarea::placeholder{color:${T.dim}}
@@ -3517,7 +3623,8 @@ export default function Planner() {
            \`scale\` composites on its own and cannot fight them. */
         button,[role="button"],a[href],summary,label[for],[data-event-id],[data-task-chip]{
           -webkit-tap-highlight-color:transparent;touch-action:manipulation;
-          transition:scale 240ms cubic-bezier(.2,1.5,.35,1),background-color 200ms ease,color 200ms ease,box-shadow 220ms ease,opacity 160ms ease;
+           scale:1;
+           transition:scale 220ms cubic-bezier(.23,1,.32,1),background-color 200ms ease,color 200ms ease,box-shadow 220ms ease,opacity 160ms ease;
         }
         /* A collision changes every card in its cluster, so lane geometry settles
            as one connected movement. Left and width keep positioning out of
@@ -3525,7 +3632,7 @@ export default function Planner() {
            to do their own jobs. */
         .nb-timeline-lane{
           container-type:inline-size;
-          transition:left 280ms cubic-bezier(.22,.61,.36,1),width 280ms cubic-bezier(.22,.61,.36,1),scale 240ms cubic-bezier(.2,1.5,.35,1),opacity 160ms ease;
+          transition:left 240ms cubic-bezier(.22,.61,.36,1),width 240ms cubic-bezier(.22,.61,.36,1),scale 220ms cubic-bezier(.23,1,.32,1),opacity 160ms ease;
         }
         /* A shared lane is information in itself. Once a card is narrow, repeat,
            alert, conflict and time badges stop repeating that information and
@@ -3547,8 +3654,8 @@ export default function Planner() {
           [data-event-id]:hover,[data-task-chip]:hover{scale:1.006}
         }
         /* A control that completes something pops rather than just filling in. */
-        .nb-pop{animation:nbpop 380ms cubic-bezier(.2,1.6,.35,1)}
-        @keyframes nbpop{0%{scale:1}35%{scale:1.28}100%{scale:1}}
+        .nb-pop{animation:nbpop 300ms cubic-bezier(.23,1,.32,1)}
+        @keyframes nbpop{0%{scale:1}35%{scale:1.12}100%{scale:1}}
 
         /* The expanded row has intrinsic height, which made the previous 1fr to
            0fr grid transition discrete in Chromium. Measure the stable inner
@@ -3571,10 +3678,10 @@ export default function Planner() {
         .nb-day-heading.is-focused{padding-top:.45rem;padding-bottom:.45rem;border-bottom:1px solid ${T.line}}
         .nb-day-heading.is-focused .nb-display{font-size:2rem;line-height:2rem}
 
-        @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}
+        @media(prefers-reduced-motion:reduce){*{animation-name:none!important;animation-duration:1ms!important;animation-iteration-count:1!important;transition-duration:1ms!important;scroll-behavior:auto!important}
           .nb-app-surface,.nb-nav-brand,.nb-nav-item,.nb-nav-membership{transition-duration:1ms!important}
           button:active,[role="button"]:active,a[href]:active,[data-event-id]:active,[data-task-chip]:active{scale:1!important}}
-        ${preferences?.display.reducedMotion ? `*{animation:none!important;transition:none!important}
+        ${preferences?.display.reducedMotion ? `*{animation-name:none!important;animation-duration:1ms!important;animation-iteration-count:1!important;transition-duration:1ms!important;scroll-behavior:auto!important}
           button:active,[role="button"]:active,a[href]:active,[data-event-id]:active,[data-task-chip]:active{scale:1!important}` : ""}
       `}</style>
 
@@ -3586,7 +3693,7 @@ export default function Planner() {
       <header style={{ background: T.bg, borderBottom: `1px solid ${T.line}`, color: T.text }} className="nb-hud sticky top-0 z-30 px-3 sm:px-5 py-2 flex items-center justify-between gap-3">
         <div className="nb-hud-left flex items-center gap-2 min-w-0">
           <button ref={navToggleRef} data-test="nav-toggle" type="button" aria-label="Toggle primary navigation" aria-controls="planner-navigation" aria-expanded={navOpen}
-            onClick={() => { beep("click"); navOpen ? closeNavigation() : openNavigation(); }} className="nb-shell-control nb-tap w-8 h-8" title="Navigation">▤</button>
+            onClick={() => { beep("click"); navOpen ? closeNavigation() : openNavigation(); }} className="nb-shell-control nb-tap w-8 h-8 flex items-center justify-center" title="Navigation"><MenuIcon /></button>
           <div className="flex items-baseline gap-2 min-w-0">
           {level != null && <>
             <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label">LVL</span>
@@ -3601,7 +3708,7 @@ export default function Planner() {
           <button onClick={() => { beep("click"); setNotebook("all"); }} style={{ fontFamily: MONO, color: T.dim }} className="nb-hud-notes nb-tap px-2 py-1 text-xs tracking-widest">NOTES</button>
           <GooeySearch T={T} surface={surface} reduced={reducedMotion}
             onOpen={() => { beep("click"); setSearchQuery(""); setSearch(true); }} />
-          <button onClick={() => { beep("click"); setSettings(true); }} style={{ color: T.dim }} className="nb-hud-settings nb-tap w-8 h-8 text-sm" aria-label="Settings">⋯</button>
+          <button onClick={() => { beep("click"); setSettings(true); }} style={{ color: T.dim }} className="nb-hud-settings nb-tap w-8 h-8 flex items-center justify-center" aria-label="Settings"><MoreIcon /></button>
           <button data-test="new-entry" onClick={() => { beep("click"); setComposer({ kind: "event", start: startSlot(nowMin), dur: 60, notch: true }); }} style={{ background: T.accent, color: T.on, fontFamily: MONO }} className="nb-tap nb-liquid px-2 py-1.5 text-xs font-bold tracking-widest">NEW</button>
         </div>
       </header>
@@ -3610,7 +3717,7 @@ export default function Planner() {
       <div onTouchStart={onTouchStartNav} onTouchMove={onTouchMoveNav} style={{ borderBottom: `1px solid ${T.line}` }}>
         <div className="flex items-center justify-between px-3 sm:px-5 py-1.5">
           <button data-test="zoom-out" onClick={zoomOut} style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-data" disabled={zoom === "month"}>
-            {zoom === "day" ? "◂ WEEK" : zoom === "week" ? "◂ MONTH" : `${MO[monthCursor.getMonth()]} ${monthCursor.getFullYear()}`}
+            {zoom === "day" || zoom === "week" ? <span className="inline-flex items-center gap-1"><ChevronIcon direction="left" />{zoom === "day" ? "WEEK" : "MONTH"}</span> : `${MO[monthCursor.getMonth()]} ${monthCursor.getFullYear()}`}
           </button>
           <div className="flex items-center gap-2">
             {/* Timeline answers "when, and for how long"; agenda answers "what is
@@ -3621,12 +3728,12 @@ export default function Planner() {
               style={{ border: `1px solid ${T.line}` }} />
             {zoom === "month" && (
               <>
-                <button onClick={() => { beep("page"); setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() - 1, 1)); }} style={{ color: T.dimText }} className="nb-tap px-2 text-xs">◂</button>
-                <button onClick={() => { beep("page"); setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1)); }} style={{ color: T.dimText }} className="nb-tap px-2 text-xs">▸</button>
+                <button aria-label="Previous month" onClick={() => { beep("page"); setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() - 1, 1)); }} style={{ color: T.dimText }} className="nb-tap px-2 text-xs flex items-center justify-center"><ChevronIcon direction="left" /></button>
+                <button aria-label="Next month" onClick={() => { beep("page"); setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1)); }} style={{ color: T.dimText }} className="nb-tap px-2 text-xs flex items-center justify-center"><ChevronIcon /></button>
               </>
             )}
-            <button data-test="zoom-in" onClick={zoomIn} style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-data" disabled={zoom === "day"}>
-              {zoom === "month" ? "WEEK ▸" : zoom === "week" ? "DAY ▸" : ""}
+          <button data-test="zoom-in" onClick={zoomIn} style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-data" disabled={zoom === "day"}>
+              {zoom === "month" ? <span className="inline-flex items-center gap-1">WEEK<ChevronIcon /></span> : zoom === "week" ? <span className="inline-flex items-center gap-1">DAY<ChevronIcon /></span> : ""}
             </button>
           </div>
         </div>
@@ -3701,7 +3808,7 @@ export default function Planner() {
         {(zoom === "week" || zoom === "day") && (
           <div className="flex items-center">
             {zoom === "day" && (
-              <button onClick={() => goDay(-1)} aria-label="Previous day" style={{ color: T.dimText }} className="nb-tap shrink-0 px-2 sm:px-3 py-1">◂</button>
+              <button onClick={() => goDay(-1)} aria-label="Previous day" style={{ color: T.dimText }} className="nb-tap shrink-0 px-2 sm:px-3 py-1 flex items-center justify-center"><ChevronIcon direction="left" /></button>
             )}
             <div ref={stripRef} style={stripFade} className="nb-x overflow-x-auto flex-1 min-w-0">
             <div className="flex min-w-max">
@@ -3739,7 +3846,7 @@ export default function Planner() {
             </div>
             </div>
             {zoom === "day" && (
-              <button onClick={() => goDay(1)} aria-label="Next day" style={{ color: T.dimText }} className="nb-tap shrink-0 px-2 sm:px-3 py-1">▸</button>
+              <button onClick={() => goDay(1)} aria-label="Next day" style={{ color: T.dimText }} className="nb-tap shrink-0 px-2 sm:px-3 py-1 flex items-center justify-center"><ChevronIcon /></button>
             )}
           </div>
         )}
@@ -3765,7 +3872,7 @@ export default function Planner() {
               onClick={() => { beep("tick"); setTimelineFocused((current) => !current); }}
               className="nb-tap mb-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
               style={{ color: T.dimText, border: `1px solid ${T.line}` }}>
-              <span aria-hidden="true" style={{ transform: dayTimelineFocused ? "rotate(180deg)" : "none", transition: "transform 220ms cubic-bezier(.77,0,.175,1)" }}>⌃</span>
+              <span aria-hidden="true" style={{ transform: dayTimelineFocused ? "rotate(180deg)" : "none", transition: "transform 220ms cubic-bezier(.77,0,.175,1)" }}><ChevronIcon direction="up" /></span>
             </button>
           )}
         </div>
@@ -3977,7 +4084,7 @@ export default function Planner() {
                         height: 2,
                         background: T.accent,
                         zIndex: 6,
-                        transition: "top 600ms cubic-bezier(.2,.8,.25,1), width 600ms cubic-bezier(.2,.8,.25,1)",
+                         transition: "top 260ms cubic-bezier(.23,1,.32,1), width 260ms cubic-bezier(.23,1,.32,1)",
                       }} />
                       {/* With nothing live the rule crosses empty grid, so the time
                           can sit at the end of it. While an event is live the whole
@@ -3998,7 +4105,7 @@ export default function Planner() {
                             : { right: 0 }),
                           top: mounted ? (nowMin / 1440) * dayHeight - 9 : -9,
                           zIndex: 7,
-                          transition: "top 600ms cubic-bezier(.2,.8,.25,1)",
+                           transition: "top 260ms cubic-bezier(.23,1,.32,1)",
                         }}>
                         {/* In the gutter it drops the meridiem: the hour labels it
                             sits among already say which half of the day this is, and
@@ -4029,7 +4136,7 @@ export default function Planner() {
                             opacity: past ? 0.74 : 1,
                             boxShadow: held
                               ? `0 10px 28px rgba(0,0,0,.45), inset 0 0 0 2px ${T.accent}`
-                              : live ? `inset 0 0 0 1.5px ${T.accent}` : past ? `inset 0 0 0 1px ${T.line}` : "none",
+                              : live ? `inset 0 0 0 1.5px ${T.accent}` : past ? `inset 0 0 0 1px ${T.line}` : "var(--e1)",
                             transform: held ? "scale(1.02)" : "none",
                             transition: "transform 120ms ease, box-shadow 120ms ease, background 200ms ease",
                             touchAction: "pan-y", cursor: "grab",
@@ -4039,7 +4146,7 @@ export default function Planner() {
                               else instead of an unrelated crimson. */}
                           {live && (
                             <span className="absolute inset-y-0 left-0 pointer-events-none"
-                              style={{ width: `${pct}%`, background: `${T.accent}26`, transition: "width 600ms linear" }}>
+                               style={{ width: `${pct}%`, background: `${T.accent}26`, transition: "width 260ms linear" }}>
                               {/* the leading edge is the rule, continued through the card */}
                               <span className="absolute inset-y-0" style={{ right: 0, width: 2, background: T.accent }} />
                             </span>
@@ -4050,13 +4157,13 @@ export default function Planner() {
                                   legible at 22px height where a left rail would vanish */}
                               <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: held ? T.accent : catColor(e.cat) }} />
                               <span title={e.title} className="nb-lead min-w-0 truncate flex-1">{e.title}</span>
-                              {conflictIds.has(e.id) && <span title="Overlaps another event" style={{ color: NOW_RED }} className="nb-event-secondary text-xs shrink-0">⚠</span>}
-                              {e.repeat && <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-event-secondary text-xs shrink-0">↻</span>}
+                              {conflictIds.has(e.id) && <span title="Overlaps another event" style={{ color: NOW_RED }} className="nb-event-secondary shrink-0"><WarningIcon /></span>}
+                              {e.repeat && <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-event-secondary shrink-0"><RepeatIcon /></span>}
                               {normalizeMeetingLink(e.link) && (
                                 <a href={normalizeMeetingLink(e.link)} target="_blank" rel="noopener noreferrer" draggable={false}
                                   onPointerDown={(ev) => ev.stopPropagation()} onPointerUp={(ev) => ev.stopPropagation()} onClick={(ev) => ev.stopPropagation()}
                                   aria-label={`Join ${e.title}`}
-                                  style={{ fontFamily: MONO, color: T.accentText }} className="text-xs font-bold tracking-widest shrink-0">JOIN ↗</a>
+                                  style={{ fontFamily: MONO, color: T.accentText }} className="inline-flex items-center gap-1 text-xs font-bold tracking-widest shrink-0">JOIN <ExternalLinkIcon /></a>
                               )}
                               {e.alerts && e.alerts.length > 0 && (
                                 <span style={{ color: T.dimText }} className="nb-event-secondary shrink-0" title="Has a reminder"><BellIcon /></span>
@@ -4175,7 +4282,7 @@ export default function Planner() {
           and left mounted it sits over the view it duplicates. */}
       {viewMode !== "actions" && (
       <div className="nb-msheet lg:hidden fixed inset-x-0 bottom-0 z-40 flex flex-col"
-        style={{ height: "76vh", background: T.card, borderTop: `1px solid ${T.line}`, transform: sheet ? "translateY(0)" : "translateY(calc(100% - 52px))", transition: "transform 420ms cubic-bezier(.22,1.12,.28,1)" }}>
+         style={{ height: "76vh", background: T.card, borderTop: `1px solid ${T.line}`, transform: sheet ? "translateY(0)" : "translateY(calc(100% - 52px))", transition: "transform 360ms cubic-bezier(.23,1,.32,1)" }}>
         <div className="flex items-center gap-3 px-3 shrink-0" style={{ height: 52 }}>
           <button onClick={() => { beep("tick"); setSheet(!sheet); }} className="nb-tap flex-1 flex items-center gap-2 text-left" aria-label="Toggle actions">
             <span style={{ background: T.faint }} className="w-8 h-0.5" />
@@ -4256,7 +4363,7 @@ export default function Planner() {
           <Sheet T={T} title={fmtDay(peekDay)} onClose={() => setPeekDay(null)}
             headerAction={(
               <button onClick={() => { setPeekDay(null); beep("tick"); jumpTo(peekDay); setZoom("day"); }}
-                style={{ fontFamily: MONO, color: T.accentText }} className="nb-tap px-2 py-1 text-xs font-bold tracking-widest">OPEN DAY ▸</button>
+                  style={{ fontFamily: MONO, color: T.accentText }} className="nb-tap inline-flex items-center gap-1 px-2 py-1 text-xs font-bold tracking-widest">OPEN DAY <ChevronIcon /></button>
             )}>
             <div className="flex flex-col gap-1.5">
               {allDayP.length + timedP.length + tasksP.length === 0 && (
@@ -4336,8 +4443,8 @@ export default function Planner() {
                     {/* Structure edits write to the record immediately rather than the
                         draft, so they stay behind the editing state — otherwise Revert
                         would appear to cover a change it cannot take back. */}
-                    {detailEditing && <button onClick={() => promoteSub(inspect.id, item.id)} style={{ color: T.dimText }} className="text-xs px-1" aria-label="Promote step to a subtask">↥</button>}
-                    {detailEditing && <button onClick={() => removeSub(inspect.id, item.id)} style={{ color: T.dimText }} className="text-xs px-1" aria-label="Remove step">✕</button>}
+                    {detailEditing && <button onClick={() => promoteSub(inspect.id, item.id)} style={{ color: T.dimText }} className="text-xs px-1" aria-label="Promote step to a subtask"><ArrowUpIcon /></button>}
+                    {detailEditing && <button onClick={() => removeSub(inspect.id, item.id)} style={{ color: T.dimText }} className="text-xs px-1" aria-label="Remove step"><CloseIcon /></button>}
                   </div>
                 ))}
                 {detailEditing && <InlineAdd T={T} surface={surface} onAdd={(v) => addSub(inspect.id, v)} />}
@@ -4360,7 +4467,7 @@ export default function Planner() {
               <div className="flex items-start gap-3 px-3 py-3 mt-4" style={{ background: surface, borderRadius: CARD_R }}>
                 <InlineText T={T} value={inspectDraft.note} placeholder="Add a note" ariaLabel="Note" multiline
                   onCommit={(note) => editEntry({ note })} onBeginEdit={beginDetailEdit} className="text-sm leading-relaxed" />
-                <span style={{ color: T.dimText }} className="text-sm shrink-0 pt-0.5">≡</span>
+                <span style={{ color: T.dimText }} className="text-sm shrink-0 pt-0.5"><MoreIcon /></span>
               </div>
 
               {/* The governing facts, grouped as one card so they read as a block of
@@ -4368,7 +4475,7 @@ export default function Planner() {
               <div className="mt-4 overflow-hidden" style={{ background: surface, borderRadius: CARD_R }}>
                 {/* §4.6. When it is planned, and when it is due, are edited where
                     they are read. §4.7 keeps the repeat rule behind its own gesture. */}
-                <DetailRow T={T} icon="▦" divider>
+                <DetailRow T={T} icon={<CalendarIcon />} divider>
                   {detailEditing ? (
                     <div className="flex flex-col gap-2">
                       <PillNav T={T} ariaLabel="Action planning state"
@@ -4424,7 +4531,7 @@ export default function Planner() {
                   onPick={(value) => editEntry({ reminders: value === "off" ? [] : [{
                     id: (inspectDraft.reminders ?? [])[0]?.id || uid(), anchor: "planned", offsetMinutes: value,
                   }] })} />
-                <DetailRow T={T} icon="⌛" divider>
+                <DetailRow T={T} icon={<ClockIcon />} divider>
                   <div className="flex items-center gap-2">
                     <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label shrink-0">DUE</span>
                     <InlineStamp T={T} dark={dark} type="date" ariaLabel="Deadline"
@@ -4434,43 +4541,43 @@ export default function Planner() {
                       style={{ color: inspectDraft.deadline.date && inspectDraft.deadline.date < todayKey ? NOW_RED : T.text }}
                       className="text-sm" />
                     {inspectDraft.deadline.date && (
-                      <button onClick={() => editEntry({ due: "" })} style={{ color: T.dimText }} className="nb-tap text-xs px-1" aria-label="Clear deadline">✕</button>
+                      <button onClick={() => editEntry({ due: "" })} style={{ color: T.dimText }} className="nb-tap text-xs px-1" aria-label="Clear deadline"><CloseIcon /></button>
                     )}
                   </div>
                 </DetailRow>
                 {/* §8.2. The label names the attribute; it does not repeat the value
                     the selected chip already carries. */}
-                <InlineChoiceRow T={T} icon="◈" divider onBeginEdit={beginDetailEdit} label={`Worth ${inspectDraft.reward}`}
+                 <InlineChoiceRow T={T} icon={<UiIcon size={13}><path d="m8 2.5 1.2 3.2 3.3 1.1-3.3 1.2L8 11.5l-1.2-3.5-3.3-1.2 3.3-1.1L8 2.5Z" /></UiIcon>} divider onBeginEdit={beginDetailEdit} label={`Worth ${inspectDraft.reward}`}
                   value={inspectDraft.reward} options={[20, 30, 40, 60].map((xp) => [xp, String(xp)])}
                   onPick={(xp) => editEntry({ xp })} />
                 {inspectDraft.status === "waiting" && (
-                  <DetailRow T={T} icon="◷" divider={inspectDependsOn.length > 0}>
+                   <DetailRow T={T} icon={<ClockIcon />} divider={inspectDependsOn.length > 0}>
                     <span className="block text-sm">{inspectDraft.followUpDate ? `Follow up ${fmtDay(inspectDraft.followUpDate)}` : "Waiting, no follow-up date"}</span>
                   </DetailRow>
                 )}
                 {/* Every edge is listed, satisfied or not, each removable — otherwise a
                     dependency could be added from here but never taken back. */}
-                <DetailRow T={T} icon="▤" divider>
+                <DetailRow T={T} icon={<MenuIcon />} divider>
                   <button
                     onClick={() => { beep("click"); beginDetailEdit(); setListPicker({ taskId: inspect.id, draft: true }); }} className="text-left w-full">
                     <span className="block text-sm">{(db.taskLists.find((l) => l.id === inspectDraft.listId) || {}).name || "—"}</span>
                     <span style={{ color: T.dimText }} className="block text-xs mt-0.5">Tap to move to another list</span>
                   </button>
                 </DetailRow>
-                <InlineChoiceRow T={T} icon="◑" divider onBeginEdit={beginDetailEdit} label={inspectDraft.category} dot={catColor}
+                 <InlineChoiceRow T={T} icon={<UiIcon size={13}><path d="M8 2.5a5.5 5.5 0 1 0 0 11V2.5Z" /><circle cx="8" cy="8" r="5.5" /></UiIcon>} divider onBeginEdit={beginDetailEdit} label={inspectDraft.category} dot={catColor}
                   value={inspectDraft.category} options={CATS.map((c) => [c, c])}
                   onPick={(cat) => editEntry({ cat })} />
                 <DetailRow T={T} icon="#" divider={inspectDependsOn.length > 0}>
                   <TagField T={T} tags={inspectDraft.tags} onBeginEdit={beginDetailEdit} onChange={(tags) => editEntry({ tags })} />
                 </DetailRow>
                 {inspectDependsOn.map((blocker, i) => (
-                  <DetailRow key={blocker.id} T={T} icon="⛌" divider={i < inspectDependsOn.length - 1}>
+                   <DetailRow key={blocker.id} T={T} icon={<BlockIcon />} divider={i < inspectDependsOn.length - 1}>
                     <div className="flex items-center gap-2">
                       <span className="flex-1 text-sm truncate"
                         style={{ color: blocker.status === "completed" ? T.dim : NOW_RED, textDecoration: blocker.status === "completed" ? "line-through" : "none" }}>
                         Blocked by {blocker.title}
                       </span>
-                      {detailEditing && <button onClick={() => unblockTask(inspect.id, blocker.id)} style={{ color: T.dimText }} className="text-xs px-1" aria-label="Remove dependency">✕</button>}
+                      {detailEditing && <button onClick={() => unblockTask(inspect.id, blocker.id)} style={{ color: T.dimText }} className="text-xs px-1" aria-label="Remove dependency"><CloseIcon /></button>}
                     </div>
                   </DetailRow>
                 ))}
@@ -4565,12 +4672,12 @@ export default function Planner() {
               label={inspectDraft.cat || "—"} value={inspectDraft.cat} dot={catColor}
               options={CATS.map((c) => [c, c])} onPick={(cat) => editEntry({ cat })} />
 
-            <InlineChoice T={T} surface={surface} icon="◷" label={inspectDraft.allDay ? "All day" : "At a time"} onBeginEdit={beginDetailEdit}
+            <InlineChoice T={T} surface={surface} icon={<ClockIcon />} label={inspectDraft.allDay ? "All day" : "At a time"} onBeginEdit={beginDetailEdit}
               value={inspectDraft.allDay ? "all" : "timed"} options={[["timed", "AT A TIME"], ["all", "ALL DAY"]]}
               onPick={(v) => editEntry({ allDay: v === "all", ...(v === "all" ? {} : { start: inspectDraft.start || 540, dur: inspectDraft.dur || 60 }) })} />
 
             {inspectDraft.allDay && (
-              <InlineField T={T} surface={surface} icon="→">
+              <InlineField T={T} surface={surface} icon={<ArrowRightIcon />}>
                 <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label shrink-0">THROUGH</span>
                 <InlineStamp T={T} dark={dark} type="date" ariaLabel="Last day"
                   value={inspectDraft.endDate || inspectDraft.date || dateKey} min={inspectDraft.date || dateKey}
@@ -4587,7 +4694,7 @@ export default function Planner() {
                 chosen here rather than in a form somewhere else. The safety was never
                 the separate surface — it is the scope question, which the save still
                 asks. */}
-            <InlineChoice T={T} surface={surface} icon="↻" onBeginEdit={beginDetailEdit}
+            <InlineChoice T={T} surface={surface} icon={<RepeatIcon />} onBeginEdit={beginDetailEdit}
               label={inspectDraft.repeat ? repeatLabel(inspectDraft.repeat) : "Does not repeat"}
               value={inspectDraft.repeat?.freq ?? "never"}
               options={REPEATS}
@@ -4601,19 +4708,19 @@ export default function Planner() {
               options={[["off", "OFF"], [0, "AT TIME"], [5, "5M"], [15, "15M"], [30, "30M"], [60, "60M"]]}
               onPick={(v) => editEntry({ alerts: v === "off" ? [] : [v] })} />
 
-            <InlineField T={T} surface={surface} icon="⌖">
+            <InlineField T={T} surface={surface} icon={<LocationIcon />}>
               <InlineText T={T} value={inspectDraft.place} placeholder="Add a place" ariaLabel="Place"
                 onCommit={(place) => editEntry({ place })} onBeginEdit={beginDetailEdit} className="text-sm" />
             </InlineField>
 
-            <InlineField T={T} surface={surface} icon="⌁">
+            <InlineField T={T} surface={surface} icon={<LinkIcon />}>
               <InlineText T={T} value={inspectDraft.link || ""} placeholder="Add a meeting link" ariaLabel="Meeting link"
                 onCommit={(link) => editEntry({ link: normalizeMeetingLink(link) || link.trim() })} onBeginEdit={beginDetailEdit} className="text-sm" />
               {normalizeMeetingLink(inspectDraft.link) && (
                 <a href={normalizeMeetingLink(inspectDraft.link)} target="_blank" rel="noopener noreferrer"
                   onClick={(e) => e.stopPropagation()}
                   style={{ fontFamily: MONO, background: T.accent, color: T.on, borderRadius: 999 }}
-                  className="nb-tap px-2.5 py-1 text-xs font-bold tracking-widest shrink-0">JOIN</a>
+                  className="nb-tap inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold tracking-widest shrink-0">JOIN <ExternalLinkIcon /></a>
               )}
               {inspectDraft.link && !normalizeMeetingLink(inspectDraft.link) && (
                 <span style={{ fontFamily: MONO, color: NOW_RED }} className="nb-label shrink-0">NOT A LINK</span>
@@ -4621,11 +4728,11 @@ export default function Planner() {
             </InlineField>
 
             {conflictIds.has(inspect.id) && (
-              <Pill T={T} surface={surface} icon="⚠" tint={NOW_RED} label="Overlaps another event on this day" />
+              <Pill T={T} surface={surface} icon={<WarningIcon />} tint={NOW_RED} label="Overlaps another event on this day" />
             )}
 
             <div className="flex items-start gap-3 px-3 py-2.5" style={{ background: surface, borderRadius: CARD_R }}>
-              <span style={{ color: T.dimText }} className="text-sm shrink-0 w-4 text-center pt-0.5">≡</span>
+              <span style={{ color: T.dimText }} className="text-sm shrink-0 w-4 text-center pt-0.5"><MoreIcon /></span>
               <InlineText T={T} value={inspectDraft.note} placeholder="Add a note" ariaLabel="Note" multiline
                 onCommit={(note) => editEntry({ note })} onBeginEdit={beginDetailEdit} className="text-sm leading-relaxed" />
             </div>
@@ -4773,7 +4880,7 @@ export default function Planner() {
                 </span>
                 {!list.isSystem && !list.isDefault && (
                   <button onClick={() => { beep("delete"); mutate((d) => { const r = deleteTaskList(d.taskLists, d.tasks, list.id); return { ...d, taskLists: r.lists, tasks: r.tasks }; }); }}
-                    style={{ color: T.dimText }} className="text-xs px-1" aria-label="Delete list">✕</button>
+                    style={{ color: T.dimText }} className="text-xs px-1 flex items-center justify-center" aria-label="Delete list"><CloseIcon /></button>
                 )}
               </div>
             ))}
@@ -5341,16 +5448,29 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromote
   useEffect(() => { previousDone.current = subDone; }, [subDone]);
   const dueLeft = t.deadline.date ? diffDays(t.deadline.date, todayKey) : null;
   const isDone = t.status === "completed";
+  const wasDone = useRef(isDone);
+  const [completionPulse, setCompletionPulse] = useState(false);
+  useEffect(() => {
+    if (isDone && !wasDone.current) {
+      setCompletionPulse(true);
+      const timer = setTimeout(() => setCompletionPulse(false), 760);
+      wasDone.current = isDone;
+      return () => clearTimeout(timer);
+    }
+    wasDone.current = isDone;
+    setCompletionPulse(false);
+    return undefined;
+  }, [isDone]);
 
   return (
-    <div data-task={t.id} className="relative overflow-hidden" style={{ background: "transparent", borderRadius: CARD_R, boxShadow: target ? `inset 0 2px 0 ${T.accent}` : "none" }}>
+    <div data-task={t.id} className="relative overflow-hidden" style={{ background: "transparent", borderRadius: CARD_R, boxShadow: target ? `inset 0 2px 0 ${T.accent}, var(--e1)` : "var(--e1)" }}>
         <div data-test="task-completion-backdrop" className="absolute inset-0 flex items-center justify-between px-4"
           style={{ fontFamily: MONO, background: dx > 0 ? T.accent : surface, color: dx > 0 ? T.on : T.dimText, borderRadius: CARD_R }}>
           <span className="nb-data" style={{ color: T.on, opacity: dx > 20 ? 1 : 0 }}>COMPLETE</span>
           <span className="nb-data" style={{ color: T.dimText, opacity: dx < -20 ? 1 : 0 }}>TOMORROW</span>
         </div>
 
-      <article className="relative" style={{ background: surface, borderRadius: CARD_R, transform: `translateX(${dx}px)`, transition: dx === 0 ? "transform 220ms cubic-bezier(.2,.8,.25,1)" : "none", opacity: isDone ? 0.55 : 1, touchAction: "pan-y", userSelect: "none", WebkitUserSelect: "none" }}
+      <article className="relative" style={{ background: surface, borderRadius: CARD_R, transform: `translateX(${dx}px)`, transition: dx === 0 ? "transform 220ms cubic-bezier(.2,.8,.25,1)" : "none", opacity: isDone ? 0.82 : 1, touchAction: "pan-y", userSelect: "none", WebkitUserSelect: "none" }}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
         <div className="flex items-start gap-3 p-3 pl-4">
           <button onPointerDown={(e) => { e.stopPropagation(); if (selection) return; if (!isDone) startHold(); }}
@@ -5375,15 +5495,16 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromote
             })}
           </button>
 
-          <div className="flex-1 min-w-0">
-            <button onClick={() => onInspect(t.id)} className="text-left w-full">
-              <span className="block text-sm font-semibold leading-snug" style={{ textDecoration: isDone ? "line-through" : "none", color: isDone ? T.dim : T.text }}>{t.title}</span>
-            </button>
-            <div className="flex flex-wrap items-center gap-2 mt-1" style={{ fontFamily: MONO }}>
+            <div className="flex-1 min-w-0">
+              <button onClick={() => onInspect(t.id)} className="text-left w-full">
+                <span className="block text-sm font-semibold leading-snug" style={{ color: isDone ? T.dimText : T.text }}>{t.title}</span>
+              </button>
+              <div className="flex flex-wrap items-center gap-2 mt-1" style={{ fontFamily: MONO }}>
               <span className="inline-flex items-center gap-1.5">
                 <span className="shrink-0 rounded-full" style={{ width: 7, height: 7, background: catColor(t.category) }} />
                 <span style={{ color: T.dimText }} className="nb-data">{t.category}</span>
-              </span>
+                </span>
+                {isDone && <span style={{ color: T.accentText, border: `1px solid ${T.accent}`, borderRadius: 999 }} className="px-1.5 py-0.5 nb-label shrink-0">DONE</span>}
               {/* Open is the default and stays quiet; the two states you set on
                   purpose announce themselves, so changing status in the detail view
                   has a visible effect out here on the row. */}
@@ -5393,13 +5514,13 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromote
               {!isDone && t.status === "waiting" && (
                 <span style={{ color: T.dimText, border: `1px solid ${T.line}`, borderRadius: 999 }} className="px-1.5 py-0.5 nb-label shrink-0">WAITING</span>
               )}
-              {t.recurrence && <span style={{ color: T.dimText }} className="text-xs">↻</span>}
+              {t.recurrence && <span style={{ color: T.dimText }} className="text-xs"><RepeatIcon /></span>}
               {t.planned.startMinute != null && <button onClick={() => onUnschedule(t.id)} style={{ color: T.accentText }} className="nb-data">{fmtTime(t.planned.startMinute, clock)}</button>}
               {dueLeft != null && <span style={{ color: dueLeft <= 0 ? NOW_RED : T.dim }} className="nb-data">DUE {dueLeft === 0 ? "TODAY" : dueLeft < 0 ? `${-dueLeft}D LATE` : `${dueLeft}D`}</span>}
               {checklist.length > 0 && <span style={{ color: T.dimText }} className="nb-data">{subDone}/{checklist.length}</span>}
               {blockers.length > 0 && (
                 <span title={blockers.map((b) => b.title).join(", ")} style={{ color: NOW_RED }} className="nb-data">
-                  ⛌ BLOCKED BY {blockers.length === 1 ? blockers[0].title : `${blockers.length} TASKS`}
+                  <span className="inline-flex items-center gap-1"><BlockIcon />BLOCKED BY {blockers.length === 1 ? blockers[0].title : `${blockers.length} TASKS`}</span>
                 </span>
               )}
             </div>
@@ -5444,7 +5565,7 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromote
           <button onPointerDown={(e) => { e.stopPropagation(); onDragStart(t.id, e.clientX, e.clientY); }}
             onContextMenu={(e) => { e.preventDefault(); if (!selection) onStartSelect(t.id); }}
             style={{ color: T.dimText, touchAction: "none" }}
-            className="nb-tap shrink-0 w-7 h-8 text-xs" aria-label="Drag to schedule, reorder, or move to another day">⣿</button>
+              className="nb-tap shrink-0 w-7 h-8 flex items-center justify-center text-xs" aria-label="Drag to schedule, reorder, or move to another day"><GripIcon /></button>
         </div>
 
         {checklist.length > 0 && !isDone && (
@@ -5465,8 +5586,8 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromote
                     <span className="w-3 h-3 shrink-0" style={{ background: s.done ? T.accent : "transparent", boxShadow: `inset 0 0 0 1px ${s.done ? T.accent : T.faint}` }} />
                     <span className="text-xs" style={{ textDecoration: s.done ? "line-through" : "none", color: s.done ? T.dim : T.text }}>{s.title}</span>
                   </button>
-                  <button onClick={() => onPromoteSub(t.id, s.id)} style={{ color: T.dimText }} className="text-xs px-1" aria-label="Promote step to a subtask" title="Needs its own planning? Promote to a subtask">↥</button>
-                  <button onClick={() => onRemoveSub(t.id, s.id)} style={{ color: T.dimText }} className="text-xs px-1" aria-label="Remove step">✕</button>
+                  <button onClick={() => onPromoteSub(t.id, s.id)} style={{ color: T.dimText }} className="text-xs px-1" aria-label="Promote step to a subtask" title="Needs its own planning? Promote to a subtask"><ArrowUpIcon /></button>
+                  <button onClick={() => onRemoveSub(t.id, s.id)} style={{ color: T.dimText }} className="text-xs px-1" aria-label="Remove step"><CloseIcon /></button>
                 </div>
               ))}
               <SubComposer T={T} onAdd={(v) => onAddSub(t.id, v)} />
@@ -5474,6 +5595,14 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromote
           </div>
         )}
       </article>
+      {completionPulse && (
+        <div data-test="task-completion-overlay" aria-hidden="true"
+          className="nb-action-complete-overlay absolute inset-0 z-20 flex items-center gap-2 px-4 pointer-events-none"
+          style={{ background: T.accent, color: T.on, borderRadius: CARD_R, fontFamily: MONO }}>
+          <CheckIcon size={14} />
+          <span className="nb-label">COMPLETE</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -5812,7 +5941,7 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
 function RowWithJoin({ T, surface, link, title, onOpen, className = "", padding = "px-3 py-2.5", style = {}, children }) {
   const href = normalizeMeetingLink(link);
   return (
-    <div className={`grid items-stretch ${href ? "grid-cols-[minmax(0,1fr)_auto]" : "grid-cols-1"}`} style={{ background: surface, borderRadius: CARD_R, ...style }}>
+    <div className={`grid items-stretch ${href ? "grid-cols-[minmax(0,1fr)_auto]" : "grid-cols-1"}`} style={{ background: surface, borderRadius: CARD_R, boxShadow: "var(--e1)", ...style }}>
       <button onClick={onOpen} className={`nb-tap min-w-0 w-full flex items-center gap-2.5 text-left ${padding} ${className}`}
         style={{ background: "transparent", borderRadius: CARD_R }}>
         {children}
@@ -5822,7 +5951,7 @@ function RowWithJoin({ T, surface, link, title, onOpen, className = "", padding 
           onClick={(e) => e.stopPropagation()}
           aria-label={`Join ${title}`}
           style={{ fontFamily: MONO, color: T.accentText }}
-          className="nb-tap self-center justify-self-end mx-2 px-1.5 py-1 text-xs font-bold tracking-widest">JOIN ↗</a>
+           className="nb-tap self-center justify-self-end mx-2 inline-flex items-center gap-1 px-1.5 py-1 text-xs font-bold tracking-widest">JOIN <ExternalLinkIcon /></a>
       )}
     </div>
   );
@@ -5901,7 +6030,7 @@ function TagField({ T, tags, onChange, editable = true, onBeginEdit = null }) {
         editable ? (
           <button key={tag} onClick={() => onChange(tags.filter((x) => x !== tag))}
             className="px-2 py-0.5 nb-data" title="Remove tag"
-            style={{ fontFamily: MONO, borderRadius: 999, color: T.dimText, border: `1px solid ${T.line}` }}>{tag} ✕</button>
+             style={{ fontFamily: MONO, borderRadius: 999, color: T.dimText, border: `1px solid ${T.line}` }}><span>{tag}</span><CloseIcon size={11} /></button>
         ) : (
           <span key={tag} className="px-2 py-0.5 nb-data"
             style={{ fontFamily: MONO, borderRadius: 999, color: T.dimText, border: `1px solid ${T.line}` }}>{tag}</span>
@@ -5940,7 +6069,7 @@ function usePresence(value, exitMs = 220) {
    grid-rows idiom the choice rows use, shared by the Settings confirmations. */
 function Reveal({ open, children }) {
   return (
-    <div style={{ display: "grid", gridTemplateRows: open ? "1fr" : "0fr", transition: "grid-template-rows 300ms cubic-bezier(.22,1.12,.28,1)" }}>
+    <div style={{ display: "grid", gridTemplateRows: open ? "1fr" : "0fr", transition: "grid-template-rows 260ms cubic-bezier(.23,1,.32,1)" }}>
       <div className="overflow-hidden" inert={!open} style={{ minHeight: 0, visibility: open ? "visible" : "hidden", transition: `visibility 0s linear ${open ? 0 : 300}ms` }}>
         {children}
       </div>
@@ -6347,7 +6476,7 @@ function GooeySearch({ T, surface, reduced, onOpen }) {
         <span aria-hidden="true" className="absolute rounded-full" style={{
           width: 26, height: 26, right: expanded ? 74 : 3, background: surface,
           opacity: expanded ? 1 : 0,
-          transition: reduced ? "none" : "right 380ms cubic-bezier(.22,1.1,.28,1), opacity 220ms ease",
+           transition: reduced ? "none" : "right 300ms cubic-bezier(.23,1,.32,1), opacity 180ms ease",
           pointerEvents: "none",
         }} />
         <button
@@ -6363,9 +6492,9 @@ function GooeySearch({ T, surface, reduced, onOpen }) {
             borderRadius: 999,
             background: expanded ? surface : "transparent",
             color: T.dimText,
-            transition: reduced ? "none" : "width 380ms cubic-bezier(.22,1.1,.28,1), background 220ms ease",
+             transition: reduced ? "none" : "width 300ms cubic-bezier(.23,1,.32,1), background 180ms ease",
           }}>
-          <span className="text-sm shrink-0">⌕</span>
+          <SearchIcon />
           <span style={{
             fontFamily: MONO, color: T.dimText,
             opacity: expanded ? 1 : 0,
@@ -6384,7 +6513,7 @@ function LiquidPillIndicator({ T, box, stretch, settled = true, z = 0 }) {
       left: box.left, width: box.width, top: box.top, height: box.height,
       background: T.accent, borderRadius: 999, zIndex: z,
       transform: `scaleX(${stretch})`, transformOrigin: "center",
-       transition: settled ? "left 420ms cubic-bezier(.22,1.1,.28,1), width 420ms cubic-bezier(.22,1.1,.28,1), height 300ms ease, top 300ms ease, transform 210ms cubic-bezier(.3,1.4,.4,1)" : "none",
+       transition: settled ? "left 300ms cubic-bezier(.23,1,.32,1), width 300ms cubic-bezier(.23,1,.32,1), height 240ms ease, top 240ms ease, transform 180ms cubic-bezier(.23,1,.32,1)" : "none",
       pointerEvents: "none",
     }} />
   );
@@ -6667,7 +6796,7 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
           <span id={titleId.current} style={{ fontFamily: MONO, color: T.dimText }} className="nb-data">{title || "Details"}</span>
           <div className="flex items-center gap-1.5">
             {headerAction}
-            <button onClick={requestClose} aria-label="Close" style={{ color: T.dimText, fontFamily: MONO }} className="nb-tap -mr-1 px-2 py-1 text-sm">✕</button>
+            <button onClick={requestClose} aria-label="Close" style={{ color: T.dimText, fontFamily: MONO }} className="nb-tap -mr-1 px-2 py-1 text-sm flex items-center justify-center"><CloseIcon /></button>
           </div>
         </div>
         {/* Padding deeper than the panel's 24px corner radius, so the last row
@@ -6800,7 +6929,7 @@ function NotebookPanel({ T, view, notes, onView, onNew, onOpen, onPin, onArchive
               </span>
             </button>
             {view !== "archived" && <button onClick={() => onPin(note)} aria-label={note.pinned ? "Unpin note" : "Pin note"}
-              style={{ color: note.pinned ? T.accent : T.dim }} className="nb-tap p-2 text-sm">{note.pinned ? "★" : "☆"}</button>}
+              style={{ color: note.pinned ? T.accent : T.dim }} className="nb-tap p-2 text-sm flex items-center justify-center"><PinIcon filled={note.pinned} /></button>}
             <button onClick={() => onArchive(note)} aria-label={note.archived ? "Restore note" : "Archive note"}
               style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap p-2 nb-data">{note.archived ? "RESTORE" : "ARCHIVE"}</button>
           </div>

@@ -90,6 +90,30 @@ test.describe("mobile timeline focus", () => {
     await expect(chrome).toHaveAttribute("data-collapsed", "false");
   });
 
+  test("scrolling down from midnight keeps a collapsed header collapsed", async ({ page }) => {
+    await atTime(page, 10, 0);
+    await seedPlanner(page, createBlankPlannerState({}));
+    const chrome = page.getByTestId("timeline-chrome");
+    const stream = page.getByTestId("day-stream");
+    const toggle = page.getByTestId("timeline-focus-toggle");
+
+    /* Put the stream at the restore boundary, then explicitly collapse it so
+       the next gesture tests only the direction of travel. */
+    await stream.evaluate((node) => { node.scrollTop = 0; node.dispatchEvent(new Event("scroll")); });
+    await expect(chrome).toHaveAttribute("data-collapsed", "false");
+    await toggle.click();
+    await expect(chrome).toHaveAttribute("data-collapsed", "true");
+
+    const box = await stream.boundingBox();
+    const session = await page.context().newCDPSession(page);
+    await dispatchTouch(session, "touchStart", box.x + 90, box.y + 120);
+    await stream.evaluate((node) => { node.scrollTop = 32; node.dispatchEvent(new Event("scroll")); });
+    await dispatchTouch(session, "touchEnd", box.x + 90, box.y + 120);
+    await session.detach();
+
+    await expect(chrome).toHaveAttribute("data-collapsed", "true");
+  });
+
   test("the date heading explicitly toggles timeline focus", async ({ page }) => {
     await atTime(page, 10, 0);
     await seedPlanner(page, createBlankPlannerState({}));
