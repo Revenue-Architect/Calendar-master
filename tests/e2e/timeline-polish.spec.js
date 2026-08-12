@@ -125,6 +125,43 @@ test.describe("mobile timeline focus", () => {
     expect(restoringHeight).toBeLessThan(expandedHeight - 1);
     await expect.poll(async () => (await chrome.boundingBox()).height).toBeGreaterThan(expandedHeight - 1);
   });
+
+  test("focus mode keeps the header's visual layer in the same smooth path", async ({ page }) => {
+    await atTime(page, 10, 0);
+    await seedPlanner(page, createBlankPlannerState({}));
+    const chrome = page.getByTestId("timeline-chrome");
+    const inner = chrome.locator(".nb-timeline-chrome-inner");
+    const toggle = page.getByTestId("timeline-focus-toggle");
+
+    const motion = await chrome.evaluate((node) => {
+      const style = getComputedStyle(node);
+      const innerStyle = getComputedStyle(node.querySelector(".nb-timeline-chrome-inner"));
+      return {
+        height: style.transitionProperty,
+        duration: style.transitionDuration,
+        innerTransform: innerStyle.transitionProperty,
+        innerDuration: innerStyle.transitionDuration,
+      };
+    });
+    expect(motion.height).toContain("height");
+    expect(motion.duration).toContain("0.3s");
+    expect(motion.innerTransform).toContain("transform");
+    expect(motion.innerTransform).toContain("opacity");
+    expect(motion.innerDuration).toContain("0.3s");
+
+    await toggle.click();
+    await page.waitForTimeout(70);
+    const collapsingOpacity = await inner.evaluate((node) => Number.parseFloat(getComputedStyle(node).opacity));
+    expect(collapsingOpacity).toBeGreaterThan(0);
+    expect(collapsingOpacity).toBeLessThan(1);
+
+    await expect.poll(async () => Number.parseFloat(await inner.evaluate((node) => getComputedStyle(node).opacity))).toBeLessThan(0.1);
+    await toggle.click();
+    await page.waitForTimeout(70);
+    const restoringOpacity = await inner.evaluate((node) => Number.parseFloat(getComputedStyle(node).opacity));
+    expect(restoringOpacity).toBeGreaterThan(0);
+    expect(restoringOpacity).toBeLessThan(1);
+  });
 });
 
 test("the day timeline has no standalone FREE labels", async ({ page }) => {

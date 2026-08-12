@@ -86,6 +86,30 @@ test.describe("the actions column", () => {
     expect(background, "the swipe backing must not bleed through the resting action face").not.toMatch(/rgba\([^)]*,\s*0(?:\.\d+)?\)/);
   });
 
+  test("the Actions card completion backing is a solid surface", async ({ page }) => {
+    await openPlanner(page, { keepSample: true });
+    await page.getByRole("tab", { name: "ACTIONS", exact: true }).click();
+
+    const backdrop = page.getByTestId("task-completion-backdrop").first();
+    await expect(backdrop).toBeVisible();
+    const resting = await backdrop.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return { background: style.backgroundColor, opacity: style.opacity };
+    });
+
+    expect(resting.background, "the completion backing must not be transparent at rest").not.toMatch(/rgba\([^)]*,\s*0(?:\.\d+)?\)/);
+    expect(resting.opacity).toBe("1");
+
+    const card = page.locator("[data-task]").first();
+    const box = await card.boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + 40, box.y + box.height / 2, { steps: 4 });
+    const revealed = await backdrop.evaluate((node) => getComputedStyle(node).backgroundColor);
+    expect(revealed, "the revealed COMPLETE surface must be opaque").not.toMatch(/rgba\([^)]*,\s*0(?:\.\d+)?\)/);
+    await page.mouse.up();
+  });
+
   test("the haptics preference suppresses completion vibration without blocking completion", async ({ page }) => {
     await recordVibrations(page);
     await seedPlanner(page, scheduledAction({ id: "task-quiet", title: "Quiet completion" }));
