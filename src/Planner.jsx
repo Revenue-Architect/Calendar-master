@@ -324,23 +324,30 @@ const buzzDevice = (p) => { try { navigator.vibrate && navigator.vibrate(p); } c
  * The window is short for the same reason: a sheet opens within a frame or two of
  * the press that opened it, so anything later did not come from that press. */
 const FLUID_TRIGGER_MAX_AGE_MS = 900;
-let lastFluidTrigger = null;
+let lastFluidTriggerRect = null;
 let lastFluidTriggerAt = 0;
 if (typeof window !== "undefined") {
   window.addEventListener("pointerdown", (event) => {
     const el = event.target instanceof Element
       ? event.target.closest("button,[role='button'],summary,label,[data-event-id],[data-task-chip]")
       : null;
-    lastFluidTrigger = el;
+    const rect = el?.getBoundingClientRect();
+    lastFluidTriggerRect = rect && rect.width > 0 && rect.height > 0
+      ? { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
+      : null;
     lastFluidTriggerAt = el ? Date.now() : 0;
   }, true);
-  window.addEventListener("keydown", () => { lastFluidTrigger = null; lastFluidTriggerAt = 0; }, true);
+  window.addEventListener("keydown", () => { lastFluidTriggerRect = null; lastFluidTriggerAt = 0; }, true);
 }
 function recentFluidTriggerRect() {
-  if (!lastFluidTrigger || !lastFluidTrigger.isConnected) return null;
+  /* Keep a geometry snapshot rather than a DOM node. Navigation can legitimately
+     unmount the pressed card before the delayed inspector mounts; requiring the
+     node to remain connected turned that valid path into a generic fade. A new
+     pointer press replaces the snapshot and keyboard opens clear it, so the short
+     lifetime still prevents an unrelated control from borrowing an old origin. */
+  if (!lastFluidTriggerRect) return null;
   if (Date.now() - lastFluidTriggerAt > FLUID_TRIGGER_MAX_AGE_MS) return null;
-  const rect = lastFluidTrigger.getBoundingClientRect();
-  return rect.width > 0 && rect.height > 0 ? rect : null;
+  return lastFluidTriggerRect;
 }
 const splitId = (id) => { const i = String(id).indexOf("@"); return i === -1 ? { base: id, date: null } : { base: id.slice(0, i), date: id.slice(i + 1) }; };
 /* "STARTS" reads in the largest unit that still says something useful — days for
@@ -654,7 +661,16 @@ export default function Planner() {
   const [monthCursor, setMonthCursor] = useState(new Date());
   const [sheet, setSheet] = useState(false);
   const [inspect, setInspect] = useState(null);
+  const [inspectExitSnapshot, setInspectExitSnapshot] = useState(null);
   const [composer, setComposer] = useState(null);
+  /* Commands such as MARK COMPLETE and saving a new entry used to set their
+     parent state to null directly. React then removed the Sheet before its own
+     exit lifecycle could run, so the close button morphed while commands faded.
+     A monotonic signal lets Sheet own the same close path for those commands. */
+  const [sheetCloseSignals, setSheetCloseSignals] = useState({ inspect: 0, composer: 0, scopeAsk: 0 });
+  const requestSheetClose = useCallback((kind) => {
+    setSheetCloseSignals((current) => ({ ...current, [kind]: current[kind] + 1 }));
+  }, []);
   const [noteEdit, setNoteEdit] = useState(null);
   const [noteHistory, setNoteHistory] = useState(null);
   /* The details sheet has a deliberate reading state and an editing state. The
@@ -667,6 +683,7 @@ export default function Planner() {
     setDraft(null);
     setDetailEditing(false);
     setDiscardAsk(false);
+    setInspectExitSnapshot(null);
   }, [inspect?.id, inspect?.kind]);
   const [notebook, setNotebook] = useState(null);
   const [settings, setSettings] = useState(false);
@@ -1785,7 +1802,7 @@ export default function Planner() {
       date: dateKey,
       start: e.allDay ? 0 : Math.min(1440 - e.dur, e.start + (e.dur || 60)),
     }, { id: nid }).state);
-    setInspect(null);
+    requestSheetClose("inspect");
     flash("Duplicated", { type: "drop-event", id: nid });
   };
   /* Dropping an action on the timeline says two things at once: this day, and
@@ -1953,6 +1970,7 @@ export default function Planner() {
 
   const doDelete = (kind, id, scope) => {
     beep("delete");
+    if (kind === "event" || kind === "task") holdInspectForExit(kind, id);
     const { base, date } = splitId(id);
     let removed = null;
     if (kind === "event") {
@@ -1973,7 +1991,7 @@ export default function Planner() {
       }
       removed = result.removed;
       setDb(result.state);
-      setInspect(null); setScopeAsk(null);
+      requestSheetClose("inspect"); requestSheetClose("scopeAsk");
       flash(scope === "one" && date ? "This one skipped" : "Deleted", {
         type: canonical && scope === "one"
           ? "restore-calendar-occurrence"
@@ -1990,7 +2008,7 @@ export default function Planner() {
       /* A reward records a completed action, not the continued existence of its
          task. Deleting a completed task therefore preserves its historical award. */
       setDb(result.state);
-      setInspect(null); setScopeAsk(null);
+      requestSheetClose("inspect"); requestSheetClose("scopeAsk");
       flash(result.removed.kind === "occurrence" ? "This one skipped" : "Deleted", {
         type: "restore-task-deletion",
         removed: result.removed,
@@ -2017,7 +2035,7 @@ export default function Planner() {
         noteRevisions: dropRevisionsFor(d.noteRevisions, [base]),
       };
     });
-    setInspect(null); setNoteEdit(null); setNoteHistory(null); setScopeAsk(null);
+    requestSheetClose("inspect"); setNoteEdit(null); setNoteHistory(null); requestSheetClose("scopeAsk");
     flash("Deleted", {
       type: "restore", kind, item: removed, revisions: removedRevisions, attachments: removedAttachments,
     });
@@ -2154,7 +2172,7 @@ export default function Planner() {
         return { ...d, tasks: createTaskCommand(d.tasks, { id: uid(), ...patch }, { now: nowStamp() }).tasks };
       });
     }
-    setScopeAsk(null);
+    requestSheetClose("scopeAsk");
     /* §4.6. A composer has done its job once it writes and gets out of the way. An
        inline edit has not: closing the record you are editing after every field
        would make editing in place worse than the form it replaced. */
@@ -2162,8 +2180,8 @@ export default function Planner() {
       setDraft(null);
       setDetailEditing(false);
     } else {
-      setComposer(null);
-      setInspect(null);
+      requestSheetClose("composer");
+      requestSheetClose("inspect");
     }
   };
   const saveEntry = (p) => {
@@ -2791,6 +2809,15 @@ export default function Planner() {
   const inspectItem = inspect && (inspect.kind === "event"
     ? dayEvents.find((event) => event.id === inspect.id)
     : resolveTaskForInspection(dayTasks, db.tasks, inspect.id));
+  const holdInspectForExit = (kind, id) => {
+    if (inspect?.kind !== kind || inspect.id !== id || !inspectItem) return;
+    setInspectExitSnapshot({ kind, id, item: structuredClone(inspectItem) });
+  };
+  const inspectRecord = inspectItem || (
+    inspectExitSnapshot && inspectExitSnapshot.kind === inspect?.kind && inspectExitSnapshot.id === inspect?.id
+      ? inspectExitSnapshot.item
+      : null
+  );
   const inspectBlockers = inspect && inspect.kind === "task" && db
     ? getTaskBlockers(db.tasks, parseTaskOccurrenceId(inspect.id).seriesId)
     : [];
@@ -2807,8 +2834,8 @@ export default function Planner() {
   /* Context links always target the durable owner, never a transient rendered card.
      Event occurrences additionally retain their date so a meeting note does not
      spill across every Tuesday; an undated event link is intentionally series-wide. */
-  const inspectNoteContext = inspect && inspectItem
-    ? (inspect.kind === "event" ? eventNoteLink(inspectItem) : taskNoteLink(inspectItem))
+  const inspectNoteContext = inspect && inspectRecord
+    ? (inspect.kind === "event" ? eventNoteLink(inspectRecord) : taskNoteLink(inspectRecord))
     : null;
   const linkedNotes = inspectNoteContext
     ? getNotesForEntity(db.notes, inspectNoteContext.type, inspectNoteContext.targetId, {
@@ -2824,7 +2851,7 @@ export default function Planner() {
      whole batch instead of once per field — editing a title, a time and a category
      used to mean answering it three times. */
   const editEntry = (patch) => {
-    if (!inspect || !inspectItem) return;
+    if (!inspect || !inspectRecord) return;
     setDraft((current) => ({ ...(current ?? {}), ...patch }));
     /* §4.6. Touching a field is what starts editing — the pill follows the record
        into its editing state rather than gatekeeping it. */
@@ -2843,16 +2870,16 @@ export default function Planner() {
 
   /* The record as it currently reads, draft included, so the view shows what will
      be saved rather than what is stored. */
-  const inspectDraft = draft && inspectItem
-    ? applyDetailDraft(inspect.kind, inspectItem, draft, dateKey)
-    : inspectItem;
+  const inspectDraft = draft && inspectRecord
+    ? applyDetailDraft(inspect.kind, inspectRecord, draft, dateKey)
+    : inspectRecord;
 
   const commitDraft = (pending = draft) => {
-    if (!inspect || !inspectItem || !hasDetailDraft(pending)) {
+    if (!inspect || !inspectRecord || !hasDetailDraft(pending)) {
       setDetailEditing(false);
       return false;
     }
-    const next = { ...entryPayload(inspect.kind, inspectItem), ...pending, inline: true };
+    const next = { ...entryPayload(inspect.kind, inspectRecord), ...pending, inline: true };
     if (inspect.kind === "event") {
       /* The record carries the timing it was read with. An inline change to the
          time, the day, or all-day has to rebuild it — passing the old timing
@@ -2861,9 +2888,9 @@ export default function Planner() {
       try {
         next.timing = next.allDay
           ? { kind: "all-day", startDate: day, endDateExclusive: addDaysToKey(next.endDate && next.endDate >= day ? next.endDate : day, 1) }
-          : inspectItem.allDay
+          : inspectRecord.allDay
             ? { kind: "timed", timeZoneMode: "floating", startLocal: addMinutesToLocalDateTime(`${day}T00:00`, next.start), endLocal: addMinutesToLocalDateTime(`${day}T00:00`, next.start + next.dur) }
-            : eventTimingFromPosition(inspectItem, day, next.start, next.dur);
+            : eventTimingFromPosition(inspectRecord, day, next.start, next.dur);
       } catch (error) {
         /* §4.7. A zoned time landing in a DST gap or fold cannot be resolved without
            being asked which offset is meant, and that question belongs to the
@@ -4132,8 +4159,9 @@ export default function Planner() {
       })()}
 
       {/* ══ INSPECTOR ══ */}
-      {inspectItem && (
+      {inspectRecord && (
         <Sheet T={T} title={inspect.kind === "event" ? "EVENT" : "ACTION"}
+          closeSignal={sheetCloseSignals.inspect}
           headerAction={(
             <FluidEditActions T={T} editing={detailEditing} dirty={hasDetailDraft(draft)}
               label={inspect.kind === "event" ? "EDIT EVENT" : "EDIT ACTION"}
@@ -4486,7 +4514,7 @@ export default function Planner() {
             <button
               onClick={() => {
                 if (inspect.kind === "event") duplicateEvent(inspect.id);
-                else { inspectDraft.status === "completed" ? reopenTask(inspect.id) : completeTask(inspect.id); setInspect(null); }
+                else { inspectDraft.status === "completed" ? reopenTask(inspect.id) : completeTask(inspect.id); requestSheetClose("inspect"); }
               }}
               style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="nb-tap nb-liquid w-full py-3 mt-5 text-xs font-bold tracking-widest">
               {inspect.kind === "event" ? "DUPLICATE" : inspectDraft.status === "completed" ? "REOPEN" : "MARK COMPLETE"}
@@ -4510,7 +4538,7 @@ export default function Planner() {
               setDraft(null);
               setDetailEditing(false);
               setDiscardAsk(false);
-              setInspect(null);
+              requestSheetClose("inspect");
             }} style={{ fontFamily: MONO, color: NOW_RED, border: `1px solid ${T.line}` }} className="nb-tap py-3 nb-label">DISCARD CHANGES</button>
           </div>
         </Sheet>
@@ -4634,6 +4662,7 @@ export default function Planner() {
 
       {composer && (
         <Sheet T={T} title={composer.id ? "EDIT" : "NEW"} morph={composer.notch ? "notch" : "auto"}
+          closeSignal={sheetCloseSignals.composer}
           onClose={() => { beep("click"); setComposer(null); }}>
           <Composer T={T} initial={composer} dateLabel={fmtDay(dateKey)} dateKey={dateKey} onSubmit={saveEntry} onTick={() => beep("tick")} weekStart={weekStart} />
         </Sheet>
@@ -4644,7 +4673,7 @@ export default function Planner() {
           while the form is still open, and underneath the form its buttons cannot be
           reached at all. Cancelling returns to the form with the edit intact. */}
       {scopeAsk && (
-        <Sheet T={T} title="REPEATING ITEM" onClose={() => { beep("click"); setScopeAsk(null); }}>
+        <Sheet T={T} title="REPEATING ITEM" closeSignal={sheetCloseSignals.scopeAsk} onClose={() => { beep("click"); setScopeAsk(null); }}>
           <h2 className="text-xl font-bold tracking-tight">This repeats</h2>
           <p style={{ fontFamily: SERIF, color: T.dimText }} className="nb-voice mt-1 mb-4">Change this one day, or every day it appears?</p>
           <div className="flex flex-col gap-2">
@@ -4744,6 +4773,10 @@ export default function Planner() {
             <button onClick={() => { beep("tick"); setPreferences((current) => current ? { ...current, feedback: { ...current.feedback, sound: !current.feedback.sound } } : current); }} className="w-full flex items-center justify-between py-2.5" style={{ borderBottom: `1px solid ${T.line}` }}>
               <span className="text-sm">Sound</span>
               <span style={{ fontFamily: MONO, color: preferences.feedback.sound ? T.accent : T.dim }} className="nb-data">{preferences.feedback.sound ? "ON" : "OFF"}</span>
+            </button>
+            <button data-test="haptics-toggle" onClick={() => { beep("tick"); setPreferences((current) => current ? { ...current, feedback: { ...current.feedback, haptics: !current.feedback.haptics } } : current); }} className="w-full flex items-center justify-between py-2.5" style={{ borderBottom: `1px solid ${T.line}` }}>
+              <span className="text-sm">Haptics</span>
+              <span style={{ fontFamily: MONO, color: preferences.feedback.haptics ? T.accent : T.dim }} className="nb-data">{preferences.feedback.haptics ? "ON" : "OFF"}</span>
             </button>
             <button onClick={() => { beep("tick"); setPreferences((current) => current ? { ...current, display: { ...current.display, clock: current.display.clock === "24" ? "12" : "24" } } : current); }} className="w-full flex items-center justify-between py-2.5" style={{ borderBottom: `1px solid ${T.line}` }}>
               <span className="text-sm">Clock</span>
@@ -5640,12 +5673,14 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
  * So the anchor is a *sibling* laid over the row's right edge, and the row
  * reserves the width it occupies. Two real controls, no nesting, and the row's
  * own tap target is unchanged everywhere the link is absent. */
+const JOIN_RESERVED_WIDTH = 72;
+
 function RowWithJoin({ T, surface, link, title, onOpen, className = "", padding = "px-3 py-2.5", style = {}, children }) {
   const href = normalizeMeetingLink(link);
   return (
     <div className="relative" style={{ background: surface, borderRadius: CARD_R, ...style }}>
       <button onClick={onOpen} className={`nb-tap w-full flex items-center gap-2.5 text-left ${padding} ${className}`}
-        style={{ paddingRight: href ? 64 : undefined, background: "transparent", borderRadius: CARD_R }}>
+        style={{ paddingRight: href ? JOIN_RESERVED_WIDTH : undefined, background: "transparent", borderRadius: CARD_R }}>
         {children}
       </button>
       {href && (
@@ -6344,7 +6379,7 @@ function Row({ T, k, v }) {
   );
 }
 
-function Sheet({ T, onClose, title, children, headerAction = null, beforeClose = null, morph = "auto" }) {
+function Sheet({ T, onClose, title, children, headerAction = null, beforeClose = null, morph = "auto", closeSignal = null }) {
   /* Ignore a backdrop dismissal that arrives in the same tap that opened the sheet.
      Belt and braces alongside preventDefault at the source: any future path that
      opens a sheet from a touch inherits the protection. */
@@ -6363,6 +6398,7 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
   const [sheetHeight, setSheetHeight] = useState(null);
   const [heightReady, setHeightReady] = useState(false);
   const titleId = useRef(`sheet-title-${Math.random().toString(36).slice(2, 9)}`);
+  const closeSignalRef = useRef(closeSignal);
   useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
   useEffect(() => { beforeCloseRef.current = beforeClose; }, [beforeClose]);
   const requestClose = useCallback(() => {
@@ -6377,6 +6413,11 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
     );
     closeTimer.current = window.setTimeout(() => onCloseRef.current(), reduced ? 0 : (morphRef.current === "notch" ? 260 : 300));
   }, []);
+  useEffect(() => {
+    if (closeSignal == null || closeSignalRef.current === closeSignal) return;
+    closeSignalRef.current = closeSignal;
+    requestClose();
+  }, [closeSignal, requestClose]);
   useLayoutEffect(() => {
     const content = contentRef.current;
     if (!content) return undefined;

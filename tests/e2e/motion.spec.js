@@ -146,6 +146,45 @@ test.describe("the notch morph", () => {
 });
 
 test.describe("sheet exits", () => {
+  test("a cross-day agenda open keeps the pressed card as its morph origin", async ({ page }) => {
+    await openPlanner(page, { keepSample: true });
+    await page.getByRole("tab", { name: "AGENDA", exact: true }).click();
+
+    await page.getByText("Roadmap workshop", { exact: true }).click();
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).toHaveAttribute("data-fluid-origin", "trigger");
+
+    await page.keyboard.press("Escape");
+    await expect(sheet).toHaveClass(/nb-fluid-closing/);
+    await expect(sheet).toHaveCount(0, { timeout: 3000 });
+  });
+
+  test("a detail command uses the same morph exit as the close button", async ({ page }) => {
+    await openPlanner(page, { keepSample: true });
+    await page.getByRole("tab", { name: "ACTIONS", exact: true }).click();
+    await page.getByText("Walk 8k steps", { exact: true }).first().click();
+
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).toHaveAttribute("data-sheet-title", "ACTION");
+    await sheet.getByRole("button", { name: "MARK COMPLETE" }).click();
+
+    await expect(sheet).toHaveClass(/nb-fluid-closing/);
+    await expect(sheet).toHaveCount(0, { timeout: 3000 });
+  });
+
+  test("deleting an inspected action keeps the exit mounted until it finishes", async ({ page }) => {
+    await openPlanner(page, { keepSample: true });
+    await page.getByRole("tab", { name: "ACTIONS", exact: true }).click();
+    await page.getByText("Reconcile receipts", { exact: true }).first().click();
+
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).toHaveAttribute("data-sheet-title", "ACTION");
+    await sheet.getByRole("button", { name: "DELETE" }).click();
+
+    await expect(sheet).toHaveClass(/nb-fluid-closing/);
+    await expect(sheet).toHaveCount(0, { timeout: 3000 });
+  });
+
   test("a detail sheet leaves along the path it arrived on", async ({ page }) => {
     await openPlanner(page);
     await page.keyboard.press("ControlOrMeta+k");

@@ -12,7 +12,10 @@ export const DEFAULT_PREFERENCES = Object.freeze({
      happens to you. Off, every accent renders exactly the flat colour it always
      has; the only difference is that `--accent-fill` resolves to the solid. */
   display: Object.freeze({ themeId: "obsidian-acid", clock: "12", weekStart: 0, reducedMotion: false, litSurfaces: false }),
-  feedback: Object.freeze({ sound: true, haptics: false }),
+  /* Completing an action historically gave immediate tactile confirmation. Keep
+     that behavior for new and migrated notebooks, while still exposing the
+     preference in Settings so it can be turned off deliberately. */
+  feedback: Object.freeze({ sound: true, haptics: true }),
   notifications: Object.freeze({ systemEnabled: false }),
   motivation: Object.freeze({ points: true, levels: true, streaks: true, celebrations: true }),
 });

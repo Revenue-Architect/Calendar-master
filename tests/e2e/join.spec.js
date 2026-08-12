@@ -57,6 +57,26 @@ test.describe("joining a meeting", () => {
     await expect(page.getByRole("link", { name: "Join No link at all" })).toHaveCount(0);
   });
 
+  test("agenda metadata clears the reserved JOIN column", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await seedPlanner(page, seeded());
+    await page.getByRole("tab", { name: "AGENDA", exact: true }).click();
+    await page.waitForTimeout(200);
+
+    for (const title of ["Timed with link", "All day with link"]) {
+      const join = page.getByRole("link", { name: `Join ${title}` });
+      const row = join.locator("..");
+      const trailing = row.locator("button > span").last();
+      const [joinBox, trailingBox] = await Promise.all([join.boundingBox(), trailing.boundingBox()]);
+      expect(joinBox).not.toBeNull();
+      expect(trailingBox).not.toBeNull();
+      expect(
+        trailingBox.x + trailingBox.width,
+        `${title} metadata must not run under JOIN`,
+      ).toBeLessThanOrEqual(joinBox.x - 1);
+    }
+  });
+
   test("an event with no link shows no JOIN anywhere", async ({ page }) => {
     await seedPlanner(page, seeded());
     await page.getByRole("tab", { name: "AGENDA", exact: true }).click();

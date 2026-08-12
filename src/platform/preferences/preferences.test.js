@@ -27,6 +27,7 @@ test("normalizes safe defaults without mutating its input", () => {
   assert.equal(normalized.display.clock, "12");
   assert.equal(normalized.display.reducedMotion, true);
   assert.equal(normalized.feedback.sound, true);
+  assert.equal(normalized.feedback.haptics, true);
   assert.equal(source.display.clock, "nope");
 });
 
