@@ -164,6 +164,80 @@ test.describe("mobile timeline focus", () => {
   });
 });
 
+test.describe("desktop timeline focus", () => {
+  test("exposes the focus control, preserves the date, and reclaims bottom space", async ({ page }) => {
+    await atTime(page, 10, 0);
+    await seedPlanner(page, createBlankPlannerState({}));
+
+    const chrome = page.getByTestId("timeline-chrome");
+    const heading = page.getByTestId("day-heading");
+    const toggle = page.getByTestId("timeline-focus-toggle");
+    const main = page.locator("main.nb-main");
+    const expandedHeight = (await chrome.boundingBox()).height;
+
+    await expect(toggle).toBeVisible();
+    await expect(toggle).toHaveAttribute("aria-keyshortcuts", "F");
+    await expect(main).toHaveCSS("padding-bottom", "12px");
+
+    await toggle.click();
+    await expect(chrome).toHaveAttribute("data-collapsed", "true");
+    await expect(heading).toBeVisible();
+    await expect(heading).toHaveAttribute("data-date", await keyOf(new Date()));
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect.poll(async () => (await chrome.boundingBox()).height).toBeLessThan(1);
+
+    await page.keyboard.press("F");
+    await expect(chrome).toHaveAttribute("data-collapsed", "false");
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect.poll(async () => (await chrome.boundingBox()).height).toBeGreaterThan(expandedHeight - 1);
+  });
+
+  test("lists F and does not let it fire while a sheet is open or being edited", async ({ page }) => {
+    await atTime(page, 10, 0);
+    await seedPlanner(page, createBlankPlannerState({}));
+    const chrome = page.getByTestId("timeline-chrome");
+
+    await page.keyboard.press("?");
+    const shortcuts = page.getByTestId("shortcut-sheet");
+    await expect(shortcuts.getByText("Focus timeline", { exact: true })).toBeVisible();
+    await page.keyboard.press("f");
+    await expect(chrome).toHaveAttribute("data-collapsed", "false");
+    await page.keyboard.press("Escape");
+    await expect(shortcuts).toBeHidden();
+
+    await page.keyboard.press("n");
+    await expect(page.getByTestId("composer")).toBeVisible();
+    await page.keyboard.press("f");
+    await expect(chrome).toHaveAttribute("data-collapsed", "false");
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("composer")).toBeHidden();
+  });
+
+  test("keeps the control out of non-day views", async ({ page }) => {
+    await atTime(page, 10, 0);
+    await seedPlanner(page, createBlankPlannerState({}));
+    const toggle = page.getByTestId("timeline-focus-toggle");
+    const main = page.locator("main.nb-main");
+
+    await page.getByRole("tab", { name: "AGENDA", exact: true }).click();
+    await expect(toggle).toHaveCount(0);
+    await expect(main).toHaveCSS("padding-bottom", "32px");
+
+    await page.getByRole("tab", { name: "TIMELINE", exact: true }).click();
+    await expect(toggle).toBeVisible();
+    await page.getByTestId("zoom-out").click();
+    await expect(page.getByTestId("week-grid")).toBeVisible();
+    await expect(toggle).toHaveCount(0);
+    await expect(main).toHaveCSS("padding-bottom", "32px");
+
+    await page.getByTestId("zoom-in").click();
+    await expect(toggle).toBeVisible();
+    await page.getByRole("tab", { name: "ACTIONS", exact: true }).click();
+    await expect(toggle).toHaveCount(0);
+    await expect(main).toHaveCSS("padding-bottom", "32px");
+  });
+});
+
 test("the day timeline has no standalone FREE labels", async ({ page }) => {
   await atTime(page, 9, 30);
   await seedPlanner(page, createBlankPlannerState({}));

@@ -240,6 +240,7 @@ const DAY_LETTERS = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
 const SHORTCUTS = [
   { group: "MOVING", keys: ["←", "→"], does: "Previous / next day" },
   { group: "MOVING", keys: ["T"], does: "Jump to today" },
+  { group: "MOVING", keys: ["F"], does: "Focus timeline" },
   { group: "MOVING", keys: ["["], does: "Zoom out — day, week, month" },
   { group: "MOVING", keys: ["]"], does: "Zoom in" },
   { group: "MAKING", keys: ["N"], does: "New event" },
@@ -1548,6 +1549,12 @@ export default function Planner() {
       if (search) return;
       /* The shortcuts have to be discoverable from the keyboard they belong to. */
       if (e.key === "?") { e.preventDefault(); beep("click"); setShortcuts(true); return; }
+      if ((e.key === "f" || e.key === "F") && viewMode === "timeline" && zoom === "day") {
+        e.preventDefault();
+        beep("tick");
+        setTimelineFocused((current) => !current);
+        return;
+      }
       if (e.key === "[") { e.preventDefault(); zoomOut(); }
       if (e.key === "]") { e.preventDefault(); zoomIn(); }
       if (e.key === "ArrowRight") goDay(1);
@@ -1575,7 +1582,7 @@ export default function Planner() {
     /* `zoom` is in here because the handler closes over `zoomIn`/`zoomOut`, which
        read it — without it, `[` and `]` would step from whatever zoom the page
        had when the listener was last attached. */
-  }, [dateKey, inspect, composer, settings, noteEdit, noteHistory, notebook, search, scopeAsk, goDay, todayKey, nowMin, dayTasks, undo, firstRun, confirmComplete, dependencyPicker, listPicker, pendingImport, peekDay, shortcuts, zoom]);
+  }, [dateKey, inspect, composer, settings, noteEdit, noteHistory, notebook, search, scopeAsk, goDay, todayKey, nowMin, dayTasks, undo, firstRun, confirmComplete, dependencyPicker, listPicker, pendingImport, peekDay, shortcuts, viewMode, zoom]);
 
   /* ─── writes (series-aware) ─── */
   const flash = (label, payload) => {
@@ -3284,7 +3291,10 @@ export default function Planner() {
           .nb-hud-settings{display:none}
         }
         .nb-main{padding-bottom:var(--sheet-pad);transition:padding-bottom 260ms cubic-bezier(.2,.8,.25,1)}
-        @media(min-width:1024px){.nb-main{padding-bottom:2rem}}
+        @media(min-width:1024px){
+          .nb-main{padding-bottom:2rem}
+          .nb-main.nb-main-day-timeline{padding-bottom:.75rem}
+        }
         .nb-stream{flex:1 1 auto;min-height:0}
 
         /* ── THE SCALE ──────────────────────────────────────────────────
@@ -3543,12 +3553,10 @@ export default function Planner() {
         .nb-timeline-chrome-inner{min-height:0;transform:translate3d(0,0,0);opacity:1;transition:transform 300ms var(--nav-ease),opacity 240ms var(--nav-ease)}
         .nb-day-heading{transition:padding 300ms var(--nav-ease),background-color 180ms ease,border-color 180ms ease}
         .nb-day-heading .nb-display{transition:font-size 300ms var(--nav-ease),line-height 300ms var(--nav-ease)}
-        @media(max-width:1023px){
-          .nb-timeline-chrome.is-collapsed{pointer-events:none}
-          .nb-timeline-chrome.is-collapsed .nb-timeline-chrome-inner{opacity:0;transform:translate3d(0,-10px,0)}
-          .nb-day-heading.is-focused{padding-top:.45rem;padding-bottom:.45rem;border-bottom:1px solid ${T.line}}
-          .nb-day-heading.is-focused .nb-display{font-size:2rem;line-height:2rem}
-        }
+        .nb-timeline-chrome.is-collapsed{pointer-events:none}
+        .nb-timeline-chrome.is-collapsed .nb-timeline-chrome-inner{opacity:0;transform:translate3d(0,-10px,0)}
+        .nb-day-heading.is-focused{padding-top:.45rem;padding-bottom:.45rem;border-bottom:1px solid ${T.line}}
+        .nb-day-heading.is-focused .nb-display{font-size:2rem;line-height:2rem}
 
         @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}
           .nb-app-surface,.nb-nav-brand,.nb-nav-item,.nb-nav-membership{transition-duration:1ms!important}
@@ -3740,8 +3748,9 @@ export default function Planner() {
             <button type="button" data-test="timeline-focus-toggle"
               aria-label={dayTimelineFocused ? "Expand timeline navigation" : "Focus timeline"}
               aria-expanded={!dayTimelineFocused}
+              aria-keyshortcuts="F"
               onClick={() => { beep("tick"); setTimelineFocused((current) => !current); }}
-              className="nb-tap mb-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full lg:hidden"
+              className="nb-tap mb-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
               style={{ color: T.dimText, border: `1px solid ${T.line}` }}>
               <span aria-hidden="true" style={{ transform: dayTimelineFocused ? "rotate(180deg)" : "none", transition: "transform 220ms cubic-bezier(.77,0,.175,1)" }}>⌃</span>
             </button>
@@ -3804,7 +3813,7 @@ export default function Planner() {
       )}
 
       {/* ══ BODY ══ */}
-      <main className="nb-main px-3 sm:px-5 grid grid-cols-1 lg:grid-cols-12 gap-5 flex-1 min-h-0"
+      <main className={`nb-main px-3 sm:px-5 grid grid-cols-1 lg:grid-cols-12 gap-5 flex-1 min-h-0 ${viewMode === "timeline" && zoom === "day" ? "nb-main-day-timeline" : ""}`}
         style={{ "--sheet-pad": sheetPad }}>
         <section className={`${viewMode === "actions" || !actionsOpen ? "lg:col-span-12" : "lg:col-span-7"} flex flex-col min-h-0`} onTouchStart={onSwipeStart} onTouchMove={onSwipeMove} onTouchEnd={onSwipeEnd} onTouchCancel={onSwipeEnd}
           style={{
@@ -4996,6 +5005,7 @@ export default function Planner() {
             <div className="mt-1">
               <Row T={T} k="← →" v="PREVIOUS / NEXT DAY" />
               <Row T={T} k="T" v="TODAY" />
+              <Row T={T} k="F" v="FOCUS TIMELINE" />
               <Row T={T} k="N" v="NEW EVENT" />
               <Row T={T} k="/" v="SEARCH" />
               <Row T={T} k="A" v="NEW ACTION" />

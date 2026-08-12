@@ -22,7 +22,7 @@ The focus button is already rendered for day Timeline, but its `lg:hidden` class
 - Use the existing non-overshooting navigation easing and reduced-motion rules for both directions.
 - Keep focus state reset behavior when the date, view mode, or zoom changes.
 - Add `F` as the keyboard toggle for Focus timeline. It follows the existing global shortcut guard: it is ignored while typing or while a sheet/modal is open, and it only changes state in day Timeline view.
-- Reduce only desktop main-content bottom padding from `2rem` to `0.75rem`. Mobile sheet padding and non-Timeline views retain their current values.
+- Reduce only the desktop day-Timeline main-content bottom padding from `2rem` to `0.75rem`. Mobile sheet padding, Agenda, week/month, and full-screen Actions retain their current values.
 - The toggle remains absent from Agenda, week/month views, and full-screen Actions mode.
 
 ## Component and CSS Boundaries
@@ -39,7 +39,7 @@ The focus button is already rendered for day Timeline, but its `lg:hidden` class
 2. Assert the toggle is not rendered in Agenda, week/month, or Actions modes.
 3. Verify `F` toggles focus in day Timeline, is listed in the shortcut sheet, and does not fire while typing or while a sheet/modal is open.
 4. Retain and run the existing mobile focus tests to verify no change to mobile behavior.
-5. Verify the desktop main padding is reduced while mobile sheet spacing and Actions mode remain unchanged.
+5. Verify only the desktop day Timeline receives the reduced bottom padding while mobile sheet spacing, Agenda, week/month, and Actions remain unchanged.
 6. Run the full unit/browser test suite and production build, then manually check desktop and mobile Timeline, Agenda, and Actions layouts at the responsive breakpoint.
 
 ## Acceptance Criteria
