@@ -85,6 +85,7 @@ import { recordBackupDismissed, recordBackupTaken, shouldPromptBackup } from "./
 import {
   gestureChangedAnything,
   isResizable,
+  liftDelayForTimelineTarget,
   movedEnoughToCancelHold,
   proposeGesture,
 } from "./features/planner/timelineGesture.js";
@@ -2658,7 +2659,23 @@ export default function Planner() {
     const el = streamNode;
     if (!el) return;
     const press = { t: null };
-    const disarm = () => { if (press.t) { clearTimeout(press.t.timer); press.t = null; } };
+    const clearPressTimer = (current) => {
+      if (!current?.timer) return;
+      clearTimeout(current.timer);
+      current.timer = null;
+    };
+    const disarm = () => {
+      clearPressTimer(press.t);
+      press.t = null;
+    };
+    /* A scroll cancels the meaning of the press but keeps its record until the
+       finger comes up. Otherwise touchend sees an apparently fresh empty tap and
+       quick-creates the very event the scroll cancellation was meant to prevent. */
+    const cancelPress = () => {
+      if (!press.t) return;
+      clearPressTimer(press.t);
+      press.t.cancelled = true;
+    };
 
     const onStart = (e) => {
       if (e.touches.length !== 1 || gestureRef.current) return;
@@ -2685,9 +2702,15 @@ export default function Planner() {
       const resizing = handle && (ev || chip)
         ? { edge: handle.getAttribute("data-resize-edge") || "end", kind: ev ? "event" : "task" }
         : null;
-      const p = { x: t.clientX, y: t.clientY, ev, chipId, resizing, startMin: snapTo(m), grab: ev ? m - ev.start : 0, held: false, timer: null };
+      const targetKind = resizing ? "resize" : (ev || chipId ? "card" : "empty");
+      const p = {
+        x: t.clientX, y: t.clientY, ev, chipId, resizing,
+        startMin: snapTo(m), grab: ev ? m - ev.start : 0,
+        startScrollTop: el.scrollTop, held: false, cancelled: false, timer: null,
+      };
       p.timer = setTimeout(() => {
-        if (!press.t) return;
+        if (!press.t || press.t.cancelled) return;
+        press.t.timer = null;
         press.t.held = true;
         beep("lift"); buzz(p.resizing ? 10 : 14);
         if (p.resizing) {
@@ -2703,7 +2726,7 @@ export default function Planner() {
         else if (p.ev) startGesture({ mode: "move", kind: "event", id: p.ev.id, start: p.ev.start, dur: p.ev.dur, grab: p.grab, was: { start: p.ev.start, dur: p.ev.dur }, x: p.x, y: p.y });
         else if (p.chipId) startGesture({ mode: "task", kind: "task", id: p.chipId, x: p.x, y: p.y });
         else startGesture({ mode: "draft", start: p.startMin, dur: 30, x: p.x, y: p.y });
-      }, LIFT_MS);
+      }, liftDelayForTimelineTarget(targetKind));
       press.t = p;
     };
 
@@ -2717,7 +2740,14 @@ export default function Planner() {
       const p = press.t;
       if (!p) return;
       const t = e.touches[0];
-      if (Math.abs(t.clientX - p.x) > 12 || Math.abs(t.clientY - p.y) > 12) disarm();
+      if (Math.abs(t.clientX - p.x) > 12 || Math.abs(t.clientY - p.y) > 12) cancelPress();
+    };
+
+    const onScroll = () => {
+      /* Scroll events are the browser's verdict that this touch belongs to the
+         viewport. Do not second-guess it with a pixel comparison: composited
+         scrolling can dispatch before `scrollTop` is reflected to JS. */
+      if (press.t) cancelPress();
     };
 
     const onEnd = (e) => {
@@ -2726,7 +2756,7 @@ export default function Planner() {
       disarm();
       const t = e.changedTouches && e.changedTouches[0];
       if (g) { finishRef.current(t ? t.clientX : g.x, t ? t.clientY : g.y); return; }
-      if (p && !p.held) {
+      if (p && !p.held && !p.cancelled) {
         /* A tap handled here opens a sheet. Without this the browser still emits its
            compatibility click ~300ms later, which lands on the freshly-opened sheet's
            backdrop and closes it again — the card appeared not to open at all. */
@@ -2747,11 +2777,13 @@ export default function Planner() {
     el.addEventListener("touchmove", onMove, { passive: false });
     el.addEventListener("touchend", onEnd, { passive: false });
     el.addEventListener("touchcancel", onCancel);
+    el.addEventListener("scroll", onScroll, { passive: true });
     return () => {
       el.removeEventListener("touchstart", onStart);
       el.removeEventListener("touchmove", onMove);
       el.removeEventListener("touchend", onEnd);
       el.removeEventListener("touchcancel", onCancel);
+      el.removeEventListener("scroll", onScroll);
     };
   }, [streamNode, ready, viewMode]);
 

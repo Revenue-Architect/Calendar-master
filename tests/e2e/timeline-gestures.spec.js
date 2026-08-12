@@ -32,6 +32,53 @@ const timing = async (page, predicate, message) =>
 
 const card = (page) => page.locator('[data-event-id="evt-standup"]');
 
+async function touchAt(session, type, x, y) {
+  await session.send("Input.dispatchTouchEvent", {
+    type,
+    touchPoints: type === "touchEnd" ? [] : [{ x, y, radiusX: 4, radiusY: 4, force: .5 }],
+  });
+}
+
+test.describe("empty timeline touch intent", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test("resting after a slow scroll cannot mature into a new event", async ({ page }) => {
+    await seedPlanner(page, createBlankPlannerState({}));
+    const stream = page.getByTestId("day-stream");
+    const box = await stream.boundingBox();
+    const x = box.x + 90;
+    const y = box.y + Math.min(180, box.height / 2);
+    const session = await page.context().newCDPSession(page);
+
+    await touchAt(session, "touchStart", x, y);
+    await stream.evaluate((node) => {
+      node.scrollTop += 6; /* below the old 12 px touch-movement cancellation */
+      node.dispatchEvent(new Event("scroll"));
+    });
+    await page.waitForTimeout(720);
+    await touchAt(session, "touchEnd", x, y);
+    await session.detach();
+
+    await expect(page.getByTestId("sheet"), "scrolling must cancel creation for the whole touch sequence").toHaveCount(0);
+  });
+
+  test("a stationary empty hold still creates after the safer delay", async ({ page }) => {
+    await seedPlanner(page, createBlankPlannerState({}));
+    const box = await page.getByTestId("day-stream").boundingBox();
+    const x = box.x + 90;
+    const y = box.y + Math.min(180, box.height / 2);
+    const session = await page.context().newCDPSession(page);
+
+    await touchAt(session, "touchStart", x, y);
+    await page.waitForTimeout(720);
+    await touchAt(session, "touchEnd", x, y);
+    await session.detach();
+
+    await expect(page.getByTestId("sheet")).toBeVisible();
+    await expect(page.getByTestId("sheet").getByRole("tab", { name: "EVENT", exact: true })).toHaveAttribute("aria-selected", "true");
+  });
+});
+
 test.describe("moving an event on the timeline", () => {
   test("press, hold, and drag moves it to the hour it was dropped on", async ({ page }) => {
     await seedPlanner(page, seeded());
