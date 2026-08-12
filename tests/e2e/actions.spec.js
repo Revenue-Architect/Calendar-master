@@ -63,6 +63,29 @@ test.describe("the actions column", () => {
     await expect.poll(() => page.evaluate(() => window.__calendarMasterVibrations)).toContainEqual([24, 32, 36]);
   });
 
+  test("the timeline completion affordance stays compact and the action face is opaque", async ({ page }) => {
+    await seedPlanner(page, scheduledAction());
+    const chip = page.locator('[data-task-chip="task-timeline"]');
+    await chip.scrollIntoViewIfNeeded();
+
+    const complete = page.getByRole("button", { name: "Complete Review launch brief" });
+    const mark = complete.getByTestId("timeline-complete-mark");
+    const [chipBox, completeBox, markBox] = await Promise.all([
+      chip.boundingBox(), complete.boundingBox(), mark.boundingBox(),
+    ]);
+
+    expect(chipBox).not.toBeNull();
+    expect(completeBox).not.toBeNull();
+    expect(markBox).not.toBeNull();
+    expect(markBox.width).toBeLessThanOrEqual(20);
+    expect(markBox.height).toBeLessThanOrEqual(20);
+    expect(completeBox.y).toBeGreaterThanOrEqual(chipBox.y);
+    expect(completeBox.y + completeBox.height).toBeLessThanOrEqual(chipBox.y + chipBox.height + 0.5);
+
+    const background = await chip.evaluate((node) => getComputedStyle(node).backgroundColor);
+    expect(background, "the swipe backing must not bleed through the resting action face").not.toMatch(/rgba\([^)]*,\s*0(?:\.\d+)?\)/);
+  });
+
   test("the haptics preference suppresses completion vibration without blocking completion", async ({ page }) => {
     await recordVibrations(page);
     await seedPlanner(page, scheduledAction({ id: "task-quiet", title: "Quiet completion" }));

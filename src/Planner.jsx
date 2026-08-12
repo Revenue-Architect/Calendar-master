@@ -714,7 +714,22 @@ export default function Planner() {
   const [listManager, setListManager] = useState(false);
   const [viewMode, setViewMode] = useState("timeline");
   const [timelineFocused, setTimelineFocused] = useState(false);
+  const timelineChromeInnerRef = useRef(null);
+  const timelineChromeObserverRef = useRef(null);
+  const [timelineChromeHeight, setTimelineChromeHeight] = useState(null);
   useEffect(() => { setTimelineFocused(false); }, [dateKey, viewMode, zoom]);
+  const attachTimelineChromeInner = useCallback((inner) => {
+    timelineChromeObserverRef.current?.disconnect();
+    timelineChromeObserverRef.current = null;
+    timelineChromeInnerRef.current = inner;
+    if (!inner) return;
+    const measure = () => setTimelineChromeHeight(Math.ceil(inner.getBoundingClientRect().height));
+    measure();
+    if (typeof ResizeObserver !== "function") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(inner);
+    timelineChromeObserverRef.current = observer;
+  }, []);
   /* The shell has explicit phases so the dark application frame is stable before
      the page moves, and so close can reverse cleanly instead of unmounting the
      navigation underneath its exit transition. */
@@ -3512,13 +3527,16 @@ export default function Planner() {
         .nb-pop{animation:nbpop 380ms cubic-bezier(.2,1.6,.35,1)}
         @keyframes nbpop{0%{scale:1}35%{scale:1.28}100%{scale:1}}
 
-        .nb-timeline-chrome{display:grid;grid-template-rows:minmax(0,1fr);min-height:0;opacity:1;transform:translateY(0);transition:grid-template-rows 300ms cubic-bezier(.22,.85,.28,1),opacity 180ms ease,transform 300ms cubic-bezier(.22,.85,.28,1)}
+        /* The expanded row has intrinsic height, which made the previous 1fr to
+           0fr grid transition discrete in Chromium. Measure the stable inner
+           box and interpolate two numeric heights so collapse and restore share
+           one interruptible path. */
+        .nb-app-surface>[data-test="timeline-chrome"].nb-timeline-chrome{min-height:0;overflow:hidden;flex:0 0 auto;opacity:1;transform:translate3d(0,0,0);transition:height 260ms cubic-bezier(.77,0,.175,1),opacity 180ms cubic-bezier(.23,1,.32,1),transform 260ms cubic-bezier(.77,0,.175,1)}
         .nb-timeline-chrome-inner{min-height:0}
-        .nb-day-heading{transition:padding 300ms cubic-bezier(.22,.85,.28,1),background-color 200ms ease,border-color 200ms ease}
-        .nb-day-heading .nb-display{transition:font-size 300ms cubic-bezier(.22,.85,.28,1),line-height 300ms cubic-bezier(.22,.85,.28,1)}
+        .nb-day-heading{transition:padding 260ms cubic-bezier(.77,0,.175,1),background-color 180ms cubic-bezier(.23,1,.32,1),border-color 180ms cubic-bezier(.23,1,.32,1)}
+        .nb-day-heading .nb-display{transition:font-size 260ms cubic-bezier(.77,0,.175,1),line-height 260ms cubic-bezier(.77,0,.175,1)}
         @media(max-width:1023px){
-          .nb-timeline-chrome-inner{overflow:hidden}
-          .nb-timeline-chrome.is-collapsed{grid-template-rows:minmax(0,0fr);opacity:0;transform:translateY(-10px);pointer-events:none}
+          .nb-timeline-chrome.is-collapsed{opacity:0;transform:translate3d(0,-8px,0);pointer-events:none}
           .nb-day-heading.is-focused{padding-top:.45rem;padding-bottom:.45rem;border-bottom:1px solid ${T.line}}
           .nb-day-heading.is-focused .nb-display{font-size:2rem;line-height:2rem}
         }
@@ -3531,8 +3549,9 @@ export default function Planner() {
       `}</style>
 
       <div data-test="timeline-chrome" data-collapsed={String(dayTimelineFocused)}
-        className={`nb-timeline-chrome ${dayTimelineFocused ? "is-collapsed" : ""}`}>
-      <div className="nb-timeline-chrome-inner">
+        className={`nb-timeline-chrome ${dayTimelineFocused ? "is-collapsed" : ""}`}
+        style={{ height: dayTimelineFocused ? 0 : (timelineChromeHeight == null ? "auto" : timelineChromeHeight) }}>
+      <div ref={attachTimelineChromeInner} className="nb-timeline-chrome-inner">
       {/* ══ HUD ══ */}
       <header style={{ background: T.bg, borderBottom: `1px solid ${T.line}`, color: T.text }} className="nb-hud sticky top-0 z-30 px-3 sm:px-5 py-2 flex items-center justify-between gap-3">
         <div className="nb-hud-left flex items-center gap-2 min-w-0">
@@ -3715,7 +3734,7 @@ export default function Planner() {
               onClick={() => { beep("tick"); setTimelineFocused((current) => !current); }}
               className="nb-tap mb-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full lg:hidden"
               style={{ color: T.dimText, border: `1px solid ${T.line}` }}>
-              <span aria-hidden="true" style={{ transform: dayTimelineFocused ? "rotate(180deg)" : "none", transition: "transform 300ms cubic-bezier(.22,.85,.28,1)" }}>⌃</span>
+              <span aria-hidden="true" style={{ transform: dayTimelineFocused ? "rotate(180deg)" : "none", transition: "transform 220ms cubic-bezier(.77,0,.175,1)" }}>⌃</span>
             </button>
           )}
         </div>

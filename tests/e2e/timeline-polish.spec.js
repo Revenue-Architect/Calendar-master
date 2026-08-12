@@ -103,6 +103,28 @@ test.describe("mobile timeline focus", () => {
     await expect(chrome).toHaveAttribute("data-collapsed", "false");
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
   });
+
+  test("the manual focus control interpolates both collapse and restore", async ({ page }) => {
+    await atTime(page, 10, 0);
+    await seedPlanner(page, createBlankPlannerState({}));
+    const chrome = page.getByTestId("timeline-chrome");
+    const toggle = page.getByTestId("timeline-focus-toggle");
+    const expandedHeight = (await chrome.boundingBox()).height;
+
+    await toggle.click();
+    await page.waitForTimeout(70);
+    const collapsingHeight = (await chrome.boundingBox()).height;
+    expect(collapsingHeight).toBeGreaterThan(1);
+    expect(collapsingHeight).toBeLessThan(expandedHeight - 1);
+
+    await expect.poll(async () => (await chrome.boundingBox()).height).toBeLessThan(1);
+    await toggle.click();
+    await page.waitForTimeout(70);
+    const restoringHeight = (await chrome.boundingBox()).height;
+    expect(restoringHeight).toBeGreaterThan(1);
+    expect(restoringHeight).toBeLessThan(expandedHeight - 1);
+    await expect.poll(async () => (await chrome.boundingBox()).height).toBeGreaterThan(expandedHeight - 1);
+  });
 });
 
 test("the day timeline has no standalone FREE labels", async ({ page }) => {

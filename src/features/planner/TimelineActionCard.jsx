@@ -48,17 +48,21 @@ export default function TimelineActionCard({
             display: "flex", flexDirection: "column", justifyContent: "flex-start",
             borderRadius: cardRadius,
             border: `1px dashed ${sizing ? theme.accent : theme.faint}`,
-            background: block ? `${theme.accent}0D` : theme.card,
+            /* The completion backing fills the lane below this face. A translucent
+               face lets that accent show through even at rest, so the intended
+               tint is layered over an opaque card base instead. */
+            backgroundColor: theme.card,
+            backgroundImage: block ? `linear-gradient(${theme.accent}0D, ${theme.accent}0D)` : "none",
             opacity: done ? 0.4 : 1,
           }}>
-          <span className="flex min-w-0 items-center gap-2 py-1 pr-2.5 pl-9">
+          <span className="flex min-w-0 items-center gap-2 py-1 pr-2.5 pl-8">
             <span className="nb-lead min-w-0 flex-1 truncate" style={{ textDecoration: done ? "line-through" : "none" }}>{task.title}</span>
             <span style={{ fontFamily: mono, color: sizing ? theme.accent : theme.dim }} className="nb-task-time ml-auto nb-data shrink-0">
               {sizing ? formatDuration(estimate) : formatTime(task.planned.startMinute)}
             </span>
           </span>
           {block && height >= 40 && (
-            <span style={{ fontFamily: mono, color: theme.dimText }} className="nb-task-duration block nb-data truncate pr-2.5 pl-9">{formatDuration(estimate)}</span>
+            <span style={{ fontFamily: mono, color: theme.dimText }} className="nb-task-duration block nb-data truncate pr-2.5 pl-8">{formatDuration(estimate)}</span>
           )}
           {block && (
             <span data-resize={task.id} data-resize-edge="end"
@@ -74,9 +78,11 @@ export default function TimelineActionCard({
             aria-label={`Complete ${task.title}`}
             onClick={(event) => { event.stopPropagation(); onComplete(task.id); }}
             onPointerDown={(event) => event.stopPropagation()}
-            className="nb-tap absolute left-1 top-1 z-10 flex h-7 w-7 items-center justify-center rounded-full"
-            style={{ color: theme.accent, background: theme.card, boxShadow: `inset 0 0 0 1.5px ${theme.accent}`, touchAction: "manipulation" }}>
-            <span aria-hidden="true" className="text-xs font-bold">✓</span>
+            className="nb-tap absolute inset-y-0 left-0 z-10 flex w-8 items-center justify-center"
+            style={{ color: theme.accent, background: "transparent", touchAction: "manipulation" }}>
+            <span data-test="timeline-complete-mark" aria-hidden="true"
+              className="flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold leading-none"
+              style={{ background: theme.card, boxShadow: `inset 0 0 0 1.25px ${theme.accent}` }}>✓</span>
           </button>
         )}
       </div>
