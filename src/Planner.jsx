@@ -3531,12 +3531,21 @@ export default function Planner() {
            0fr grid transition discrete in Chromium. Measure the stable inner
            box and interpolate two numeric heights so collapse and restore share
            one interruptible path. */
-        .nb-app-surface>[data-test="timeline-chrome"].nb-timeline-chrome{min-height:0;overflow:hidden;flex:0 0 auto;opacity:1;transform:translate3d(0,0,0);transition:height 260ms cubic-bezier(.77,0,.175,1),opacity 180ms cubic-bezier(.23,1,.32,1),transform 260ms cubic-bezier(.77,0,.175,1)}
-        .nb-timeline-chrome-inner{min-height:0}
-        .nb-day-heading{transition:padding 260ms cubic-bezier(.77,0,.175,1),background-color 180ms cubic-bezier(.23,1,.32,1),border-color 180ms cubic-bezier(.23,1,.32,1)}
-        .nb-day-heading .nb-display{transition:font-size 260ms cubic-bezier(.77,0,.175,1),line-height 260ms cubic-bezier(.77,0,.175,1)}
+        /* Focus mode is a two-layer collapse. The outer box owns the one piece of
+           layout that must move — the space reclaimed by the timeline — while the
+           inner box carries the visual departure. Keeping those paths separate
+           prevents the header contents from fading out before the stream has
+           actually received the space, which read as an abrupt jump even though
+           the measured height was interpolating correctly. Both directions use
+           the shell's established no-overshoot ease so a button tap, a scroll,
+           and a reversal all retarget the same transition. */
+        .nb-app-surface>[data-test="timeline-chrome"].nb-timeline-chrome{min-height:0;overflow:hidden;flex:0 0 auto;opacity:1;transform:none;transition:height 300ms var(--nav-ease)}
+        .nb-timeline-chrome-inner{min-height:0;transform:translate3d(0,0,0);opacity:1;transition:transform 300ms var(--nav-ease),opacity 240ms var(--nav-ease)}
+        .nb-day-heading{transition:padding 300ms var(--nav-ease),background-color 180ms ease,border-color 180ms ease}
+        .nb-day-heading .nb-display{transition:font-size 300ms var(--nav-ease),line-height 300ms var(--nav-ease)}
         @media(max-width:1023px){
-          .nb-timeline-chrome.is-collapsed{opacity:0;transform:translate3d(0,-8px,0);pointer-events:none}
+          .nb-timeline-chrome.is-collapsed{pointer-events:none}
+          .nb-timeline-chrome.is-collapsed .nb-timeline-chrome-inner{opacity:0;transform:translate3d(0,-10px,0)}
           .nb-day-heading.is-focused{padding-top:.45rem;padding-bottom:.45rem;border-bottom:1px solid ${T.line}}
           .nb-day-heading.is-focused .nb-display{font-size:2rem;line-height:2rem}
         }
@@ -5311,10 +5320,11 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromote
 
   return (
     <div data-task={t.id} className="relative overflow-hidden" style={{ background: "transparent", borderRadius: CARD_R, boxShadow: target ? `inset 0 2px 0 ${T.accent}` : "none" }}>
-      <div className="absolute inset-0 flex items-center justify-between px-4" style={{ fontFamily: MONO }}>
-        <span className="nb-data" style={{ color: T.accentText, opacity: dx > 20 ? 1 : 0 }}>COMPLETE</span>
-        <span className="nb-data" style={{ color: T.dimText, opacity: dx < -20 ? 1 : 0 }}>TOMORROW</span>
-      </div>
+        <div data-test="task-completion-backdrop" className="absolute inset-0 flex items-center justify-between px-4"
+          style={{ fontFamily: MONO, background: dx > 0 ? T.accent : surface, color: dx > 0 ? T.on : T.dimText, borderRadius: CARD_R }}>
+          <span className="nb-data" style={{ color: T.on, opacity: dx > 20 ? 1 : 0 }}>COMPLETE</span>
+          <span className="nb-data" style={{ color: T.dimText, opacity: dx < -20 ? 1 : 0 }}>TOMORROW</span>
+        </div>
 
       <article className="relative" style={{ background: surface, borderRadius: CARD_R, transform: `translateX(${dx}px)`, transition: dx === 0 ? "transform 220ms cubic-bezier(.2,.8,.25,1)" : "none", opacity: isDone ? 0.55 : 1, touchAction: "pan-y", userSelect: "none", WebkitUserSelect: "none" }}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
