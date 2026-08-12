@@ -7,6 +7,8 @@ export default function TimelineActionCard({
   estimate,
   block,
   sizing,
+  dragging = false,
+  reducedMotion = false,
   swipeOffset = 0,
   theme,
   mono,
@@ -17,6 +19,8 @@ export default function TimelineActionCard({
   onComplete,
   onReopen,
   onResizePointerDown,
+  onPointerDown,
+  onPointerUp,
   clickFollowsGesture,
 }) {
   const open = () => {
@@ -32,13 +36,22 @@ export default function TimelineActionCard({
 
   return (
     <div className="nb-timeline-lane absolute overflow-hidden"
-      style={{ top, height, left, width, borderRadius: cardRadius, zIndex: sizing ? 20 : 5, pointerEvents: "auto" }}>
+      style={{
+        top, height, left, width, borderRadius: cardRadius,
+        zIndex: dragging || sizing ? 20 : 5,
+        pointerEvents: "auto",
+        transform: dragging && !reducedMotion ? "scale(1.02)" : "none",
+        boxShadow: dragging && !reducedMotion ? "0 10px 28px rgba(0,0,0,.38)" : "none",
+        transition: reducedMotion ? "none" : "transform 120ms cubic-bezier(.23,1,.32,1), box-shadow 160ms ease-out",
+      }}>
       <div aria-hidden="true" className="absolute inset-0 flex items-center pl-2"
         data-test="timeline-completion-backdrop"
         style={{ backgroundColor: theme.accent, color: theme.on, fontFamily: mono, borderRadius: cardRadius, opacity: 1 }}>
         <span className="nb-label inline-flex items-center gap-1"><svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m3 8.2 3 3 7-7" /></svg>COMPLETE</span>
       </div>
       <div className="absolute inset-0"
+        onPointerDown={(event) => onPointerDown?.(event, task)}
+        onPointerUp={(event) => onPointerUp?.(event, task)}
         style={{
           transform: `translateX(${swipeOffset}px)`,
           transition: swipeOffset === 0 ? "transform 220ms cubic-bezier(.2,.8,.25,1)" : "none",

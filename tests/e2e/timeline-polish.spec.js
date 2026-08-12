@@ -54,6 +54,7 @@ test.describe("mobile timeline focus", () => {
     const session = await page.context().newCDPSession(page);
 
     await dispatchTouch(session, "touchStart", x, y);
+    await dispatchTouch(session, "touchMove", x, y + 12);
     await stream.evaluate((node) => { node.scrollTop += 32; node.dispatchEvent(new Event("scroll")); });
     await dispatchTouch(session, "touchEnd", x, y);
     await session.detach();
@@ -75,6 +76,7 @@ test.describe("mobile timeline focus", () => {
     const session = await page.context().newCDPSession(page);
 
     await dispatchTouch(session, "touchStart", x, y);
+    await dispatchTouch(session, "touchMove", x, y + 12);
     await stream.evaluate((node) => { node.scrollTop += 32; node.dispatchEvent(new Event("scroll")); });
     await dispatchTouch(session, "touchEnd", x, y);
     await expect(chrome).toHaveAttribute("data-collapsed", "true");
@@ -107,6 +109,7 @@ test.describe("mobile timeline focus", () => {
     const box = await stream.boundingBox();
     const session = await page.context().newCDPSession(page);
     await dispatchTouch(session, "touchStart", box.x + 90, box.y + 120);
+    await dispatchTouch(session, "touchMove", box.x + 90, box.y + 132);
     await stream.evaluate((node) => { node.scrollTop = 32; node.dispatchEvent(new Event("scroll")); });
     await dispatchTouch(session, "touchEnd", box.x + 90, box.y + 120);
     await session.detach();
@@ -198,7 +201,12 @@ test.describe("mobile timeline focus", () => {
     const stream = page.getByTestId("week-grid").locator(".nb-s").first();
     await expect(toggle).toBeVisible();
 
+    const session = await page.context().newCDPSession(page);
+    const box = await stream.boundingBox();
+    await dispatchTouch(session, "touchStart", box.x + 90, box.y + 120);
+    await dispatchTouch(session, "touchMove", box.x + 90, box.y + 132);
     await stream.evaluate((node) => { node.scrollTop += 32; node.dispatchEvent(new Event("scroll")); });
+    await dispatchTouch(session, "touchEnd", box.x + 90, box.y + 120);
     await expect(chrome).toHaveAttribute("data-collapsed", "true");
     await stream.evaluate((node) => { node.scrollTop = 0; node.dispatchEvent(new Event("scroll")); });
     await expect(chrome).toHaveAttribute("data-collapsed", "false");

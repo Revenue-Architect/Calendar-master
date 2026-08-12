@@ -4,7 +4,7 @@ import { createBlankPlannerState } from "../../src/platform/persistence/plannerS
 import { createTask } from "../../src/domains/tasks/index.js";
 import { createPreferences } from "../../src/platform/preferences/preferences.js";
 import { PREFERENCES_STORE_KEY } from "../../src/platform/persistence/preferencesStore.js";
-import { keyOf } from "../../src/shared/time/dateKey.js";
+import { addDaysToKey, keyOf } from "../../src/shared/time/dateKey.js";
 
 /* The Actions column can be collapsed, restored, and swapped for a full-screen
  * view. Two things about it are only observable in a browser: that the collapsed
@@ -87,6 +87,26 @@ test.describe("the actions column", () => {
     expect(reopened.tasks[0].status).toBe("open");
     await expect(completionOverlay).toHaveAttribute("data-visible", "false");
     await expect.poll(() => completionOverlay.evaluate((node) => getComputedStyle(node).opacity)).toBe("0");
+  });
+
+  test("a held desktop Action card follows the pointer and reschedules on drop", async ({ page }) => {
+    await seedPlanner(page, scheduledAction({ id: "task-drag", title: "Move the brief" }));
+    const chip = page.locator('[data-task-chip="task-drag"]');
+    await chip.scrollIntoViewIfNeeded();
+    const before = await chip.boundingBox();
+    const hourPx = 68;
+    const x = before.x + before.width / 2;
+    const y = before.y + before.height / 2;
+
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.waitForTimeout(360);
+    await page.mouse.move(x, y + hourPx, { steps: 8 });
+    await expect.poll(async () => (await chip.boundingBox()).y).toBeGreaterThan(before.y + 30);
+    await page.mouse.up();
+
+    const state = await settledState(page, (stored) => stored.tasks[0]?.planned.startMinute === 11 * 60, "the Action drag did not reschedule the task");
+    expect(state.tasks[0].planned.startMinute).toBe(11 * 60);
   });
 
   test("the timeline completion affordance stays compact and the action face is opaque", async ({ page }) => {
@@ -277,6 +297,59 @@ test.describe("the actions column", () => {
 
     await page.getByRole("button", { name: "BACK TO DAY" }).click();
     await expect(page.getByTestId("day-stream")).toBeVisible();
+  });
+
+  test("the week date ribbon collapses in Actions and restores in Timeline", async ({ page }) => {
+    await openPlanner(page);
+    await page.getByTestId("zoom-out").click();
+    await expect(page.getByTestId("day-ribbon")).toBeVisible();
+
+    await page.getByRole("tab", { name: "ACTIONS", exact: true }).click();
+    await expect(page.getByTestId("day-ribbon")).toBeHidden();
+
+    await page.getByRole("tab", { name: "TIMELINE", exact: true }).click();
+    await expect(page.getByTestId("day-ribbon")).toBeVisible();
+  });
+
+  test("PLAN TODAY reviews overdue actions before changing their plan", async ({ page }) => {
+    const today = keyOf(new Date());
+    const yesterday = addDaysToKey(today, -1);
+    const blank = createBlankPlannerState({});
+    const first = createTask(blank.tasks, {
+      id: "task-overdue-one", title: "Reconcile the old invoice",
+      deadline: { date: yesterday },
+      planned: { date: yesterday, startMinute: 600, estimateMinutes: 45 },
+    });
+    const second = createTask(first.tasks, {
+      id: "task-overdue-two", title: "Send the overdue follow-up",
+      deadline: { date: yesterday },
+      planned: { date: yesterday, startMinute: 780, estimateMinutes: 30 },
+    });
+    await seedPlanner(page, { ...blank, tasks: second.tasks });
+
+    const actionsColumn = page.locator('[data-test="actions-column"]');
+    const plan = actionsColumn.getByTestId("plan-today");
+    await expect(plan).toBeVisible();
+    const before = await storedState(page);
+    await plan.click();
+
+    const review = actionsColumn.getByTestId("overdue-plan-review");
+    await expect(review).toBeVisible();
+    await expect(review).toContainText("Reconcile the old invoice");
+    await expect(review).toContainText("DUE");
+    expect((await storedState(page)).tasks.map((task) => task.planned.date)).toEqual(before.tasks.map((task) => task.planned.date));
+
+    await review.getByTestId("overdue-plan-cancel").click();
+    await expect(review).toBeHidden();
+    expect((await storedState(page)).tasks.map((task) => task.planned.date)).toEqual(before.tasks.map((task) => task.planned.date));
+
+    await plan.click();
+    await review.getByTestId("overdue-plan-one").first().click();
+    await expect.poll(async () => (await storedState(page)).tasks.find((task) => task.id === "task-overdue-one").planned.date).toBe(today);
+    await expect.poll(async () => (await storedState(page)).tasks.find((task) => task.id === "task-overdue-two").planned.date).toBe(yesterday);
+
+    await review.getByTestId("overdue-plan-all").click();
+    await expect.poll(async () => (await storedState(page)).tasks.every((task) => task.planned.date === today)).toBe(true);
   });
 
   test("pressing an action in the full-screen view does not start a drag", async ({ page }) => {

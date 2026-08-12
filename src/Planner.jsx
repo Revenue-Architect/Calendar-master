@@ -833,7 +833,11 @@ export default function Planner() {
   const timelineChromeInnerRef = useRef(null);
   const timelineChromeObserverRef = useRef(null);
   const [timelineChromeHeight, setTimelineChromeHeight] = useState(null);
-  useEffect(() => { setTimelineFocused(false); }, [dateKey, viewMode, zoom]);
+  useEffect(() => {
+    timelineUserScrollRef.current = false;
+    timelineAutoPositionRef.current = false;
+    setTimelineFocused(false);
+  }, [dateKey, viewMode, zoom]);
   const attachTimelineChromeInner = useCallback((inner) => {
     timelineChromeObserverRef.current?.disconnect();
     timelineChromeObserverRef.current = null;
@@ -889,6 +893,7 @@ export default function Planner() {
   const ribbonShiftPendingRef = useRef(false);
   const ribbonScrollAnchorRef = useRef(null);
   const ribbonCenterPendingRef = useRef(false);
+  const ribbonPositionedRef = useRef(false);
   const ribbonWindowStartRef = useRef(ribbonInitialWindowStart);
   const ribbonScrollLockRef = useRef(false);
   const navToggleRef = useRef(null);
@@ -911,6 +916,8 @@ export default function Planner() {
      than relying on someone remembering to list every cause of a remount. */
   const streamRef = useRef(null);
   const timelineScrollTopRef = useRef(0);
+  const timelineAutoPositionRef = useRef(false);
+  const timelineUserScrollRef = useRef(false);
   const [streamNode, setStreamNode] = useState(null);
   const [dayHourHeight, setDayHourHeight] = useState(HOUR_H);
   const dayHeight = dayHourHeight * 24;
@@ -985,6 +992,23 @@ export default function Planner() {
      this the day cell at the edge is sliced down the middle by the arrow beside
      it, which reads as a rendering fault rather than "there is more this way". */
   const [, stripFade] = useEdgeFade(stripRef);
+  const revealRibbonCell = useCallback((behavior = "smooth", center = false) => {
+    const strip = stripRef.current;
+    const cell = activeRef.current;
+    if (!strip || !cell) return;
+    const inset = 24;
+    const left = cell.offsetLeft;
+    const right = left + cell.offsetWidth;
+    const visibleLeft = strip.scrollLeft;
+    const visibleRight = visibleLeft + strip.clientWidth;
+    let next = center
+      ? Math.max(0, left - (strip.clientWidth - cell.offsetWidth) / 2)
+      : visibleLeft;
+    if (!center && left < visibleLeft + inset) next = Math.max(0, left - inset);
+    else if (!center && right > visibleRight - inset) next = Math.max(0, right - strip.clientWidth + inset);
+    if (Math.abs(next - visibleLeft) < 1) return;
+    strip.scrollTo({ left: next, behavior });
+  }, []);
   const setRibbonWindow = useCallback((next) => {
     const proposed = typeof next === "function" ? next(ribbonWindowStartRef.current) : next;
     const clamped = Math.max(0, Math.min(ribbonSpan - RIBBON_RENDER_WINDOW_DAYS, Math.round(proposed)));
@@ -1465,8 +1489,9 @@ export default function Planner() {
   const timelineLayout = useMemo(() => {
     const g = gesture;
     const movingEvent = g && (g.mode === "move" || g.mode === "resize-end" || g.mode === "resize-start");
+    const movingTask = g && g.mode === "task";
     const resizingTask = g && g.mode === "task-resize";
-    const transforming = movingEvent || resizingTask;
+    const transforming = movingEvent || movingTask || resizingTask;
     const list = [
       ...timed.map((event) => ({
         ...(movingEvent && g.id === event.id ? { ...event, start: g.start, dur: g.dur } : event),
@@ -1475,7 +1500,7 @@ export default function Planner() {
       })),
       ...scheduledTasks.map((task) => ({
         ...task,
-        start: task.planned.startMinute,
+        start: movingTask && g.id === task.id && g.start != null ? g.start : task.planned.startMinute,
         dur: resizingTask && g.id === task.id ? g.dur : (task.planned.estimateMinutes ?? 30),
         timelineKind: "task",
         timelineKey: `task:${task.id}`,
@@ -1527,31 +1552,30 @@ export default function Planner() {
 
   useEffect(() => {
     if (ready && (zoom === "week" || zoom === "day") && activeRef.current && stripRef.current) {
-      /* The ribbon only mounts a small window of cells. A smooth programmatic
-         scroll would emit intermediate positions while that window is being
-         replaced, detaching the very button a user is trying to press. The
-         selected cell still lands in the same place; the motion belongs to the
-         cards below, not to a virtualized control row. */
-      stripRef.current.scrollTo({ left: activeRef.current.offsetLeft - 24, behavior: "auto" });
+      /* Let the highlight travel through the visible cells. Only reveal it when
+         it reaches an edge; recentering on every date change made the whole
+         ribbon jump instead of the selected day moving naturally. */
+      const initial = !ribbonPositionedRef.current;
+      revealRibbonCell(initial ? "auto" : "smooth", initial);
+      ribbonPositionedRef.current = true;
       ribbonCenterPendingRef.current = false;
     }
-  }, [dateKey, ready, zoom]);
+  }, [dateKey, ready, zoom, revealRibbonCell]);
   useLayoutEffect(() => {
     if (!ribbonCenterPendingRef.current || !activeRef.current || !stripRef.current) return;
-    stripRef.current.scrollTo({
-      left: Math.max(0, activeRef.current.offsetLeft - 24),
-      behavior: "auto",
-    });
+    revealRibbonCell("auto");
     ribbonCenterPendingRef.current = false;
-  }, [ribbonRange.startKey, ribbonRange.endKey, ribbonWindowStart, mounted]);
+  }, [ribbonRange.startKey, ribbonRange.endKey, ribbonWindowStart, mounted, revealRibbonCell]);
 
   useEffect(() => {
     if (!ready || !streamRef.current) return;
     const first = timed.slice().sort((a, b) => a.start - b.start)[0];
     const anchor = isToday ? nowMin : first ? first.start : 480;
     const nextScrollTop = Math.max(0, (anchor / 1440) * dayHeight - 140);
+    timelineAutoPositionRef.current = true;
     streamRef.current.scrollTop = nextScrollTop;
     timelineScrollTopRef.current = nextScrollTop;
+    requestAnimationFrame(() => requestAnimationFrame(() => { timelineAutoPositionRef.current = false; }));
     /* `zoom` belongs here: changing it rebuilds the surface above the day, which
        remounts the stream with a scrollTop of zero. Without it, zooming out to the
        month and back left the day sitting at midnight — eight hours above anything
@@ -2044,8 +2068,10 @@ export default function Planner() {
      that moves it, both live in features/planner/overduePull.js so they can be
      asserted without a render — including the awkward case, a missed occurrence
      of an accumulating series, whose id is not a row any command can find. */
-  const pullOverdue = () => {
-    const entries = pullableOverdue(overdue, todayKey);
+  const pullOverdue = (ids = null) => {
+    const candidates = pullableOverdue(overdue, todayKey);
+    const selected = ids == null ? null : new Set(ids);
+    const entries = selected ? candidates.filter((entry) => selected.has(entry.id)) : candidates;
     if (!entries.length) return;
     beep("schedule");
     const before = structuredClone(db);
@@ -2713,6 +2739,11 @@ export default function Planner() {
        about this surface: where the pointer is and what it is over. */
     if (g.mode === "move" && !overDay) {
       next.start = proposeGesture("move", { pointerMinute: m, grab: g.grab, duration: g.dur }).start;
+    } else if (g.mode === "task" && g.start != null) {
+      /* Actions use the same vertical move proposal as events. The old task
+         gesture only updated its drop metadata, so the floating label moved
+         while the actual card stayed at its original minute. */
+      next.start = proposeGesture("move", { pointerMinute: m, grab: g.grab, duration: g.dur }).start;
     } else if (g.mode === "resize-end" || g.mode === "task-resize" || g.mode === "draft") {
       next.dur = proposeGesture("resize-end", { start: g.start, pointerMinute: m, kind: g.kind }).duration;
     } else if (g.mode === "resize-start") {
@@ -2736,6 +2767,18 @@ export default function Planner() {
   const onTimelineScrollPosition = useCallback((nextScrollTop, { initial = false } = {}) => {
     if (!Number.isFinite(nextScrollTop)) return;
     if (initial) {
+      timelineScrollTopRef.current = nextScrollTop;
+      return;
+    }
+    if (timelineAutoPositionRef.current) {
+      timelineScrollTopRef.current = nextScrollTop;
+      return;
+    }
+    /* Resize, card insertion, and the initial anchor can all move a scroll node
+       without a person scrolling it. Focus mode must respond to intent, not to
+       those layout corrections; the touch/wheel listeners below mark the first
+       real scroll gesture. */
+    if (!timelineUserScrollRef.current) {
       timelineScrollTopRef.current = nextScrollTop;
       return;
     }
@@ -2826,7 +2869,14 @@ export default function Planner() {
         const el = streamRef.current;
         if (el) {
           const r = el.getBoundingClientRect();
-          if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) scheduleTask(g.id, snapTo(minutesAt(y), 15));
+          if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+            const dropStart = g.start ?? snapTo(minutesAt(y), 15);
+            const changed = g.start == null || gestureChangedAnything(
+              { start: g.was?.start ?? g.start, duration: g.was?.dur ?? g.dur },
+              { start: g.start, duration: g.dur },
+            );
+            if (changed) scheduleTask(g.id, dropStart);
+          }
         }
       }
     }
@@ -2922,6 +2972,36 @@ export default function Planner() {
     if (gestureRef.current) return;
     if (tappedRef.current) { tappedRef.current = false; e.stopPropagation(); beep("click"); setInspect({ kind: "event", id: ev.id }); }
   };
+  const taskDown = (e, task) => {
+    if (e.pointerType === "touch" || e.button === 2 || task?.planned?.startMinute == null) return;
+    e.stopPropagation();
+    const start = task.planned.startMinute;
+    const duration = task.planned.estimateMinutes ?? 30;
+    const grab = minutesAt(e.clientY) - start;
+    const target = e.currentTarget;
+    const pointerId = e.pointerId;
+    tappedRef.current = true;
+    armHold(e.clientX, e.clientY, () => {
+      tappedRef.current = false;
+      target.setPointerCapture?.(pointerId);
+      beep("lift"); buzz(14);
+      startGesture({
+        mode: "task", kind: "task", id: task.id, start, dur: duration, grab,
+        was: { start, dur: duration }, x: e.clientX, y: e.clientY,
+      });
+    });
+  };
+  const taskUp = (e, task) => {
+    if (e.pointerType === "touch") return;
+    disarmHold();
+    if (gestureRef.current) return;
+    if (tappedRef.current) {
+      tappedRef.current = false;
+      e.stopPropagation();
+      beep("click");
+      setInspect({ kind: "task", id: task.id });
+    }
+  };
   /* `edge` is which end of the block the hand has hold of: the bottom moves the
      end and the top moves the start, and in both cases the *other* end is what
      the person is holding still in their head.
@@ -2977,6 +3057,11 @@ export default function Planner() {
 
     const onStart = (e) => {
       if (e.touches.length !== 1 || gestureRef.current) return;
+      /* A scroll event can arrive after the finger moves outside the stream (or
+         after a device compositor applies the offset), so establish intent at
+         touch start. A tap alone never changes focus; it only authorizes a
+         following scroll event to do so. */
+      timelineUserScrollRef.current = true;
       if (e.target.closest?.("[data-timeline-complete]")) return;
       const t = e.touches[0];
       const hit = e.target.closest ? e.target.closest("[data-event-id],[data-resize],[data-task-chip]") : null;
@@ -3004,7 +3089,8 @@ export default function Planner() {
       const targetKind = resizing ? "resize" : (ev || chipId ? "card" : "empty");
       const p = {
         x: t.clientX, y: t.clientY, ev, chipId, resizing,
-        startMin: snapTo(m), grab: ev ? m - ev.start : 0,
+        startMin: snapTo(m),
+        grab: ev ? m - ev.start : chip?.planned?.startMinute != null ? m - chip.planned.startMinute : 0,
         startScrollTop: el.scrollTop, held: false, cancelled: false, swiping: false,
         lastX: t.clientX, lastY: t.clientY, timer: null,
       };
@@ -3024,7 +3110,15 @@ export default function Planner() {
           });
         }
         else if (p.ev) startGesture({ mode: "move", kind: "event", id: p.ev.id, start: p.ev.start, dur: p.ev.dur, grab: p.grab, was: { start: p.ev.start, dur: p.ev.dur }, x: p.x, y: p.y });
-        else if (p.chipId) startGesture({ mode: "task", kind: "task", id: p.chipId, x: p.x, y: p.y });
+        else if (p.chipId) {
+          const task = plannedRef.current.find((item) => item.id === p.chipId);
+          const start = task?.planned?.startMinute ?? p.startMin;
+          const dur = task?.planned?.estimateMinutes ?? 30;
+          startGesture({
+            mode: "task", kind: "task", id: p.chipId, start, dur, grab: p.grab,
+            was: { start, dur }, x: p.x, y: p.y,
+          });
+        }
         else startGesture({ mode: "draft", start: p.startMin, dur: 30, x: p.x, y: p.y });
       }, liftDelayForTimelineTarget(targetKind));
       press.t = p;
@@ -3052,6 +3146,7 @@ export default function Planner() {
         return;
       }
       if (Math.abs(t.clientX - p.x) > 12 || Math.abs(t.clientY - p.y) > 12) cancelPress();
+      if (Math.abs(t.clientY - p.y) > 4) timelineUserScrollRef.current = true;
     };
 
     const onScroll = () => {
@@ -3060,6 +3155,7 @@ export default function Planner() {
       if (!p) return;
       cancelPress();
     };
+    const onWheel = () => { timelineUserScrollRef.current = true; };
 
     const onEnd = (e) => {
       const g = gestureRef.current;
@@ -3100,12 +3196,14 @@ export default function Planner() {
     el.addEventListener("touchend", onEnd, { passive: false });
     el.addEventListener("touchcancel", onCancel);
     el.addEventListener("scroll", onScroll, { passive: true });
+    el.addEventListener("wheel", onWheel, { passive: true });
     return () => {
       el.removeEventListener("touchstart", onStart);
       el.removeEventListener("touchmove", onMove);
       el.removeEventListener("touchend", onEnd);
       el.removeEventListener("touchcancel", onCancel);
       el.removeEventListener("scroll", onScroll);
+      el.removeEventListener("wheel", onWheel);
     };
   }, [streamNode, ready, viewMode, zoom, dayHourHeight, onTimelineScrollPosition]);
 
@@ -3973,7 +4071,9 @@ export default function Planner() {
             at either scroll edge. The date surface is therefore effectively
             unbounded without growing a permanent DOM row or losing scroll place. */}
         {(zoom === "week" || zoom === "day") && (
-          <div className="flex items-center">
+          <div data-test="calendar-ribbon-reveal">
+            <Reveal open={viewMode !== "actions"}>
+              <div className="flex items-center">
             {zoom === "day" && (
               <button onClick={() => goDay(-1)} aria-label="Previous day" style={{ color: T.dimText }} className="nb-tap shrink-0 px-2 sm:px-3 py-1 flex items-center justify-center"><ChevronIcon direction="left" /></button>
             )}
@@ -4021,6 +4121,8 @@ export default function Planner() {
             {zoom === "day" && (
               <button onClick={() => goDay(1)} aria-label="Next day" style={{ color: T.dimText }} className="nb-tap shrink-0 px-2 sm:px-3 py-1 flex items-center justify-center"><ChevronIcon /></button>
             )}
+              </div>
+            </Reveal>
           </div>
         )}
       </div>
@@ -4168,6 +4270,7 @@ export default function Planner() {
                     setComposer({ kind: "event", date: draft.date, start: draft.start, dur: draft.dur });
                   }}
                   onTimelineScroll={onTimelineScrollPosition}
+                  onTimelineIntent={() => { timelineUserScrollRef.current = true; }}
                   onOpenDay={(k) => { beep("tick"); if (k !== dateKey) jumpTo(k); setZoom("day"); }}
                   onOpenEvent={(id, key) => { beep("click"); if (key !== dateKey) jumpTo(key); setTimeout(() => setInspect({ kind: "event", id }), key !== dateKey ? 80 : 0); }}
                   onOpenTask={(id, key) => { beep("click"); if (key !== dateKey) jumpTo(key); setTimeout(() => setInspect({ kind: "task", id }), key !== dateKey ? 80 : 0); }}
@@ -4412,20 +4515,23 @@ export default function Planner() {
                       day looked emptier than it was. */}
                   {plannedTasks.map((t) => {
                     const sizing = gesture && gesture.mode === "task-resize" && gesture.id === t.id;
+                    const dragging = gesture && gesture.mode === "task" && gesture.id === t.id;
                     const estimate = sizing ? gesture.dur : t.planned.estimateMinutes;
                     const block = isResizable(t, "task");
                     const h = block ? Math.max(28, (estimate / 1440) * dayHeight - 3) : 28;
                     return (
                       <TimelineActionCard key={t.id} task={t}
-                        top={(t.planned.startMinute / 1440) * dayHeight + 2}
+                        top={((dragging && gesture.start != null ? gesture.start : t.planned.startMinute) / 1440) * dayHeight + 2}
                         height={h} left={`${(t.lane / t.cols) * 100}%`} width={`calc(${100 / t.cols}% - 6px)`}
-                        estimate={estimate} block={block} sizing={sizing}
+                        estimate={estimate} block={block} sizing={sizing} dragging={dragging} reducedMotion={reducedMotion}
                         swipeOffset={taskSwipe?.id === t.id ? taskSwipe.offset : 0}
                         theme={T} mono={MONO} cardRadius={CARD_R} formatTime={tm} formatDuration={dur}
                         clickFollowsGesture={clickFollowsGesture}
                         onOpen={(id) => { beep("click"); setInspect({ kind: "task", id }); }}
                         onComplete={completeTask}
                         onReopen={reopenTask}
+                        onPointerDown={taskDown}
+                        onPointerUp={taskUp}
                         onResizePointerDown={(ev, task, nextEstimate) => resizeDown(ev, { id: task.id, start: task.planned.startMinute, dur: nextEstimate }, "end", "task")} />
                     );
                   })}
@@ -5366,9 +5472,13 @@ function NavigationShell({ phase, firstItemRef, onTimeline, onActions, onSetup, 
 /* ═══════════════════════ ACTIONS ═══════════════════════ */
 
 function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, onOpenDeadline, overdue, deadlines, showOverdue, todayKey, gesture, blockersFor, onPromoteSub, smartView, viewCounts, onSmartView, lists, onManageLists, clock = "12", selection, onToggleSelect, onStartSelect, onCancelSelect, onBulk, onPullOverdue, beep, buzz, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onAddTask, onEditNote, onUnschedule, onJump, onCollapse = null }) {
+  const [overdueReviewOpen, setOverdueReviewOpen] = useState(false);
   const pullable = overdue.filter((t) => t.planned?.date !== todayKey);
   const open = tasks.filter((t) => t.status !== "completed");
   const done = tasks.filter((t) => t.status === "completed");
+  useEffect(() => {
+    if (!pullable.length) setOverdueReviewOpen(false);
+  }, [pullable.length]);
   return (
     <div ref={listRef}>
       <div className="hidden lg:flex items-baseline justify-between mb-3">
@@ -5428,11 +5538,35 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
       {/* Only what PLAN TODAY can actually move is offered: overdue work already
           planned onto today would make the button a visible no-op. */}
       {showOverdue && pullable.length > 0 && (
-        <button onClick={onPullOverdue} className="w-full flex items-center gap-2 px-3 py-2 mb-2 text-left" style={{ boxShadow: `inset 0 0 0 1px ${NOW_RED}` }}>
+        <>
+          <button data-test="plan-today" onClick={() => { beep("click"); setOverdueReviewOpen((current) => !current); }} className="w-full flex items-center gap-2 px-3 py-2 mb-2 text-left" style={{ boxShadow: `inset 0 0 0 1px ${NOW_RED}` }} aria-expanded={overdueReviewOpen}>
           <span style={{ fontFamily: MONO, color: NOW_RED }} className="nb-data shrink-0">{pullable.length} OVERDUE</span>
           <span className="flex-1 text-xs truncate" style={{ color: T.dimText }}>{pullable.map((t) => t.title).join(" · ")}</span>
-          <span style={{ fontFamily: MONO, color: T.accentText }} className="nb-label shrink-0">PLAN TODAY</span>
-        </button>
+            <span style={{ fontFamily: MONO, color: T.accentText }} className="nb-label shrink-0">PLAN TODAY</span>
+          </button>
+          <Reveal open={overdueReviewOpen}>
+            <div data-test="overdue-plan-review" className="mb-3 px-3 py-2.5" style={{ background: T.card, borderRadius: CARD_R, boxShadow: `inset 0 0 0 1px ${NOW_RED}`, opacity: overdueReviewOpen ? 1 : 0, transform: overdueReviewOpen ? "translateY(0)" : "translateY(-4px)", transition: "opacity 180ms ease-out, transform 180ms cubic-bezier(.23,1,.32,1)" }}>
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <span style={{ fontFamily: MONO, color: NOW_RED }} className="nb-label">OVERDUE WORK</span>
+                <button data-test="overdue-plan-cancel" onClick={() => { beep("click"); setOverdueReviewOpen(false); }} style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-label">CANCEL</button>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                {pullable.map((t) => (
+                  <div key={t.id} data-test={`overdue-plan-${t.id}`} className="flex items-center gap-2 py-1.5" style={{ borderTop: `1px solid ${T.line}` }}>
+                    <button data-test="overdue-plan-open" onClick={() => { beep("click"); setOverdueReviewOpen(false); onInspect(t.id); }} className="nb-tap min-w-0 flex-1 text-left">
+                      <span className="block text-sm font-semibold truncate">{t.title}</span>
+                      <span style={{ fontFamily: MONO, color: T.dimText }} className="block nb-data truncate">
+                        DUE {t.deadline?.date || "—"} · WAS {t.planned?.date ? `${plannedLabel(t.planned.date, todayKey)}${t.planned.startMinute != null ? ` ${fmtTime(t.planned.startMinute, clock)}` : ""}` : "UNPLANNED"}{t.planned?.estimateMinutes ? ` · ${dur(t.planned.estimateMinutes)}` : ""}
+                      </span>
+                    </button>
+                    <button data-test="overdue-plan-one" onClick={() => onPullOverdue([t.id])} style={{ fontFamily: MONO, color: T.accentText, border: `1px solid ${T.line}`, borderRadius: 999 }} className="nb-tap shrink-0 px-2 py-1 nb-label">PLAN</button>
+                  </div>
+                ))}
+              </div>
+              <button data-test="overdue-plan-all" onClick={() => { setOverdueReviewOpen(false); onPullOverdue(); }} style={{ fontFamily: MONO, color: T.on, background: T.accent, borderRadius: 999 }} className="nb-tap mt-2 w-full px-2 py-1.5 nb-label">PLAN ALL TODAY</button>
+            </div>
+          </Reveal>
+        </>
       )}
 
       {deadlines.length > 0 && (
@@ -5786,7 +5920,7 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromote
 /* The true week: 7 day columns against one shared time axis. Events are blocks and
    free time is the open space between them — the shape of the week is the point,
    so the columns carry as little chrome as they can. */
-function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, nowMin, clock, slots, draftPreview, onCreateDraft, onTimelineScroll, onOpenDay, onOpenEvent, onOpenTask, onSlotPick, onMoveEvent, beep, buzz }) {
+function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, nowMin, clock, slots, draftPreview, onCreateDraft, onTimelineScroll, onTimelineIntent, onOpenDay, onOpenEvent, onOpenTask, onSlotPick, onMoveEvent, beep, buzz }) {
   const scrollRef = useRef(null);
   const weekKey = week[0]?.key;
   useEffect(() => {
@@ -6145,7 +6279,7 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
             ))}
           </div>
         )}
-        <div ref={scrollRef} onScroll={(event) => {
+        <div ref={scrollRef} onTouchStartCapture={() => onTimelineIntent?.()} onWheel={() => onTimelineIntent?.()} onScroll={(event) => {
           /* The scroll container is the reliable cancellation signal on touch:
              a finger can move only a few pixels before the browser starts
              scrolling, which is still a scroll rather than an intentional

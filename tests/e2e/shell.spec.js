@@ -154,4 +154,31 @@ test.describe("the day ribbon", () => {
     await page.getByRole("button", { name: "Previous day" }).click();
     await expect(heading, "the arrows should step one day either way").toHaveAttribute("data-date", target);
   });
+
+  test("the selected cell moves within the viewport before the ribbon scrolls", async ({ page }) => {
+    await openPlanner(page);
+    const ribbon = page.getByTestId("day-ribbon");
+    const today = await page.getByTestId("day-heading").getAttribute("data-date");
+    await expect.poll(async () => ribbon.evaluate((node, key) => {
+      const cell = node.querySelector(`[data-day="${key}"]`);
+      if (!cell) return false;
+      const strip = node.getBoundingClientRect();
+      const box = cell.getBoundingClientRect();
+      return box.left >= strip.left && box.right <= strip.right;
+    }, today)).toBe(true);
+    const before = await ribbon.evaluate((node, key) => {
+      const cell = node.querySelector(`[data-day="${key}"]`);
+      return { scrollLeft: node.scrollLeft, left: cell.getBoundingClientRect().left };
+    }, today);
+
+    await page.getByRole("button", { name: "Next day" }).click();
+    const next = await page.getByTestId("day-heading").getAttribute("data-date");
+    const after = await ribbon.evaluate((node, key) => {
+      const cell = node.querySelector(`[data-day="${key}"]`);
+      return { scrollLeft: node.scrollLeft, left: cell.getBoundingClientRect().left };
+    }, next);
+
+    expect(Math.abs(after.scrollLeft - before.scrollLeft), "a visible adjacent date should not recenter the ribbon").toBeLessThan(2);
+    expect(after.left, "the highlighted cell should travel through the ribbon").toBeGreaterThan(before.left + 20);
+  });
 });
