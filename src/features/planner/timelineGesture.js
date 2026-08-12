@@ -26,7 +26,7 @@ export const LIFT_MS = 300;
 /* Empty canvas is different from an existing object: the same press creates a
    new record, so it waits through the pause that naturally happens at the end
    of a slow scroll. Existing cards keep the quicker manipulation threshold. */
-export const EMPTY_SPACE_LIFT_MS = 650;
+export const EMPTY_SPACE_LIFT_MS = 500;
 /* How far a press may travel before it stops being a press. Below this a hand
    is holding still; above it, the surface is being scrolled. */
 export const HOLD_CANCEL_PX = 8;

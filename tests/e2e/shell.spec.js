@@ -93,17 +93,51 @@ test.describe("the shell", () => {
 });
 
 test.describe("the day ribbon", () => {
-  /* The day view used to offer one arrow either side of a date: it said which day
-     you were on and nothing about the days around it, and gave a dragged event
-     nowhere to land but the day already open. */
-  test("the timeline carries the same fortnight strip the week view does", async ({ page }) => {
+  test("the timeline carries a rolling multi-year strip into the week view", async ({ page }) => {
     await openPlanner(page);
+    const ribbon = page.getByTestId("day-ribbon");
     const cells = page.locator("[data-day]");
     await expect(cells.first()).toBeVisible();
-    expect(await cells.count(), "the strip should span a fortnight").toBe(14);
+    expect(await ribbon.getAttribute("data-ribbon-total-days"), "the logical strip should span more than two years").toBe("733");
+
+    const span = await ribbon.evaluate((node) => {
+      const first = Date.parse(`${node.getAttribute("data-ribbon-start")}T00:00:00Z`);
+      const last = Date.parse(`${node.getAttribute("data-ribbon-end")}T00:00:00Z`);
+      return Math.round((last - first) / 86_400_000);
+    });
+    expect(span, "the visible ribbon must cover at least a year in each direction").toBeGreaterThan(700);
 
     /* Each cell is a drop target, which is the point of having it here. */
     await expect(cells.first()).toHaveAttribute("data-day", /^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  test("the ribbon shifts past both rolling edges and keeps the selected day reachable", async ({ page }) => {
+    await openPlanner(page);
+    const ribbon = page.getByTestId("day-ribbon");
+    const cells = page.locator("[data-day]");
+
+    const firstBefore = await ribbon.getAttribute("data-ribbon-start");
+    await ribbon.evaluate((node) => { node.scrollLeft = 0; node.dispatchEvent(new Event("scroll")); });
+    await expect.poll(() => ribbon.getAttribute("data-ribbon-start")).not.toBe(firstBefore);
+
+    const lastBefore = await ribbon.getAttribute("data-ribbon-end");
+    await ribbon.evaluate((node) => { node.scrollLeft = node.scrollWidth; node.dispatchEvent(new Event("scroll")); });
+    await expect.poll(() => ribbon.getAttribute("data-ribbon-end")).not.toBe(lastBefore);
+
+    const edge = await cells.last().getAttribute("data-day");
+    await cells.last().click();
+    await expect(page.getByTestId("day-heading")).toHaveAttribute("data-date", edge);
+    await page.getByRole("button", { name: "Next day" }).click();
+    const next = await page.getByTestId("day-heading").getAttribute("data-date");
+    await expect(page.locator(`[data-day="${next}"]`)).toHaveAttribute("data-day", next);
+    await page.waitForTimeout(360);
+
+    const pastEdge = await cells.first().getAttribute("data-day");
+    await page.locator(`[data-day="${pastEdge}"]`).click();
+    await expect(page.getByTestId("day-heading")).toHaveAttribute("data-date", pastEdge);
+    await page.getByRole("button", { name: "Previous day" }).click();
+    const previous = await page.getByTestId("day-heading").getAttribute("data-date");
+    await expect(page.locator(`[data-day="${previous}"]`)).toHaveAttribute("data-day", previous);
   });
 
   test("a day in the strip selects that day, and the arrows still step one at a time", async ({ page }) => {

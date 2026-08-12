@@ -70,12 +70,15 @@ test.describe("empty timeline touch intent", () => {
     const session = await page.context().newCDPSession(page);
 
     await touchAt(session, "touchStart", x, y);
-    await page.waitForTimeout(720);
+    await page.waitForTimeout(540);
     await touchAt(session, "touchEnd", x, y);
     await session.detach();
 
     await expect(page.getByTestId("sheet")).toBeVisible();
     await expect(page.getByTestId("sheet").getByRole("tab", { name: "EVENT", exact: true })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByTestId("timeline-draft-preview"), "the placement preview should remain under the composer").toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("timeline-draft-preview")).toBeHidden();
   });
 });
 

@@ -160,6 +160,15 @@ test.describe("the actions column", () => {
     expect(motion.transform).toMatch(/^(none|matrix\(1, 0, 0, 1, 0, [0-9.]+\))$/);
   });
 
+  test("every open Action exposes Add a step immediately", async ({ page }) => {
+    await seedPlanner(page, scheduledAction({ id: "task-steps", title: "Action without steps" }));
+    await page.getByRole("tab", { name: "ACTIONS", exact: true }).click();
+
+    const card = page.locator('[data-task="task-steps"]');
+    await expect(card.getByTestId("task-add-step"), "the subtask affordance must not depend on an existing step").toBeVisible();
+    await expect(card.getByPlaceholder("Add a step")).toBeVisible();
+  });
+
   test("the haptics preference suppresses completion vibration without blocking completion", async ({ page }) => {
     await recordVibrations(page);
     await seedPlanner(page, scheduledAction({ id: "task-quiet", title: "Quiet completion" }));

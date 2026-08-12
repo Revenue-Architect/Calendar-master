@@ -48,7 +48,7 @@ test("empty space waits longer than a card before becoming a timeline gesture", 
   assert.equal(liftDelayForTimelineTarget("resize"), LIFT_MS);
   assert.equal(liftDelayForTimelineTarget("empty"), EMPTY_SPACE_LIFT_MS);
   assert.ok(LIFT_MS <= 300, "card manipulation must still feel immediate");
-  assert.ok(EMPTY_SPACE_LIFT_MS >= 650, "resting during a slow scroll must not create a draft");
+  assert.equal(EMPTY_SPACE_LIFT_MS, 500, "empty creation should wait half a second");
 });
 
 test("touch intent distinguishes a horizontal action swipe from timeline scrolling", () => {
