@@ -83,6 +83,38 @@ test.describe("adjacent weekdays", () => {
 });
 
 test.describe("the notch morph", () => {
+  test("creation keeps one visible material through the whole morph", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openPlanner(page);
+    await page.getByTestId("new-action").click();
+
+    const sheet = page.getByTestId("sheet");
+    const opening = await sheet.evaluate((node) => {
+      for (const animation of node.getAnimations({ subtree: true })) {
+        animation.pause();
+        animation.currentTime = 0;
+      }
+      return Number(getComputedStyle(node.querySelector(".nb-notch-body")).opacity);
+    });
+    expect(opening, "creation should grow from NEW instead of fading content over it").toBeGreaterThanOrEqual(.99);
+
+    await page.keyboard.press("Escape");
+    await expect(sheet).toHaveClass(/nb-fluid-closing/);
+    const closing = await sheet.evaluate((node) => {
+      for (const animation of node.getAnimations({ subtree: true })) {
+        animation.pause();
+        const timing = animation.effect.getTiming();
+        animation.currentTime = Math.max(0, Number(timing.delay || 0) + Number(timing.duration || 0) - 2);
+      }
+      return {
+        panel: Number(getComputedStyle(node).opacity),
+        body: Number(getComputedStyle(node.querySelector(".nb-notch-body")).opacity),
+      };
+    });
+    expect(closing.panel).toBeGreaterThanOrEqual(.99);
+    expect(closing.body, "creation should fold into NEW instead of fading away first").toBeGreaterThanOrEqual(.99);
+  });
+
   test("NEW grows the composer out of the button, and folds it back", async ({ page }) => {
     await openPlanner(page);
     await page.getByTestId("new-entry").click();
@@ -90,7 +122,7 @@ test.describe("the notch morph", () => {
     const sheet = page.getByTestId("sheet");
     await expect(sheet).toBeVisible();
     await expect(sheet, "the composer should morph as a notch from NEW").toHaveAttribute("data-fluid-origin", "notch");
-    /* The body is the part that arrives late and leaves early. */
+    /* The body remains part of the material instead of cross-fading over it. */
     await expect(sheet.locator(".nb-notch-body")).toBeVisible();
 
     await page.keyboard.press("Escape");
@@ -146,6 +178,70 @@ test.describe("the notch morph", () => {
 });
 
 test.describe("sheet exits", () => {
+  test("a trigger morph approaches rest without bouncing past it", async ({ page }) => {
+    await openPlanner(page, { keepSample: true });
+    await page.getByRole("tab", { name: "AGENDA", exact: true }).click();
+    await page.getByText("Roadmap workshop", { exact: true }).click();
+
+    const travel = await page.getByTestId("sheet").evaluate((node) => {
+      const animation = node.getAnimations()[0];
+      animation.pause();
+      animation.currentTime = 0;
+      const start = new DOMMatrix(getComputedStyle(node).transform);
+      animation.currentTime = Number(animation.effect.getTiming().duration) * .72;
+      const late = new DOMMatrix(getComputedStyle(node).transform);
+      return { start: { x: start.m41, y: start.m42 }, late: { x: late.m41, y: late.m42 } };
+    });
+    const remainsBetweenStartAndRest = (late, start) => start >= 0
+      ? late >= -.01 && late <= start + .01
+      : late <= .01 && late >= start - .01;
+    expect(remainsBetweenStartAndRest(travel.late.x, travel.start.x), "horizontal travel crossed the resting edge").toBe(true);
+    expect(remainsBetweenStartAndRest(travel.late.y, travel.start.y), "vertical travel crossed the resting edge").toBe(true);
+  });
+
+  test("an inspector stays visible while it morphs to and from its card", async ({ page }) => {
+    await openPlanner(page, { keepSample: true });
+    await page.getByRole("tab", { name: "AGENDA", exact: true }).click();
+    await page.getByText("Roadmap workshop", { exact: true }).click();
+
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).toHaveAttribute("data-fluid-origin", "trigger");
+
+    /* Sample the rendered animation itself. A class-name assertion passed while
+       the body independently faded from zero, which is exactly why the previous
+       regression test certified a transition that still looked like a fade. */
+    const opening = await sheet.evaluate((node) => {
+      const body = node.querySelector(".nb-notch-body");
+      for (const animation of node.getAnimations({ subtree: true })) {
+        animation.pause();
+        animation.currentTime = 0;
+      }
+      return {
+        panelOpacity: Number(getComputedStyle(node).opacity),
+        bodyOpacity: Number(getComputedStyle(body).opacity),
+      };
+    });
+    expect(opening.panelOpacity).toBeGreaterThanOrEqual(.99);
+    expect(opening.bodyOpacity, "the card-to-sheet morph must not begin as an empty surface").toBeGreaterThanOrEqual(.99);
+
+    await page.keyboard.press("Escape");
+    await expect(sheet).toHaveClass(/nb-fluid-closing/);
+    const closing = await sheet.evaluate((node) => {
+      const body = node.querySelector(".nb-notch-body");
+      for (const animation of node.getAnimations({ subtree: true })) {
+        animation.pause();
+        const timing = animation.effect.getTiming();
+        animation.currentTime = Math.max(0, Number(timing.delay || 0) + Number(timing.duration || 0) - 2);
+      }
+      return {
+        panelOpacity: Number(getComputedStyle(node).opacity),
+        bodyOpacity: Number(getComputedStyle(body).opacity),
+      };
+    });
+    expect(closing.panelOpacity, "the material must land in the card before it unmounts").toBeGreaterThanOrEqual(.99);
+    expect(closing.bodyOpacity, "the card contents should leave through the shrinking clip, not a separate fade").toBeGreaterThanOrEqual(.99);
+  });
+
   test("a cross-day agenda open keeps the pressed card as its morph origin", async ({ page }) => {
     await openPlanner(page, { keepSample: true });
     await page.getByRole("tab", { name: "AGENDA", exact: true }).click();

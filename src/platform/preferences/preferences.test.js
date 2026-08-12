@@ -12,7 +12,7 @@ test("derives a versioned preference record from legacy display fields", () => {
     themeId: "cream-blue", clock: "24", sound: false, notifs: true,
   });
 
-  assert.equal(preferences.schemaVersion, 1);
+  assert.equal(preferences.schemaVersion, 2);
   assert.equal(preferences.display.themeId, "cream-blue");
   assert.equal(preferences.display.clock, "24");
   assert.equal(preferences.feedback.sound, false);
@@ -21,7 +21,7 @@ test("derives a versioned preference record from legacy display fields", () => {
 });
 
 test("normalizes safe defaults without mutating its input", () => {
-  const source = { schemaVersion: 1, display: { clock: "nope", reducedMotion: true } };
+  const source = { schemaVersion: 2, display: { clock: "nope", reducedMotion: true } };
   const normalized = createPreferences(source);
 
   assert.equal(normalized.display.clock, "12");
@@ -29,6 +29,11 @@ test("normalizes safe defaults without mutating its input", () => {
   assert.equal(normalized.feedback.sound, true);
   assert.equal(normalized.feedback.haptics, true);
   assert.equal(source.display.clock, "nope");
+});
+
+test("an explicit current-version haptics choice is preserved", () => {
+  const preferences = createPreferences({ schemaVersion: 2, feedback: { haptics: false } });
+  assert.equal(preferences.feedback.haptics, false);
 });
 
 test("resets one preference group without touching the other groups", () => {

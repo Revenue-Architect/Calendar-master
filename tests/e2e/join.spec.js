@@ -57,23 +57,35 @@ test.describe("joining a meeting", () => {
     await expect(page.getByRole("link", { name: "Join No link at all" })).toHaveCount(0);
   });
 
-  test("agenda metadata clears the reserved JOIN column", async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 844 });
+  test("agenda keeps titles and metadata in readable lanes beside JOIN", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 800 });
     await seedPlanner(page, seeded());
     await page.getByRole("tab", { name: "AGENDA", exact: true }).click();
     await page.waitForTimeout(200);
 
-    for (const title of ["Timed with link", "All day with link"]) {
+    for (const [title, metadata] of [["Timed with link", "9:00 AM"], ["All day with link", "ALL DAY"]]) {
       const join = page.getByRole("link", { name: `Join ${title}` });
       const row = join.locator("..");
-      const trailing = row.locator("button > span").last();
-      const [joinBox, trailingBox] = await Promise.all([join.boundingBox(), trailing.boundingBox()]);
+      const titleText = row.getByText(title, { exact: true });
+      const trailing = row.getByText(metadata, { exact: true });
+      const [joinBox, titleBox, trailingBox] = await Promise.all([
+        join.boundingBox(), titleText.boundingBox(), trailing.boundingBox(),
+      ]);
       expect(joinBox).not.toBeNull();
+      expect(titleBox).not.toBeNull();
       expect(trailingBox).not.toBeNull();
+      expect(
+        await titleText.evaluate((node) => node.scrollWidth <= node.clientWidth + 1),
+        `${title} should fit instead of being sacrificed to metadata`,
+      ).toBe(true);
       expect(
         trailingBox.x + trailingBox.width,
         `${title} metadata must not run under JOIN`,
       ).toBeLessThanOrEqual(joinBox.x - 1);
+      expect(
+        trailingBox.y,
+        `${title} metadata should sit below the title instead of through its line`,
+      ).toBeGreaterThanOrEqual(titleBox.y + titleBox.height - 1);
     }
   });
 

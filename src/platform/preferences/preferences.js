@@ -1,4 +1,4 @@
-export const PREFERENCES_VERSION = 1;
+export const PREFERENCES_VERSION = 2;
 
 export const DEFAULT_PREFERENCES = Object.freeze({
   schemaVersion: PREFERENCES_VERSION,

@@ -34,9 +34,8 @@ export function fluidPillStretch(previousBox, nextBox) {
  * size, and the clip opens out to the panel's own edges. What the eye follows is
  * a button-shaped hole growing into a panel-shaped one — the same gesture the
  * scale was reaching for — while the text inside is laid out once, at its final
- * size, and never resampled. The contents fade in behind the opening clip, since
- * full-size words seen through a button-sized window would otherwise arrive as a
- * sliver of a sentence.
+ * size, and never resampled. The clip is also the content reveal, so there is no
+ * independent fade that can disconnect the panel from the card it came from.
  *
  * `insetX`/`insetY` are the distance from each edge of the panel to that starting
  * rectangle. They are clamped at zero: a trigger wider than the panel it opens

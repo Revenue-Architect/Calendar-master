@@ -8,6 +8,22 @@ import { openPlanner, quickAdd, storedState } from "./helpers.js";
  * the panel's press-and-hold is the same gesture as "I am scrolling this list". */
 
 test.describe("the actions column", () => {
+  test("completing an action sends tactile feedback", async ({ page }) => {
+    await page.addInitScript(() => {
+      window.__calendarMasterVibrations = [];
+      Object.defineProperty(navigator, "vibrate", {
+        configurable: true,
+        value: (pattern) => { window.__calendarMasterVibrations.push(pattern); return true; },
+      });
+    });
+    await openPlanner(page, { keepSample: true });
+    await page.getByRole("tab", { name: "ACTIONS", exact: true }).click();
+    await page.getByText("Walk 8k steps", { exact: true }).first().click();
+    await page.getByTestId("sheet").getByRole("button", { name: "MARK COMPLETE" }).click();
+
+    await expect.poll(() => page.evaluate(() => window.__calendarMasterVibrations)).toContainEqual([8, 30, 14]);
+  });
+
   test("collapses, restores, and remembers across a reload", async ({ page }) => {
     await openPlanner(page);
     const column = page.getByTestId("actions-column");

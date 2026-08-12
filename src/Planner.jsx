@@ -3315,17 +3315,15 @@ export default function Planner() {
            window opens out to the panel's own edges. Nothing inside is ever
            scaled, so the text is laid out once and never resampled — see
            features/motion/fluidGeometry.js for why that is the whole fix. */
-        .nb-fluid[data-fluid-origin="trigger"]{animation-name:nbfluidorigin;transform-origin:center}
+        .nb-fluid[data-fluid-origin="trigger"]{animation-name:nbfluidorigin;animation-timing-function:cubic-bezier(.22,.85,.28,1);transform-origin:center}
         @keyframes nbfluidorigin{
           0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round 999px)}
           100%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px round 24px)}
         }
-        /* Full-size words seen through a button-sized window are a sliver of a
-           sentence, so the contents arrive behind the opening clip rather than
-           through it. Opacity only: a transform here would put the content back
-           on a curve of its own. */
-        .nb-fluid[data-fluid-origin="trigger"] .nb-notch-body{animation:nbmorphbody 200ms ease 130ms both}
-        @keyframes nbmorphbody{from{opacity:0}to{opacity:1}}
+        /* The clip is the transition. Fading the body independently made the
+           opening shape empty and erased the contents before the closing shape
+           reached its card, so the connected morph read as a generic fade. */
+        .nb-fluid[data-fluid-origin="trigger"] .nb-notch-body{animation:none;opacity:1}
         .nb-fluid.nb-fluid-closing{animation:nbfluidout 240ms cubic-bezier(.4,0,.4,1) forwards;pointer-events:none}
         .nb-fluid.nb-fluid-closing[data-fluid-origin="trigger"]{animation-name:nbfluidoriginout;animation-duration:300ms}
         @keyframes nbfluidout{0%,30%{opacity:1}100%{opacity:0;transform:translateY(12px) scale(.97);border-radius:30px}}
@@ -3335,31 +3333,24 @@ export default function Planner() {
            describe the same path. Same distance, same clip, reversed. */
         @keyframes nbfluidoriginout{
           0%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px round 24px)}
-          82%{opacity:1}
-          100%{opacity:0;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round 999px)}
+          100%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round 999px)}
         }
-        .nb-fluid.nb-fluid-closing[data-fluid-origin="trigger"] .nb-notch-body{animation:nbmorphbodyout 120ms ease forwards}
-        @keyframes nbmorphbodyout{to{opacity:0}}
+        .nb-fluid.nb-fluid-closing[data-fluid-origin="trigger"] .nb-notch-body{animation:none;opacity:1}
         /* The notch morph: one object changing shape, rather than a panel fading
-           in. The shape never fades — it travels and stretches from the pill at
-           full opacity, so the eye follows a thing moving instead of watching
-           one image replaced by another. The body is held back until the shape
-           has most of its size, and on the way out it leaves first, so the
-           panel is empty by the time it folds back into the button. */
-        .nb-fluid[data-fluid-origin="notch"]{animation-name:nbnotchin;animation-duration:380ms}
+           in. Shape and contents stay on one compositor path at full opacity;
+           the animated clip itself reveals and conceals what belongs inside. */
+        .nb-fluid[data-fluid-origin="notch"]{animation-name:nbnotchin;animation-duration:380ms;animation-timing-function:cubic-bezier(.22,.85,.28,1)}
         @keyframes nbnotchin{
           0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round 999px)}
           100%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px round 24px)}
         }
-        .nb-fluid[data-fluid-origin="notch"] .nb-notch-body{animation:nbnotchbody 260ms ease 130ms both}
-        @keyframes nbnotchbody{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+        .nb-fluid[data-fluid-origin="notch"] .nb-notch-body{animation:none;opacity:1;transform:none}
         .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"]{animation:nbnotchout 260ms cubic-bezier(.4,0,.3,1) forwards}
         @keyframes nbnotchout{
           0%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px round 24px)}
           100%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round 999px)}
         }
-        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-notch-body{animation:nbnotchbodyout 140ms ease forwards}
-        @keyframes nbnotchbodyout{to{opacity:0;transform:translateY(6px)}}
+        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-notch-body{animation:none;opacity:1;transform:none}
         @media(min-width:640px){.nb-fluid{transform-origin:center;border-radius:24px}}
         /* The blur is set once and never animated. A changing blur radius throws
            away the compositor's cached backdrop every frame and re-blurs the whole
@@ -5670,17 +5661,16 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
  * inside a button is invalid HTML that browsers and screen readers resolve
  * differently.
  *
- * So the anchor is a *sibling* laid over the row's right edge, and the row
- * reserves the width it occupies. Two real controls, no nesting, and the row's
- * own tap target is unchanged everywhere the link is absent. */
-const JOIN_RESERVED_WIDTH = 72;
+ * The two controls occupy real grid columns. The old absolute overlay made the
+ * button reserve a guessed width; on a 360px phone that left an ordinary title
+ * only ~85px while the time was centred through both text lines. */
 
 function RowWithJoin({ T, surface, link, title, onOpen, className = "", padding = "px-3 py-2.5", style = {}, children }) {
   const href = normalizeMeetingLink(link);
   return (
-    <div className="relative" style={{ background: surface, borderRadius: CARD_R, ...style }}>
-      <button onClick={onOpen} className={`nb-tap w-full flex items-center gap-2.5 text-left ${padding} ${className}`}
-        style={{ paddingRight: href ? JOIN_RESERVED_WIDTH : undefined, background: "transparent", borderRadius: CARD_R }}>
+    <div className={`grid items-stretch ${href ? "grid-cols-[minmax(0,1fr)_auto]" : "grid-cols-1"}`} style={{ background: surface, borderRadius: CARD_R, ...style }}>
+      <button onClick={onOpen} className={`nb-tap min-w-0 w-full flex items-center gap-2.5 text-left ${padding} ${className}`}
+        style={{ background: "transparent", borderRadius: CARD_R }}>
         {children}
       </button>
       {href && (
@@ -5688,7 +5678,7 @@ function RowWithJoin({ T, surface, link, title, onOpen, className = "", padding 
           onClick={(e) => e.stopPropagation()}
           aria-label={`Join ${title}`}
           style={{ fontFamily: MONO, color: T.accentText }}
-          className="nb-tap absolute right-2 top-1/2 -translate-y-1/2 px-1.5 py-1 text-xs font-bold tracking-widest">JOIN ↗</a>
+          className="nb-tap self-center justify-self-end mx-2 px-1.5 py-1 text-xs font-bold tracking-widest">JOIN ↗</a>
       )}
     </div>
   );
@@ -5716,8 +5706,10 @@ function Agenda({ T, surface, days, dateKey, todayKey, clock, onOpenEvent, onOpe
                 <RowWithJoin key={e.id} T={T} surface={surface} link={e.link} title={e.title}
                   onOpen={() => onOpenEvent(e.id, day.key)}>
                   <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: catColor(e.cat) }} />
-                  <span className="flex-1 text-sm font-semibold truncate">{e.title}</span>
-                  <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label shrink-0">ALL DAY</span>
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-sm font-semibold whitespace-normal break-words leading-5">{e.title}</span>
+                    <span style={{ fontFamily: MONO, color: T.dimText }} className="block nb-label mt-0.5">ALL DAY</span>
+                  </span>
                 </RowWithJoin>
               ))}
               {day.timed.map((e) => (
@@ -5725,10 +5717,12 @@ function Agenda({ T, surface, days, dateKey, todayKey, clock, onOpenEvent, onOpe
                   onOpen={() => onOpenEvent(e.id, day.key)}>
                   <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: catColor(e.cat) }} />
                   <span className="flex-1 min-w-0">
-                    <span className="block text-sm font-semibold truncate">{e.title}</span>
-                    {e.place && <span style={{ color: T.dimText }} className="block text-xs truncate">{e.place}</span>}
+                    <span className="block text-sm font-semibold whitespace-normal break-words leading-5">{e.title}</span>
+                    <span className="mt-0.5 flex min-w-0 items-baseline justify-between gap-2">
+                      {e.place && <span style={{ color: T.dimText }} className="min-w-0 flex-1 text-xs truncate">{e.place}</span>}
+                      <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data shrink-0">{fmtTime(e.start, clock)}</span>
+                    </span>
                   </span>
-                  <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data shrink-0">{fmtTime(e.start, clock)}</span>
                 </RowWithJoin>
               ))}
               {day.tasks.map((t) => (
