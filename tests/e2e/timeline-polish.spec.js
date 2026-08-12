@@ -186,6 +186,28 @@ test.describe("mobile timeline focus", () => {
     expect(restoringOpacity).toBeGreaterThan(0);
     expect(restoringOpacity).toBeLessThan(1);
   });
+
+  test("the week timeline shares focus collapse and restores at midnight", async ({ page }) => {
+    await atTime(page, 10, 0);
+    await seedPlanner(page, createBlankPlannerState({}));
+    await page.getByTestId("zoom-out").click();
+    await expect(page.getByTestId("week-grid")).toBeVisible();
+
+    const chrome = page.getByTestId("timeline-chrome");
+    const toggle = page.getByTestId("timeline-focus-toggle");
+    const stream = page.getByTestId("week-grid").locator(".nb-s").first();
+    await expect(toggle).toBeVisible();
+
+    await stream.evaluate((node) => { node.scrollTop += 32; node.dispatchEvent(new Event("scroll")); });
+    await expect(chrome).toHaveAttribute("data-collapsed", "true");
+    await stream.evaluate((node) => { node.scrollTop = 0; node.dispatchEvent(new Event("scroll")); });
+    await expect(chrome).toHaveAttribute("data-collapsed", "false");
+
+    await toggle.click();
+    await expect(chrome).toHaveAttribute("data-collapsed", "true");
+    await page.keyboard.press("F");
+    await expect(chrome).toHaveAttribute("data-collapsed", "false");
+  });
 });
 
 test.describe("desktop timeline focus", () => {
@@ -237,7 +259,7 @@ test.describe("desktop timeline focus", () => {
     await expect(page.getByTestId("composer")).toBeHidden();
   });
 
-  test("keeps the control out of non-day views", async ({ page }) => {
+  test("keeps the control out of non-timeline views", async ({ page }) => {
     await atTime(page, 10, 0);
     await seedPlanner(page, createBlankPlannerState({}));
     const toggle = page.getByTestId("timeline-focus-toggle");
@@ -251,7 +273,7 @@ test.describe("desktop timeline focus", () => {
     await expect(toggle).toBeVisible();
     await page.getByTestId("zoom-out").click();
     await expect(page.getByTestId("week-grid")).toBeVisible();
-    await expect(toggle).toHaveCount(0);
+    await expect(toggle).toBeVisible();
     await expect(main).toHaveCSS("padding-bottom", "32px");
 
     await page.getByTestId("zoom-in").click();

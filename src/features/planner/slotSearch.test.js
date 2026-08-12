@@ -86,6 +86,22 @@ test("today's slots start at now rounded up, never in the past", () => {
   assert.deepEqual(slots, [{ date: D0, start: 705, dur: 60 }]);
 });
 
+test("a visible week skips prior dates and anchors now to the actual today", () => {
+  const state = baseState([]);
+  const slots = findOpenSlots(state, {
+    ...opts,
+    fromDate: D0,
+    todayDate: "2026-08-11",
+    currentMinute: 700,
+    days: 3,
+    limit: 2,
+  });
+  assert.deepEqual(slots, [
+    { date: "2026-08-11", start: 705, dur: 60 },
+    { date: "2026-08-12", start: 540, dur: 60 },
+  ]);
+});
+
 test("a fully booked horizon yields no slots", () => {
   const state = baseState([
     timed("d1", "work", `${D0}T08:00`, `${D0}T18:00`),

@@ -17,6 +17,7 @@ import { localDateTimeToEpochMinutes } from "../../shared/time/localDateTime.js"
    blocks merge naturally as the cursor only ever moves forward. */
 export function findOpenSlots(state, {
   fromDate,
+  todayDate = fromDate,
   currentMinute = 0,
   durationMinutes,
   days = 14,
@@ -30,6 +31,11 @@ export function findOpenSlots(state, {
   const slots = [];
   for (let i = 0; i < days && slots.length < limit; i += 1) {
     const key = addDaysToKey(fromDate, i);
+    /* A week can begin before today. Those dates are useful for reading the
+       calendar, but offering a booking slot in the past is not useful. The
+       cursor's "now" rule is keyed to the actual date rather than array index,
+       so a Sunday-starting week does not accidentally treat Sunday as today. */
+    if (todayDate && key < todayDate) continue;
     const dayStart = localDateTimeToEpochMinutes(`${key}T00:00`);
     const busy = [
       ...getTimedBusyIntervals(state, key, addDaysToKey(key, 1), { viewerTimeZone })
@@ -41,7 +47,7 @@ export function findOpenSlots(state, {
     /* Today never offers a slot in the past; it starts at "now", rounded up to
        the next quarter hour so a suggested start is one you could actually say
        out loud in a meeting invite. */
-    let cursor = Math.max(windowStartMinute, i === 0 ? Math.ceil(currentMinute / 15) * 15 : 0);
+    let cursor = Math.max(windowStartMinute, key === todayDate ? Math.ceil(currentMinute / 15) * 15 : windowStartMinute);
     for (const [start, end] of busy) {
       if (cursor >= windowEndMinute) break;
       const gapEnd = Math.min(start, windowEndMinute);

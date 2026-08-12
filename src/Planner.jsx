@@ -84,6 +84,7 @@ import { AUTO_COMPLETE_DELAY_MS, autoCompleteStillValid, togglesLastOpenStep } f
 import { recordBackupDismissed, recordBackupTaken, shouldPromptBackup } from "./features/planner/backupReminder.js";
 import {
   gestureChangedAnything,
+  EMPTY_SPACE_LIFT_MS,
   isResizable,
   liftDelayForTimelineTarget,
   movedEnoughToCancelHold,
@@ -1411,10 +1412,13 @@ export default function Planner() {
   /* "Find a slot" reads free/busy through the calendar domain's availability
      projection plus timed actions as blockers — see slotSearch.js. */
   const slotMatches = useMemo(() => (db && slotDur ? findOpenSlots(db, {
-    fromDate: todayKey,
+    fromDate: weekStartKey,
+    todayDate: todayKey,
     currentMinute: nowMin,
     durationMinutes: slotDur,
-  }) : []), [db, slotDur, todayKey, nowMin]);
+    days: 7,
+    limit: 12,
+  }) : []), [db, slotDur, weekStartKey, todayKey, nowMin]);
 
   /* §1.1. The visible day is composed once from the three source domains. The
      timeline still owns its layout and gestures, but it no longer reimplements
@@ -1781,7 +1785,7 @@ export default function Planner() {
       if (search) return;
       /* The shortcuts have to be discoverable from the keyboard they belong to. */
       if (e.key === "?") { e.preventDefault(); beep("click"); setShortcuts(true); return; }
-      if ((e.key === "f" || e.key === "F") && viewMode === "timeline" && zoom === "day") {
+      if ((e.key === "f" || e.key === "F") && viewMode === "timeline" && (zoom === "day" || zoom === "week")) {
         e.preventDefault();
         beep("tick");
         setTimelineFocused((current) => !current);
@@ -2724,9 +2728,33 @@ export default function Planner() {
     setGesture(next);
   };
 
+  /* Day and week timelines have different scroll nodes, but focus mode is one
+     piece of navigation. Keep the direction/restore rule here so the two views
+     cannot drift: a small move away from midnight collapses the chrome, and only
+     movement back toward midnight restores it. Initial positioning is explicitly
+     silent so opening a week at 10am never collapses the header by accident. */
+  const onTimelineScrollPosition = useCallback((nextScrollTop, { initial = false } = {}) => {
+    if (!Number.isFinite(nextScrollTop)) return;
+    if (initial) {
+      timelineScrollTopRef.current = nextScrollTop;
+      return;
+    }
+    const previousScrollTop = timelineScrollTopRef.current;
+    const movingTowardMidnight = nextScrollTop < previousScrollTop - 1;
+    const movingAwayFromMidnight = nextScrollTop > previousScrollTop + 1;
+    timelineScrollTopRef.current = nextScrollTop;
+    const timelineView = viewMode === "timeline" && (zoom === "day" || zoom === "week");
+    const mobileTimeline = window.matchMedia?.("(max-width:1023px)").matches && timelineView;
+    if (!mobileTimeline) return;
+    if (nextScrollTop <= Math.max(48, dayHourHeight) && movingTowardMidnight) setTimelineFocused(false);
+    if (movingAwayFromMidnight && nextScrollTop >= TIMELINE_FOCUS_TRIGGER_PX) setTimelineFocused(true);
+  }, [dayHourHeight, viewMode, zoom]);
+
   const finishGesture = (x, y) => {
     const g = gestureRef.current;
-    const finishedDraft = g?.mode === "draft" ? { start: g.start, dur: g.dur } : null;
+    const finishedDraft = g?.mode === "draft"
+      ? { date: dateKeyRef.current, start: g.start, dur: g.dur }
+      : null;
     endGesture();
     if (!g) return;
     /* A drag that ends inside the control it began in still produces a click.
@@ -3027,30 +3055,7 @@ export default function Planner() {
     };
 
     const onScroll = () => {
-      /* A near-midnight position is only a restore signal when the stream is
-         moving *towards* midnight. The old position-only check treated the
-         first few pixels of a downward scroll from 0 as a return to midnight,
-         so a collapsed header immediately unfolded and gave the timeline back
-         the space the user had just asked it to keep. Keep the previous value
-         in a ref because this listener is deliberately passive and can run
-         between composited scroll frames. */
-      const previousScrollTop = timelineScrollTopRef.current;
-      const nextScrollTop = el.scrollTop;
-      const movingTowardMidnight = nextScrollTop < previousScrollTop - 1;
-      const movingAwayFromMidnight = nextScrollTop > previousScrollTop + 1;
-      timelineScrollTopRef.current = nextScrollTop;
-      const mobileTimeline = window.matchMedia?.("(max-width:1023px)").matches
-        && viewMode === "timeline" && zoom === "day";
-      if (mobileTimeline) {
-        if (nextScrollTop <= Math.max(48, dayHourHeight) && movingTowardMidnight) setTimelineFocused(false);
-        /* This is intentionally a small distance rather than one hour row. The
-           previous day-height threshold meant a downward scroll that began near
-           midnight could travel a noticeable way before the chrome responded,
-           while another scroll path never crossed the threshold at all. */
-        if (movingAwayFromMidnight && nextScrollTop >= TIMELINE_FOCUS_TRIGGER_PX) {
-          setTimelineFocused(true);
-        }
-      }
+      onTimelineScrollPosition(el.scrollTop);
       const p = press.t;
       if (!p) return;
       cancelPress();
@@ -3102,7 +3107,7 @@ export default function Planner() {
       el.removeEventListener("touchcancel", onCancel);
       el.removeEventListener("scroll", onScroll);
     };
-  }, [streamNode, ready, viewMode, zoom, dayHourHeight]);
+  }, [streamNode, ready, viewMode, zoom, dayHourHeight, onTimelineScrollPosition]);
 
   /* mouse / pen tracking, plus touch tracking for drags that begin outside the stream */
   useEffect(() => {
@@ -3272,7 +3277,9 @@ export default function Planner() {
     return true;
   };
   const draggingTask = gesture && gesture.mode === "task" ? dayTasks.find((t) => t.id === gesture.id) : null;
-  const timelineDraft = gesture && gesture.mode === "draft" ? gesture : draftPreview;
+  const timelineDraft = gesture && gesture.mode === "draft"
+    ? gesture
+    : draftPreview && (!draftPreview.date || draftPreview.date === dateKey) ? draftPreview : null;
   const dropMin = gesture && gesture.mode === "task" && !gesture.overDay && !gesture.overTask && streamRef.current
     ? (() => {
         const r = streamRef.current.getBoundingClientRect();
@@ -3443,7 +3450,7 @@ export default function Planner() {
       }}
     />
   );
-  const dayTimelineFocused = timelineFocused && viewMode === "timeline" && zoom === "day";
+  const timelineViewFocused = timelineFocused && viewMode === "timeline" && (zoom === "day" || zoom === "week");
   const actionsLayout = viewMode === "actions" ? "nb-actions-full" : (actionsOpen ? "nb-actions-open" : "nb-actions-closed");
 
   return (
@@ -3848,9 +3855,9 @@ export default function Planner() {
           button:active,[role="button"]:active,a[href]:active,[data-event-id]:active,[data-task-chip]:active{scale:1!important}` : ""}
       `}</style>
 
-      <div data-test="timeline-chrome" data-collapsed={String(dayTimelineFocused)}
-        className={`nb-timeline-chrome ${dayTimelineFocused ? "is-collapsed" : ""}`}
-        style={{ height: dayTimelineFocused ? 0 : (timelineChromeHeight == null ? "auto" : timelineChromeHeight) }}>
+      <div data-test="timeline-chrome" data-collapsed={String(timelineViewFocused)}
+        className={`nb-timeline-chrome ${timelineViewFocused ? "is-collapsed" : ""}`}
+        style={{ height: timelineViewFocused ? 0 : (timelineChromeHeight == null ? "auto" : timelineChromeHeight) }}>
       <div ref={attachTimelineChromeInner} className="nb-timeline-chrome-inner">
       {/* ══ HUD ══ */}
       <header style={{ background: T.bg, borderBottom: `1px solid ${T.line}`, color: T.text }} className="nb-hud sticky top-0 z-30 px-3 sm:px-5 py-2 flex items-center justify-between gap-3">
@@ -4022,7 +4029,7 @@ export default function Planner() {
 
       {/* ══ HERO ══ */}
       <div data-test="day-heading" data-date={dateKey}
-        className={`nb-day-heading relative z-20 px-3 sm:px-5 pt-4 pb-3 ${dayTimelineFocused ? "is-focused" : ""}`}
+        className={`nb-day-heading relative z-20 px-3 sm:px-5 pt-4 pb-3 ${timelineViewFocused ? "is-focused" : ""}`}
         style={{ background: T.bg }}>
         <div className="flex items-end gap-3">
           <span style={{ fontFamily: MONO }} className="nb-display">{pad(activeDate.getDate())}</span>
@@ -4030,15 +4037,15 @@ export default function Planner() {
             <span style={{ fontFamily: MONO, color: T.dimText }} className="block nb-data">{WD[activeDate.getDay()]} · {MO[activeDate.getMonth()]} {activeDate.getFullYear()}</span>
             <span className="block text-sm font-semibold leading-snug mt-0.5">{briefing}</span>
           </span>
-          {viewMode === "timeline" && zoom === "day" && (
+          {viewMode === "timeline" && (zoom === "day" || zoom === "week") && (
             <button type="button" data-test="timeline-focus-toggle"
-              aria-label={dayTimelineFocused ? "Expand timeline navigation" : "Focus timeline"}
-              aria-expanded={!dayTimelineFocused}
+              aria-label={timelineViewFocused ? "Expand timeline navigation" : "Focus timeline"}
+              aria-expanded={!timelineViewFocused}
               aria-keyshortcuts="F"
               onClick={() => { beep("tick"); setTimelineFocused((current) => !current); }}
               className="nb-tap mb-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
               style={{ color: T.dimText, border: `1px solid ${T.line}` }}>
-              <span aria-hidden="true" style={{ transform: dayTimelineFocused ? "rotate(180deg)" : "none", transition: "transform 220ms cubic-bezier(.77,0,.175,1)" }}><ChevronIcon direction="up" /></span>
+              <span aria-hidden="true" style={{ transform: timelineViewFocused ? "rotate(180deg)" : "none", transition: "transform 220ms cubic-bezier(.77,0,.175,1)" }}><ChevronIcon direction="up" /></span>
             </button>
           )}
         </div>
@@ -4137,10 +4144,11 @@ export default function Planner() {
                     </button>
                   ))}
                   {slotDur != null && (slotMatches.length === 0 ? (
-                    <span style={{ fontFamily: MONO, color: NOW_RED }} className="nb-label">NO OPEN GAPS IN 14 DAYS</span>
+                    <span style={{ fontFamily: MONO, color: NOW_RED }} className="nb-label">NO OPEN GAPS THIS WEEK</span>
                   ) : (
-                    slotMatches.slice(0, 3).map((s) => (
+                    slotMatches.slice(0, 6).map((s) => (
                       <button key={`${s.date}-${s.start}`}
+                        data-test="week-slot" data-slot-date={s.date}
                         onClick={() => { beep("click"); if (s.date !== dateKey) jumpTo(s.date); setComposer({ kind: "event", date: s.date, start: s.start, dur: s.dur }); }}
                         className="nb-tap px-2 py-0.5 nb-data"
                         style={{ fontFamily: MONO, color: T.accentText, borderRadius: 999, border: `1.5px dashed ${T.accent}` }}>
@@ -4153,6 +4161,13 @@ export default function Planner() {
                   T={T} surface={surface} hourRule={hourRule} hourBand={hourBand}
                   week={week} dateKey={dateKey} todayKey={todayKey} nowMin={nowMin} clock={clock}
                   slots={slotMatches}
+                  draftPreview={draftPreview}
+                  onCreateDraft={(draft) => {
+                    beep("click");
+                    setDraftPreview(draft);
+                    setComposer({ kind: "event", date: draft.date, start: draft.start, dur: draft.dur });
+                  }}
+                  onTimelineScroll={onTimelineScrollPosition}
                   onOpenDay={(k) => { beep("tick"); if (k !== dateKey) jumpTo(k); setZoom("day"); }}
                   onOpenEvent={(id, key) => { beep("click"); if (key !== dateKey) jumpTo(key); setTimeout(() => setInspect({ kind: "event", id }), key !== dateKey ? 80 : 0); }}
                   onOpenTask={(id, key) => { beep("click"); if (key !== dateKey) jumpTo(key); setTimeout(() => setInspect({ kind: "task", id }), key !== dateKey ? 80 : 0); }}
@@ -5771,7 +5786,7 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromote
 /* The true week: 7 day columns against one shared time axis. Events are blocks and
    free time is the open space between them — the shape of the week is the point,
    so the columns carry as little chrome as they can. */
-function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, nowMin, clock, slots, onOpenDay, onOpenEvent, onOpenTask, onSlotPick, onMoveEvent, beep, buzz }) {
+function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, nowMin, clock, slots, draftPreview, onCreateDraft, onTimelineScroll, onOpenDay, onOpenEvent, onOpenTask, onSlotPick, onMoveEvent, beep, buzz }) {
   const scrollRef = useRef(null);
   const weekKey = week[0]?.key;
   useEffect(() => {
@@ -5779,8 +5794,10 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
     if (!el) return;
     const firsts = week.flatMap((d) => d.timed.map((e) => e.start));
     const anchor = week.some((d) => d.key === todayKey) ? nowMin : firsts.length ? Math.min(...firsts) : 480;
-    el.scrollTop = Math.max(0, (anchor / 1440) * DAY_H - 140);
-  }, [weekKey]);
+    const initialScrollTop = Math.max(0, (anchor / 1440) * DAY_H - 140);
+    el.scrollTop = initialScrollTop;
+    onTimelineScroll?.(initialScrollTop, { initial: true });
+  }, [weekKey, onTimelineScroll]);
   const hasAllDay = week.some((d) => d.allDay.length > 0);
 
   /* ─── dragging a card across the week ───
@@ -5795,6 +5812,10 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
   const dragRef = useRef(null);
   const holdRef = useRef(null);
   const tapRef = useRef(false);
+  const [draft, setDraft] = useState(null);
+  const draftRef = useRef(null);
+  const draftPressRef = useRef(null);
+  const draftEndedAtRef = useRef(0);
   const dragging = Boolean(drag);
 
   const minuteAt = (clientY) => {
@@ -5812,6 +5833,154 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
       return found ? found.getAttribute("data-week-day") : null;
     } catch { return null; }
   };
+
+  const cancelDraftPress = () => {
+    const press = draftPressRef.current;
+    if (!press) return;
+    clearTimeout(press.timer);
+    press.timer = null;
+    press.cancelled = true;
+  };
+
+  const beginDraft = () => {
+    const press = draftPressRef.current;
+    if (!press || press.cancelled || draftRef.current) return;
+    press.timer = null;
+    press.held = true;
+    const next = {
+      date: press.date,
+      start: press.start,
+      dur: 30,
+      x: press.x,
+      y: press.y,
+    };
+    draftRef.current = next;
+    setDraft(next);
+    beep?.("lift");
+    buzz?.(14);
+  };
+
+  const updateDraft = (clientX, clientY) => {
+    const current = draftRef.current;
+    if (!current) return;
+    const next = {
+      ...current,
+      x: clientX,
+      y: clientY,
+      /* Creating in a week is anchored to the column where the press began;
+         the vertical motion is the duration handle, just like an empty day
+         timeline press. A horizontal move can still leave the column without
+         silently changing the day being created. */
+      dur: proposeGesture("resize-end", {
+        start: current.start,
+        pointerMinute: minuteAt(clientY),
+        kind: "event",
+      }).duration,
+    };
+    draftRef.current = next;
+    setDraft(next);
+  };
+
+  const finishDraft = () => {
+    const current = draftRef.current;
+    draftRef.current = null;
+    draftPressRef.current = null;
+    setDraft(null);
+    if (!current) return;
+    draftEndedAtRef.current = Date.now();
+    onCreateDraft?.({ date: current.date, start: current.start, dur: current.dur });
+  };
+
+  const armDraft = (event, day) => {
+    if (event.target.closest?.("[data-test='week-event']")) return;
+    const { clientX, clientY } = event.touches?.[0] ?? event;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const start = startSlot(((clientY - rect.top) / DAY_H) * 1440, 5);
+    cancelDraftPress();
+    const press = {
+      date: day,
+      start,
+      x: clientX,
+      y: clientY,
+      held: false,
+      cancelled: false,
+      timer: null,
+      pointerType: event.pointerType || "touch",
+    };
+    press.timer = setTimeout(beginDraft, EMPTY_SPACE_LIFT_MS);
+    draftPressRef.current = press;
+  };
+
+  const draftPointerDown = (event, day) => {
+    if (event.pointerType === "touch" || event.button === 2) return;
+    event.stopPropagation();
+    armDraft(event, day);
+  };
+
+  const draftTouchStart = (event, day) => {
+    if (event.touches.length !== 1 || event.target.closest?.("[data-test='week-event']")) return;
+    event.stopPropagation();
+    armDraft(event, day);
+  };
+
+  const draftTouchMove = (event) => {
+    if (event.target.closest?.("[data-test='week-event']") && !draftRef.current) return;
+    const point = event.touches[0];
+    if (!point) return;
+    const press = draftPressRef.current;
+    if (!draftRef.current) {
+      if (press && movedEnoughToCancelHold(press, { x: point.clientX, y: point.clientY })) cancelDraftPress();
+      return;
+    }
+    if (event.cancelable) event.preventDefault();
+    updateDraft(point.clientX, point.clientY);
+  };
+
+  const draftTouchEnd = (event, day) => {
+    if (event.target.closest?.("[data-test='week-event']")) return;
+    const press = draftPressRef.current;
+    if (draftRef.current) {
+      if (event.cancelable) event.preventDefault();
+      finishDraft();
+      return;
+    }
+    if (!press) return;
+    clearTimeout(press.timer);
+    draftPressRef.current = null;
+    if (event.cancelable) event.preventDefault();
+    if (press.cancelled) {
+      /* A cancelled touch must not fall through to the compatibility click on
+         the column. Without this, a small scroll that correctly aborts the
+         creation hold still opened a one-hour composer when the finger lifted. */
+      draftEndedAtRef.current = Date.now();
+      return;
+    }
+    onSlotPick?.({ date: day, start: press.start, dur: 60 });
+  };
+
+  useEffect(() => {
+    const move = (event) => {
+      const press = draftPressRef.current;
+      if (!press || press.pointerType === "touch" || draftRef.current) return;
+      if (movedEnoughToCancelHold(press, { x: event.clientX, y: event.clientY })) cancelDraftPress();
+    };
+    window.addEventListener("pointermove", move);
+    return () => window.removeEventListener("pointermove", move);
+  }, []);
+
+  useEffect(() => {
+    if (!draft) return undefined;
+    const move = (event) => { event.preventDefault(); updateDraft(event.clientX, event.clientY); };
+    const up = () => finishDraft();
+    window.addEventListener("pointermove", move, { passive: false });
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+  }, [Boolean(draft)]);
 
   const beginDrag = (event, day, clientX, clientY) => {
     tapRef.current = false;
@@ -5871,6 +6040,7 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
      every long press before it lifted. Same reason the day timeline does. */
   const touchStart = (e, event, day) => {
     if (e.touches.length !== 1) return;
+    e.stopPropagation();
     const { clientX, clientY } = e.touches[0];
     tapRef.current = true;
     clearTimeout(holdRef.current);
@@ -5906,7 +6076,8 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
   }, []);
 
   const pointerDown = (e, event, day) => {
-    if (e.pointerType === "touch" || e.button === 2) return;
+    if (e.pointerType === "touch") { e.stopPropagation(); return; }
+    if (e.button === 2) return;
     e.stopPropagation();
     tapRef.current = true;
     const { clientX, clientY } = e;
@@ -5924,7 +6095,10 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
     if (tapRef.current) { tapRef.current = false; e.stopPropagation(); onOpenEvent(event.id, day); }
   };
 
-  useEffect(() => () => clearTimeout(holdRef.current), []);
+  useEffect(() => () => {
+    clearTimeout(holdRef.current);
+    clearTimeout(draftPressRef.current?.timer);
+  }, []);
 
   /* The lifted card leaves its old column and is drawn in the one under the
      pointer, so the week shows the move rather than describing it. */
@@ -5971,7 +6145,15 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
             ))}
           </div>
         )}
-        <div ref={scrollRef} className="nb-s flex-1 min-h-0 overflow-y-auto">
+        <div ref={scrollRef} onScroll={(event) => {
+          /* The scroll container is the reliable cancellation signal on touch:
+             a finger can move only a few pixels before the browser starts
+             scrolling, which is still a scroll rather than an intentional
+             creation hold. Once the draft has lifted, vertical motion belongs
+             to its duration update and must not cancel it. */
+          if (draftPressRef.current && !draftRef.current) cancelDraftPress();
+          onTimelineScroll?.(event.currentTarget.scrollTop);
+        }} className="nb-s flex-1 min-h-0 overflow-y-auto">
           <div className="relative flex" style={{ height: DAY_H, userSelect: "none", WebkitUserSelect: "none" }}>
             <div className="relative w-12 shrink-0">
               {Array.from({ length: 24 }).map((_, h) => h > 0 && (
@@ -5981,20 +6163,55 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
             {week.map((day) => {
               const isToday = day.key === todayKey;
               const daySlots = slots.filter((s) => s.date === day.key);
+              const dayDraft = draft?.date === day.key ? draft : draftPreview?.date === day.key ? draftPreview : null;
               return (
                 <div key={day.key} data-week-day={day.key} className="relative flex-1 min-w-0" style={{
                     borderLeft: `1px solid ${hourRule}`,
                     background: drag?.date === day.key ? `${T.accent}14` : day.key === dateKey ? `${T.accent}08` : "transparent",
                   }}
+                  onPointerDown={(event) => draftPointerDown(event, day.key)}
+                  onPointerUp={(event) => {
+                    if (event.pointerType === "touch") return;
+                    const press = draftPressRef.current;
+                    if (draftRef.current) { finishDraft(); return; }
+                    if (!press) return;
+                    clearTimeout(press.timer);
+                    draftPressRef.current = null;
+                    if (press.cancelled) draftEndedAtRef.current = Date.now();
+                  }}
+                  onPointerCancel={() => {
+                    const press = draftPressRef.current;
+                    if (draftRef.current) { draftRef.current = null; setDraft(null); }
+                    if (press?.cancelled) draftEndedAtRef.current = Date.now();
+                    clearTimeout(press?.timer);
+                    draftPressRef.current = null;
+                  }}
+                  onTouchStart={(event) => draftTouchStart(event, day.key)}
+                  onTouchMove={draftTouchMove}
+                  onTouchEnd={(event) => draftTouchEnd(event, day.key)}
+                  onTouchCancel={() => {
+                    cancelDraftPress();
+                    draftEndedAtRef.current = Date.now();
+                    draftPressRef.current = null;
+                  }}
                   onClick={(e) => {
                     /* A drop is not a click on the column underneath it. */
-                    if (dragRef.current) return;
+                    if (dragRef.current || Date.now() - draftEndedAtRef.current < 350) return;
                     const rect = e.currentTarget.getBoundingClientRect();
                     onSlotPick({ date: day.key, start: startSlot(((e.clientY - rect.top) / DAY_H) * 1440, 30), dur: 60 });
                   }}>
                   {Array.from({ length: 24 }).map((_, h) => (
                     <div key={h} className="absolute left-0 right-0 pointer-events-none" style={{ top: h * HOUR_H, height: HOUR_H, borderTop: `1px solid ${hourRule}`, background: h % 2 ? hourBand : "transparent" }} />
                   ))}
+                  {dayDraft && (
+                    <div data-test="week-draft-preview" className="absolute left-0.5 right-0.5 pointer-events-none flex items-center justify-center"
+                      data-date={dayDraft.date} data-start={dayDraft.start} data-duration={dayDraft.dur}
+                      style={{ top: (dayDraft.start / 1440) * DAY_H + 1, height: Math.max(16, (dayDraft.dur / 1440) * DAY_H - 2), borderRadius: CARD_R, boxShadow: `inset 0 0 0 1.5px ${T.accent}`, background: `${T.accent}14`, zIndex: 7 }}>
+                      <span className="tracking-widest" style={{ fontFamily: MONO, color: T.accentText, fontSize: 9 }}>
+                        {fmtTime(dayDraft.start, clock)} – {fmtTime(dayDraft.start + dayDraft.dur, clock)}
+                      </span>
+                    </div>
+                  )}
                   {cardsFor(day).map((e) => {
                     const top = (e.start / 1440) * DAY_H;
                     const h = Math.max(16, (e.dur / 1440) * DAY_H) - 2;
@@ -6005,9 +6222,9 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
                         onPointerDown={(ev) => pointerDown(ev, e, day.key)}
                         onPointerUp={(ev) => pointerUp(ev, e, day.key)}
                         onTouchStart={(ev) => touchStart(ev, e, day.key)}
-                        onTouchMove={touchMove}
-                        onTouchEnd={(ev) => touchEnd(ev, e, day.key)}
-                        onTouchCancel={() => { disarm(); endDrag(); }}
+                        onTouchMove={(ev) => { ev.stopPropagation(); touchMove(ev); }}
+                        onTouchEnd={(ev) => { ev.stopPropagation(); touchEnd(ev, e, day.key); }}
+                        onTouchCancel={(ev) => { ev.stopPropagation(); disarm(); endDrag(); }}
                         onClick={(ev) => ev.stopPropagation()}
                         className="absolute text-left overflow-hidden"
                         style={{
