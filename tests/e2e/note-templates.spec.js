@@ -76,6 +76,26 @@ test.describe("starting a note from a template", () => {
     await expect(page.getByTestId("note-templates")).toHaveCount(0);
   });
 
+  test("notebook rows enter with a restrained stagger", async ({ page }) => {
+    await newNote(page);
+    const sheet = page.getByTestId("sheet");
+    await sheet.getByRole("textbox").first().fill("Animated note");
+    await sheet.getByRole("textbox").nth(1).fill("A note whose row should arrive clearly.");
+    await sheet.getByRole("button", { name: "SAVE" }).click();
+    await expect(sheet).toBeHidden();
+
+    await page.getByRole("button", { name: "NOTES" }).click();
+    const row = page.getByTestId("sheet").locator(".nb-list-enter").first();
+    await expect(row).toBeVisible();
+    const motion = await row.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return { name: style.animationName, duration: style.animationDuration, delay: style.animationDelay };
+    });
+    expect(motion.name).toBe("nb-list-enter");
+    expect(motion.duration).toBe("0.18s");
+    expect(motion.delay).toBe("0s");
+  });
+
   test("switching template replaces the body rather than stacking on it", async ({ page }) => {
     await newNote(page);
     const body = page.getByTestId("sheet").getByRole("textbox").nth(1);

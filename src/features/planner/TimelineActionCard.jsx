@@ -15,6 +15,7 @@ export default function TimelineActionCard({
   formatDuration,
   onOpen,
   onComplete,
+  onReopen,
   onResizePointerDown,
   clickFollowsGesture,
 }) {
@@ -33,7 +34,8 @@ export default function TimelineActionCard({
     <div className="nb-timeline-lane absolute overflow-hidden"
       style={{ top, height, left, width, borderRadius: cardRadius, zIndex: sizing ? 20 : 5, pointerEvents: "auto" }}>
       <div aria-hidden="true" className="absolute inset-0 flex items-center pl-2"
-        style={{ background: theme.accent, color: theme.on, fontFamily: mono, borderRadius: cardRadius }}>
+        data-test="timeline-completion-backdrop"
+        style={{ backgroundColor: theme.accent, color: theme.on, fontFamily: mono, borderRadius: cardRadius, opacity: 1 }}>
         <span className="nb-label">✓ COMPLETE</span>
       </div>
       <div className="absolute inset-0"
@@ -48,12 +50,12 @@ export default function TimelineActionCard({
             display: "flex", flexDirection: "column", justifyContent: "flex-start",
             borderRadius: cardRadius,
             border: `1px dashed ${sizing ? theme.accent : theme.faint}`,
-            /* The completion backing fills the lane below this face. A translucent
-               face lets that accent show through even at rest, so the intended
-               tint is layered over an opaque card base instead. */
+            /* The completion backing is a solid reveal surface. The face stays
+               opaque in both open and completed states, so the red action never
+               bleeds through after a completion or a partial swipe. */
             backgroundColor: theme.card,
             backgroundImage: block ? `linear-gradient(${theme.accent}0D, ${theme.accent}0D)` : "none",
-            opacity: done ? 0.4 : 1,
+            opacity: 1,
           }}>
           <span className="flex min-w-0 items-center gap-2 py-1 pr-2.5 pl-8">
             <span className="nb-lead min-w-0 flex-1 truncate" style={{ textDecoration: done ? "line-through" : "none" }}>{task.title}</span>
@@ -73,18 +75,16 @@ export default function TimelineActionCard({
             </span>
           )}
         </button>
-        {!done && (
-          <button type="button" data-timeline-complete={task.id}
-            aria-label={`Complete ${task.title}`}
-            onClick={(event) => { event.stopPropagation(); onComplete(task.id); }}
+        <button type="button" data-timeline-complete={task.id}
+            aria-label={`${done ? "Reopen" : "Complete"} ${task.title}`}
+            onClick={(event) => { event.stopPropagation(); (done ? onReopen : onComplete)(task.id); }}
             onPointerDown={(event) => event.stopPropagation()}
             className="nb-tap absolute inset-y-0 left-0 z-10 flex w-8 items-center justify-center"
             style={{ color: theme.accent, background: "transparent", touchAction: "manipulation" }}>
             <span data-test="timeline-complete-mark" aria-hidden="true"
               className="flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold leading-none"
               style={{ background: theme.card, boxShadow: `inset 0 0 0 1.25px ${theme.accent}` }}>✓</span>
-          </button>
-        )}
+        </button>
       </div>
     </div>
   );

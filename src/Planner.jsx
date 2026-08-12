@@ -3189,6 +3189,7 @@ export default function Planner() {
     />
   );
   const dayTimelineFocused = timelineFocused && viewMode === "timeline" && zoom === "day";
+  const actionsLayout = viewMode === "actions" ? "nb-actions-full" : (actionsOpen ? "nb-actions-open" : "nb-actions-closed");
 
   return (
     <div data-test="nav-shell" data-nav-state={navPhase} className="nb-nav-shell" style={{ fontFamily: DISPLAY }}>
@@ -3294,7 +3295,14 @@ export default function Planner() {
         @media(min-width:1024px){
           .nb-main{padding-bottom:2rem}
           .nb-main.nb-main-day-timeline{padding-bottom:.75rem}
+          .nb-main.nb-actions-open,.nb-main.nb-actions-closed{grid-template-columns:minmax(0,7fr) minmax(0,5fr);column-gap:1.25rem;transition:grid-template-columns 300ms var(--nav-ease),column-gap 300ms var(--nav-ease)}
+          .nb-main.nb-actions-closed{grid-template-columns:minmax(0,1fr) minmax(0,0fr);column-gap:0}
+          .nb-main.nb-actions-full{grid-template-columns:minmax(0,1fr)}
         }
+        .nb-actions-column{min-width:0;overflow-x:hidden;opacity:1;transform:translate3d(0,0,0);visibility:visible;transition:opacity 220ms ease,transform 300ms var(--nav-ease),visibility 0s linear 0s}
+        .nb-actions-column.is-collapsed{opacity:0;transform:translate3d(12px,0,0);visibility:hidden;pointer-events:none;transition:opacity 180ms ease,transform 240ms var(--nav-ease),visibility 0s linear 300ms}
+        .nb-actions-restore{transform:translate3d(0,-50%,0);opacity:1;visibility:visible;transition:opacity 180ms ease,transform 300ms var(--nav-ease),visibility 0s linear 0s}
+        .nb-actions-restore.is-hidden{transform:translate3d(100%,-50%,0);opacity:0;visibility:hidden;pointer-events:none;transition:opacity 180ms ease,transform 240ms var(--nav-ease),visibility 0s linear 300ms}
         .nb-stream{flex:1 1 auto;min-height:0}
 
         /* ── THE SCALE ──────────────────────────────────────────────────
@@ -3399,6 +3407,11 @@ export default function Planner() {
         @keyframes turnprev{0%{opacity:.4;transform:translate3d(-6%,0,0)}55%{opacity:1}100%{opacity:1;transform:translate3d(0,0,0)}}
         .nb-up{animation:nbup 200ms cubic-bezier(.2,.9,.3,1.1)}
         @keyframes nbup{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+        /* Low-frequency collections get one quiet entrance so a filter change
+           does not replace the whole surface on a single frame. Four pixels is
+           enough to establish continuity without making readable content travel. */
+        .nb-list-enter{animation:nb-list-enter 180ms cubic-bezier(.23,1,.32,1) both;animation-delay:calc(var(--nb-list-index, 0) * 30ms);will-change:transform,opacity}
+        @keyframes nb-list-enter{from{opacity:0;transform:translate3d(0,4px,0)}to{opacity:1;transform:translate3d(0,0,0)}}
         /* Every menu and sheet is the same material as the control that opened it.
            When a trigger can be measured the surface grows from that exact pill;
            first-run and system sheets use the bottom-sheet fallback. */
@@ -3813,9 +3826,9 @@ export default function Planner() {
       )}
 
       {/* ══ BODY ══ */}
-      <main className={`nb-main px-3 sm:px-5 grid grid-cols-1 lg:grid-cols-12 gap-5 flex-1 min-h-0 ${viewMode === "timeline" && zoom === "day" ? "nb-main-day-timeline" : ""}`}
+      <main className={`nb-main px-3 sm:px-5 grid grid-cols-1 lg:grid-cols-12 gap-5 flex-1 min-h-0 ${viewMode === "timeline" && zoom === "day" ? "nb-main-day-timeline" : ""} ${actionsLayout}`}
         style={{ "--sheet-pad": sheetPad }}>
-        <section className={`${viewMode === "actions" || !actionsOpen ? "lg:col-span-12" : "lg:col-span-7"} flex flex-col min-h-0`} onTouchStart={onSwipeStart} onTouchMove={onSwipeMove} onTouchEnd={onSwipeEnd} onTouchCancel={onSwipeEnd}
+        <section className="flex flex-col min-h-0 min-w-0" onTouchStart={onSwipeStart} onTouchMove={onSwipeMove} onTouchEnd={onSwipeEnd} onTouchCancel={onSwipeEnd}
           style={{
             transform: swipe === 0 ? "none" : `translateX(${swipe * 0.32}px)`,
             transition: snapping || swipe !== 0 ? "none" : "transform 260ms cubic-bezier(.2,.8,.25,1)",
@@ -4124,6 +4137,7 @@ export default function Planner() {
                         clickFollowsGesture={clickFollowsGesture}
                         onOpen={(id) => { beep("click"); setInspect({ kind: "task", id }); }}
                         onComplete={completeTask}
+                        onReopen={reopenTask}
                         onResizePointerDown={(ev, task, nextEstimate) => resizeDown(ev, { id: task.id, start: task.planned.startMinute, dur: nextEstimate }, "end", "task")} />
                     );
                   })}
@@ -4142,14 +4156,14 @@ export default function Planner() {
           </div>
         </section>
 
-        {viewMode !== "actions" && actionsOpen && (
-          <section data-test="actions-column" className="nb-s hidden lg:block lg:col-span-5 min-h-0 overflow-y-auto relative">
+        {viewMode !== "actions" && (
+          <section id="actions-column" data-test="actions-column" aria-hidden={!actionsOpen} className={`nb-actions-column nb-s hidden lg:block min-h-0 overflow-y-auto relative ${actionsOpen ? "" : "is-collapsed"}`}>
             {actionsPanel}
           </section>
         )}
-        {viewMode !== "actions" && !actionsOpen && (
-          <button data-test="actions-restore" onClick={() => setActionsOpen(true)}
-            className="nb-tap hidden lg:block fixed right-0 top-1/2 -translate-y-1/2 z-20 px-2 py-4 text-xs font-bold tracking-widest"
+        {viewMode !== "actions" && (
+          <button data-test="actions-restore" aria-hidden={actionsOpen} tabIndex={actionsOpen ? -1 : 0} aria-controls="actions-column" onClick={() => setActionsOpen(true)}
+            className={`nb-actions-restore nb-tap hidden lg:block fixed right-0 top-1/2 z-20 px-2 py-4 text-xs font-bold tracking-widest ${actionsOpen ? "is-hidden" : ""}`}
             style={{ fontFamily: MONO, background: T.accent, color: T.on, borderRadius: "12px 0 0 12px", writingMode: "vertical-rl" }}>
             ACTIONS
           </button>
@@ -5156,7 +5170,7 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
       )}
 
       {tasks.length === 0 && !selection && (
-        <button onClick={onAddTask} className="w-full py-8 text-center" style={{ border: `1px dashed ${T.faint}` }}>
+        <button onClick={onAddTask} className="nb-list-enter w-full py-8 text-center" style={{ border: `1px dashed ${T.faint}`, "--nb-list-index": 0 }}>
           <span style={{ fontFamily: SERIF, color: T.dimText }} className="nb-voice">Nothing claimed for this day yet. Add the one thing that matters.</span>
         </button>
       )}
@@ -6752,8 +6766,8 @@ function EntityNotes({ T, notes, kind, onNew, onOpen }) {
         <p style={{ fontFamily: SERIF, color: T.dimText }} className="nb-voice mt-2">Keep the thinking beside this {kind}, not inside a field it will outgrow.</p>
       ) : (
         <div className="flex flex-col mt-2">
-          {notes.map((note) => (
-            <button key={note.id} onClick={() => onOpen(note)} className="nb-row text-left py-2.5" style={{ borderBottom: `1px solid ${T.line}` }}>
+          {notes.map((note, index) => (
+            <button key={note.id} onClick={() => onOpen(note)} className="nb-row nb-list-enter text-left py-2.5" style={{ borderBottom: `1px solid ${T.line}`, "--nb-list-index": Math.min(index, 4) }}>
               <span className="block text-sm truncate">{note.title || noteExcerpt(note, 90) || "Untitled note"}</span>
               <span style={{ fontFamily: MONO, color: T.dimText }} className="block nb-data mt-0.5">
                 {note.pinned ? "PINNED · " : ""}{note.updatedAt ? "UPDATED" : "NEW"}
@@ -6777,8 +6791,8 @@ function NotebookPanel({ T, view, notes, onView, onNew, onOpen, onPin, onArchive
         <button onClick={onNew} style={{ fontFamily: MONO, color: T.on, background: T.accent }} className="nb-tap nb-liquid w-full py-3 mt-4 text-xs font-bold tracking-widest">+ NEW NOTE</button>
       )}
       <div className="flex flex-col mt-3">
-        {notes.map((note) => (
-          <div key={note.id} className="flex items-center gap-2 py-3" style={{ borderBottom: `1px solid ${T.line}` }}>
+        {notes.map((note, index) => (
+          <div key={note.id} className="nb-list-enter flex items-center gap-2 py-3" style={{ borderBottom: `1px solid ${T.line}`, "--nb-list-index": Math.min(index, 4) }}>
             <button onClick={() => onOpen(note)} className="nb-row text-left flex-1 min-w-0">
               <span className="block text-sm truncate">{note.title || noteExcerpt(note, 100) || "Untitled note"}</span>
               <span style={{ fontFamily: MONO, color: T.dimText }} className="block nb-data mt-0.5 truncate">

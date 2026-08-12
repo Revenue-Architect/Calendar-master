@@ -61,6 +61,17 @@ test.describe("the actions column", () => {
     expect(state.tasks[0].status).toBe("completed");
     await expect(page.getByTestId("sheet"), "the dedicated check must not inspect the action").toHaveCount(0);
     await expect.poll(() => page.evaluate(() => window.__calendarMasterVibrations)).toContainEqual([24, 32, 36]);
+
+    const completedFace = await chip.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return { background: style.backgroundColor, opacity: style.opacity };
+    });
+    expect(completedFace.background, "a completed action face must stay opaque").not.toMatch(/rgba\([^)]*,\s*0(?:\.\d+)?\)/);
+    expect(completedFace.opacity, "completion must not reveal the backing through the face").toBe("1");
+
+    await page.getByRole("button", { name: "Reopen Review launch brief" }).click();
+    const reopened = await settledState(page, (stored) => stored.tasks[0]?.status === "open", "completed action did not reopen");
+    expect(reopened.tasks[0].status).toBe("open");
   });
 
   test("the timeline completion affordance stays compact and the action face is opaque", async ({ page }) => {
@@ -84,6 +95,15 @@ test.describe("the actions column", () => {
 
     const background = await chip.evaluate((node) => getComputedStyle(node).backgroundColor);
     expect(background, "the swipe backing must not bleed through the resting action face").not.toMatch(/rgba\([^)]*,\s*0(?:\.\d+)?\)/);
+
+    const backdrop = page.getByTestId("timeline-completion-backdrop");
+    await expect(backdrop).toBeVisible();
+    const backdropStyle = await backdrop.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return { background: style.backgroundColor, opacity: style.opacity };
+    });
+    expect(backdropStyle.background, "the COMPLETE reveal must be a solid surface").not.toMatch(/rgba\([^)]*,\s*0(?:\.\d+)?\)/);
+    expect(backdropStyle.opacity).toBe("1");
   });
 
   test("the Actions card completion backing is a solid surface", async ({ page }) => {
@@ -108,6 +128,21 @@ test.describe("the actions column", () => {
     const revealed = await backdrop.evaluate((node) => getComputedStyle(node).backgroundColor);
     expect(revealed, "the revealed COMPLETE surface must be opaque").not.toMatch(/rgba\([^)]*,\s*0(?:\.\d+)?\)/);
     await page.mouse.up();
+  });
+
+  test("the empty Actions state enters with a restrained reveal", async ({ page }) => {
+    await openPlanner(page);
+    await page.getByRole("tab", { name: "ACTIONS", exact: true }).click();
+
+    const empty = page.getByRole("button", { name: /Nothing claimed for this day yet/ });
+    await expect(empty).toBeVisible();
+    const motion = await empty.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return { name: style.animationName, duration: style.animationDuration, transform: style.transform };
+    });
+    expect(motion.name).toBe("nb-list-enter");
+    expect(motion.duration).toBe("0.18s");
+    expect(motion.transform).toMatch(/^(none|matrix\(1, 0, 0, 1, 0, [0-9.]+\))$/);
   });
 
   test("the haptics preference suppresses completion vibration without blocking completion", async ({ page }) => {
@@ -151,6 +186,50 @@ test.describe("the actions column", () => {
     await page.reload();
     await expect(page.getByTestId("day-stream")).toBeVisible();
     await expect(page.getByTestId("actions-column")).toBeVisible();
+  });
+
+  test("collapse and restore interpolate the pane, contents, and restore rail", async ({ page }) => {
+    await openPlanner(page);
+    const main = page.locator("main.nb-main");
+    const stream = page.getByTestId("day-stream");
+    const column = page.getByTestId("actions-column");
+    const restore = page.getByTestId("actions-restore");
+    const collapse = column.getByTestId("actions-collapse");
+    const narrow = (await stream.boundingBox()).width;
+
+    const motion = await main.evaluate((node) => {
+      const columnStyle = getComputedStyle(node.querySelector('[data-test="actions-column"]'));
+      const mainStyle = getComputedStyle(node);
+      return {
+        grid: mainStyle.transitionProperty,
+        duration: mainStyle.transitionDuration,
+        column: columnStyle.transitionProperty,
+      };
+    });
+    expect(motion.grid).toContain("grid-template-columns");
+    expect(motion.duration).toContain("0.3s");
+    expect(motion.column).toContain("opacity");
+    expect(motion.column).toContain("transform");
+
+    await collapse.click();
+    await page.waitForTimeout(70);
+    const shrinking = (await stream.boundingBox()).width;
+    const fading = await column.evaluate((node) => Number.parseFloat(getComputedStyle(node).opacity));
+    expect(shrinking).toBeGreaterThan(narrow);
+    expect(fading).toBeGreaterThan(0);
+    expect(fading).toBeLessThan(1);
+    await expect(column).toBeHidden();
+    const wide = (await stream.boundingBox()).width;
+
+    await restore.click();
+    await page.waitForTimeout(70);
+    const restoring = (await stream.boundingBox()).width;
+    const returning = await column.evaluate((node) => Number.parseFloat(getComputedStyle(node).opacity));
+    expect(restoring).toBeLessThan(wide);
+    expect(restoring).toBeGreaterThan(narrow);
+    expect(returning).toBeGreaterThan(0);
+    expect(returning).toBeLessThan(1);
+    await expect(column).toBeVisible();
   });
 
   test("collapsing gives the timeline the width the column gave up", async ({ page }) => {
