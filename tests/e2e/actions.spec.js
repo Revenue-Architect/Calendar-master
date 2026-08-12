@@ -47,6 +47,15 @@ test.describe("the actions column", () => {
     await page.getByTestId("sheet").getByRole("button", { name: "MARK COMPLETE" }).click();
 
     await expect.poll(() => page.evaluate(() => window.__calendarMasterVibrations)).toContainEqual([24, 32, 36]);
+
+    const completedCard = page.locator("[data-task]").filter({ hasText: "Walk 8k steps" }).first();
+    const completionOverlay = completedCard.getByTestId("task-completion-overlay");
+    await expect(completionOverlay).toHaveAttribute("data-visible", "true");
+    await expect.poll(() => completionOverlay.evaluate((node) => getComputedStyle(node).opacity)).toBe("1");
+
+    await completedCard.getByRole("button", { name: "Reopen" }).click();
+    await expect(completionOverlay).toHaveAttribute("data-visible", "false");
+    await expect.poll(() => completionOverlay.evaluate((node) => getComputedStyle(node).opacity)).toBe("0");
   });
 
   test("the timeline check completes an action without opening its inspector", async ({ page }) => {
@@ -69,9 +78,15 @@ test.describe("the actions column", () => {
     expect(completedFace.background, "a completed action face must stay opaque").not.toMatch(/rgba\([^)]*,\s*0(?:\.\d+)?\)/);
     expect(completedFace.opacity, "completion must not reveal the backing through the face").toBe("1");
 
+    const completionOverlay = page.getByTestId("timeline-action-completion-overlay");
+    await expect(completionOverlay).toHaveAttribute("data-visible", "true");
+    await expect.poll(() => completionOverlay.evaluate((node) => getComputedStyle(node).opacity)).toBe("1");
+
     await page.getByRole("button", { name: "Reopen Review launch brief" }).click();
     const reopened = await settledState(page, (stored) => stored.tasks[0]?.status === "open", "completed action did not reopen");
     expect(reopened.tasks[0].status).toBe("open");
+    await expect(completionOverlay).toHaveAttribute("data-visible", "false");
+    await expect.poll(() => completionOverlay.evaluate((node) => getComputedStyle(node).opacity)).toBe("0");
   });
 
   test("the timeline completion affordance stays compact and the action face is opaque", async ({ page }) => {

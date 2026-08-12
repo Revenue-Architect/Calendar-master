@@ -3510,13 +3510,11 @@ export default function Planner() {
            enough to establish continuity without making readable content travel. */
         .nb-list-enter{animation:nb-list-enter 180ms cubic-bezier(.23,1,.32,1) both;animation-delay:calc(var(--nb-list-index, 0) * 30ms);will-change:transform,opacity}
         @keyframes nb-list-enter{from{opacity:0;transform:translate3d(0,4px,0)}to{opacity:1;transform:translate3d(0,0,0)}}
-        .nb-action-complete-overlay{animation:nb-action-complete 760ms cubic-bezier(.23,1,.32,1) both;will-change:clip-path,opacity}
-        @keyframes nb-action-complete{
-          0%{opacity:0;clip-path:inset(0 100% 0 0 round 14px)}
-          18%{opacity:1}
-          64%{opacity:1;clip-path:inset(0 0 0 0 round 14px)}
-          100%{opacity:0;clip-path:inset(0 0 0 100% round 14px)}
-        }
+        /* Completion is a durable state, not a toast. Keep the accent surface
+           mounted after its reveal so the card remains visibly complete; the
+           same interruptible clip transition reverses when the user reopens it. */
+        .nb-action-complete-overlay{opacity:0;clip-path:inset(0 100% 0 0 round 14px);transition:clip-path 260ms cubic-bezier(.23,1,.32,1),opacity 160ms ease;will-change:clip-path,opacity}
+        .nb-action-complete-overlay.is-visible{opacity:1;clip-path:inset(0 0 0 0 round 14px)}
         /* Every menu and sheet is the same material as the control that opened it.
            When a trigger can be measured the surface grows from that exact pill;
            first-run and system sheets use the bottom-sheet fallback. */
@@ -5448,19 +5446,6 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromote
   useEffect(() => { previousDone.current = subDone; }, [subDone]);
   const dueLeft = t.deadline.date ? diffDays(t.deadline.date, todayKey) : null;
   const isDone = t.status === "completed";
-  const wasDone = useRef(isDone);
-  const [completionPulse, setCompletionPulse] = useState(false);
-  useEffect(() => {
-    if (isDone && !wasDone.current) {
-      setCompletionPulse(true);
-      const timer = setTimeout(() => setCompletionPulse(false), 760);
-      wasDone.current = isDone;
-      return () => clearTimeout(timer);
-    }
-    wasDone.current = isDone;
-    setCompletionPulse(false);
-    return undefined;
-  }, [isDone]);
 
   return (
     <div data-task={t.id} className="relative overflow-hidden" style={{ background: "transparent", borderRadius: CARD_R, boxShadow: target ? `inset 0 2px 0 ${T.accent}, var(--e1)` : "var(--e1)" }}>
@@ -5470,8 +5455,14 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromote
           <span className="nb-data" style={{ color: T.dimText, opacity: dx < -20 ? 1 : 0 }}>TOMORROW</span>
         </div>
 
-      <article className="relative" style={{ background: surface, borderRadius: CARD_R, transform: `translateX(${dx}px)`, transition: dx === 0 ? "transform 220ms cubic-bezier(.2,.8,.25,1)" : "none", opacity: isDone ? 0.82 : 1, touchAction: "pan-y", userSelect: "none", WebkitUserSelect: "none" }}
+      <article className="relative" style={{ background: surface, borderRadius: CARD_R, transform: `translateX(${dx}px)`, transition: dx === 0 ? "transform 220ms cubic-bezier(.2,.8,.25,1)" : "none", opacity: 1, touchAction: "pan-y", userSelect: "none", WebkitUserSelect: "none" }}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
+        <div data-test="task-completion-overlay" data-visible={String(isDone)} aria-hidden="true"
+          className={`nb-action-complete-overlay absolute inset-0 z-10 flex items-center gap-2 pl-14 pr-4 pointer-events-none ${isDone ? "is-visible" : ""}`}
+          style={{ background: T.accent, color: T.on, borderRadius: CARD_R, fontFamily: MONO }}>
+          <CheckIcon size={14} />
+          <span className="nb-label">COMPLETE</span>
+        </div>
         <div className="flex items-start gap-3 p-3 pl-4">
           <button onPointerDown={(e) => { e.stopPropagation(); if (selection) return; if (!isDone) startHold(); }}
             onPointerUp={(e) => {
@@ -5482,7 +5473,7 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromote
               if (isDone) onReopen(t.id); else stopHold(true);
             }}
             onPointerLeave={() => stopHold(true)} onPointerCancel={() => stopHold(true)}
-            className="relative mt-0.5 w-8 h-8 shrink-0 flex items-center justify-center"
+            className="relative z-20 mt-0.5 w-8 h-8 shrink-0 flex items-center justify-center"
             aria-label={selection ? (selection.has(t.id) ? "Deselect" : "Select") : isDone ? "Reopen" : "Hold to complete"} style={{ touchAction: "none" }}>
             <svg width="32" height="32" viewBox="0 0 32 32" className="absolute inset-0">
               <circle cx="16" cy="16" r="13" fill="none" stroke={selection && selection.has(t.id) ? T.accent : T.faint} strokeWidth="2" />
@@ -5595,14 +5586,6 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromote
           </div>
         )}
       </article>
-      {completionPulse && (
-        <div data-test="task-completion-overlay" aria-hidden="true"
-          className="nb-action-complete-overlay absolute inset-0 z-20 flex items-center gap-2 px-4 pointer-events-none"
-          style={{ background: T.accent, color: T.on, borderRadius: CARD_R, fontFamily: MONO }}>
-          <CheckIcon size={14} />
-          <span className="nb-label">COMPLETE</span>
-        </div>
-      )}
     </div>
   );
 }

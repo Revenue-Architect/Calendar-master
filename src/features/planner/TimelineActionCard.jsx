@@ -1,5 +1,3 @@
-import { useEffect, useRef, useState } from "react";
-
 export default function TimelineActionCard({
   task,
   top,
@@ -31,19 +29,6 @@ export default function TimelineActionCard({
     open();
   };
   const done = task.status === "completed";
-  const wasDone = useRef(done);
-  const [completionPulse, setCompletionPulse] = useState(false);
-  useEffect(() => {
-    if (done && !wasDone.current) {
-      setCompletionPulse(true);
-      const timer = setTimeout(() => setCompletionPulse(false), 760);
-      wasDone.current = done;
-      return () => clearTimeout(timer);
-    }
-    wasDone.current = done;
-    setCompletionPulse(false);
-    return undefined;
-  }, [done]);
 
   return (
     <div className="nb-timeline-lane absolute overflow-hidden"
@@ -59,6 +44,11 @@ export default function TimelineActionCard({
           transition: swipeOffset === 0 ? "transform 220ms cubic-bezier(.2,.8,.25,1)" : "none",
           borderRadius: cardRadius,
         }}>
+        <div data-test="timeline-action-completion-overlay" data-visible={String(done)} aria-hidden="true"
+          className={`nb-action-complete-overlay absolute inset-0 z-20 flex items-center gap-2 pl-9 pr-2 pointer-events-none ${done ? "is-visible" : ""}`}
+          style={{ background: theme.accent, color: theme.on, borderRadius: cardRadius, fontFamily: mono }}>
+          <span className="nb-label">COMPLETE</span>
+        </div>
         <button type="button" data-task-chip={task.id} onClick={open} onKeyDown={keyOpen}
           className="nb-tap absolute inset-0 w-full text-left overflow-hidden"
           style={{
@@ -94,22 +84,15 @@ export default function TimelineActionCard({
             aria-label={`${done ? "Reopen" : "Complete"} ${task.title}`}
             onClick={(event) => { event.stopPropagation(); (done ? onReopen : onComplete)(task.id); }}
             onPointerDown={(event) => event.stopPropagation()}
-            className="nb-tap absolute inset-y-0 left-0 z-10 flex w-8 items-center justify-center"
+            className="nb-tap absolute inset-y-0 left-0 z-30 flex w-8 items-center justify-center"
             style={{ color: theme.accent, background: "transparent", touchAction: "manipulation" }}>
             <span data-test="timeline-complete-mark" aria-hidden="true"
               className="flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold leading-none"
-               style={{ background: theme.card, boxShadow: `inset 0 0 0 1.25px ${theme.accent}` }}>
+               style={{ background: done ? theme.on : theme.card, color: theme.accent, boxShadow: `inset 0 0 0 1.25px ${theme.accent}` }}>
               <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m3 8.2 3 3 7-7" /></svg>
             </span>
          </button>
       </div>
-      {completionPulse && (
-        <div data-test="timeline-action-completion-overlay" aria-hidden="true"
-          className="nb-action-complete-overlay absolute inset-0 z-20 flex items-center gap-2 px-3 pointer-events-none"
-          style={{ background: theme.accent, color: theme.on, borderRadius: cardRadius, fontFamily: mono }}>
-          <span className="nb-label">COMPLETE</span>
-        </div>
-      )}
     </div>
   );
 }
