@@ -81,8 +81,10 @@ test.describe("mobile timeline focus", () => {
 
     const focusedBox = await stream.boundingBox();
     await dispatchTouch(session, "touchStart", focusedBox.x + 90, focusedBox.y + 100);
-    await stream.evaluate((node) => { node.scrollTop = 0; node.dispatchEvent(new Event("scroll")); });
     await dispatchTouch(session, "touchEnd", focusedBox.x + 90, focusedBox.y + 100);
+    /* Momentum can reach midnight after the finger is already up. Expansion is
+       tied to the stream position, not to an active touch record. */
+    await stream.evaluate((node) => { node.scrollTop = 0; node.dispatchEvent(new Event("scroll")); });
     await session.detach();
 
     await expect(chrome).toHaveAttribute("data-collapsed", "false");

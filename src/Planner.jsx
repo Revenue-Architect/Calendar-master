@@ -2771,13 +2771,13 @@ export default function Planner() {
       /* Scroll events are the browser's verdict that this touch belongs to the
          viewport. Do not second-guess it with a pixel comparison: composited
          scrolling can dispatch before `scrollTop` is reflected to JS. */
+      if (el.scrollTop <= Math.max(48, dayHourHeight)) setTimelineFocused(false);
       const p = press.t;
       if (!p) return;
       const travelled = Math.abs(el.scrollTop - p.startScrollTop);
       cancelPress();
       if (!window.matchMedia?.("(max-width:1023px)").matches || viewMode !== "timeline" || zoom !== "day") return;
-      if (el.scrollTop <= Math.max(48, dayHourHeight)) setTimelineFocused(false);
-      else if (travelled >= 24) setTimelineFocused(true);
+      if (el.scrollTop > Math.max(48, dayHourHeight) && travelled >= 24) setTimelineFocused(true);
     };
 
     const onEnd = (e) => {
@@ -3713,7 +3713,7 @@ export default function Planner() {
               aria-label={dayTimelineFocused ? "Expand timeline navigation" : "Focus timeline"}
               aria-expanded={!dayTimelineFocused}
               onClick={() => { beep("tick"); setTimelineFocused((current) => !current); }}
-              className="nb-tap mb-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
+              className="nb-tap mb-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full lg:hidden"
               style={{ color: T.dimText, border: `1px solid ${T.line}` }}>
               <span aria-hidden="true" style={{ transform: dayTimelineFocused ? "rotate(180deg)" : "none", transition: "transform 300ms cubic-bezier(.22,.85,.28,1)" }}>⌃</span>
             </button>
