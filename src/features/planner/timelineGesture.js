@@ -23,9 +23,14 @@ export const MINUTES_PER_DAY = 1440;
 export const SNAP_MINUTES = 5;
 /* How long a press has to sit still before it becomes a drag. */
 export const LIFT_MS = 300;
+/* Empty canvas is different from an existing object: the same press creates a
+   new record, so it waits through the pause that naturally happens at the end
+   of a slow scroll. Existing cards keep the quicker manipulation threshold. */
+export const EMPTY_SPACE_LIFT_MS = 650;
 /* How far a press may travel before it stops being a press. Below this a hand
    is holding still; above it, the surface is being scrolled. */
 export const HOLD_CANCEL_PX = 8;
+export const ACTION_SWIPE_COMMIT_PX = 64;
 /* Floors, per kind. An event shorter than ten minutes is almost always a
    mis-drag; an action's estimate is a unit of work and rounds coarser. */
 export const MIN_EVENT_MINUTES = 10;
@@ -47,6 +52,26 @@ export function minimumFor(kind) {
 export function movedEnoughToCancelHold(origin, point, threshold = HOLD_CANCEL_PX) {
   if (!origin || !point) return false;
   return Math.hypot(finite(point.x) - finite(origin.x), finite(point.y) - finite(origin.y)) > threshold;
+}
+
+export function liftDelayForTimelineTarget(targetKind) {
+  return targetKind === "empty" ? EMPTY_SPACE_LIFT_MS : LIFT_MS;
+}
+
+export function timelineTouchIntent(origin, point, threshold = 12, dominance = 1.4) {
+  if (!origin || !point) return "pending";
+  const dx = finite(point.x) - finite(origin.x);
+  const dy = finite(point.y) - finite(origin.y);
+  const ax = Math.abs(dx);
+  const ay = Math.abs(dy);
+  if (ax >= threshold && ax > ay * dominance) return "horizontal";
+  if (ay >= threshold && ay > ax * dominance) return "vertical";
+  return "pending";
+}
+
+export function shouldCommitActionSwipe(origin, point) {
+  if (!origin || !point || timelineTouchIntent(origin, point) !== "horizontal") return false;
+  return finite(point.x) - finite(origin.x) >= ACTION_SWIPE_COMMIT_PX;
 }
 
 /**

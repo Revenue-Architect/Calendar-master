@@ -1,12 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  ACTION_SWIPE_COMMIT_PX,
+  EMPTY_SPACE_LIFT_MS,
   HOLD_CANCEL_PX,
+  LIFT_MS,
   MINUTES_PER_DAY,
   MIN_EVENT_MINUTES,
   MIN_TASK_MINUTES,
   gestureChangedAnything,
   isResizable,
+  liftDelayForTimelineTarget,
   minimumFor,
   movedEnoughToCancelHold,
   proposeGesture,
@@ -14,6 +18,8 @@ import {
   proposeResizeEnd,
   proposeResizeStart,
   snapMinute,
+  shouldCommitActionSwipe,
+  timelineTouchIntent,
 } from "./timelineGesture.js";
 
 test("snapping lands on the grid and never leaves the day", () => {
@@ -35,6 +41,30 @@ test("a press that has not travelled is still a press", () => {
   assert.equal(movedEnoughToCancelHold(origin, { x: 104, y: 104 }), false, "within the threshold");
   assert.equal(movedEnoughToCancelHold(origin, { x: 100, y: 100 + HOLD_CANCEL_PX + 1 }), true);
   assert.equal(movedEnoughToCancelHold(null, { x: 0, y: 0 }), false);
+});
+
+test("empty space waits longer than a card before becoming a timeline gesture", () => {
+  assert.equal(liftDelayForTimelineTarget("card"), LIFT_MS);
+  assert.equal(liftDelayForTimelineTarget("resize"), LIFT_MS);
+  assert.equal(liftDelayForTimelineTarget("empty"), EMPTY_SPACE_LIFT_MS);
+  assert.ok(LIFT_MS <= 300, "card manipulation must still feel immediate");
+  assert.ok(EMPTY_SPACE_LIFT_MS >= 650, "resting during a slow scroll must not create a draft");
+});
+
+test("touch intent distinguishes a horizontal action swipe from timeline scrolling", () => {
+  const origin = { x: 100, y: 100 };
+  assert.equal(timelineTouchIntent(origin, { x: 108, y: 103 }), "pending");
+  assert.equal(timelineTouchIntent(origin, { x: 118, y: 104 }), "horizontal");
+  assert.equal(timelineTouchIntent(origin, { x: 104, y: 118 }), "vertical");
+  assert.equal(timelineTouchIntent(origin, { x: 118, y: 116 }), "pending", "diagonal movement belongs to neither custom gesture");
+});
+
+test("a scheduled action completes only after a deliberate right swipe", () => {
+  const origin = { x: 40, y: 200 };
+  assert.equal(shouldCommitActionSwipe(origin, { x: 40 + ACTION_SWIPE_COMMIT_PX - 1, y: 204 }), false);
+  assert.equal(shouldCommitActionSwipe(origin, { x: 40 + ACTION_SWIPE_COMMIT_PX, y: 204 }), true);
+  assert.equal(shouldCommitActionSwipe(origin, { x: 120, y: 280 }), false, "vertical travel remains a scroll");
+  assert.equal(shouldCommitActionSwipe(origin, { x: -40, y: 200 }), false, "left swipes do not complete");
 });
 
 test("moving keeps the length and takes the grab point into account", () => {
