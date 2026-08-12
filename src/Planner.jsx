@@ -88,6 +88,8 @@ import {
   liftDelayForTimelineTarget,
   movedEnoughToCancelHold,
   proposeGesture,
+  shouldCommitActionSwipe,
+  timelineTouchIntent,
 } from "./features/planner/timelineGesture.js";
 import { loadBackupRecord, saveBackupRecord } from "./platform/persistence/backupStore.js";
 import { textToNoteBlocks } from "./features/notes/noteText.js";
@@ -117,6 +119,8 @@ import {
   hasDetailDraft,
 } from "./features/planner/detailDraft.js";
 import { progressSegmentStates } from "./features/motion/progressGeometry.js";
+import TimelineActionCard from "./features/planner/TimelineActionCard.jsx";
+import { HAPTIC_PATTERNS, triggerDeviceHaptic } from "./features/feedback/haptics.js";
 import {
   fluidMorphFromRects,
   fluidPillBox,
@@ -311,7 +315,6 @@ const startSlot = (m, s = 15) => Math.min(snapTo(m, s), 1440 - s);
 /* The wire form a native time input speaks, independent of the 12/24 display clock. */
 const hhmm = (m) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
 const fromHhmm = (s) => { const [h, m] = s.split(":").map(Number); return h * 60 + m; };
-const buzzDevice = (p) => { try { navigator.vibrate && navigator.vibrate(p); } catch (e) {} };
 /* Sheets morph open from the control that opened them. Focus alone cannot always
    say which control that was — iOS Safari does not focus a tapped button — so the
    last pressed trigger is remembered here and consulted when a sheet mounts.
@@ -699,6 +702,7 @@ export default function Planner() {
   const [gesture, setGesture] = useState(null);
   const [turn, setTurn] = useState(null);
   const [swipe, setSwipe] = useState(0);
+  const [taskSwipe, setTaskSwipe] = useState(null);
   const [snapping, setSnapping] = useState(false);
   const [alertToast, setAlertToast] = useState(null);
   const [confirmWipe, setConfirmWipe] = useState(false);
@@ -805,6 +809,7 @@ export default function Planner() {
   const swipeRef = useRef(null);
   const holdRef = useRef(null);
   const gestureRef = useRef(null);
+  const completeTaskRef = useRef(() => {});
   const tappedRef = useRef(false);
   const monthHoldT = useRef(null);
   const monthHeldRef = useRef(false);
@@ -1010,7 +1015,7 @@ export default function Planner() {
   }, [preferences]);
   const beep = useSynth(preferences?.feedback.sound ?? true);
   const buzz = useCallback((pattern) => {
-    if (preferences?.feedback.haptics) buzzDevice(pattern);
+    if (preferences?.feedback.haptics) triggerDeviceHaptic(pattern);
   }, [preferences]);
   /* An event card sits *above* the day surface, so it is lifted off the page rather
      than cut into it. Blending keeps the fill opaque so cards never show the grid
@@ -1672,7 +1677,7 @@ export default function Planner() {
       setConfirmComplete({ id, reasons });
       return;
     }
-    beep("commit"); buzz([8, 30, 14]);
+    beep("commit"); buzz(HAPTIC_PATTERNS.complete);
     const rewardSource = awardCompletion(id, t);
     if (rewardSource && preferences?.motivation.celebrations) {
       setReward({ xp: t.reward, k: uid() });
@@ -1687,6 +1692,10 @@ export default function Planner() {
     flash("Completed", { type: "task-complete", id, rewardSources: rewardSource ? [rewardSource] : [] });
     setConfirmComplete(null);
   };
+  /* The delegated native touch listener lives longer than the render that
+     installed it. Keep completion pointed at the current notebook and current
+     preference state rather than closing over the first render. */
+  completeTaskRef.current = completeTask;
   /* The last-step auto-complete fires after a beat of delay, so it goes through a
      render-fresh ref AND revalidates before acting: 420ms is long enough to untick
      the step, and a completion must honour what is true when it fires, not what
@@ -2679,6 +2688,7 @@ export default function Planner() {
 
     const onStart = (e) => {
       if (e.touches.length !== 1 || gestureRef.current) return;
+      if (e.target.closest?.("[data-timeline-complete]")) return;
       const t = e.touches[0];
       const hit = e.target.closest ? e.target.closest("[data-event-id],[data-resize],[data-task-chip]") : null;
       /* A grip is part of the card it sits on, not a target of its own.
@@ -2706,7 +2716,8 @@ export default function Planner() {
       const p = {
         x: t.clientX, y: t.clientY, ev, chipId, resizing,
         startMin: snapTo(m), grab: ev ? m - ev.start : 0,
-        startScrollTop: el.scrollTop, held: false, cancelled: false, timer: null,
+        startScrollTop: el.scrollTop, held: false, cancelled: false, swiping: false,
+        lastX: t.clientX, lastY: t.clientY, timer: null,
       };
       p.timer = setTimeout(() => {
         if (!press.t || press.t.cancelled) return;
@@ -2740,6 +2751,17 @@ export default function Planner() {
       const p = press.t;
       if (!p) return;
       const t = e.touches[0];
+      if (!t) return;
+      p.lastX = t.clientX;
+      p.lastY = t.clientY;
+      if (p.chipId && (p.swiping || (t.clientX > p.x && timelineTouchIntent(p, { x: t.clientX, y: t.clientY }) === "horizontal"))) {
+        if (e.cancelable) e.preventDefault();
+        e.stopPropagation();
+        cancelPress();
+        p.swiping = true;
+        setTaskSwipe({ id: p.chipId, offset: Math.max(0, Math.min(96, t.clientX - p.x)) });
+        return;
+      }
       if (Math.abs(t.clientX - p.x) > 12 || Math.abs(t.clientY - p.y) > 12) cancelPress();
     };
 
@@ -2755,6 +2777,16 @@ export default function Planner() {
       const p = press.t;
       disarm();
       const t = e.changedTouches && e.changedTouches[0];
+      if (p?.swiping) {
+        if (e.cancelable) e.preventDefault();
+        e.stopPropagation();
+        gestureEndedAt.current = Date.now();
+        const point = { x: t?.clientX ?? p.lastX, y: t?.clientY ?? p.lastY };
+        const commits = shouldCommitActionSwipe(p, point);
+        setTaskSwipe(null);
+        if (commits) completeTaskRef.current(p.chipId);
+        return;
+      }
       if (g) { finishRef.current(t ? t.clientX : g.x, t ? t.clientY : g.y); return; }
       if (p && !p.held && !p.cancelled) {
         /* A tap handled here opens a sheet. Without this the browser still emits its
@@ -2770,6 +2802,7 @@ export default function Planner() {
     const onCancel = (e) => {
       const g = gestureRef.current;
       disarm();
+      setTaskSwipe(null);
       if (g) { const t = e.changedTouches && e.changedTouches[0]; finishRef.current(t ? t.clientX : g.x, t ? t.clientY : g.y); }
     };
 
@@ -3454,6 +3487,9 @@ export default function Planner() {
           .nb-event-secondary{display:none}
           .nb-event-row{column-gap:.375rem}
         }
+        @container (max-width:160px){
+          .nb-task-time,.nb-task-duration{display:none}
+        }
         /* Down is quick and linear, release overshoots and settles — the difference
            between the two is what reads as a physical thing rather than a fade. */
         button:active,[role="button"]:active,a[href]:active,summary:active,[data-event-id]:active,[data-task-chip]:active{
@@ -4008,27 +4044,16 @@ export default function Planner() {
                     const block = isResizable(t, "task");
                     const h = block ? Math.max(28, (estimate / 1440) * dayHeight - 3) : 28;
                     return (
-                      <button key={t.id} data-task-chip={t.id} onClick={() => { if (clickFollowsGesture()) return; beep("click"); setInspect({ kind: "task", id: t.id }); }} className="nb-tap nb-timeline-lane absolute text-left overflow-hidden"
-                        style={{ display: "flex", flexDirection: "column", justifyContent: "flex-start", top: (t.planned.startMinute / 1440) * dayHeight + 2, height: h, left: `${(t.lane / t.cols) * 100}%`, width: `calc(${100 / t.cols}% - 6px)`, borderRadius: CARD_R, border: `1px dashed ${sizing ? T.accent : T.faint}`, background: block ? `${T.accent}0D` : "transparent", opacity: t.status === "completed" ? 0.4 : 1, zIndex: sizing ? 20 : 5, pointerEvents: "auto" }}>
-                        <span className="flex items-center gap-2 px-2.5 py-1">
-                          <span className="w-2 h-2 shrink-0 rounded-full" style={{ background: t.status === "completed" ? T.accent : "transparent", boxShadow: `inset 0 0 0 1.5px ${T.accent}` }} />
-                          <span className="nb-lead truncate" style={{ textDecoration: t.status === "completed" ? "line-through" : "none" }}>{t.title}</span>
-                          <span style={{ fontFamily: MONO, color: sizing ? T.accent : T.dim }} className="ml-auto nb-data shrink-0">
-                            {sizing ? dur(estimate) : tm(t.planned.startMinute)}
-                          </span>
-                        </span>
-                        {block && h >= 40 && (
-                          <span style={{ fontFamily: MONO, color: T.dimText }} className="block nb-data truncate px-2.5 pl-7">{dur(estimate)}</span>
-                        )}
-                        {/* Only an action that has an estimate gets a handle: with no
-                            length there is nothing for the gesture to change. */}
-                        {block && (
-                          <span data-resize={t.id} data-resize-edge="end" onPointerDown={(ev) => resizeDown(ev, { id: t.id, start: t.planned.startMinute, dur: estimate }, "end", "task")}
-                            className="absolute inset-x-0 bottom-0 flex items-end justify-center" style={{ height: 12, cursor: "ns-resize", touchAction: "pan-y" }}>
-                            <span style={{ background: T.faint, width: 22, height: 2, marginBottom: 3, borderRadius: 2 }} />
-                          </span>
-                        )}
-                      </button>
+                      <TimelineActionCard key={t.id} task={t}
+                        top={(t.planned.startMinute / 1440) * dayHeight + 2}
+                        height={h} left={`${(t.lane / t.cols) * 100}%`} width={`calc(${100 / t.cols}% - 6px)`}
+                        estimate={estimate} block={block} sizing={sizing}
+                        swipeOffset={taskSwipe?.id === t.id ? taskSwipe.offset : 0}
+                        theme={T} mono={MONO} cardRadius={CARD_R} formatTime={tm} formatDuration={dur}
+                        clickFollowsGesture={clickFollowsGesture}
+                        onOpen={(id) => { beep("click"); setInspect({ kind: "task", id }); }}
+                        onComplete={completeTask}
+                        onResizePointerDown={(ev, task, nextEstimate) => resizeDown(ev, { id: task.id, start: task.planned.startMinute, dur: nextEstimate }, "end", "task")} />
                     );
                   })}
 
