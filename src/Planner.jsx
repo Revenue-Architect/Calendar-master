@@ -713,6 +713,8 @@ export default function Planner() {
   const [dependencyPicker, setDependencyPicker] = useState(null);
   const [listManager, setListManager] = useState(false);
   const [viewMode, setViewMode] = useState("timeline");
+  const [timelineFocused, setTimelineFocused] = useState(false);
+  useEffect(() => { setTimelineFocused(false); }, [dateKey, viewMode, zoom]);
   /* The shell has explicit phases so the dark application frame is stable before
      the page moves, and so close can reverse cleanly instead of unmounting the
      navigation underneath its exit transition. */
@@ -2769,7 +2771,13 @@ export default function Planner() {
       /* Scroll events are the browser's verdict that this touch belongs to the
          viewport. Do not second-guess it with a pixel comparison: composited
          scrolling can dispatch before `scrollTop` is reflected to JS. */
-      if (press.t) cancelPress();
+      const p = press.t;
+      if (!p) return;
+      const travelled = Math.abs(el.scrollTop - p.startScrollTop);
+      cancelPress();
+      if (!window.matchMedia?.("(max-width:1023px)").matches || viewMode !== "timeline" || zoom !== "day") return;
+      if (el.scrollTop <= Math.max(48, dayHourHeight)) setTimelineFocused(false);
+      else if (travelled >= 24) setTimelineFocused(true);
     };
 
     const onEnd = (e) => {
@@ -2818,7 +2826,7 @@ export default function Planner() {
       el.removeEventListener("touchcancel", onCancel);
       el.removeEventListener("scroll", onScroll);
     };
-  }, [streamNode, ready, viewMode]);
+  }, [streamNode, ready, viewMode, zoom, dayHourHeight]);
 
   /* mouse / pen tracking, plus touch tracking for drags that begin outside the stream */
   useEffect(() => {
@@ -3158,6 +3166,7 @@ export default function Planner() {
       }}
     />
   );
+  const dayTimelineFocused = timelineFocused && viewMode === "timeline" && zoom === "day";
 
   return (
     <div data-test="nav-shell" data-nav-state={navPhase} className="nb-nav-shell" style={{ fontFamily: DISPLAY }}>
@@ -3503,6 +3512,17 @@ export default function Planner() {
         .nb-pop{animation:nbpop 380ms cubic-bezier(.2,1.6,.35,1)}
         @keyframes nbpop{0%{scale:1}35%{scale:1.28}100%{scale:1}}
 
+        .nb-timeline-chrome{display:grid;grid-template-rows:minmax(0,1fr);min-height:0;opacity:1;transform:translateY(0);transition:grid-template-rows 300ms cubic-bezier(.22,.85,.28,1),opacity 180ms ease,transform 300ms cubic-bezier(.22,.85,.28,1)}
+        .nb-timeline-chrome-inner{min-height:0}
+        .nb-day-heading{transition:padding 300ms cubic-bezier(.22,.85,.28,1),background-color 200ms ease,border-color 200ms ease}
+        .nb-day-heading .nb-display{transition:font-size 300ms cubic-bezier(.22,.85,.28,1),line-height 300ms cubic-bezier(.22,.85,.28,1)}
+        @media(max-width:1023px){
+          .nb-timeline-chrome-inner{overflow:hidden}
+          .nb-timeline-chrome.is-collapsed{grid-template-rows:minmax(0,0fr);opacity:0;transform:translateY(-10px);pointer-events:none}
+          .nb-day-heading.is-focused{padding-top:.45rem;padding-bottom:.45rem;border-bottom:1px solid ${T.line}}
+          .nb-day-heading.is-focused .nb-display{font-size:2rem;line-height:2rem}
+        }
+
         @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}
           .nb-app-surface,.nb-nav-brand,.nb-nav-item,.nb-nav-membership{transition-duration:1ms!important}
           button:active,[role="button"]:active,a[href]:active,[data-event-id]:active,[data-task-chip]:active{scale:1!important}}
@@ -3510,6 +3530,9 @@ export default function Planner() {
           button:active,[role="button"]:active,a[href]:active,[data-event-id]:active,[data-task-chip]:active{scale:1!important}` : ""}
       `}</style>
 
+      <div data-test="timeline-chrome" data-collapsed={String(dayTimelineFocused)}
+        className={`nb-timeline-chrome ${dayTimelineFocused ? "is-collapsed" : ""}`}>
+      <div className="nb-timeline-chrome-inner">
       {/* ══ HUD ══ */}
       <header style={{ background: T.bg, borderBottom: `1px solid ${T.line}`, color: T.text }} className="nb-hud sticky top-0 z-30 px-3 sm:px-5 py-2 flex items-center justify-between gap-3">
         <div className="nb-hud-left flex items-center gap-2 min-w-0">
@@ -3672,15 +3695,29 @@ export default function Planner() {
           </div>
         )}
       </div>
+      </div>
+      </div>
 
       {/* ══ HERO ══ */}
-      <div data-test="day-heading" data-date={dateKey} className="px-3 sm:px-5 pt-4 pb-3">
+      <div data-test="day-heading" data-date={dateKey}
+        className={`nb-day-heading relative z-20 px-3 sm:px-5 pt-4 pb-3 ${dayTimelineFocused ? "is-focused" : ""}`}
+        style={{ background: T.bg }}>
         <div className="flex items-end gap-3">
           <span style={{ fontFamily: MONO }} className="nb-display">{pad(activeDate.getDate())}</span>
-          <span className="pb-1.5">
+          <span className="min-w-0 flex-1 pb-1.5">
             <span style={{ fontFamily: MONO, color: T.dimText }} className="block nb-data">{WD[activeDate.getDay()]} · {MO[activeDate.getMonth()]} {activeDate.getFullYear()}</span>
             <span className="block text-sm font-semibold leading-snug mt-0.5">{briefing}</span>
           </span>
+          {viewMode === "timeline" && zoom === "day" && (
+            <button type="button" data-test="timeline-focus-toggle"
+              aria-label={dayTimelineFocused ? "Expand timeline navigation" : "Focus timeline"}
+              aria-expanded={!dayTimelineFocused}
+              onClick={() => { beep("tick"); setTimelineFocused((current) => !current); }}
+              className="nb-tap mb-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
+              style={{ color: T.dimText, border: `1px solid ${T.line}` }}>
+              <span aria-hidden="true" style={{ transform: dayTimelineFocused ? "rotate(180deg)" : "none", transition: "transform 300ms cubic-bezier(.22,.85,.28,1)" }}>⌃</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -3868,9 +3905,6 @@ export default function Planner() {
                       borderTop: `1px solid ${hourRule}`,
                       background: h % 2 ? hourBand : "transparent",
                     }}>
-                      {suggested.includes(h) && !gesture && (
-                        <span style={{ fontFamily: MONO, color: T.faint }} className="block mr-2 mt-1.5 nb-label">FREE</span>
-                      )}
                     </div>
                   </div>
                 ))}

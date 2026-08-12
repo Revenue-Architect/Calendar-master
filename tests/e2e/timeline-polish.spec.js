@@ -31,6 +31,84 @@ function liveAt(today, hour) {
 
 const hourLabel = (page, text) => page.getByText(text, { exact: true }).first();
 
+async function dispatchTouch(session, type, x, y) {
+  await session.send("Input.dispatchTouchEvent", {
+    type,
+    touchPoints: type === "touchEnd" ? [] : [{ x, y, radiusX: 4, radiusY: 4, force: .5 }],
+  });
+}
+
+test.describe("mobile timeline focus", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test("intentional timeline scrolling collapses chrome while preserving the date", async ({ page }) => {
+    const today = await atTime(page, 10, 0);
+    await seedPlanner(page, createBlankPlannerState({}));
+    const chrome = page.getByTestId("timeline-chrome");
+    const stream = page.getByTestId("day-stream");
+    await expect(chrome, "initial auto-positioning must leave navigation expanded").toHaveAttribute("data-collapsed", "false");
+    const before = await stream.boundingBox();
+    const box = before;
+    const x = box.x + 90;
+    const y = box.y + Math.min(180, box.height / 2);
+    const session = await page.context().newCDPSession(page);
+
+    await dispatchTouch(session, "touchStart", x, y);
+    await stream.evaluate((node) => { node.scrollTop += 32; node.dispatchEvent(new Event("scroll")); });
+    await dispatchTouch(session, "touchEnd", x, y);
+    await session.detach();
+
+    await expect(chrome).toHaveAttribute("data-collapsed", "true");
+    await expect(page.getByTestId("day-heading")).toBeVisible();
+    await expect(page.getByTestId("day-heading")).toHaveAttribute("data-date", today);
+    await expect.poll(async () => (await stream.boundingBox()).height).toBeGreaterThan(before.height + 60);
+  });
+
+  test("returning near midnight expands timeline chrome", async ({ page }) => {
+    await atTime(page, 10, 0);
+    await seedPlanner(page, createBlankPlannerState({}));
+    const chrome = page.getByTestId("timeline-chrome");
+    const stream = page.getByTestId("day-stream");
+    const box = await stream.boundingBox();
+    const x = box.x + 90;
+    const y = box.y + Math.min(180, box.height / 2);
+    const session = await page.context().newCDPSession(page);
+
+    await dispatchTouch(session, "touchStart", x, y);
+    await stream.evaluate((node) => { node.scrollTop += 32; node.dispatchEvent(new Event("scroll")); });
+    await dispatchTouch(session, "touchEnd", x, y);
+    await expect(chrome).toHaveAttribute("data-collapsed", "true");
+
+    const focusedBox = await stream.boundingBox();
+    await dispatchTouch(session, "touchStart", focusedBox.x + 90, focusedBox.y + 100);
+    await stream.evaluate((node) => { node.scrollTop = 0; node.dispatchEvent(new Event("scroll")); });
+    await dispatchTouch(session, "touchEnd", focusedBox.x + 90, focusedBox.y + 100);
+    await session.detach();
+
+    await expect(chrome).toHaveAttribute("data-collapsed", "false");
+  });
+
+  test("the date heading explicitly toggles timeline focus", async ({ page }) => {
+    await atTime(page, 10, 0);
+    await seedPlanner(page, createBlankPlannerState({}));
+    const chrome = page.getByTestId("timeline-chrome");
+    const toggle = page.getByTestId("timeline-focus-toggle");
+
+    await toggle.click();
+    await expect(chrome).toHaveAttribute("data-collapsed", "true");
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await toggle.click();
+    await expect(chrome).toHaveAttribute("data-collapsed", "false");
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  });
+});
+
+test("the day timeline has no standalone FREE labels", async ({ page }) => {
+  await atTime(page, 9, 30);
+  await seedPlanner(page, createBlankPlannerState({}));
+  await expect(page.getByTestId("day-stream").getByText("FREE", { exact: true })).toHaveCount(0);
+});
+
 test.describe("short mobile timeline density", () => {
   test.use({ viewport: { width: 489, height: 601 }, hasTouch: true, isMobile: true });
 
