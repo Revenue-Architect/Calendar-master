@@ -87,6 +87,7 @@ test.describe("the actions column", () => {
     expect(reopened.tasks[0].status).toBe("open");
     await expect(completionOverlay).toHaveAttribute("data-visible", "false");
     await expect.poll(() => completionOverlay.evaluate((node) => getComputedStyle(node).opacity)).toBe("0");
+    await expect(page.locator('[role="status"]').filter({ hasText: "Completed" }), "reopening must clear the stale completion toast").toHaveCount(0);
   });
 
   test("a held desktop Action card follows the pointer and reschedules on drop", async ({ page }) => {
@@ -107,6 +108,63 @@ test.describe("the actions column", () => {
 
     const state = await settledState(page, (stored) => stored.tasks[0]?.planned.startMinute === 11 * 60, "the Action drag did not reschedule the task");
     expect(state.tasks[0].planned.startMinute).toBe(11 * 60);
+  });
+
+  test("the live-time rule stays behind a moving Action card", async ({ page }) => {
+    await seedPlanner(page, scheduledAction({ id: "task-now-layer", title: "Layered live time" }));
+    const line = page.getByTestId("timeline-now-line");
+    const chip = page.locator('[data-task-chip="task-now-layer"]');
+    await chip.scrollIntoViewIfNeeded();
+
+    const layering = await line.evaluate((node) => {
+      const card = node.parentElement?.querySelector('[data-task-chip="task-now-layer"]')?.parentElement?.parentElement;
+      return {
+        line: getComputedStyle(node).zIndex,
+        card: card ? getComputedStyle(card).zIndex : null,
+      };
+    });
+
+    expect(layering.line, "the now rule is a grid guide, not a card overlay").toBe("0");
+    expect(layering.card, "the Action lane must own the foreground").toBe("5");
+  });
+
+  test("drag feedback is a compact ghost, not a line across the timeline", async ({ page }) => {
+    await seedPlanner(page, scheduledAction({ id: "task-drag-feedback", title: "Readable drag feedback" }));
+    const chip = page.locator('[data-task-chip="task-drag-feedback"]');
+    await chip.scrollIntoViewIfNeeded();
+    const before = await chip.boundingBox();
+    const x = before.x + before.width / 2;
+    const y = before.y + before.height / 2;
+
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.waitForTimeout(360);
+    await page.mouse.move(x, y + 56, { steps: 8 });
+
+    const ghost = page.getByTestId("timeline-drag-ghost");
+    await expect(ghost).toBeVisible();
+    const ghostBox = await ghost.boundingBox();
+    const cardBox = await chip.boundingBox();
+    expect(ghostBox.y + ghostBox.height, "the ghost should sit above the card it represents").toBeLessThanOrEqual(cardBox.y + 1);
+
+    const dropPreview = page.getByTestId("timeline-drop-preview");
+    await expect(dropPreview).toBeVisible();
+    expect(await dropPreview.evaluate((node) => getComputedStyle(node).zIndex), "the landing guide must sit behind cards").toBe("0");
+    await page.mouse.up();
+  });
+
+  test("the Actions ribbon has an interruptible collapse", async ({ page }) => {
+    await openPlanner(page);
+    const reveal = page.getByTestId("calendar-ribbon-reveal");
+    const before = await reveal.boundingBox();
+    expect(before?.height).toBeGreaterThan(0);
+
+    await page.getByRole("tab", { name: "ACTIONS", exact: true }).click();
+    await page.waitForTimeout(110);
+    const during = await reveal.boundingBox();
+    expect(during?.height, "the ribbon should not disappear on the first frame").toBeGreaterThan(0);
+    expect(during?.height, "the ribbon should be part-way through its collapse").toBeLessThan(before.height);
+    await expect(page.getByTestId("day-ribbon")).toBeHidden();
   });
 
   test("the timeline completion affordance stays compact and the action face is opaque", async ({ page }) => {

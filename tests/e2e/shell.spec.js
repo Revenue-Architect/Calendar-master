@@ -182,3 +182,20 @@ test.describe("the day ribbon", () => {
     expect(after.left, "the highlighted cell should travel through the ribbon").toBeGreaterThan(before.left + 20);
   });
 });
+
+test.describe("the narrow month navigator", () => {
+  test("keeps the month label readable instead of shrinking into the pill bar", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openPlanner(page);
+    await page.getByTestId("zoom-out").click();
+    await page.getByTestId("zoom-out").click();
+
+    const month = page.getByTestId("zoom-out");
+    const tabs = page.getByRole("tablist");
+    const previousMonth = page.getByRole("button", { name: "Previous month" });
+    const [monthBox, tabsBox, controlsBox] = await Promise.all([month.boundingBox(), tabs.boundingBox(), previousMonth.boundingBox()]);
+    expect(monthBox.width, "the month label must retain enough width to read").toBeGreaterThan(50);
+    expect(controlsBox.y, "month navigation controls should move to their own row on a phone")
+      .toBeGreaterThan(Math.max(monthBox.y + monthBox.height, tabsBox.y + tabsBox.height) - 1);
+  });
+});

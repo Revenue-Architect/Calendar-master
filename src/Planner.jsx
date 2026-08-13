@@ -1993,6 +1993,12 @@ export default function Planner() {
     const t = findTask(id);
     if (!t || t.status !== "completed") return;
     beep("click");
+    /* Reopening is an explicit reversal. Leaving the previous completion toast
+       and its UNDO action alive made the next screen claim the task was still
+       completed, even though the card had already reopened. */
+    clearTimeout(undoT.current);
+    undoT.current = null;
+    setUndo(null);
     writeTask(id, (state, taskId) => reopenTaskCommand(state.tasks, taskId), { reopened: true });
     reverseTaskReward(id);
   };
@@ -3943,6 +3949,17 @@ export default function Planner() {
         .nb-day-heading .nb-display{transition:font-size 300ms var(--nav-ease),line-height 300ms var(--nav-ease)}
         .nb-timeline-chrome.is-collapsed{pointer-events:none}
         .nb-timeline-chrome.is-collapsed .nb-timeline-chrome-inner{opacity:0;transform:translate3d(0,-10px,0)}
+        /* The day ribbon has intrinsic width and a content-dependent height. A
+           grid row hid it in one frame in Chromium, so Actions felt like it
+           cut the date context away. CalendarRibbonReveal measures the stable
+           inner box and gives both directions one numeric, interruptible path. */
+        .nb-calendar-ribbon-reveal{min-height:0;overflow:hidden;opacity:1;transform:translate3d(0,0,0);visibility:visible;transition:height 360ms cubic-bezier(.22,.8,.28,1),opacity 240ms ease,transform 360ms cubic-bezier(.22,.8,.28,1),visibility 0s linear 0s}
+        .nb-calendar-ribbon-reveal.is-collapsed{opacity:0;transform:translate3d(0,-8px,0);pointer-events:none;visibility:hidden;transition:height 360ms cubic-bezier(.22,.8,.28,1),opacity 240ms ease,transform 360ms cubic-bezier(.22,.8,.28,1),visibility 0s linear 360ms}
+        @media(max-width:639px){
+          .nb-month-navigator.is-month{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:.5rem;row-gap:.25rem;align-items:center}
+          .nb-month-navigator.is-month .nb-month-view-mode{justify-content:flex-end}
+          .nb-month-navigator.is-month .nb-month-controls{grid-column:1 / -1}
+        }
         .nb-day-heading.is-focused{padding-top:.45rem;padding-bottom:.45rem;border-bottom:1px solid ${T.line}}
         .nb-day-heading.is-focused .nb-display{font-size:2rem;line-height:2rem}
 
@@ -3983,27 +4000,31 @@ export default function Planner() {
 
       {/* ══ NAVIGATOR ══ */}
       <div onTouchStart={onTouchStartNav} onTouchMove={onTouchMoveNav} style={{ borderBottom: `1px solid ${T.line}` }}>
-        <div className="flex items-center justify-between px-3 sm:px-5 py-1.5">
-          <button data-test="zoom-out" onClick={zoomOut} style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-data" disabled={zoom === "month"}>
+        <div className={`nb-month-navigator flex items-center justify-between px-3 sm:px-5 py-1.5 ${zoom === "month" ? "is-month" : ""}`}>
+          <button data-test="zoom-out" onClick={zoomOut} style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-data shrink-0 whitespace-nowrap" disabled={zoom === "month"}>
             {zoom === "day" || zoom === "week" ? <span className="inline-flex items-center gap-1"><ChevronIcon direction="left" />{zoom === "day" ? "WEEK" : "MONTH"}</span> : `${MO[monthCursor.getMonth()]} ${monthCursor.getFullYear()}`}
           </button>
-          <div className="flex items-center gap-2">
+          <div className="nb-month-view-mode flex items-center gap-2 min-w-0">
             {/* Timeline answers "when, and for how long"; agenda answers "what is
                 coming". Same days, same data, two questions. */}
             <PillNav T={T} ariaLabel="View mode" value={viewMode}
               options={[["timeline", "TIMELINE"], ["agenda", "AGENDA"], ["actions", "ACTIONS"]]}
               onPick={(mode) => { beep("tick"); setViewMode(mode); if (mode === "actions") setSheet(false); }}
-              style={{ border: `1px solid ${T.line}` }} />
-            {zoom === "month" && (
-              <>
-                <button aria-label="Previous month" onClick={() => { beep("page"); setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() - 1, 1)); }} style={{ color: T.dimText }} className="nb-tap px-2 text-xs flex items-center justify-center"><ChevronIcon direction="left" /></button>
-                <button aria-label="Next month" onClick={() => { beep("page"); setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1)); }} style={{ color: T.dimText }} className="nb-tap px-2 text-xs flex items-center justify-center"><ChevronIcon /></button>
-              </>
-            )}
-          <button data-test="zoom-in" onClick={zoomIn} style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-data" disabled={zoom === "day"}>
-              {zoom === "month" ? <span className="inline-flex items-center gap-1">WEEK<ChevronIcon /></span> : zoom === "week" ? <span className="inline-flex items-center gap-1">DAY<ChevronIcon /></span> : ""}
-            </button>
+              className="shrink-0" style={{ border: `1px solid ${T.line}` }} />
           </div>
+          {zoom === "month" ? (
+            <div className="nb-month-controls flex items-center justify-end gap-2">
+              <button aria-label="Previous month" onClick={() => { beep("page"); setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() - 1, 1)); }} style={{ color: T.dimText }} className="nb-tap px-2 text-xs flex items-center justify-center"><ChevronIcon direction="left" /></button>
+              <button aria-label="Next month" onClick={() => { beep("page"); setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1)); }} style={{ color: T.dimText }} className="nb-tap px-2 text-xs flex items-center justify-center"><ChevronIcon /></button>
+              <button data-test="zoom-in" onClick={zoomIn} style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-data" disabled={zoom === "day"}>
+                <span className="inline-flex items-center gap-1">WEEK<ChevronIcon /></span>
+              </button>
+            </div>
+          ) : (
+            <button data-test="zoom-in" onClick={zoomIn} style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-data" disabled={zoom === "day"}>
+              {zoom === "week" ? <span className="inline-flex items-center gap-1">DAY<ChevronIcon /></span> : ""}
+            </button>
+          )}
         </div>
 
         {zoom === "month" && (
@@ -4071,8 +4092,7 @@ export default function Planner() {
             at either scroll edge. The date surface is therefore effectively
             unbounded without growing a permanent DOM row or losing scroll place. */}
         {(zoom === "week" || zoom === "day") && (
-          <div data-test="calendar-ribbon-reveal">
-            <Reveal open={viewMode !== "actions"}>
+          <CalendarRibbonReveal open={viewMode !== "actions"}>
               <div className="flex items-center">
             {zoom === "day" && (
               <button onClick={() => goDay(-1)} aria-label="Previous day" style={{ color: T.dimText }} className="nb-tap shrink-0 px-2 sm:px-3 py-1 flex items-center justify-center"><ChevronIcon direction="left" /></button>
@@ -4122,8 +4142,7 @@ export default function Planner() {
               <button onClick={() => goDay(1)} aria-label="Next day" style={{ color: T.dimText }} className="nb-tap shrink-0 px-2 sm:px-3 py-1 flex items-center justify-center"><ChevronIcon /></button>
             )}
               </div>
-            </Reveal>
-          </div>
+          </CalendarRibbonReveal>
         )}
       </div>
       </div>
@@ -4361,13 +4380,19 @@ export default function Planner() {
                           card the elapsed fill carries the same accent onward, so the
                           line reads as flowing into the event rather than being cut
                           off behind it. With nothing live it spans the full width. */}
-                      <div className="absolute pointer-events-none" style={{
+                      <div data-test="timeline-now-line" className="absolute pointer-events-none" style={{
                         left: 0,
                         width: liveEvent ? `calc(${laneL}% + 2px)` : "100%",
                         top: mounted ? (nowMin / 1440) * dayHeight : 0,
                         height: 2,
                         background: T.accent,
-                        zIndex: 6,
+                        /* The live-time rule belongs to the grid, not to the
+                           cards. Above an Action it read as a stray border that
+                           travelled through the card while the card was being
+                           dragged. Cards own the foreground; the time badge
+                           below remains above them when it has to replace a
+                           gutter label. */
+                        zIndex: 0,
                          transition: "top 260ms cubic-bezier(.23,1,.32,1), width 260ms cubic-bezier(.23,1,.32,1)",
                       }} />
                       {/* With nothing live the rule crosses empty grid, so the time
@@ -4537,9 +4562,8 @@ export default function Planner() {
                   })}
 
                   {dropMin != null && (
-                    <div className="absolute left-0 right-2 pointer-events-none" style={{ top: (dropMin / 1440) * dayHeight, zIndex: 30 }}>
-                      <div style={{ background: T.accent, height: 2 }} />
-                      <span style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="absolute right-0 -top-2 px-1 nb-data">{tm(dropMin)}</span>
+                    <div data-test="timeline-drop-preview" className="absolute left-0 right-2 pointer-events-none" style={{ top: (dropMin / 1440) * dayHeight, zIndex: 0 }}>
+                      <div style={{ borderTop: `1px dashed ${T.accent}99`, height: 1 }} />
                     </div>
                   )}
                 </div>
@@ -4584,8 +4608,24 @@ export default function Planner() {
       )}
 
       {draggingTask && (
-        <div className="fixed z-50 pointer-events-none px-2 py-1" style={{ left: gesture.x - 60, top: gesture.y - 18, background: T.accent, color: T.on }}>
-          <span className="text-xs font-semibold">{gesture.overDay ? `→ ${fmtDay(gesture.overDay)}` : draggingTask.title}</span>
+        <div data-test="timeline-drag-ghost" className="fixed z-50 pointer-events-none flex min-w-0 items-center gap-2 px-2.5 py-1.5"
+          style={{
+            left: Math.max(8, Math.min(gesture.x + 14, (typeof window !== "undefined" ? window.innerWidth : 390) - 248)),
+            /* Keep the label above the lifted card instead of laying a second
+               copy of its title over the card surface. The card follows the
+               same grab point, so this leaves a small visual gap at rest. */
+            top: gesture.y - 32,
+            maxWidth: "calc(100vw - 16px)",
+            background: T.card,
+            color: T.text,
+            border: `1px solid ${T.accent}`,
+            borderRadius: CARD_R,
+            boxShadow: "0 8px 22px rgba(0,0,0,.28)",
+            transform: "translateY(-100%)",
+            fontFamily: MONO,
+          }}>
+          <span className="min-w-0 truncate text-xs font-semibold">{gesture.overDay ? `→ ${fmtDay(gesture.overDay)}` : draggingTask.title}</span>
+          {dropMin != null && <span className="shrink-0 px-1 nb-data" style={{ background: T.accent, color: T.on, borderRadius: 4 }}>{tm(dropMin)}</span>}
         </div>
       )}
 
@@ -6573,6 +6613,43 @@ function Reveal({ open, children }) {
   return (
     <div style={{ display: "grid", gridTemplateRows: open ? "1fr" : "0fr", transition: "grid-template-rows 260ms cubic-bezier(.23,1,.32,1)" }}>
       <div className="overflow-hidden" inert={!open} style={{ minHeight: 0, visibility: open ? "visible" : "hidden", transition: `visibility 0s linear ${open ? 0 : 300}ms` }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/* The date ribbon is the one Reveal surface whose height is part of the
+   navigation rhythm. Measuring its content avoids the discrete intrinsic-size
+   jump that made entering Actions feel like the calendar was being cut away. */
+function CalendarRibbonReveal({ open, children }) {
+  const contentRef = useRef(null);
+  const [contentHeight, setContentHeight] = useState(null);
+  const measure = useCallback(() => {
+    const node = contentRef.current;
+    if (!node) return;
+    const next = Math.ceil(node.getBoundingClientRect().height);
+    setContentHeight((current) => current === next ? current : next);
+  }, []);
+
+  useLayoutEffect(() => {
+    measure();
+  }, [measure, open]);
+
+  useEffect(() => {
+    const node = contentRef.current;
+    if (!node || typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [measure]);
+
+  return (
+    <div data-test="calendar-ribbon-reveal"
+      className={`nb-calendar-ribbon-reveal ${open ? "" : "is-collapsed"}`}
+      inert={!open}
+      style={{ height: open ? (contentHeight == null ? "auto" : `${contentHeight}px`) : 0 }}>
+      <div ref={contentRef} style={{ minHeight: 0 }}>
         {children}
       </div>
     </div>
