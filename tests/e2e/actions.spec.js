@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { openPlanner, quickAdd, seedPlanner, settledState, storedState } from "./helpers.js";
 import { createBlankPlannerState } from "../../src/platform/persistence/plannerStateImport.js";
+import { createEvent } from "../../src/domains/calendar/index.js";
 import { createTask } from "../../src/domains/tasks/index.js";
 import { createPreferences } from "../../src/platform/preferences/preferences.js";
 import { PREFERENCES_STORE_KEY } from "../../src/platform/persistence/preferencesStore.js";
@@ -19,6 +20,31 @@ function scheduledAction({ id = "task-timeline", title = "Review launch brief" }
     planned: { date: keyOf(new Date()), startMinute: 10 * 60, estimateMinutes: 60 },
   });
   return { ...state, tasks: result.tasks };
+}
+
+function liveActionAt(now, { id = "task-live", title = "Live Action" } = {}) {
+  const state = createBlankPlannerState({});
+  const result = createTask(state.tasks, {
+    id, title,
+    planned: {
+      date: keyOf(now),
+      startMinute: now.getHours() * 60,
+      estimateMinutes: 60,
+    },
+  });
+  return { ...state, tasks: result.tasks };
+}
+
+function addLiveEvent(state, now) {
+  const date = keyOf(now);
+  return createEvent(state, {
+    calendarId: "calendar-default", title: "Live event", category: "WORK",
+    timing: {
+      kind: "timed", timeZoneMode: "floating",
+      startLocal: `${date}T${String(now.getHours()).padStart(2, "0")}:00`,
+      endLocal: `${date}T${String(now.getHours() + 1).padStart(2, "0")}:00`,
+    },
+  }, { id: "event-live" }).state;
 }
 
 async function recordVibrations(page) {
@@ -108,6 +134,37 @@ test.describe("the actions column", () => {
 
     const state = await settledState(page, (stored) => stored.tasks[0]?.planned.startMinute === 11 * 60, "the Action drag did not reschedule the task");
     expect(state.tasks[0].planned.startMinute).toBe(11 * 60);
+  });
+
+  test("a live estimated Action carries the NOW rule through its card", async ({ page }) => {
+    const now = new Date("2026-08-13T10:20:00");
+    await page.clock.setFixedTime(now);
+    await seedPlanner(page, liveActionAt(now));
+
+    const line = page.getByTestId("timeline-now-line");
+    const action = page.locator('[data-task-chip="task-live"]');
+    const fill = page.getByTestId("timeline-action-live-fill");
+    const nowTime = page.getByTestId("timeline-now-time");
+    await action.scrollIntoViewIfNeeded();
+    await expect(fill).toBeVisible();
+    await expect(fill).toHaveCSS("pointer-events", "none");
+    await expect.poll(() => fill.evaluate((node) => Number.parseFloat(node.style.width))).toBeCloseTo(33, 0);
+
+    const geometry = await line.evaluate((node) => ({
+      line: node.getBoundingClientRect().width,
+      layer: node.parentElement?.getBoundingClientRect().width,
+    }));
+    expect(geometry.line).toBeLessThan(geometry.layer);
+    await expect.poll(() => nowTime.evaluate((node) => Number.parseFloat(getComputedStyle(node).right))).toBeGreaterThan(0);
+  });
+
+  test("a live Event wins the NOW treatment over an overlapping Action", async ({ page }) => {
+    const now = new Date("2026-08-13T10:20:00");
+    await page.clock.setFixedTime(now);
+    await seedPlanner(page, addLiveEvent(liveActionAt(now), now));
+
+    await expect(page.locator('[data-event-id="event-live"]')).toContainText("33%");
+    await expect(page.getByTestId("timeline-action-live-fill")).toHaveCount(0);
   });
 
   test("the live-time rule stays behind a moving Action card", async ({ page }) => {
