@@ -11,6 +11,8 @@ export default function TimelineActionCard({
   sizing,
   dragging = false,
   reducedMotion = false,
+  live = false,
+  livePct = 0,
   swipeOffset = 0,
   theme,
   mono,
@@ -93,6 +95,13 @@ export default function TimelineActionCard({
           style={{ background: theme.accent, color: theme.on, borderRadius: cardRadius, fontFamily: mono }}>
           <span className="nb-label">COMPLETE</span>
         </div>
+        {live && (
+          <span data-test="timeline-action-live-fill" aria-hidden="true"
+            className="absolute inset-y-0 left-0 pointer-events-none"
+            style={{ width: `${livePct}%`, background: `${theme.accent}26`, transition: "width 260ms linear" }}>
+            <span className="absolute inset-y-0 right-0" style={{ width: 2, background: theme.accent }} />
+          </span>
+        )}
         <button ref={chipRef} type="button" data-task-chip={task.id}
           onClick={open} onKeyDown={keyOpen}
           className="nb-tap absolute inset-0 w-full text-left overflow-hidden"

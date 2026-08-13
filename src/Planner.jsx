@@ -1780,9 +1780,17 @@ export default function Planner() {
      cluster is double-booked. Detected, warned about, never prevented. */
   const conflictIds = useMemo(() => new Set(events.filter((e) => e.cols > 1).map((e) => e.id)), [events]);
   const liveEvent = isToday ? events.find((e) => nowMin >= e.start && nowMin < e.start + e.dur) : null;
-  const livePct = liveEvent ? (nowMin - liveEvent.start) / liveEvent.dur : 0;
-  const laneL = liveEvent ? (liveEvent.lane / liveEvent.cols) * 100 : 0;
-  const laneW = liveEvent ? 100 / liveEvent.cols : 100;
+  /* One NOW signal needs one owner. Events keep precedence — they are fixed
+     commitments — but an estimated Action is still a real block of time when
+     no Event owns this minute. An unestimated Action is only a point, and a
+     completed one is already expressed by its completion face. */
+  const liveAction = !liveEvent && isToday
+    ? plannedTasks.find((task) => task.status !== "completed" && task.planned.estimateMinutes != null
+      && nowMin >= task.start && nowMin < task.start + task.dur)
+    : null;
+  const liveTimelineItem = liveEvent ?? liveAction;
+  const livePct = liveTimelineItem ? (nowMin - liveTimelineItem.start) / liveTimelineItem.dur : 0;
+  const laneL = liveTimelineItem ? (liveTimelineItem.lane / liveTimelineItem.cols) * 100 : 0;
 
   /* ─── day turning ─── */
   const ensureRibbonDateVisible = useCallback((key) => {
@@ -4538,7 +4546,7 @@ export default function Planner() {
                     <span style={{
                       fontFamily: MONO, color: T.dimText,
                       transform: h === 0 ? "none" : "translateY(-50%)",
-                      opacity: isToday && liveEvent && Math.abs(nowMin - h * 60) < nowLabelClearanceMin ? 0 : 1,
+                      opacity: isToday && liveTimelineItem && Math.abs(nowMin - h * 60) < nowLabelClearanceMin ? 0 : 1,
                       transition: "opacity 200ms ease",
                     }}
                       className="w-14 shrink-0 pr-3 text-right nb-data">{fmtHour(h, clock)}</span>
@@ -4560,38 +4568,35 @@ export default function Planner() {
                 <div className="absolute left-16 right-2 top-0" style={{ height: dayHeight, pointerEvents: "none" }}>
                   {isToday && (
                     <>
-                      {/* The rule runs up to the live card and stops there; inside the
+                      {/* The rule runs up to the live item and stops there; inside the
                           card the elapsed fill carries the same accent onward, so the
-                          line reads as flowing into the event rather than being cut
-                          off behind it. With nothing live it spans the full width. */}
+                          line reads as flowing into time already claimed rather than
+                          being cut off behind it. With nothing live it spans the full
+                          width. */}
                       <div data-test="timeline-now-line" className="absolute pointer-events-none" style={{
                         left: 0,
-                        width: liveEvent ? `calc(${laneL}% + 2px)` : "100%",
+                        width: liveTimelineItem ? `calc(${laneL}% + 2px)` : "100%",
                         top: mounted ? (nowMin / 1440) * dayHeight : 0,
                         height: 2,
                         background: T.accent,
-                        /* The live-time rule belongs to the grid, not to the
-                           cards. Above an Action it read as a stray border that
-                           travelled through the card while the card was being
-                           dragged. Cards own the foreground; the time badge
-                           below remains above them when it has to replace a
-                           gutter label. */
+                        /* The live-time rule belongs to the grid; the matching fill
+                           owns its continuation inside either kind of live card.
+                           Cards remain the foreground and the time badge below stays
+                           above them when it replaces a gutter label. */
                         zIndex: 0,
                          transition: "top 260ms cubic-bezier(.23,1,.32,1), width 260ms cubic-bezier(.23,1,.32,1)",
                       }} />
                       {/* With nothing live the rule crosses empty grid, so the time
-                          can sit at the end of it. While an event is live the whole
-                          lane is card, and a chip anywhere in it lands on the title,
-                          the times, or the elapsed fill it is meant to be reading —
-                          so it steps out into the hour gutter, which is where every
-                          other time label on this surface already lives. */}
-                      <span className="absolute px-1.5 py-0.5 nb-data pointer-events-none"
+                          can sit at the end of it. While a timed item is live its
+                          lane is card, and a chip there would land on information it
+                          is meant to be reading, so it steps into the hour gutter. */}
+                      <span data-test="timeline-now-time" className="absolute px-1.5 py-0.5 nb-data pointer-events-none"
                         style={{
                           fontFamily: MONO, background: T.accent, color: T.on, borderRadius: 4,
                           /* Opaque, because in the gutter it lands on whichever hour
                              label is nearest and has to replace it rather than
                              overprint it. */
-                          ...(liveEvent
+                          ...(liveTimelineItem
                             /* Wide enough to cover the whole hour label it replaces,
                                not just overlap part of it and leave a stray digit. */
                             ? { right: "100%", marginRight: 4, whiteSpace: "nowrap", minWidth: 54, textAlign: "right" }
@@ -4603,7 +4608,7 @@ export default function Planner() {
                         {/* In the gutter it drops the meridiem: the hour labels it
                             sits among already say which half of the day this is, and
                             the full form does not fit the rail. */}
-                        {liveEvent ? tm(nowMin).replace(/\s*[AP]M$/i, "") : tm(nowMin)}
+                        {liveTimelineItem ? tm(nowMin).replace(/\s*[AP]M$/i, "") : tm(nowMin)}
                       </span>
                     </>
                   )}
@@ -4744,11 +4749,14 @@ export default function Planner() {
                     const estimate = sizing ? gesture.dur : t.planned.estimateMinutes;
                     const block = isResizable(t, "task");
                     const h = block ? Math.max(28, (estimate / 1440) * dayHeight - 3) : 28;
+                    const live = liveAction?.id === t.id;
+                    const pct = live ? livePct * 100 : 0;
                     return (
                       <TimelineActionCard key={t.id} task={t}
                         top={((dragging && gesture.start != null ? gesture.start : t.planned.startMinute) / 1440) * dayHeight + 2}
                         height={h} left={`${(t.lane / t.cols) * 100}%`} width={`calc(${100 / t.cols}% - 6px)`}
                         estimate={estimate} block={block} sizing={sizing} dragging={dragging} reducedMotion={reducedMotion}
+                        live={live} livePct={pct}
                         swipeOffset={taskSwipe?.id === t.id ? taskSwipe.offset : 0}
                         theme={T} mono={MONO} cardRadius={CARD_R} formatTime={tm} formatDuration={dur}
                         clickFollowsGesture={clickFollowsGesture}
