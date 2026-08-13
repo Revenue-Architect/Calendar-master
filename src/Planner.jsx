@@ -121,7 +121,7 @@ import { loadBackupRecord, saveBackupRecord } from "./platform/persistence/backu
 import { textToNoteBlocks } from "./features/notes/noteText.js";
 import { eventNoteLink, taskNoteLink } from "./features/notes/contextLink.js";
 import {
-  focusDialogOnOpen, restoreDialogFocus, trapDialogTab,
+  applyScrollSnapshot, focusDialogOnOpen, restoreDialogFocus, scrollChildIntoContainer, snapshotAncestorScroll, trapDialogTab,
 } from "./features/accessibility/dialogFocus.js";
 import {
   applyBulkTaskAction,
@@ -1102,9 +1102,21 @@ export default function Planner() {
         /* Truly empty storage is a first run: the sample week is a teaching
            notebook, and the welcome sheet asks before it becomes "yours". */
         state = loaded.state || migrateV7ToV8(migrateV6ToV7(migrateV5ToV6(migrateV4ToV5(seed()))));
-        if (!loaded.state) await savePlannerState(storage, state);
         isFirstRun = !loaded.state;
-        reportStorage("planner", false);
+        /* A blocked or missing store is not an unreadable notebook. Load already
+           succeeded as empty; failing to write the sample must leave autosave
+           off and say NOT SAVING, not pretend a stored copy could not be read. */
+        if (!loaded.state) {
+          try {
+            await savePlannerState(storage, state);
+            reportStorage("planner", false);
+          } catch {
+            setSaveBlocked(true);
+            reportStorage("planner", true, "write-failed");
+          }
+        } else {
+          reportStorage("planner", false);
+        }
       } catch (error) {
         /* Unreadable storage is not a first run. Opening the sample week here
            used to present someone else's demo as the user's notebook, and a
@@ -3766,11 +3778,11 @@ export default function Planner() {
              stays there. Keeping the curve below 1 avoids the bounce that made
              the first pass feel disconnected from the shell. */
           --nav-ease:cubic-bezier(.22,.61,.36,1);
-          position:relative;height:100dvh;overflow:hidden;background:#17181b;
+          position:relative;height:100dvh;overflow:clip;overflow-anchor:none;background:#17181b;
         }
-        .nb-root{height:100%;overflow:hidden}
+        .nb-root{height:100%;overflow:clip;overflow-anchor:none}
         .nb-app-surface{
-          position:absolute;inset:0;z-index:2;height:auto;overflow:hidden;transform:translate3d(0,0,0) scale(1);
+          position:absolute;inset:0;z-index:2;height:auto;overflow:clip;overflow-anchor:none;transform:translate3d(0,0,0) scale(1);
           transform-origin:top left;border-radius:0;box-shadow:none;
           transition:top var(--nav-page-duration) var(--nav-ease),right var(--nav-page-duration) var(--nav-ease),bottom var(--nav-page-duration) var(--nav-ease),left var(--nav-page-duration) var(--nav-ease),width var(--nav-page-duration) var(--nav-ease),transform var(--nav-page-duration) var(--nav-ease),border-radius var(--nav-page-duration) var(--nav-ease),box-shadow var(--nav-page-duration) var(--nav-ease);
         }
@@ -3957,6 +3969,7 @@ export default function Planner() {
            window opens out to the panel's own edges. Nothing inside is ever
            scaled, so the text is laid out once and never resampled — see
            features/motion/fluidGeometry.js for why that is the whole fix. */
+        .nb-fluid[data-fluid-origin="none"]{animation:none;transform:none;clip-path:none}
         .nb-fluid[data-fluid-origin="trigger"]{animation-name:nbfluidorigin;animation-timing-function:cubic-bezier(.22,.85,.28,1);transform-origin:center}
         @keyframes nbfluidorigin{
           0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round 999px)}
@@ -5501,7 +5514,7 @@ export default function Planner() {
       )}
 
       {search && (
-        <Sheet T={T} title="PALETTE" onClose={() => { beep("click"); closePalette(); }}>
+        <Sheet T={T} title="PALETTE" morph="none" onClose={() => { beep("click"); closePalette(); }}>
           <CommandPalette T={T} surface={surface} query={searchQuery} onQueryChange={setSearchQuery}
             rows={paletteRows} queryIssues={searchProjection.query.issues}
             placeholder="Search, run a command, or type to create"
@@ -7449,6 +7462,13 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
   const dialogRef = useRef(null);
   const contentRef = useRef(null);
   const openerRef = useRef(null);
+  /* Capture before child layout effects run. Autofocus inside a sheet that is
+     still translated onto its trigger will shove overflow ancestors; the
+     snapshot is the page as it was, and the layout effect puts it back. */
+  const pageScrollRef = useRef(null);
+  if (pageScrollRef.current == null && typeof document !== "undefined") {
+    pageScrollRef.current = snapshotAncestorScroll(document.documentElement);
+  }
   const closeTimer = useRef(null);
   const closingRef = useRef(false);
   const morphRef = useRef(morph);
@@ -7541,7 +7561,13 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
        from the keyboard grew out of a button that had nothing to do with it. A
        press is the only evidence that a particular control opened this; with no
        press, the sheet arrives on its own terms. */
-    const triggerRect = recentFluidTriggerRect();
+    if (panel && morphRef.current === "none") {
+      /* Search is a command palette. It is opened from the keyboard and the
+         header hundreds of times a day, so it must not travel and it must not
+         borrow a nearby control as an origin. */
+      panel.dataset.fluidOrigin = "none";
+    }
+    const triggerRect = morphRef.current === "none" ? null : recentFluidTriggerRect();
     if (panel && triggerRect) {
       /* Measure the panel as it will finally be, not as the entry animation has
          already made it.
@@ -7571,13 +7597,24 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
       panel.style.setProperty("--fluid-inset-x", `${geometry.insetX}px`);
       panel.style.setProperty("--fluid-inset-y", `${geometry.insetY}px`);
     }
-    const frame = window.requestAnimationFrame(() => focusDialogOnOpen(dialogRef.current));
+    const frame = window.requestAnimationFrame(() => {
+      focusDialogOnOpen(dialogRef.current);
+      applyScrollSnapshot(pageScrollRef.current);
+    });
+    /* Hold page chrome still for the length of the morph. Inner stream and
+       ribbon scrollers are descendants, not ancestors, so they stay put. */
+    const restorePageScroll = () => applyScrollSnapshot(pageScrollRef.current);
+    restorePageScroll();
+    window.addEventListener("scroll", restorePageScroll, true);
+    const unlock = window.setTimeout(() => window.removeEventListener("scroll", restorePageScroll, true), 480);
     /* `nb-sheet-h` transitions height, and it used to switch on one frame into
        the notch's own 380ms scale — two curves animating the same box, which is
        the bounce. The height transition waits until the shape has finished
        arriving. */
     return () => {
       window.cancelAnimationFrame(frame);
+      window.clearTimeout(unlock);
+      window.removeEventListener("scroll", restorePageScroll, true);
       restoreDialogFocus(openerRef.current);
     };
   }, []);
@@ -7814,9 +7851,13 @@ function NoteEditor({ T, note, onSave, onDelete, history = 0, onHistory, onPin, 
 function CommandPalette({ T, surface, query, onQueryChange, rows, placeholder, footer, queryIssues = [] }) {
   const [active, setActive] = useState(0);
   const listRef = useRef(null);
+  const inputRef = useRef(null);
   /* A new query is a new list; keeping the old index would leave the highlight
      on whatever happened to slide into that position. */
   useEffect(() => { setActive(0); }, [query, rows.length]);
+  useLayoutEffect(() => {
+    inputRef.current?.focus({ preventScroll: true });
+  }, []);
 
   const clamp = (index) => (rows.length ? (index + rows.length) % rows.length : 0);
   const onKeyDown = (e) => {
@@ -7826,13 +7867,14 @@ function CommandPalette({ T, surface, query, onQueryChange, rows, placeholder, f
   };
 
   useEffect(() => {
-    listRef.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: "nearest" });
+    const row = listRef.current?.querySelector('[data-active="true"]');
+    scrollChildIntoContainer(row, row?.closest(".nb-sheet-scroll") ?? listRef.current);
   }, [active]);
 
   let lastGroup = null;
   return (
     <div>
-      <input autoFocus data-test="palette-input" value={query} onChange={(e) => onQueryChange(e.target.value)}
+      <input ref={inputRef} data-test="palette-input" value={query} onChange={(e) => onQueryChange(e.target.value)}
         onKeyDown={onKeyDown} placeholder={placeholder} aria-label="Search or run a command"
         style={{ background: "transparent", border: `1px solid ${T.line}` }} className="w-full px-3 py-3 text-base font-semibold" />
       {footer && <p style={{ fontFamily: MONO, color: T.dimText }} className="nb-data pt-2">{footer}</p>}

@@ -46,7 +46,7 @@ export function trapDialogTab(event, root) {
   const nextIndex = nextDialogFocusIndex(focusable.length, currentIndex, event.shiftKey);
   if (nextIndex === -1) return false;
   event.preventDefault();
-  focusable[nextIndex].focus();
+  focusable[nextIndex].focus({ preventScroll: true });
   return true;
 }
 
@@ -56,4 +56,75 @@ export function restoreDialogFocus(element) {
   if (!element?.isConnected || typeof element.focus !== "function") return false;
   element.focus({ preventScroll: true });
   return true;
+}
+
+/* How far a child must move to sit inside its scroller.
+   Kept as rect math so the palette can scroll its own list without asking
+   the browser to walk transformed ancestors. */
+export function verticalScrollDelta(childRect, parentRect) {
+  if (!childRect || !parentRect) return 0;
+  if (childRect.top < parentRect.top) return childRect.top - parentRect.top;
+  if (childRect.bottom > parentRect.bottom) return childRect.bottom - parentRect.bottom;
+  return 0;
+}
+
+export function scrollChildIntoContainer(element, container) {
+  if (!element || !container) return false;
+  const delta = verticalScrollDelta(element.getBoundingClientRect(), container.getBoundingClientRect());
+  if (delta === 0) return false;
+  container.scrollTop += delta;
+  return true;
+}
+
+/* A sheet that autofocuses while it is still translated onto its trigger can
+   make overflow:hidden ancestors change scrollLeft. That is the bounce that
+   shoved the calendar and header date off-screen when Search opened beside
+   the Actions column. Snapshot the page chrome — never inner stream/ribbon
+   scrollers — and put it back after focus. */
+export function snapshotAncestorScroll(fromNode) {
+  const snapshots = [];
+  const seen = new Set();
+  const add = (node) => {
+    if (!node || seen.has(node)) return;
+    seen.add(node);
+    snapshots.push({
+      node,
+      left: node.scrollLeft || 0,
+      top: node.scrollTop || 0,
+    });
+  };
+  if (typeof document !== "undefined") {
+    add(document.documentElement);
+    add(document.body);
+  }
+  let node = fromNode;
+  while (node) {
+    add(node);
+    node = node.parentElement;
+  }
+  return snapshots;
+}
+
+export function applyScrollSnapshot(snapshots) {
+  if (!Array.isArray(snapshots)) return false;
+  let changed = false;
+  for (const entry of snapshots) {
+    if (!entry?.node) continue;
+    if (entry.node.scrollLeft !== entry.left) {
+      entry.node.scrollLeft = entry.left;
+      changed = true;
+    }
+    if (entry.node.scrollTop !== entry.top) {
+      entry.node.scrollTop = entry.top;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+export function restoreAncestorScroll(fromNode) {
+  const snapshots = snapshotAncestorScroll(fromNode);
+  const restore = () => applyScrollSnapshot(snapshots);
+  restore();
+  return restore;
 }

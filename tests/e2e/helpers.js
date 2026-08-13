@@ -195,6 +195,13 @@ export async function pressHoldAndDrag(page, source, target, { holdMs = 600, ste
  * notebook that is valid by construction rather than by hope. */
 export async function seedPlanner(page, state, { showGestureHint = false } = {}) {
   await page.goto("/");
+  /* First boot writes the sample week on a 400ms debounce. If we replace
+     the notebook before that save lands, the sample overwrites the seed
+     and a 1,000-record fixture comes back as the demo. Wait for the
+     first write, then put the intended notebook in and reload. */
+  await expect(page.getByTestId("day-stream")).toBeVisible();
+  await expect.poll(() => page.evaluate((key) => window.localStorage.getItem(key), STATE_KEY)).toBeTruthy();
+  await page.waitForTimeout(80);
   await page.evaluate(([key, value]) => {
     window.localStorage.clear();
     window.localStorage.setItem(key, JSON.stringify(value));

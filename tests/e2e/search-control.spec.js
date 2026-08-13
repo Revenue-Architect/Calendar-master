@@ -86,3 +86,69 @@ test.describe("the search control", () => {
     expect(await page.locator('filter[id^="goo-search"]').count()).toBe(0);
   });
 });
+
+/* Opening Search used to pan the transformed app surface: native autofocus and
+   scrollIntoView walked overflow:hidden ancestors while the sheet was still
+   sitting on the right-hand control. With the Actions column open that shove
+   sent the calendar and the header date off the left edge on Day, Week, and
+   Month. The palette may cover them; it must not move them. */
+const boxOf = async (locator) => {
+  const box = await locator.boundingBox();
+  if (!box) return null;
+  return { x: Math.round(box.x), y: Math.round(box.y), w: Math.round(box.width) };
+};
+
+const stayPut = (before, after, label) => {
+  expect(after, `${label} disappeared when Search opened`).not.toBeNull();
+  expect(before, `${label} was missing before Search opened`).not.toBeNull();
+  /* The reported failure is a sideways shove. Month chrome is still easing its
+     height after a zoom change, so a vertical delta on the heading is the
+     navigator settling, not Search moving the calendar off-screen. */
+  expect(after.x, `${label} shifted sideways when Search opened`).toBe(before.x);
+  expect(after.w, `${label} changed width when Search opened`).toBe(before.w);
+};
+
+test.describe("Search beside an open Actions column", () => {
+  test.use({ viewport: { width: 1280, height: 900 } });
+
+  const openWideActions = async (page) => {
+    await openPlanner(page);
+    await expect(page.getByTestId("actions-column")).toBeVisible();
+    await expect(page.getByTestId("day-heading")).toBeVisible();
+  };
+
+  const assertPaletteLeavesCalendar = async (page, surface) => {
+    const heading = page.getByTestId("day-heading");
+    const beforeHeading = await boxOf(heading);
+    const beforeSurface = await boxOf(surface);
+    await control(page).click();
+    await expect(page.getByTestId("palette-input")).toBeFocused();
+    await page.waitForTimeout(500);
+    stayPut(beforeHeading, await boxOf(heading), "the header date");
+    stayPut(beforeSurface, await boxOf(surface), "the calendar");
+  };
+
+  test("leaves Day where it is", async ({ page }) => {
+    await openWideActions(page);
+    await assertPaletteLeavesCalendar(page, page.getByTestId("day-stream"));
+  });
+
+  test("leaves Week where it is", async ({ page }) => {
+    await openWideActions(page);
+    await page.getByTestId("zoom-out").click();
+    await expect(page.getByTestId("week-grid")).toBeVisible();
+    await assertPaletteLeavesCalendar(page, page.getByTestId("week-grid"));
+  });
+
+  test("leaves Month where it is", async ({ page }) => {
+    await openWideActions(page);
+    await page.getByTestId("zoom-out").click();
+    await page.getByTestId("zoom-out").click();
+    const month = page.locator("[data-day]").first();
+    await expect(month).toBeVisible();
+    /* The chrome height transition is 300ms; wait it out so the heading is
+       no longer travelling when we snapshot. */
+    await page.waitForTimeout(400);
+    await assertPaletteLeavesCalendar(page, page.locator(".grid.grid-cols-7.gap-px"));
+  });
+});
