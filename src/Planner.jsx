@@ -66,7 +66,11 @@ import {
   updateTask as updateTaskCommand,
   upsertTaskException,
 } from "./domains/tasks/index.js";
-import { loadPlannerState, savePlannerState } from "./platform/persistence/plannerStateStore.js";
+import {
+  loadPlannerState,
+  readPlannerRecoverySnapshot,
+  savePlannerState,
+} from "./platform/persistence/plannerStateStore.js";
 import {
   createBlankPlannerState,
   normalizeImportedPlannerState,
@@ -155,6 +159,7 @@ import {
   reverseLatestTaskAward,
 } from "./domains/gamification/index.js";
 import { loadMotivationLedger, saveMotivationLedger } from "./platform/persistence/gamificationStore.js";
+import { classifyStorageFailures } from "./platform/resilience/storageStatus.js";
 import {
   createEvent as createCalendarEvent,
   deleteEvent as deleteCalendarEvent,
@@ -181,6 +186,7 @@ import { readable } from "./design/contrast.js";
 
 /* ═══════════════════════ TOKENS ═══════════════════════ */
 
+const GESTURE_HINT_KEY = "nbmp:ui:gestureHintSeen";
 
 /* §4.6/§4.7. The frequencies an entry can be set to from its own detail view. The
    fuller rule — selected weekdays, an end date, a count — still belongs to the
@@ -266,6 +272,11 @@ const SHORTCUTS = [
   { group: "MAKING", keys: ["⌘K", "/"], does: "Search, run a command, or type to create" },
   { group: "ACTIONS", keys: ["C"], does: "Complete the first open action" },
   { group: "ACTIONS", keys: ["D"], does: "Defer the first open action by a day" },
+  { group: "GESTURES", keys: ["HOLD"], does: "Hold an empty slot to create" },
+  { group: "GESTURES", keys: ["DRAG"], does: "Hold and drag an event or action to move it" },
+  { group: "GESTURES", keys: ["EDGE"], does: "Drag an event edge to resize it" },
+  { group: "GESTURES", keys: ["SWIPE →"], does: "Swipe a scheduled action right to complete it" },
+  { group: "GESTURES", keys: ["SCROLL"], does: "Scroll the timeline without creating" },
   { group: "ELSEWHERE", keys: ["⌘Z"], does: "Undo the last change" },
   { group: "ELSEWHERE", keys: ["?"], does: "This list" },
   { group: "ELSEWHERE", keys: ["Esc"], does: "Close whatever is open" },
@@ -762,7 +773,9 @@ function seed() {
 
 export default function Planner() {
   const [db, setDb] = useState(null);
+  const [recoverySnapshot, setRecoverySnapshot] = useState(null);
   const [ready, setReady] = useState(false);
+  const [loadingSlow, setLoadingSlow] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [now, setNow] = useState(new Date());
   const [zoom, setZoom] = useState("day");
@@ -806,6 +819,21 @@ export default function Planner() {
   const [search, setSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [shortcuts, setShortcuts] = useState(false);
+  const [gestureHintVisible, setGestureHintVisible] = useState(true);
+  useEffect(() => {
+    let live = true;
+    storage.get(GESTURE_HINT_KEY)
+      .then((result) => {
+        const value = result && typeof result === "object" && Object.hasOwn(result, "value") ? result.value : result;
+        if (live && value === "true") setGestureHintVisible(false);
+      })
+      .catch(() => { /* A blocked preference store should leave the hint available for this session. */ });
+    return () => { live = false; };
+  }, []);
+  const dismissGestureHint = useCallback(() => {
+    setGestureHintVisible(false);
+    storage.set(GESTURE_HINT_KEY, "true").catch(() => { /* Session dismissal is still useful when storage is blocked. */ });
+  }, []);
   const [backupRecord, setBackupRecord] = useState(null);
   const [scopeAsk, setScopeAsk] = useState(null);
   const [reward, setReward] = useState(null);
@@ -962,7 +990,9 @@ export default function Planner() {
   const monthHeldRef = useRef(false);
   const monthHoverT = useRef(null);
 
-  const storageBad = storageFailures.size > 0;
+  const storageStatus = useMemo(() => classifyStorageFailures(storageFailures), [storageFailures]);
+  const storageBad = storageStatus.canonical;
+  const supportingStorageBad = storageStatus.supporting.length > 0;
   const reportStorage = useCallback((scope, failed, errorCode = "write-failed") => {
     setStorageFailures((current) => {
       const next = new Set(current);
@@ -1059,6 +1089,7 @@ export default function Planner() {
     (async () => {
       let state;
       let isFirstRun = false;
+      let nextRecoverySnapshot = null;
       let nextDiagnostics = createDiagnosticsLedger();
       try {
         const loaded = await loadDiagnostics(storage);
@@ -1085,6 +1116,7 @@ export default function Planner() {
            clears — but leave autosave off. Overwriting here would seed straight over
            data that is damaged rather than gone, and export stays the way out. */
         state = migrateV7ToV8(migrateV6ToV7(migrateV5ToV6(migrateV4ToV5(seed()))));
+        nextRecoverySnapshot = await readPlannerRecoverySnapshot(storage);
         setSaveBlocked(true);
         reportStorage("planner", true, "read-failed");
       }
@@ -1119,6 +1151,7 @@ export default function Planner() {
          rather than assuming. */
       if (!dead) {
         setDb(state);
+        setRecoverySnapshot(nextRecoverySnapshot);
         setPreferences(nextPreferences);
           setMotivationLedger(nextLedger);
         setBackupRecord(nextBackup);
@@ -1129,6 +1162,15 @@ export default function Planner() {
     })();
     return () => { dead = true; };
   }, [reportStorage]);
+
+  useEffect(() => {
+    if (ready) {
+      setLoadingSlow(false);
+      return undefined;
+    }
+    const timer = setTimeout(() => setLoadingSlow(true), 2000);
+    return () => clearTimeout(timer);
+  }, [ready]);
 
   useEffect(() => { if (ready) { const r = requestAnimationFrame(() => setMounted(true)); return () => cancelAnimationFrame(r); } }, [ready]);
 
@@ -2634,10 +2676,11 @@ export default function Planner() {
     } catch (e) { beep("abort"); }
   };
   const exportJson = () => {
-    download(`planner-${todayKey}.json`, JSON.stringify(db, null, 2), "application/json");
+    const exportState = recoverySnapshot || db;
+    download(`planner-${todayKey}.json`, JSON.stringify(exportState, null, 2), "application/json");
     /* Exporting *is* the backup, however the user got here — from Settings, from
        the storage warning, or from the nudge. All three should quiet it. */
-    setBackupRecord((current) => recordBackupTaken(current, { state: db, today: todayKey }));
+    setBackupRecord((current) => recordBackupTaken(current, { state: exportState, today: todayKey }));
   };
   const exportIcs = () => {
     const esc = (s) => String(s || "").replace(/([,;\\])/g, "\\$1").replace(/\n/g, "\\n");
@@ -2749,7 +2792,17 @@ export default function Planner() {
       /* Actions use the same vertical move proposal as events. The old task
          gesture only updated its drop metadata, so the floating label moved
          while the actual card stayed at its original minute. */
-      next.start = proposeGesture("move", { pointerMinute: m, grab: g.grab, duration: g.dur }).start;
+      /* Use the pointer's movement from the lift point, with any scroll that
+         happened during the drag folded in. Reading an absolute minute from a
+         moving scroll node makes a one-hour pointer move turn into a different
+         duration when the browser nudges the stream while the card is captured. */
+      const originY = Number.isFinite(g.originY) ? g.originY : y;
+      const originStart = Number.isFinite(g.originStart) ? g.originStart : g.start;
+      const scrollDelta = streamRef.current && Number.isFinite(g.originScrollTop)
+        ? streamRef.current.scrollTop - g.originScrollTop
+        : 0;
+      const pointerMinute = originStart + g.grab + (((y - originY) + scrollDelta) / dayHeight) * 1440;
+      next.start = proposeGesture("move", { pointerMinute, grab: g.grab, duration: g.dur }).start;
     } else if (g.mode === "resize-end" || g.mode === "task-resize" || g.mode === "draft") {
       next.dur = proposeGesture("resize-end", { start: g.start, pointerMinute: m, kind: g.kind }).duration;
     } else if (g.mode === "resize-start") {
@@ -2989,10 +3042,11 @@ export default function Planner() {
     tappedRef.current = true;
     armHold(e.clientX, e.clientY, () => {
       tappedRef.current = false;
-      target.setPointerCapture?.(pointerId);
+      if (pointerId != null) target.setPointerCapture?.(pointerId);
       beep("lift"); buzz(14);
       startGesture({
         mode: "task", kind: "task", id: task.id, start, dur: duration, grab,
+        originStart: start, originY: e.clientY, originScrollTop: streamRef.current?.scrollTop ?? 0,
         was: { start, dur: duration }, x: e.clientX, y: e.clientY,
       });
     });
@@ -3000,7 +3054,13 @@ export default function Planner() {
   const taskUp = (e, task) => {
     if (e.pointerType === "touch") return;
     disarmHold();
-    if (gestureRef.current) return;
+    /* Pointer capture retargets the release to the card. Finish here as well as
+       in the document-level safety listener: otherwise a captured desktop
+       Action can follow the pointer visually but never commit its new time. */
+    if (gestureRef.current) {
+      finishGesture(e.clientX, e.clientY);
+      return;
+    }
     if (tappedRef.current) {
       tappedRef.current = false;
       e.stopPropagation();
@@ -3122,6 +3182,7 @@ export default function Planner() {
           const dur = task?.planned?.estimateMinutes ?? 30;
           startGesture({
             mode: "task", kind: "task", id: p.chipId, start, dur, grab: p.grab,
+            originStart: start, originY: p.y, originScrollTop: el.scrollTop,
             was: { start, dur }, x: p.x, y: p.y,
           });
         }
@@ -3231,12 +3292,16 @@ export default function Planner() {
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
     document.addEventListener("touchmove", tmove, { passive: false });
     document.addEventListener("touchend", tend);
     document.addEventListener("touchcancel", tend);
     return () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
       document.removeEventListener("touchmove", tmove);
       document.removeEventListener("touchend", tend);
       document.removeEventListener("touchcancel", tend);
@@ -3252,8 +3317,21 @@ export default function Planner() {
 
   if (!ready || !db) {
     return (
-      <div style={{ background: THEMES[0].bg, color: THEMES[0].dim, fontFamily: MONO, minHeight: "100vh" }} className="flex items-center justify-center nb-data">
-        OPENING THE NOTEBOOK
+      <div role="status" aria-live="polite" aria-atomic="true" style={{ background: THEMES[0].bg, color: THEMES[0].dim, fontFamily: MONO, minHeight: "100vh" }} className="flex items-center justify-center nb-data">
+        <div className="flex flex-col items-center gap-3 px-6 text-center">
+          <span>{loadingSlow ? "STILL OPENING THE NOTEBOOK" : "OPENING THE NOTEBOOK"}</span>
+          {loadingSlow && (
+            <>
+              <span data-test="loading-recovery" className="max-w-xs text-xs leading-relaxed">
+                Storage is taking longer than expected. Your saved notebook has not been changed.
+              </span>
+              <button type="button" onClick={() => window.location.reload()} className="nb-tap nb-label px-3 py-2"
+                style={{ color: THEMES[0].accent, border: `1px solid ${THEMES[0].accent}`, borderRadius: 999 }}>
+                RELOAD
+              </button>
+            </>
+          )}
+        </div>
       </div>
     );
   }
@@ -4021,9 +4099,11 @@ export default function Planner() {
               </button>
             </div>
           ) : (
-            <button data-test="zoom-in" onClick={zoomIn} style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-data" disabled={zoom === "day"}>
-              {zoom === "week" ? <span className="inline-flex items-center gap-1">DAY<ChevronIcon /></span> : ""}
-            </button>
+            zoom === "week" && (
+              <button data-test="zoom-in" onClick={zoomIn} style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-data">
+                <span className="inline-flex items-center gap-1">DAY<ChevronIcon /></span>
+              </button>
+            )
           )}
         </div>
 
@@ -4222,6 +4302,20 @@ export default function Planner() {
             <button data-test="backup-nudge-dismiss"
               onClick={() => { beep("click"); setBackupRecord((current) => recordBackupDismissed(current, { state: db, today: todayKey })); }}
               style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-data shrink-0" aria-label="Not now">NOT NOW</button>
+          </div>
+        </div>
+      )}
+
+      {gestureHintVisible && !firstRun && viewMode === "timeline" && zoom === "day" && (
+        <div className="px-3 sm:px-5 pb-3">
+          <div data-test="gesture-hint" className="nb-up flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2"
+            style={{ background: surface, color: T.text, borderRadius: CARD_R, boxShadow: `inset 0 0 0 1px ${T.line}` }}>
+            <span style={{ fontFamily: MONO, color: T.accentText }} className="nb-label shrink-0">GESTURES</span>
+            <span className="nb-body min-w-0 flex-1">Hold a slot to create · hold to move · swipe an Action right to complete.</span>
+            <button onClick={() => { beep("click"); dismissGestureHint(); setShortcuts(true); }}
+              style={{ fontFamily: MONO, color: T.accentText }} className="nb-tap text-xs font-bold tracking-widest shrink-0 underline">SHORTCUTS</button>
+            <button data-test="gesture-hint-dismiss" onClick={() => { beep("click"); dismissGestureHint(); }}
+              style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-data shrink-0" aria-label="Dismiss gesture hint">GOT IT</button>
           </div>
         </div>
       )}
@@ -4556,6 +4650,12 @@ export default function Planner() {
                         onComplete={completeTask}
                         onReopen={reopenTask}
                         onPointerDown={taskDown}
+                        onPointerMove={(event, task) => {
+                          const active = gestureRef.current;
+                          if (!active || active.id !== task.id) return;
+                          event.preventDefault();
+                          applyMove(event.clientX, event.clientY);
+                        }}
                         onPointerUp={taskUp}
                         onResizePointerDown={(ev, task, nextEstimate) => resizeDown(ev, { id: task.id, start: task.planned.startMinute, dur: nextEstimate }, "end", "task")} />
                     );
@@ -4634,12 +4734,12 @@ export default function Planner() {
           the user has no reason to open. */}
       {storageBad && (
         <div className="fixed inset-x-0 top-14 z-50 flex justify-center px-3 pointer-events-none">
-          <div role="alert" className="nb-up flex items-center gap-3 px-3 py-2 w-full sm:w-auto pointer-events-auto"
+          <div data-test="storage-alert" role="alert" className="nb-up flex items-start sm:items-center gap-3 px-3 py-2 w-full sm:w-auto pointer-events-auto"
             style={{ background: NOW_RED, color: "#FFFFFF", borderRadius: CARD_R }}>
             <span style={{ fontFamily: MONO }} className="nb-label shrink-0">NOT SAVING</span>
-            <span className="text-sm truncate">Changes are staying in this tab only.</span>
-            <button onClick={() => { beep("click"); setSettings(true); }}
-              style={{ fontFamily: MONO }} className="text-xs font-bold tracking-widest shrink-0 underline">EXPORT</button>
+            <span className="text-sm min-w-0 flex-1 leading-snug">Changes are staying in this tab only.</span>
+            <button onClick={() => { beep("click"); exportJson(); }}
+              style={{ fontFamily: MONO }} className="text-xs font-bold tracking-widest shrink-0 underline">SAVE A COPY</button>
           </div>
         </div>
       )}
@@ -5326,7 +5426,7 @@ export default function Planner() {
 
       {shortcuts && (
         <Sheet T={T} title="SHORTCUTS" onClose={() => { beep("click"); setShortcuts(false); }}>
-          <h2 className="text-2xl font-bold tracking-tight">Keyboard</h2>
+          <h2 className="text-2xl font-bold tracking-tight">Keyboard &amp; gestures</h2>
           <ShortcutSheet T={T} surface={surface} />
         </Sheet>
       )}
@@ -5407,6 +5507,11 @@ export default function Planner() {
             <p style={{ fontFamily: SERIF, color: T.dimText }} className="nb-voice mt-1 mb-2">Everything lives on this device. There's no account to sync with — take it with you as a file instead.</p>
             {storageBad && (
               <p style={{ fontFamily: MONO, color: NOW_RED }} className="nb-label mb-2">SAVING TO THIS DEVICE FAILED — EXPORT A COPY</p>
+            )}
+            {!storageBad && supportingStorageBad && (
+              <p data-test="supporting-storage-warning" style={{ fontFamily: MONO, color: T.accentText }} className="nb-label mb-2">
+                SOME SUPPORTING SETTINGS COULD NOT BE SAVED — YOUR NOTEBOOK IS STILL AVAILABLE
+              </p>
             )}
             <Reveal open={Boolean(pendingImport)}>
               {pendingImportShown && (
@@ -7833,10 +7938,10 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick, weekStart 
             {!allDay && (
               <div className="flex items-center gap-2 px-3 py-2.5" style={{ background: surface, borderRadius: CARD_R }}>
                 <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label shrink-0">FROM</span>
-                <input type="time" step={60} value={toTime(start)} onChange={(e) => e.target.value && setStart(fromTime(e.target.value))}
+                <input aria-label="Start time" type="time" step={60} value={toTime(start)} onChange={(e) => e.target.value && setStart(fromTime(e.target.value))}
                   style={{ background: "transparent", border: "none", fontFamily: MONO }} className="text-sm" />
                 <span style={{ color: T.dimText }} className="text-sm">&#8594;</span>
-                <input type="time" step={60} value={endLocal.slice(11)} onChange={(e) => {
+                <input aria-label="End time" type="time" step={60} value={endLocal.slice(11)} onChange={(e) => {
                   if (!e.target.value) return;
                   setLen(durationFromClockRange(start, fromTime(e.target.value)));
                 }} style={{ background: "transparent", border: "none", fontFamily: MONO }} className="text-sm" />
@@ -7855,7 +7960,7 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick, weekStart 
             {!unplanned && (
               <div className="flex items-center gap-2 px-3 py-2.5" style={{ background: surface, borderRadius: CARD_R }}>
                 <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label shrink-0">ON</span>
-                <input type="date" value={date} onChange={(e) => e.target.value && setDate(e.target.value)}
+                <input aria-label="Action date" type="date" value={date} onChange={(e) => e.target.value && setDate(e.target.value)}
                   style={{ background: "transparent", border: "none", fontFamily: MONO }} className="text-sm flex-1" />
               </div>
             )}
@@ -7881,14 +7986,14 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick, weekStart 
           {kind === "event" && allDay && (
             <div className="flex items-center gap-2 px-3 py-2.5" style={{ background: surface, borderRadius: CARD_R }}>
               <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label shrink-0">THROUGH</span>
-              <input type="date" value={endDate} min={date} onChange={(e) => setEndDate(e.target.value)}
+              <input aria-label="Last event day" type="date" value={endDate} min={date} onChange={(e) => setEndDate(e.target.value)}
                 style={{ background: "transparent", border: "none", fontFamily: MONO }} className="text-sm flex-1" />
             </div>
           )}
           {kind === "event" && !initial.instance && (
             <div className="flex items-center gap-2 px-3 py-2.5" style={{ background: surface, borderRadius: CARD_R }}>
               <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label shrink-0">ON</span>
-              <input type="date" value={date} onChange={(e) => e.target.value && setDate(e.target.value)}
+                <input aria-label="Event day" type="date" value={date} onChange={(e) => e.target.value && setDate(e.target.value)}
                 style={{ background: "transparent", border: "none", fontFamily: MONO }} className="text-sm flex-1" />
             </div>
           )}
@@ -7914,10 +8019,10 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick, weekStart 
               {!unplanned && (
                 <div className="flex items-center gap-2 px-3 py-2.5" style={{ background: surface, borderRadius: CARD_R }}>
                   <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label shrink-0">AT</span>
-                  <input type="time" step={60} value={at != null ? toTime(at) : ""} onChange={(e) => setAt(e.target.value ? fromTime(e.target.value) : null)}
+                  <input aria-label="Action time" type="time" step={60} value={at != null ? toTime(at) : ""} onChange={(e) => setAt(e.target.value ? fromTime(e.target.value) : null)}
                     style={{ background: "transparent", border: "none", fontFamily: MONO }} className="text-sm" />
                   <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label shrink-0 ml-auto">DUE</span>
-                  <input type="date" value={due} onChange={(e) => setDue(e.target.value)}
+                  <input aria-label="Due date" type="date" value={due} onChange={(e) => setDue(e.target.value)}
                     style={{ background: "transparent", border: "none", fontFamily: MONO }} className="text-sm" />
                 </div>
               )}
@@ -7939,7 +8044,7 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick, weekStart 
                   {repeat.freq === "daily" ? "DAYS" : repeat.freq === "weekly" ? "WEEKS" : repeat.freq === "monthly" ? "MONTHS" : "YEARS"}
                 </span>
                 <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label ml-auto">UNTIL</span>
-                <input type="date" value={repeat.until || ""} onChange={(e) => setRepeat({ ...repeat, until: e.target.value })}
+                <input aria-label="Repeat until" type="date" value={repeat.until || ""} onChange={(e) => setRepeat({ ...repeat, until: e.target.value })}
                   style={{ background: "transparent", border: "none", fontFamily: MONO }} className="text-sm" />
               </div>
               {/* The one place the goo says something rather than decorates: a

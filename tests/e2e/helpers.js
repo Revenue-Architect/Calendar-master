@@ -10,7 +10,7 @@ import { expect } from "@playwright/test";
 export const STATE_KEY = "nbmp:state:v8";
 
 /** Open the app on a clean notebook, with the sample week cleared. */
-export async function openPlanner(page, { keepSample = false } = {}) {
+export async function openPlanner(page, { keepSample = false, showGestureHint = false } = {}) {
   /* Cleared once, before the run the test actually observes — not via
      `addInitScript`, which would fire again on every later navigation and wipe
      the notebook out from under any test that reloads to prove something was
@@ -27,6 +27,16 @@ export async function openPlanner(page, { keepSample = false } = {}) {
   if (await firstRun.isVisible().catch(() => false)) {
     await firstRun.getByRole("button", { name: keepSample ? "EXPLORE THE SAMPLE" : "START EMPTY" }).click();
     await expect(firstRun).toBeHidden();
+  }
+  /* The hint is intentionally first-use UI. Keep the default fixture focused
+     on the surface under test, while allowing the resilience spec to opt into
+     the user-visible onboarding copy explicitly. */
+  if (!showGestureHint) {
+    const hint = page.getByTestId("gesture-hint");
+    if (await hint.isVisible().catch(() => false)) {
+      await hint.getByTestId("gesture-hint-dismiss").click();
+      await expect(hint).toBeHidden();
+    }
   }
   /* Motion is real in this app; letting it settle keeps assertions about
      position from racing a sheet that is still morphing open. */
@@ -128,7 +138,7 @@ export async function pressHoldAndDrag(page, source, target, { holdMs = 600, ste
  * hidden calendar, a notebook mid-migration. The spec runs in Node, so it can
  * build one with the same domain commands the app uses and hand the app a
  * notebook that is valid by construction rather than by hope. */
-export async function seedPlanner(page, state) {
+export async function seedPlanner(page, state, { showGestureHint = false } = {}) {
   await page.goto("/");
   await page.evaluate(([key, value]) => {
     window.localStorage.clear();
@@ -136,5 +146,12 @@ export async function seedPlanner(page, state) {
   }, [STATE_KEY, state]);
   await page.reload();
   await expect(page.getByTestId("day-stream")).toBeVisible();
+  if (!showGestureHint) {
+    const hint = page.getByTestId("gesture-hint");
+    if (await hint.isVisible().catch(() => false)) {
+      await hint.getByTestId("gesture-hint-dismiss").click();
+      await expect(hint).toBeHidden();
+    }
+  }
   await page.waitForTimeout(250);
 }

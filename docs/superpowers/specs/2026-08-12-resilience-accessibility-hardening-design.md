@@ -38,7 +38,7 @@ The existing `OPENING THE NOTEBOOK` state remains the first state. A bounded wat
 
 The existing `SHORTCUTS` sheet remains the single help surface. A new `GESTURES` group documents hold-to-create, hold-and-drag, edge resize, scheduled-Action swipe completion, and scroll-versus-hold arbitration. The list is generated from the same source as the keyboard shortcuts so it cannot drift from the UI.
 
-The Timeline receives one dismissible, non-modal first-use hint. It is a UI-only preference, not notebook content and not a new onboarding sheet. The hint points to the existing Shortcuts surface and disappears after dismissal or a recognized first-use interaction. If storage is unavailable, it is session-safe and must not block planning.
+The Timeline receives one dismissible, non-modal first-use hint. It is a UI-only preference, not notebook content and not a new onboarding sheet. The hint points to the existing Shortcuts surface and disappears after explicit dismissal or opening that reference. If storage is unavailable, it is session-safe and must not block planning.
 
 ## 5. Stress and performance coverage
 

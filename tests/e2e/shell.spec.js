@@ -7,7 +7,7 @@ test.describe("the shell", () => {
     await expect(page.getByTestId("day-stream")).toBeVisible();
     await expect(page.getByTestId("week-grid")).toBeHidden();
     /* Zooming in from the day is the end of the road; zooming out is not. */
-    await expect(page.getByTestId("zoom-in")).toBeDisabled();
+    await expect(page.getByTestId("zoom-in")).toHaveCount(0);
     await expect(page.getByTestId("zoom-out")).toBeEnabled();
   });
 

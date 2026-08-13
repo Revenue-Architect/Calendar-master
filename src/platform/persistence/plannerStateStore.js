@@ -11,6 +11,7 @@ export const V5_KEY = "nbmp:state:v5";
 export const V6_KEY = "nbmp:state:v6";
 export const V7_KEY = "nbmp:state:v7";
 export const V8_KEY = "nbmp:state:v8";
+const PLANNER_STATE_KEYS = [V8_KEY, V7_KEY, V6_KEY, V5_KEY, V4_KEY];
 
 function valueOf(result) {
   if (result == null) return null;
@@ -25,6 +26,27 @@ function parseStored(result, key) {
   } catch (error) {
     throw new Error(`${key} contains invalid JSON`, { cause: error });
   }
+}
+
+/* Recovery is intentionally separate from loadPlannerState. Loading must return
+   only a validated, current notebook; recovery must be able to retain the last
+   human-authored bytes even when validation rejects them. This is the escape hatch
+   used by the UI before it seeds a fresh in-memory notebook. */
+export async function readPlannerRecoverySnapshot(storagePort) {
+  for (const key of PLANNER_STATE_KEYS) {
+    try {
+      const value = valueOf(await storagePort.get(key));
+      if (value == null || value === "") continue;
+      if (typeof value === "string") {
+        try { return JSON.parse(value); } catch { continue; }
+      }
+      if (typeof value === "object" && !Array.isArray(value)) return value;
+    } catch {
+      /* A blocked or transient store should not prevent the remaining keys from
+         being checked, nor should it turn the recovery path into another crash. */
+    }
+  }
+  return null;
 }
 
 export async function savePlannerState(storagePort, state) {

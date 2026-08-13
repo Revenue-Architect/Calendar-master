@@ -1,3 +1,5 @@
+import { useEffect, useRef } from "react";
+
 export default function TimelineActionCard({
   task,
   top,
@@ -20,9 +22,11 @@ export default function TimelineActionCard({
   onReopen,
   onResizePointerDown,
   onPointerDown,
+  onPointerMove,
   onPointerUp,
   clickFollowsGesture,
 }) {
+  const chipRef = useRef(null);
   const open = () => {
     if (clickFollowsGesture?.()) return;
     onOpen(task.id);
@@ -33,6 +37,27 @@ export default function TimelineActionCard({
     open();
   };
   const done = task.status === "completed";
+
+  /* The timeline delegates touch intent from the stream, but a captured desktop
+     pointer is retargeted to this button. Native listeners keep the press/drag
+     lifecycle attached to the same node across capture and release; relying only
+     on a synthetic parent event allowed the card to move visually without a
+     reliable commit on some Chromium builds. */
+  useEffect(() => {
+    const node = chipRef.current;
+    if (!node) return undefined;
+    const down = (event) => onPointerDown?.(event, task);
+    const move = (event) => onPointerMove?.(event, task);
+    const up = (event) => onPointerUp?.(event, task);
+    node.addEventListener("pointerdown", down);
+    node.addEventListener("pointermove", move);
+    node.addEventListener("pointerup", up);
+    return () => {
+      node.removeEventListener("pointerdown", down);
+      node.removeEventListener("pointermove", move);
+      node.removeEventListener("pointerup", up);
+    };
+  }, [task, onPointerDown, onPointerMove, onPointerUp]);
 
   return (
     <div className="nb-timeline-lane absolute overflow-hidden"
@@ -50,8 +75,6 @@ export default function TimelineActionCard({
         <span className="nb-label inline-flex items-center gap-1"><svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m3 8.2 3 3 7-7" /></svg>COMPLETE</span>
       </div>
       <div className="absolute inset-0"
-        onPointerDown={(event) => onPointerDown?.(event, task)}
-        onPointerUp={(event) => onPointerUp?.(event, task)}
         style={{
           transform: `translateX(${swipeOffset}px)`,
           transition: swipeOffset === 0 ? "transform 220ms cubic-bezier(.2,.8,.25,1)" : "none",
@@ -62,7 +85,8 @@ export default function TimelineActionCard({
           style={{ background: theme.accent, color: theme.on, borderRadius: cardRadius, fontFamily: mono }}>
           <span className="nb-label">COMPLETE</span>
         </div>
-        <button type="button" data-task-chip={task.id} onClick={open} onKeyDown={keyOpen}
+        <button ref={chipRef} type="button" data-task-chip={task.id}
+          onClick={open} onKeyDown={keyOpen}
           className="nb-tap absolute inset-0 w-full text-left overflow-hidden"
           style={{
             display: "flex", flexDirection: "column", justifyContent: "flex-start",

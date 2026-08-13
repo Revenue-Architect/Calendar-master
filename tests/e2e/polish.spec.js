@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { openPlanner, seedPlanner } from "./helpers.js";
 import { createBlankPlannerState } from "../../src/platform/persistence/plannerStateImport.js";
 import { createEvent } from "../../src/domains/calendar/index.js";
-import { keyOf } from "../../src/shared/time/dateKey.js";
+import { addDaysToKey, keyOf } from "../../src/shared/time/dateKey.js";
 
 /* Interaction details that are invisible to a unit test and obvious to a person:
  * a shortcut that types into the field it just opened, a control that lands on
@@ -54,13 +54,22 @@ test.describe("the now marker", () => {
        the elapsed fill it is meant to be reading. */
     const now = new Date();
     const today = keyOf(now);
-    const start = Math.max(0, now.getHours() - 1);
-    const end = Math.min(23, now.getHours() + 1);
+    /* Build the fixture around the actual minute, including the next local day
+       when the test runs near midnight. The previous hour-only fixture stopped
+       at 23:30, so a run at 23:31+ silently produced a non-live event and the
+       assertion looked for the compact gutter marker that is only used by a
+       live event. */
+    const nowMinute = now.getHours() * 60 + now.getMinutes();
+    const startMinute = Math.max(0, nowMinute - 60);
+    const endTotal = nowMinute + 60;
+    const endKey = endTotal >= 1440 ? addDaysToKey(today, 1) : today;
+    const endMinute = endTotal % 1440;
+    const localTime = (key, minute) => `${key}T${pad(Math.floor(minute / 60))}:${pad(minute % 60)}`;
     const state = createEvent(createBlankPlannerState({}), {
       calendarId: "calendar-default", title: "Live workshop", category: "DEEP WORK",
       timing: {
         kind: "timed", timeZoneMode: "floating",
-        startLocal: `${today}T${pad(start)}:00`, endLocal: `${today}T${pad(end)}:30`,
+        startLocal: localTime(today, startMinute), endLocal: localTime(endKey, endMinute),
       },
     }, { id: "evt-live" }).state;
     await seedPlanner(page, state);

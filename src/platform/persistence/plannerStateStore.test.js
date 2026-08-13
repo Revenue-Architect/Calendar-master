@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { loadPlannerState, savePlannerState, V4_KEY, V5_KEY, V6_KEY, V7_KEY, V8_KEY } from "./plannerStateStore.js";
+import { loadPlannerState, readPlannerRecoverySnapshot, savePlannerState, V4_KEY, V5_KEY, V6_KEY, V7_KEY, V8_KEY } from "./plannerStateStore.js";
 import { migrateV4ToV5 } from "../../domains/calendar/migrations/migrateV4ToV5.js";
 import { migrateV5ToV6 } from "../../domains/tasks/migrations/migrateV5ToV6.js";
 import { migrateV6ToV7 } from "../../domains/notes/migrations/migrateV6ToV7.js";
@@ -79,6 +79,18 @@ test("missing state is not silently seeded and saves require valid v8", async ()
   const port = memoryStorage();
   assert.deepEqual(await loadPlannerState(port), { state: null, migrated: false });
   await assert.rejects(() => savePlannerState(port, { schemaVersion: 7 }), /schemaVersion/);
+});
+
+test("recovery snapshot keeps the last stored object even when current validation rejects it", async () => {
+  const damaged = { schemaVersion: 8, events: [{ id: "keep-me", title: "Important draft" }], tasks: "not-an-array" };
+  const port = memoryStorage({ [V8_KEY]: JSON.stringify(damaged) });
+  assert.deepEqual(await readPlannerRecoverySnapshot(port), damaged);
+});
+
+test("recovery snapshot falls back across malformed keys without throwing", async () => {
+  const legacy = { schemaVersion: 4, events: [{ id: "legacy", title: "Keep this too" }] };
+  const port = memoryStorage({ [V8_KEY]: "{broken", [V7_KEY]: JSON.stringify(legacy) });
+  assert.deepEqual(await readPlannerRecoverySnapshot(port), legacy);
 });
 
 test("an existing v7 notebook is confirmed into v8 before its old key is removed", async () => {
