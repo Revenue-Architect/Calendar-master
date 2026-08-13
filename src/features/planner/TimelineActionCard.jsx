@@ -95,13 +95,6 @@ export default function TimelineActionCard({
           style={{ background: theme.accent, color: theme.on, borderRadius: cardRadius, fontFamily: mono }}>
           <span className="nb-label">COMPLETE</span>
         </div>
-        {live && (
-          <span data-test="timeline-action-live-fill" aria-hidden="true"
-            className="absolute inset-y-0 left-0 pointer-events-none"
-            style={{ width: `${livePct}%`, background: `${theme.accent}26`, transition: "width 260ms linear" }}>
-            <span className="absolute inset-y-0 right-0" style={{ width: 2, background: theme.accent }} />
-          </span>
-        )}
         <button ref={chipRef} type="button" data-task-chip={task.id}
           onClick={open} onKeyDown={keyOpen}
           className="nb-tap absolute inset-0 w-full text-left overflow-hidden"
@@ -113,6 +106,15 @@ export default function TimelineActionCard({
             backgroundImage: block ? `linear-gradient(${theme.accent}0D, ${theme.accent}0D)` : "none",
             opacity: 1,
           }}>
+          {/* Inside the opaque card face so it remains visibly beneath the
+              content, COMPLETE overlay, checkmark, and resize affordance. */}
+          {live && (
+            <span data-test="timeline-action-live-fill" aria-hidden="true"
+              className="absolute inset-y-0 left-0 pointer-events-none"
+              style={{ width: `${livePct}%`, background: `${theme.accent}26`, transition: "width 260ms linear" }}>
+              <span className="absolute inset-y-0 right-0" style={{ width: 2, background: theme.accent }} />
+            </span>
+          )}
           <span className="flex min-w-0 items-center gap-2 py-1 pr-2.5 pl-8">
             <span className="nb-lead min-w-0 flex-1 truncate" style={{ color: done ? theme.dimText : theme.text }}>{task.title}</span>
             <span style={{ fontFamily: mono, color: sizing ? theme.accent : theme.dim }} className="nb-task-time ml-auto nb-data shrink-0">
