@@ -3129,6 +3129,13 @@ export default function Planner() {
          following scroll event to do so. */
       timelineUserScrollRef.current = true;
       if (e.target.closest?.("[data-timeline-complete]")) return;
+      /* JOIN is an action inside an event card, not a card gesture. The native
+         listener owns touch intent before React's synthetic click reaches the
+         anchor, so opt links out here as well as at the JSX boundary below.
+         Without this guard a mobile tap first arms the event and the delegated
+         touchend opens its edit sheet even though the browser is also following
+         the meeting URL. */
+      if (e.target.closest?.("a[href]")) return;
       const t = e.touches[0];
       const hit = e.target.closest ? e.target.closest("[data-event-id],[data-resize],[data-task-chip]") : null;
       /* A grip is part of the card it sits on, not a target of its own.
@@ -4027,12 +4034,6 @@ export default function Planner() {
         .nb-day-heading .nb-display{transition:font-size 300ms var(--nav-ease),line-height 300ms var(--nav-ease)}
         .nb-timeline-chrome.is-collapsed{pointer-events:none}
         .nb-timeline-chrome.is-collapsed .nb-timeline-chrome-inner{opacity:0;transform:translate3d(0,-10px,0)}
-        /* The day ribbon has intrinsic width and a content-dependent height. A
-           grid row hid it in one frame in Chromium, so Actions felt like it
-           cut the date context away. CalendarRibbonReveal measures the stable
-           inner box and gives both directions one numeric, interruptible path. */
-        .nb-calendar-ribbon-reveal{min-height:0;overflow:hidden;opacity:1;transform:translate3d(0,0,0);visibility:visible;transition:height 360ms cubic-bezier(.22,.8,.28,1),opacity 240ms ease,transform 360ms cubic-bezier(.22,.8,.28,1),visibility 0s linear 0s}
-        .nb-calendar-ribbon-reveal.is-collapsed{opacity:0;transform:translate3d(0,-8px,0);pointer-events:none;visibility:hidden;transition:height 360ms cubic-bezier(.22,.8,.28,1),opacity 240ms ease,transform 360ms cubic-bezier(.22,.8,.28,1),visibility 0s linear 360ms}
         @media(max-width:639px){
           .nb-month-navigator.is-month{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:.5rem;row-gap:.25rem;align-items:center}
           .nb-month-navigator.is-month .nb-month-view-mode{justify-content:flex-end}
@@ -4171,8 +4172,7 @@ export default function Planner() {
             a generous two-year window mounted, then shifts that window by a year
             at either scroll edge. The date surface is therefore effectively
             unbounded without growing a permanent DOM row or losing scroll place. */}
-        {(zoom === "week" || zoom === "day") && (
-          <CalendarRibbonReveal open={viewMode !== "actions"}>
+        {(zoom === "week" || zoom === "day") && viewMode !== "actions" && (
               <div className="flex items-center">
             {zoom === "day" && (
               <button onClick={() => goDay(-1)} aria-label="Previous day" style={{ color: T.dimText }} className="nb-tap shrink-0 px-2 sm:px-3 py-1 flex items-center justify-center"><ChevronIcon direction="left" /></button>
@@ -4222,7 +4222,6 @@ export default function Planner() {
               <button onClick={() => goDay(1)} aria-label="Next day" style={{ color: T.dimText }} className="nb-tap shrink-0 px-2 sm:px-3 py-1 flex items-center justify-center"><ChevronIcon /></button>
             )}
               </div>
-          </CalendarRibbonReveal>
         )}
       </div>
       </div>
@@ -4564,7 +4563,12 @@ export default function Planner() {
                               {e.repeat && <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-event-secondary shrink-0"><RepeatIcon /></span>}
                               {normalizeMeetingLink(e.link) && (
                                 <a href={normalizeMeetingLink(e.link)} target="_blank" rel="noopener noreferrer" draggable={false}
-                                  onPointerDown={(ev) => ev.stopPropagation()} onPointerUp={(ev) => ev.stopPropagation()} onClick={(ev) => ev.stopPropagation()}
+                                  onPointerDownCapture={(ev) => ev.stopPropagation()}
+                                  onPointerUpCapture={(ev) => ev.stopPropagation()}
+                                  onPointerCancel={(ev) => ev.stopPropagation()}
+                                  onTouchStart={(ev) => ev.stopPropagation()}
+                                  onTouchEnd={(ev) => ev.stopPropagation()}
+                                  onClick={(ev) => ev.stopPropagation()}
                                   aria-label={`Join ${e.title}`}
                                   style={{ fontFamily: MONO, color: T.accentText }} className="inline-flex items-center gap-1 text-xs font-bold tracking-widest shrink-0">JOIN <ExternalLinkIcon /></a>
                               )}
@@ -6718,43 +6722,6 @@ function Reveal({ open, children }) {
   return (
     <div style={{ display: "grid", gridTemplateRows: open ? "1fr" : "0fr", transition: "grid-template-rows 260ms cubic-bezier(.23,1,.32,1)" }}>
       <div className="overflow-hidden" inert={!open} style={{ minHeight: 0, visibility: open ? "visible" : "hidden", transition: `visibility 0s linear ${open ? 0 : 300}ms` }}>
-        {children}
-      </div>
-    </div>
-  );
-}
-
-/* The date ribbon is the one Reveal surface whose height is part of the
-   navigation rhythm. Measuring its content avoids the discrete intrinsic-size
-   jump that made entering Actions feel like the calendar was being cut away. */
-function CalendarRibbonReveal({ open, children }) {
-  const contentRef = useRef(null);
-  const [contentHeight, setContentHeight] = useState(null);
-  const measure = useCallback(() => {
-    const node = contentRef.current;
-    if (!node) return;
-    const next = Math.ceil(node.getBoundingClientRect().height);
-    setContentHeight((current) => current === next ? current : next);
-  }, []);
-
-  useLayoutEffect(() => {
-    measure();
-  }, [measure, open]);
-
-  useEffect(() => {
-    const node = contentRef.current;
-    if (!node || typeof ResizeObserver === "undefined") return undefined;
-    const observer = new ResizeObserver(measure);
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [measure]);
-
-  return (
-    <div data-test="calendar-ribbon-reveal"
-      className={`nb-calendar-ribbon-reveal ${open ? "" : "is-collapsed"}`}
-      inert={!open}
-      style={{ height: open ? (contentHeight == null ? "auto" : `${contentHeight}px`) : 0 }}>
-      <div ref={contentRef} style={{ minHeight: 0 }}>
         {children}
       </div>
     </div>

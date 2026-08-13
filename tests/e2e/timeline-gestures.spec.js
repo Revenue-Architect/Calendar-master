@@ -229,3 +229,25 @@ test.describe("joining from the timeline", () => {
     await expect(card(page).locator("a[href^='https']")).toHaveCount(0);
   });
 });
+
+test.describe("joining from the mobile timeline", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test("a touch on JOIN follows the meeting without opening the event sheet", async ({ page }) => {
+    await seedPlanner(page, seeded({ link: LINK }));
+    await card(page).scrollIntoViewIfNeeded();
+
+    const join = card(page).locator(`a[href="${LINK}"]`);
+    await expect(join).toBeVisible();
+    const box = await join.boundingBox();
+    const session = await page.context().newCDPSession(page);
+
+    await touchAt(session, "touchStart", box.x + box.width / 2, box.y + box.height / 2);
+    await page.waitForTimeout(80);
+    await touchAt(session, "touchEnd", box.x + box.width / 2, box.y + box.height / 2);
+    await session.detach();
+
+    await page.waitForTimeout(350);
+    await expect(page.getByTestId("sheet"), "a mobile JOIN tap opened the event sheet").toHaveCount(0);
+  });
+});

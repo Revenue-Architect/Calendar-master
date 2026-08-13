@@ -153,18 +153,13 @@ test.describe("the actions column", () => {
     await page.mouse.up();
   });
 
-  test("the Actions ribbon has an interruptible collapse", async ({ page }) => {
+  test("the Actions view removes the week ribbon", async ({ page }) => {
     await openPlanner(page);
-    const reveal = page.getByTestId("calendar-ribbon-reveal");
-    const before = await reveal.boundingBox();
-    expect(before?.height).toBeGreaterThan(0);
+    await expect(page.getByTestId("day-ribbon")).toBeVisible();
 
     await page.getByRole("tab", { name: "ACTIONS", exact: true }).click();
-    await page.waitForTimeout(110);
-    const during = await reveal.boundingBox();
-    expect(during?.height, "the ribbon should not disappear on the first frame").toBeGreaterThan(0);
-    expect(during?.height, "the ribbon should be part-way through its collapse").toBeLessThan(before.height);
-    await expect(page.getByTestId("day-ribbon")).toBeHidden();
+    await expect(page.getByTestId("calendar-ribbon-reveal")).toHaveCount(0);
+    await expect(page.getByTestId("day-ribbon")).toHaveCount(0);
   });
 
   test("the timeline completion affordance stays compact and the action face is opaque", async ({ page }) => {
@@ -357,13 +352,13 @@ test.describe("the actions column", () => {
     await expect(page.getByTestId("day-stream")).toBeVisible();
   });
 
-  test("the week date ribbon collapses in Actions and restores in Timeline", async ({ page }) => {
+  test("the week date ribbon is absent in Actions and restores in Timeline", async ({ page }) => {
     await openPlanner(page);
     await page.getByTestId("zoom-out").click();
     await expect(page.getByTestId("day-ribbon")).toBeVisible();
 
     await page.getByRole("tab", { name: "ACTIONS", exact: true }).click();
-    await expect(page.getByTestId("day-ribbon")).toBeHidden();
+    await expect(page.getByTestId("day-ribbon")).toHaveCount(0);
 
     await page.getByRole("tab", { name: "TIMELINE", exact: true }).click();
     await expect(page.getByTestId("day-ribbon")).toBeVisible();
