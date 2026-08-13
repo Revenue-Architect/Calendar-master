@@ -3050,6 +3050,7 @@ export default function Planner() {
   };
   const eventDown = (e, ev) => {
     if (e.pointerType === "touch") return;
+    if (e.target.closest?.("a[href], [data-join]")) return;
     e.stopPropagation();
     const grab = minutesAt(e.clientY) - ev.start;
     const { clientX, clientY } = e;
@@ -3062,6 +3063,11 @@ export default function Planner() {
   };
   const eventUp = (e, ev) => {
     if (e.pointerType === "touch") return;
+    if (e.target.closest?.("a[href], [data-join]")) {
+      disarmHold();
+      tappedRef.current = false;
+      return;
+    }
     disarmHold();
     if (gestureRef.current) return;
     if (tappedRef.current) { tappedRef.current = false; e.stopPropagation(); beep("click"); setInspect({ kind: "event", id: ev.id }); }
@@ -4656,7 +4662,7 @@ export default function Planner() {
                               {conflictIds.has(e.id) && <span title="Overlaps another event" style={{ color: NOW_RED }} className="nb-event-secondary shrink-0"><WarningIcon /></span>}
                               {e.repeat && <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-event-secondary shrink-0"><RepeatIcon /></span>}
                               {normalizeMeetingLink(e.link) && (
-                                <span aria-hidden="true" style={{ fontFamily: MONO, color: T.accentText }} className="inline-flex items-center gap-1 text-xs font-bold tracking-widest shrink-0">JOIN <ExternalLinkIcon /></span>
+                                <span aria-hidden="true" className="inline-flex items-center gap-1 text-xs font-bold tracking-widest shrink-0 opacity-0 pointer-events-none">JOIN <ExternalLinkIcon /></span>
                               )}
                               {e.alerts && e.alerts.length > 0 && (
                                 <span style={{ color: T.dimText }} className="nb-event-secondary shrink-0" title="Has a reminder"><BellIcon /></span>
@@ -4702,7 +4708,7 @@ export default function Planner() {
                           </div>
                         </div>
                         {normalizeMeetingLink(e.link) && (
-                          <a href={normalizeMeetingLink(e.link)} target="_blank" rel="noopener noreferrer" draggable={false}
+                          <a href={normalizeMeetingLink(e.link)} target="_blank" rel="noopener noreferrer" draggable={false} data-join={e.id}
                             onPointerDownCapture={(ev) => ev.stopPropagation()}
                             onPointerUpCapture={(ev) => ev.stopPropagation()}
                             onPointerCancel={(ev) => ev.stopPropagation()}
@@ -4710,10 +4716,9 @@ export default function Planner() {
                             onTouchEnd={(ev) => ev.stopPropagation()}
                             onClick={(ev) => ev.stopPropagation()}
                             aria-label={`Join ${e.title}`}
-                            className="absolute right-1 top-1 z-20 inline-flex items-center gap-1 px-1"
+                            className="absolute right-1 top-1 z-20 inline-flex items-center gap-1 px-1.5 py-1 text-xs font-bold tracking-widest"
                             style={{ fontFamily: MONO, color: T.accentText }}>
-                            <span className="sr-only">JOIN</span>
-                            <ExternalLinkIcon />
+                            JOIN <ExternalLinkIcon />
                           </a>
                         )}
                       </div>
@@ -4958,7 +4963,7 @@ export default function Planner() {
               </div>
 
               <div className="flex flex-col gap-1.5 mt-4">
-                {detailEditing && <InlineAdd T={T} surface={surface} onAdd={(v) => addSub(inspect.id, v)} />}
+                {inspectDraft.status !== "completed" && <InlineAdd T={T} surface={surface} onAdd={(v) => addSub(inspect.id, v)} />}
                 {(inspectDraft.checklist ?? []).map((item) => (
                   <div key={item.id} className="flex items-center gap-3 px-3 py-2.5" style={{ background: surface, borderRadius: 999 }}>
                     <button onClick={() => toggleSub(inspect.id, item.id)} className="shrink-0" aria-label={item.done ? "Reopen step" : "Complete step"}>
@@ -6682,13 +6687,17 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
                         {(e.lifted || (h >= 30 && e.cols === 1)) && <span className="block truncate tracking-widest" style={{ fontFamily: MONO, color: e.lifted ? T.accent : T.dim, fontSize: 9, paddingLeft: e.lifted && e.cols > 1 ? 4 : 15 }}>{fmtTime(e.start, clock)}</span>}
                       </button>
                       {href && (
-                        <a href={href} target="_blank" rel="noopener noreferrer" draggable={false}
+                        <a href={href} target="_blank" rel="noopener noreferrer" draggable={false} data-join={e.id}
                           onPointerDown={(ev) => ev.stopPropagation()}
+                          onPointerUp={(ev) => ev.stopPropagation()}
+                          onPointerCancel={(ev) => ev.stopPropagation()}
+                          onTouchStart={(ev) => ev.stopPropagation()}
+                          onTouchEnd={(ev) => ev.stopPropagation()}
                           onClick={(ev) => ev.stopPropagation()}
                           aria-label={`Join ${e.title}`}
-                          className="absolute right-0.5 top-0.5 z-10 inline-flex items-center"
+                          className="absolute right-0.5 top-0.5 z-10 inline-flex items-center gap-0.5 px-1 py-0.5 text-[9px] font-bold tracking-widest"
                           style={{ fontFamily: MONO, color: T.accentText }}>
-                          <ExternalLinkIcon />
+                          JOIN <ExternalLinkIcon />
                         </a>
                       )}
                       </div>

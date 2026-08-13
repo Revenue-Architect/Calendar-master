@@ -133,8 +133,9 @@ test.describe("inspector contracts", () => {
     await page.locator('[data-task-chip="task-timeline"]').click();
     const sheet = page.getByTestId("sheet");
     await expect(sheet).toBeVisible();
-    await sheet.getByRole("button", { name: "EDIT ACTION" }).click();
     const add = sheet.getByPlaceholder("Add a step");
+    await expect(add, "Add a Step must be first without waiting for Edit").toBeVisible();
+    await sheet.getByRole("button", { name: "EDIT ACTION" }).click();
     await expect(add).toBeVisible();
     const order = await sheet.evaluate((node) => {
       const addNode = node.querySelector('input[placeholder="Add a step"]');

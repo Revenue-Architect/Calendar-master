@@ -34,6 +34,15 @@ function seeded() {
 const joins = (page) => page.getByRole("link", { name: /^Join / });
 
 test.describe("joining a meeting", () => {
+  test("Day JOIN opens the meeting instead of the Event sheet", async ({ page }) => {
+    await seedPlanner(page, seeded());
+    const join = page.getByRole("link", { name: "Join Timed with link" });
+    await expect(join).toBeVisible();
+    await expect(join).toHaveAttribute("href", LINK);
+    await join.click();
+    await expect(page.getByTestId("sheet")).toHaveCount(0);
+  });
+
   test("the ALL DAY strip offers JOIN", async ({ page }) => {
     await seedPlanner(page, seeded());
     const join = page.getByRole("link", { name: "Join All day with link" });
