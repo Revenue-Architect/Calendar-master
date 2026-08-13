@@ -1,6 +1,6 @@
 # Live Action NOW indicator
 
-**Status:** Approved design pending spec review  
+**Status:** Approved design pending spec review
 **Date:** 2026-08-13
 
 ## Problem
