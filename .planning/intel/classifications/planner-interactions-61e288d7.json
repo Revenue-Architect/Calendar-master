@@ -1,0 +1,22 @@
+{
+  "source_path": "docs/interaction-contracts/planner-interactions.md",
+  "type": "SPEC",
+  "confidence": "high",
+  "manifest_override": false,
+  "title": "Planner interaction contracts",
+  "summary": "In-force owner table for Day, Week, Actions, inspectors, JOIN, Add a Step, and cancel.",
+  "scope": [
+    "Day Event",
+    "Day Action",
+    "Week Event",
+    "Week Action",
+    "JOIN",
+    "Add a Step",
+    "inspectors",
+    "focus"
+  ],
+  "cross_refs": [],
+  "locked": false,
+  "precedence": null,
+  "notes": ""
+}

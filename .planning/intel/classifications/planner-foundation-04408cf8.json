@@ -1,0 +1,23 @@
+{
+  "source_path": "docs/product/planner-foundation.md",
+  "type": "PRD",
+  "confidence": "medium",
+  "manifest_override": false,
+  "title": "Planner Product Foundation",
+  "summary": "Living personal-first planner specification for Calendar, Tasks, and Notes with provider sync deferred.",
+  "scope": [
+    "Event",
+    "Task",
+    "Note",
+    "Day",
+    "Calendar domain",
+    "Tasks domain",
+    "provider integration"
+  ],
+  "cross_refs": [
+    "docs/adr/0001-domain-oriented-modular-monolith.md"
+  ],
+  "locked": false,
+  "precedence": null,
+  "notes": "Path is docs/product/ (DOC heuristic) but content is living product capability with MUST requirements and approved domain sections. Dominant signals are PRD."
+}

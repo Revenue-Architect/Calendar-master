@@ -1,7 +1,7 @@
 # Planner Product Foundation
 
 - **Status:** Living specification
-- **Last updated:** 2026-08-09
+- **Last updated:** 2026-08-13
 - **Product scope:** Personal-first, collaboration-ready planner
 - **Architecture:** Domain-oriented modular monolith
 - **Integration scope:** Calendar and task provider integration is planned and
@@ -1231,7 +1231,11 @@ without re-identifying or rewriting existing notes.
 
 - A daily note links to a date-only value in the user's planning timezone.
 - Do not create empty daily records merely because a date was viewed.
-- Support multiple notes per day while allowing one note to be designated primary.
+- Each user/date has at most one primary daily note.
+- A date may have additional day-linked notes created through an explicit add action.
+- Opening the default daily-note editor resolves the primary note; if none exists,
+  the first saved note becomes primary.
+- Users may designate another day-linked note as primary through an explicit action.
 - Changing timezone MUST NOT silently move a date-only daily note.
 
 ### 2.3 Event notes
@@ -2815,7 +2819,7 @@ collaboration fields (§3.4). These remain specified above and unimplemented.
 | 2026-08-09 | Carry unknown block attributes through migration rather than dropping what a later version wrote. |
 | 2026-08-09 | Split migrated note text only on blank lines; never infer headings or lists from prose. |
 | 2026-08-09 | Skip the revision bump when a save changes nothing, so autosave cannot inflate history. |
-| 2026-08-09 | Allow one daily note per day; writing on a day that has one edits it rather than adding a second. |
+| 2026-08-13 | Give each user/date at most one primary daily note while allowing additional day-linked notes through explicit creation. The default daily editor edits or creates the primary note. |
 | 2026-08-09 | Flow the now rule into a live event's elapsed fill rather than letting a card cut it off. |
 | 2026-08-09 | Style each editor as its own detail view in an editable state, not as a separate form. |
 | 2026-08-09 | Show only required fields in an editor; everything else expands behind a disclosure. |

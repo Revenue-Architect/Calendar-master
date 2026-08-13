@@ -1,0 +1,23 @@
+{
+  "source_path": "docs/adr/0001-domain-oriented-modular-monolith.md",
+  "type": "ADR",
+  "confidence": "high",
+  "manifest_override": false,
+  "title": "ADR 0001: Domain-Oriented Modular Monolith",
+  "summary": "Accepted decision to evolve the planner into a domain-oriented modular monolith with deferred providers.",
+  "scope": [
+    "modular monolith",
+    "domains",
+    "platform",
+    "shared",
+    "ui",
+    "Planner.jsx",
+    "provider integrations"
+  ],
+  "cross_refs": [
+    "src/Planner.jsx"
+  ],
+  "locked": true,
+  "precedence": null,
+  "notes": ""
+}
