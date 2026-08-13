@@ -107,7 +107,7 @@ export default function TimelineActionCard({
           <span className="flex min-w-0 items-center gap-2 py-1 pr-2.5 pl-8">
             <span className="nb-lead min-w-0 flex-1 truncate" style={{ color: done ? theme.dimText : theme.text }}>{task.title}</span>
             <span style={{ fontFamily: mono, color: sizing ? theme.accent : theme.dim }} className="nb-task-time ml-auto nb-data shrink-0">
-              {sizing ? formatDuration(estimate) : formatTime(task.planned.startMinute)}
+              {sizing || (block && height < 40) ? formatDuration(estimate) : formatTime(task.planned.startMinute)}
             </span>
           </span>
           {block && height >= 40 && (

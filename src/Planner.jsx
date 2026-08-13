@@ -4669,7 +4669,7 @@ export default function Planner() {
                               )}
                               {live && <span style={{ fontFamily: MONO, background: T.accent, color: T.on, borderRadius: 4 }} className="nb-event-secondary shrink-0 px-1 nb-data">{Math.round(pct)}%</span>}
                               {held && <span style={{ fontFamily: MONO, background: T.accent, color: T.on, borderRadius: 4 }} className="shrink-0 px-1 nb-data">{gesture.overDay ? fmtDay(gesture.overDay) : tm(e.start)}</span>}
-                              {!held && !live && h < 38 && <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-event-secondary nb-data shrink-0">{tm(e.start)}</span>}
+                              {!held && !live && h < 38 && <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-event-secondary nb-data shrink-0">{tm(e.start)} → {tm(e.start + e.dur)}</span>}
                             </div>
                             {h >= 38 && (
                               <span style={{ fontFamily: MONO, color: T.dimText }} className="block nb-data truncate mt-0.5 pl-4">

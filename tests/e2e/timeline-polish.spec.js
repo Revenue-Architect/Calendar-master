@@ -506,6 +506,46 @@ test.describe("checklist progress", () => {
   });
 });
 
+
+test.describe("short timed cards keep their details inside the block", () => {
+  test("a 10-minute Event shows its range and a 10-minute Action shows its estimate", async ({ page }) => {
+    const today = keyOf(new Date());
+    const blank = createBlankPlannerState({});
+    const withEvent = createEvent(blank, {
+      calendarId: "calendar-default", title: "Standup ping", category: "PEOPLE",
+      timing: {
+        kind: "timed", timeZoneMode: "floating",
+        startLocal: `${today}T08:00`, endLocal: `${today}T08:10`,
+      },
+    }, { id: "evt-ten" }).state;
+    const scheduled = createTask(withEvent.tasks, {
+      id: "task-ten", title: "Send standup note",
+      planned: { date: today, startMinute: 9 * 60, estimateMinutes: 10 },
+    });
+    await seedPlanner(page, { ...withEvent, tasks: scheduled.tasks });
+
+    const eventCard = page.locator('[data-event-id="evt-ten"]');
+    const actionCard = page.locator('[data-task-chip="task-ten"]');
+    await expect(eventCard).toBeVisible();
+    await expect(actionCard).toBeVisible();
+
+    const eventRange = eventCard.getByText("8:00 AM", { exact: false });
+    await expect(eventRange, "short Event must still name its end, not only its start").toContainText("8:10 AM");
+    await expect(actionCard.getByText("10m", { exact: true }), "short Action must still show its estimate").toBeVisible();
+
+    const inside = async (host, child, label) => {
+      const [card, detail] = await Promise.all([host.boundingBox(), child.boundingBox()]);
+      expect(card, label + " card missing").not.toBeNull();
+      expect(detail, label + " detail missing").not.toBeNull();
+      expect(detail.y, label + " starts above the card").toBeGreaterThanOrEqual(card.y - 1);
+      expect(detail.y + detail.height, label + " is clipped by the card")
+        .toBeLessThanOrEqual(card.y + card.height + 1);
+    };
+    await inside(eventCard, eventCard.getByText(/8:00 AM.*8:10 AM/), "Event range");
+    await inside(actionCard, actionCard.getByText("10m", { exact: true }), "Action estimate");
+  });
+});
+
 test.describe("cards sit where their time is", () => {
   test("a week card puts its title at the top of the block, not the middle", async ({ page }) => {
     /* A button centres its contents vertically — the browser's own layout for
