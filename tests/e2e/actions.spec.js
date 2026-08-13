@@ -242,6 +242,25 @@ test.describe("the actions column", () => {
     await expect(card.getByPlaceholder("Add a step")).toBeVisible();
   });
 
+  test("Add a step precedes existing steps in the full-screen Actions view", async ({ page }) => {
+    const action = scheduledAction({ id: "task-step-order", title: "Ordered checklist" });
+    action.tasks[0].checklist = [
+      { id: "step-first", title: "Existing first step", done: false, order: 0, completedAt: null },
+      { id: "step-second", title: "Existing second step", done: false, order: 1, completedAt: null },
+    ];
+    await seedPlanner(page, action);
+    await page.getByRole("tab", { name: "ACTIONS", exact: true }).click();
+
+    const card = page.locator('[data-task="task-step-order"]');
+    const order = await card.evaluate((node) => {
+      const add = node.querySelector('input[placeholder="Add a step"]');
+      const firstStep = [...node.querySelectorAll("button")].find((button) => button.textContent?.includes("Existing first step"));
+      if (!add || !firstStep) return "missing";
+      return add.compareDocumentPosition(firstStep) & Node.DOCUMENT_POSITION_FOLLOWING ? "add-first" : "step-first";
+    });
+    expect(order).toBe("add-first");
+  });
+
   test("the haptics preference suppresses completion vibration without blocking completion", async ({ page }) => {
     await recordVibrations(page);
     await seedPlanner(page, scheduledAction({ id: "task-quiet", title: "Quiet completion" }));

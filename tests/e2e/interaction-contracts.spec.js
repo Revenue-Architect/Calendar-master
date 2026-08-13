@@ -168,7 +168,9 @@ test.describe("Week JOIN and cancellation", () => {
     await seedPlanner(page, notebook());
     await page.getByTestId("zoom-out").click();
     await expect(page.getByTestId("week-grid")).toBeVisible();
-    const join = page.getByRole("link", { name: "Join Standup" });
+    /* The fixture is recurring, so Week correctly renders one JOIN per visible
+       occurrence. Any occurrence must keep the same direct-link contract. */
+    const join = page.getByRole("link", { name: "Join Standup" }).first();
     await expect(join).toBeVisible();
     await expect(join).toHaveAttribute("href", LINK);
     const nested = await page.evaluate(() => document.querySelectorAll("button a, a button").length);

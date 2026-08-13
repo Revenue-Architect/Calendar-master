@@ -28,11 +28,27 @@ function asRaw(value) {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
-export function readLocalNotebook(localStorageLike = typeof window !== "undefined" ? window.localStorage : null) {
-  if (!localStorageLike || typeof localStorageLike.getItem !== "function") return null;
+function browserStorage(name) {
+  try {
+    return typeof window !== "undefined" ? window[name] : null;
+  } catch {
+    /* Browsers may expose the property while throwing on access. A recovery
+       probe must be safer than the storage layer it is trying to rescue. */
+    return null;
+  }
+}
+
+export function hasHostNotebookStorage(host) {
+  const candidate = arguments.length ? host : browserStorage("storage");
+  return Boolean(candidate && typeof candidate.get === "function");
+}
+
+export function readLocalNotebook(localStorageLike) {
+  const storage = arguments.length ? localStorageLike : browserStorage("localStorage");
+  if (!storage || typeof storage.getItem !== "function") return null;
   for (const key of RECOVERY_STATE_KEYS) {
     try {
-      const raw = localStorageLike.getItem(key);
+      const raw = storage.getItem(key);
       if (raw) return { key, raw };
     } catch {
       /* Storage itself may be the thing that is broken. Keep looking. */
@@ -41,11 +57,12 @@ export function readLocalNotebook(localStorageLike = typeof window !== "undefine
   return null;
 }
 
-export async function readHostNotebook(host = typeof window !== "undefined" ? window.storage : null) {
-  if (!host || typeof host.get !== "function") return null;
+export async function readHostNotebook(host) {
+  const storage = arguments.length ? host : browserStorage("storage");
+  if (!storage || typeof storage.get !== "function") return null;
   for (const key of RECOVERY_STATE_KEYS) {
     try {
-      const raw = asRaw(valueOf(await host.get(key)));
+      const raw = asRaw(valueOf(await storage.get(key)));
       if (raw) return { key, raw };
     } catch {
       /* Host storage may be the thing that is broken. Keep looking. */
@@ -56,8 +73,19 @@ export async function readHostNotebook(host = typeof window !== "undefined" ? wi
 
 /** Host first, then localStorage. Either side failing does not hide the other. */
 export async function readRecoverableNotebook({
-  host = typeof window !== "undefined" ? window.storage : null,
-  localStorageLike = typeof window !== "undefined" ? window.localStorage : null,
+  host,
+  localStorageLike,
 } = {}) {
+  if (host === undefined) host = browserStorage("storage");
+  if (localStorageLike === undefined) localStorageLike = browserStorage("localStorage");
   return (await readHostNotebook(host)) || readLocalNotebook(localStorageLike);
+}
+
+/** Keep the host-first promise on the crash screen as well as in exports. */
+export function recoveryDisplayState({ hasHost, hostChecked, hostFound, localFound }) {
+  const stillLooking = Boolean(hasHost && !hostChecked);
+  return {
+    found: stillLooking ? null : (hostFound || localFound),
+    stillLooking,
+  };
 }

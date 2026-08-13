@@ -4716,7 +4716,7 @@ export default function Planner() {
                             onTouchEnd={(ev) => ev.stopPropagation()}
                             onClick={(ev) => ev.stopPropagation()}
                             aria-label={`Join ${e.title}`}
-                            className="absolute right-1 top-1 z-20 inline-flex items-center gap-1 px-1.5 py-1 text-xs font-bold tracking-widest"
+                            className="absolute inset-y-0 right-1 z-20 inline-flex items-center gap-1 px-1.5 text-xs font-bold leading-none tracking-widest"
                             style={{ fontFamily: MONO, color: T.accentText }}>
                             JOIN <ExternalLinkIcon />
                           </a>
@@ -6156,6 +6156,7 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromote
         {!isDone && (
           <div data-test="task-add-step" className={`pl-8 pr-3 ${checklist.length > 0 ? "pb-3" : "pt-1 pb-2"}`}>
             <div className="pl-3" style={{ borderLeft: `2px solid ${T.faint}` }}>
+              <SubComposer T={T} onAdd={(v) => onAddSub(t.id, v)} />
               {checklist.map((s) => (
                 <div key={s.id} className="nb-row flex items-center gap-2 w-full py-1.5">
                   <button onClick={() => {
@@ -6175,7 +6176,6 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromote
                   <button onClick={() => onRemoveSub(t.id, s.id)} style={{ color: T.dimText }} className="text-xs px-1" aria-label="Remove step"><CloseIcon /></button>
                 </div>
               ))}
-              <SubComposer T={T} onAdd={(v) => onAddSub(t.id, v)} />
             </div>
           </div>
         )}
@@ -6562,13 +6562,32 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
             <span className="w-12 shrink-0 self-center pr-2 text-right nb-data" style={{ fontFamily: MONO, color: T.dimText, fontSize: 9 }}>ALL DAY</span>
             {week.map((day) => (
               <div key={day.key} className="flex-1 min-w-0 px-0.5 py-1 flex flex-col gap-0.5" style={{ borderLeft: `1px solid ${hourRule}` }}>
-                {day.allDay.map((e) => (
-                  <button key={e.segmentId ?? e.id} onClick={() => onOpenEvent(e.id, day.key)} className="nb-tap flex items-center gap-1 px-1.5 py-0.5 text-left overflow-hidden"
-                    style={{ background: surface, borderRadius: 6 }}>
-                    <span className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: catColor(e.cat) }} />
-                    <span className="font-semibold truncate" style={{ fontSize: 10 }}>{e.title}</span>
-                  </button>
-                ))}
+                {day.allDay.map((e) => {
+                  const href = normalizeMeetingLink(e.link);
+                  return (
+                    <div key={e.segmentId ?? e.id} className="relative overflow-hidden" style={{ background: surface, borderRadius: 6 }}>
+                      <button onClick={() => onOpenEvent(e.id, day.key)} className="nb-tap flex w-full items-center gap-1 py-0.5 text-left overflow-hidden"
+                        style={{ paddingLeft: 6, paddingRight: href ? 38 : 6 }}>
+                        <span className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: catColor(e.cat) }} />
+                        <span className="font-semibold truncate" style={{ fontSize: 10 }}>{e.title}</span>
+                      </button>
+                      {href && (
+                        <a href={href} target="_blank" rel="noopener noreferrer" draggable={false} data-join={e.id}
+                          onPointerDown={(ev) => ev.stopPropagation()}
+                          onPointerUp={(ev) => ev.stopPropagation()}
+                          onPointerCancel={(ev) => ev.stopPropagation()}
+                          onTouchStart={(ev) => ev.stopPropagation()}
+                          onTouchEnd={(ev) => ev.stopPropagation()}
+                          onClick={(ev) => ev.stopPropagation()}
+                          aria-label={`Join ${e.title}`}
+                          className="absolute inset-y-0 right-0.5 z-10 inline-flex items-center gap-0.5 px-1 text-[9px] font-bold leading-none tracking-widest"
+                          style={{ fontFamily: MONO, color: T.accentText }}>
+                          JOIN <ExternalLinkIcon />
+                        </a>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             ))}
           </div>
@@ -6660,8 +6679,12 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
                         onTouchEnd={(ev) => { ev.stopPropagation(); touchEnd(ev, e, day.key); }}
                         onTouchCancel={(ev) => { ev.stopPropagation(); disarm(); dragRef.current = null; setDrag(null); }}
                         onClick={(ev) => ev.stopPropagation()}
-                        className="absolute inset-0 text-left overflow-hidden"
+                        className="absolute inset-y-0 left-0 text-left overflow-hidden"
                         style={{
+                          /* The sibling JOIN is about 47px at this type scale.
+                             Reserve its real hit lane rather than clipping the
+                             title underneath an absolutely positioned link. */
+                          right: href ? 50 : 0,
                           display: "flex", flexDirection: "column", justifyContent: "flex-start",
                           background: surface, borderRadius: CARD_R,
                           opacity: past ? 0.74 : 1,
@@ -6680,9 +6703,9 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
                             legible. Keeping the dot and the time turned a title
                             into "R…" over "10:…" — two truncations that say
                             nothing where one whole word would have. */}
-                        <span className={`flex items-center gap-1 ${e.cols > 1 ? "px-1" : "px-1.5"} pt-0.5 min-w-0`}>
+                        <span className={`flex flex-1 items-center gap-1 overflow-hidden ${e.cols > 1 ? "px-1" : "px-1.5"} pt-0.5 min-w-0`}>
                           {e.cols === 1 && <span className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: catColor(e.cat) }} />}
-                          <span className="font-semibold leading-tight truncate" style={{ fontSize: 10 }}>{e.title}</span>
+                          <span className="min-w-0 flex-1 font-semibold leading-tight truncate" style={{ fontSize: 10 }}>{e.title}</span>
                         </span>
                         {(e.lifted || (h >= 30 && e.cols === 1)) && <span className="block truncate tracking-widest" style={{ fontFamily: MONO, color: e.lifted ? T.accent : T.dim, fontSize: 9, paddingLeft: e.lifted && e.cols > 1 ? 4 : 15 }}>{fmtTime(e.start, clock)}</span>}
                       </button>
@@ -6695,7 +6718,7 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
                           onTouchEnd={(ev) => ev.stopPropagation()}
                           onClick={(ev) => ev.stopPropagation()}
                           aria-label={`Join ${e.title}`}
-                          className="absolute right-0.5 top-0.5 z-10 inline-flex items-center gap-0.5 px-1 py-0.5 text-[9px] font-bold tracking-widest"
+                          className="absolute inset-y-0 right-0.5 z-10 inline-flex items-center gap-0.5 px-1 text-[9px] font-bold leading-none tracking-widest"
                           style={{ fontFamily: MONO, color: T.accentText }}>
                           JOIN <ExternalLinkIcon />
                         </a>

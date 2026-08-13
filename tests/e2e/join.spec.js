@@ -31,6 +31,18 @@ function seeded() {
   }, { id: "evt-plain" }).state;
 }
 
+function shortBackToBack() {
+  let state = createBlankPlannerState({});
+  state = createEvent(state, {
+    calendarId: "calendar-default", title: "Short linked meeting", category: "PEOPLE", link: LINK,
+    timing: { kind: "timed", timeZoneMode: "floating", startLocal: `${today}T10:00`, endLocal: `${today}T10:15` },
+  }, { id: "evt-short-linked" }).state;
+  return createEvent(state, {
+    calendarId: "calendar-default", title: "Following meeting", category: "ADMIN",
+    timing: { kind: "timed", timeZoneMode: "floating", startLocal: `${today}T10:15`, endLocal: `${today}T10:30` },
+  }, { id: "evt-following" }).state;
+}
+
 const joins = (page) => page.getByRole("link", { name: /^Join / });
 
 test.describe("joining a meeting", () => {
@@ -50,6 +62,42 @@ test.describe("joining a meeting", () => {
     await expect(join).toHaveAttribute("href", LINK);
     await expect(join).toHaveAttribute("target", "_blank");
     await expect(join).toHaveAttribute("rel", "noopener noreferrer");
+  });
+
+  test("short Day JOIN stays inside its card and cannot steal the following event", async ({ page }) => {
+    await seedPlanner(page, shortBackToBack());
+    const card = page.locator('[data-event-id="evt-short-linked"]');
+    const join = page.getByRole("link", { name: "Join Short linked meeting" });
+    await card.scrollIntoViewIfNeeded();
+    const [cardBox, joinBox] = await Promise.all([card.boundingBox(), join.boundingBox()]);
+    expect(cardBox).not.toBeNull();
+    expect(joinBox).not.toBeNull();
+    expect(joinBox.y).toBeGreaterThanOrEqual(cardBox.y - 1);
+    expect(joinBox.y + joinBox.height).toBeLessThanOrEqual(cardBox.y + cardBox.height + 1);
+  });
+
+  test("Week exposes direct JOIN for all-day meetings", async ({ page }) => {
+    await seedPlanner(page, seeded());
+    await page.getByTestId("zoom-out").click();
+    await expect(page.getByTestId("week-grid")).toBeVisible();
+    const join = page.getByRole("link", { name: "Join All day with link" });
+    await expect(join).toBeVisible();
+    await expect(join).toHaveAttribute("href", LINK);
+  });
+
+  test("Week JOIN reserves space instead of covering its title", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await seedPlanner(page, shortBackToBack());
+    await page.getByTestId("zoom-out").click();
+    await expect(page.getByTestId("week-grid")).toBeVisible();
+    const join = page.getByRole("link", { name: "Join Short linked meeting" });
+    const wrapper = join.locator("..");
+    const eventFace = wrapper.getByTestId("week-event");
+    const [joinBox, eventBox] = await Promise.all([join.boundingBox(), eventFace.boundingBox()]);
+    expect(joinBox).not.toBeNull();
+    expect(eventBox).not.toBeNull();
+    expect(eventBox.x + eventBox.width).toBeLessThanOrEqual(joinBox.x - 1);
+    await expect(eventFace.getByText("Short linked meeting", { exact: true })).toHaveCSS("overflow", "hidden");
   });
 
   test("agenda rows offer JOIN for both timed and all-day events", async ({ page }) => {

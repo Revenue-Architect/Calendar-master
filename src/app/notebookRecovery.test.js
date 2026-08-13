@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { readHostNotebook, readLocalNotebook, readRecoverableNotebook } from "./notebookRecovery.js";
+import {
+  readHostNotebook,
+  readLocalNotebook,
+  readRecoverableNotebook,
+  recoveryDisplayState,
+} from "./notebookRecovery.js";
 
 test("localStorage probe returns the newest present key", () => {
   const store = {
@@ -44,4 +49,40 @@ test("host get throwing does not hide a local copy", async () => {
   const found = await readRecoverableNotebook({ host, localStorageLike: local });
   assert.equal(found.raw, "{\"ok\":true}");
   assert.equal(await readHostNotebook(host), null);
+});
+
+test("default recovery probes survive blocked browser storage getters", async () => {
+  const previousWindow = globalThis.window;
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: Object.defineProperties({}, {
+      localStorage: { configurable: true, get() { throw new Error("local storage blocked"); } },
+      storage: { configurable: true, get() { throw new Error("host storage blocked"); } },
+    }),
+  });
+
+  try {
+    assert.equal(readLocalNotebook(), null);
+    assert.equal(await readHostNotebook(), null);
+  } finally {
+    if (previousWindow === undefined) delete globalThis.window;
+    else Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow });
+  }
+});
+
+test("the crash screen waits for host storage before offering a local copy", () => {
+  const localFound = { key: "nbmp:state:v8", raw: "{\"source\":\"local\"}" };
+  assert.deepEqual(recoveryDisplayState({
+    hasHost: true,
+    hostChecked: false,
+    hostFound: null,
+    localFound,
+  }), { found: null, stillLooking: true });
+
+  assert.deepEqual(recoveryDisplayState({
+    hasHost: true,
+    hostChecked: true,
+    hostFound: null,
+    localFound,
+  }), { found: localFound, stillLooking: false });
 });

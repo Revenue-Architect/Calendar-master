@@ -1,5 +1,10 @@
 import React from "react";
-import { readLocalNotebook, readHostNotebook } from "./notebookRecovery.js";
+import {
+  hasHostNotebookStorage,
+  readLocalNotebook,
+  readHostNotebook,
+  recoveryDisplayState,
+} from "./notebookRecovery.js";
 
 /* The last thing standing between a render error and someone's notebook.
  *
@@ -78,16 +83,15 @@ export class ErrorBoundary extends React.Component {
     if (!error) return this.props.children;
 
     const localFound = readLocalNotebook();
-    const found = hostFound || localFound;
     /* Host storage is async. Until it answers, do not claim the notebook is
        gone — an embed keeps the only copy there, and localStorage is empty
        on purpose. Standalone has no host, so there is nothing to wait for
        and the empty-state copy can render on the first paint (e2e depends
        on that). */
-    const hasHost = typeof window !== "undefined"
-      && window.storage
-      && typeof window.storage.get === "function";
-    const stillLooking = !found && hasHost && !hostChecked;
+    const hasHost = hasHostNotebookStorage();
+    const { found, stillLooking } = recoveryDisplayState({
+      hasHost, hostChecked, hostFound, localFound,
+    });
     const button = {
       fontFamily: MONO, fontSize: 12, fontWeight: 700, letterSpacing: "0.1em",
       padding: "12px 16px", borderRadius: 12, border: "none", cursor: "pointer",

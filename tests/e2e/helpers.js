@@ -194,19 +194,18 @@ export async function pressHoldAndDrag(page, source, target, { holdMs = 600, ste
  * build one with the same domain commands the app uses and hand the app a
  * notebook that is valid by construction rather than by hope. */
 export async function seedPlanner(page, state, { showGestureHint = false } = {}) {
-  await page.goto("/");
-  /* First boot writes the sample week on a 400ms debounce. If we replace
-     the notebook before that save lands, the sample overwrites the seed
-     and a 1,000-record fixture comes back as the demo. Wait for the
-     first write, then put the intended notebook in and reload. */
-  await expect(page.getByTestId("day-stream")).toBeVisible();
-  await expect.poll(() => page.evaluate((key) => window.localStorage.getItem(key), STATE_KEY)).toBeTruthy();
-  await page.waitForTimeout(80);
-  await page.evaluate(([key, value]) => {
+  /* Install the notebook before Planner's first module executes. Waiting for a
+     rendered sample is insufficient because its 400ms autosave can still land
+     between a direct localStorage write and reload. The session marker makes
+     this init script one-shot, so later reloads keep testing real persistence. */
+  const marker = `nbmp:test-seed:${Date.now()}:${Math.random()}`;
+  await page.addInitScript(({ key, value, marker: seedMarker }) => {
+    if (window.sessionStorage.getItem(seedMarker)) return;
     window.localStorage.clear();
     window.localStorage.setItem(key, JSON.stringify(value));
-  }, [STATE_KEY, state]);
-  await page.reload();
+    window.sessionStorage.setItem(seedMarker, "done");
+  }, { key: STATE_KEY, value: state, marker });
+  await page.goto("/");
   await expect(page.getByTestId("day-stream")).toBeVisible();
   if (!showGestureHint) {
     const hint = page.getByTestId("gesture-hint");
