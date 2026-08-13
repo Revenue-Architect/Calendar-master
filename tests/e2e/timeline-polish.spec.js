@@ -437,6 +437,18 @@ test.describe("checklist progress", () => {
     await expect(bar).toHaveAttribute("aria-valuemax", "5");
   });
 
+  test("the Action edit sheet uses the same segmented progress", async ({ page }) => {
+    await seedPlanner(page, withSteps(2, 5));
+    await page.getByRole("button", { name: "Ship the release" }).first().click();
+
+    const sheet = page.getByTestId("sheet");
+    const bar = sheet.getByRole("progressbar", { name: /steps done/ });
+    await expect(bar).toBeVisible();
+    await expect(bar.locator("> span")).toHaveCount(5);
+    await expect(bar).toHaveAttribute("aria-valuenow", "2");
+    await expect(bar).toHaveAttribute("aria-valuemax", "5");
+  });
+
   test("the segments are evenly sized, so the count is readable at a glance", async ({ page }) => {
     await seedPlanner(page, withSteps(1, 4));
     const widths = await page.getByRole("progressbar").first().locator("> span")

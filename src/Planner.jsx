@@ -145,7 +145,7 @@ import {
   durationFromDatedClockRange,
   hasDetailDraft,
 } from "./features/planner/detailDraft.js";
-import { progressSegmentStates } from "./features/motion/progressGeometry.js";
+import SegmentedProgress from "./features/planner/SegmentedProgress.jsx";
 import TimelineActionCard from "./features/planner/TimelineActionCard.jsx";
 import { HAPTIC_PATTERNS, triggerDeviceHaptic } from "./features/feedback/haptics.js";
 import {
@@ -4985,19 +4985,18 @@ export default function Planner() {
                 ))}
               </div>
 
-              {(inspectDraft.checklist ?? []).length > 0 && (
-                <div className="flex items-center gap-3 mt-3">
-                  <span className="flex-1 h-1 rounded-full overflow-hidden" style={{ background: T.faint }}>
-                    <span className="block h-full rounded-full" style={{
-                      width: `${((inspectDraft.checklist.filter((x) => x.done).length) / inspectDraft.checklist.length) * 100}%`,
-                      background: T.accent, transition: "width 220ms ease",
-                    }} />
-                  </span>
-                  <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data">
-                    {inspectDraft.checklist.filter((x) => x.done).length} / {inspectDraft.checklist.length}
-                  </span>
-                </div>
-              )}
+              {(inspectDraft.checklist ?? []).length > 0 && (() => {
+                const checklistDone = inspectDraft.checklist.filter((x) => x.done).length;
+                return (
+                  <div className="flex items-center gap-3 mt-3">
+                    <SegmentedProgress T={T} done={checklistDone} total={inspectDraft.checklist.length}
+                      ariaLabel={`${checklistDone} of ${inspectDraft.checklist.length} steps done`} className="flex-1" />
+                    <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data">
+                      {checklistDone} / {inspectDraft.checklist.length}
+                    </span>
+                  </div>
+                );
+              })()}
 
               <div className="flex items-start gap-3 px-3 py-3 mt-4" style={{ background: surface, borderRadius: CARD_R }}>
                 <InlineText T={T} value={inspectDraft.note} placeholder="Add a note" ariaLabel="Note" multiline
@@ -6033,11 +6032,6 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromote
   const surface = isDark(T.bg) ? mixHex(T.card, "#FFFFFF", 0.13) : mixHex(T.card, "#000000", 0.06);
   const checklist = t.checklist ?? [];
   const subDone = checklist.filter((s) => s.done).length;
-  /* Where the last render left the row. The stagger runs from the first segment
-     that is actually changing, so a single tick has no delay and a jump of three
-     still fills one after another. */
-  const previousDone = useRef(subDone);
-  useEffect(() => { previousDone.current = subDone; }, [subDone]);
   const dueLeft = t.deadline.date ? diffDays(t.deadline.date, todayKey) : null;
   const isDone = t.status === "completed";
 
@@ -6109,42 +6103,8 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromote
                 </span>
               )}
             </div>
-            {/* One segment per step, not one bar filled to a fraction. A
-                continuous bar says "roughly two-thirds done"; segments say
-                "four of six", which is the thing a checklist actually knows.
-
-                Segments fill by *count*, left to right — segment three lights up
-                for the third completed step whichever step that was. A checklist
-                is a quantity of work remaining, not an ordered pipeline, so a bar
-                that reshuffles because you started at the bottom would be
-                reporting the order you worked in rather than how much is left.
-
-                And they fill rather than flip: a width that grows is a thing
-                happening, where a colour that changes is a thing that already
-                happened. The stagger is measured from the lowest segment that
-                actually changed, so ticking one step fills immediately and
-                clearing three fills them in sequence. */}
-            {checklist.length > 0 && (
-              <div className="flex gap-1 mt-2" role="progressbar"
-                aria-valuemin={0} aria-valuemax={checklist.length} aria-valuenow={subDone}
-                aria-label={`${subDone} of ${checklist.length} steps done`}>
-                {progressSegmentStates(subDone, checklist.length).map((filled, index) => {
-                  const delay = Math.max(0, index - Math.min(subDone, previousDone.current)) * 60;
-                  return (
-                    <span key={index} className="flex-1 overflow-hidden"
-                      style={{ height: 3, borderRadius: 999, background: T.faint }}>
-                      <span className="block h-full w-full" style={{
-                        background: T.accent,
-                        borderRadius: 999,
-                        transformOrigin: "left center",
-                        transform: filled ? "scaleX(1)" : "scaleX(0)",
-                        transition: `transform 300ms cubic-bezier(.22,.9,.3,1) ${delay}ms`,
-                      }} />
-                    </span>
-                  );
-                })}
-              </div>
-            )}
+            <SegmentedProgress T={T} done={subDone} total={checklist.length}
+              className="mt-2" ariaLabel={`${subDone} of ${checklist.length} steps done`} />
           </div>
 
           <button onPointerDown={(e) => { e.stopPropagation(); onDragStart(t.id, e.clientX, e.clientY); }}
