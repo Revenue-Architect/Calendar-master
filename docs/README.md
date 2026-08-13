@@ -9,6 +9,13 @@ are too detailed for the repository README.
   three-level capability specification for Calendar, Tasks, Notes, and the shared
   planner platform. Approved domains are appended incrementally.
 
+## Structure
+
+- [`spec/structure.md`](spec/structure.md) freezes where new code goes while
+  ADR 0001 remains the target architecture.
+- [`interaction-contracts/planner-interactions.md`](interaction-contracts/planner-interactions.md)
+  owns Day, Week, Actions, and inspector gesture contracts.
+
 ## Feature designs
 
 - [`superpowers/specs/2026-08-09-calendar-phase-2-design.md`](superpowers/specs/2026-08-09-calendar-phase-2-design.md)

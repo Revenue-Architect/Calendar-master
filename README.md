@@ -21,6 +21,14 @@ The browser suite needs Chromium once: `npx playwright install chromium`. Where 
 image already ships one that this Playwright did not install, point at it with
 `PLAYWRIGHT_CHROMIUM_EXECUTABLE=/path/to/chrome`.
 
+## Where new code goes
+
+See [`docs/spec/structure.md`](docs/spec/structure.md) and
+[`docs/adr/0001-domain-oriented-modular-monolith.md`](docs/adr/0001-domain-oriented-modular-monolith.md).
+Domain rules stay in `src/domains/`, persistence in `src/platform/persistence/`,
+and new UI or use-cases extract beside their owner instead of growing
+`src/Planner.jsx`.
+
 ## Layout
 
 | Path | What it is |

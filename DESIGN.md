@@ -156,9 +156,10 @@ Radii: 10 px chips, **14 px cards**, 24 px sheets, 999 px pills.
 
 ## 5. Motion and feedback
 
-One spring for arrivals — `cubic-bezier(.22, 1.12, .28, 1)` — and one ease for
-departures. Named in `index.css` so a new interaction cannot invent a fourteenth
-curve.
+Navigation uses a no-overshoot ease. Sheets use origin-based reveal motion.
+One arrival spring remains available for rare celebrations, not for view changes
+that happen many times a day. Named in `index.css` so a new interaction cannot
+invent a fourteenth curve.
 
 **Press states.** Every control scales to `.97` in 90 ms and springs back over
 260 ms. Imperceptible once; most of what "solid" means over a day of use.
@@ -168,7 +169,17 @@ Suppressed entirely under `prefers-reduced-motion`.
 scaled: the panel arrives at true size, clipped to a rounded window exactly the
 trigger's size, and the window opens out. Animating a container's scale magnifies
 everything inside it — see `src/features/motion/fluidGeometry.js`, which carries
-the full argument and the measurements.
+the full argument and the measurements. Inline field editors animate only their
+own row. They must not remount or replay the containing sheet.
+
+**One owner per gesture.** A press has exactly one owner for its whole life.
+Cancel is never commit: `pointercancel` and `touchcancel` restore the before
+state and write nothing. See
+`docs/interaction-contracts/planner-interactions.md`.
+
+**Actions contains no calendar context.** The date ribbon, Week strip, and Month
+grid are absent there. Returning to Timeline or Agenda restores the selected
+date before paint. Do not keep a hidden ribbon mounted to preserve scroll.
 
 ---
 

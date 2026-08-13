@@ -38,17 +38,24 @@ export default function TimelineActionCard({
   };
   const done = task.status === "completed";
 
-  /* The timeline delegates touch intent from the stream, but a captured desktop
-     pointer is retargeted to this button. Native listeners keep the press/drag
-     lifecycle attached to the same node across capture and release; relying only
-     on a synthetic parent event allowed the card to move visually without a
-     reliable commit on some Chromium builds. */
+  /* Native listeners stay on the body only. The checkmark and resize edge are
+     siblings, so a captured desktop pointer cannot steal their ownership. */
   useEffect(() => {
     const node = chipRef.current;
     if (!node) return undefined;
-    const down = (event) => onPointerDown?.(event, task);
-    const move = (event) => onPointerMove?.(event, task);
-    const up = (event) => onPointerUp?.(event, task);
+    const ignoreForeign = (event) => event.target.closest?.("[data-resize], [data-timeline-complete], a[href]");
+    const down = (event) => {
+      if (ignoreForeign(event)) return;
+      onPointerDown?.(event, task);
+    };
+    const move = (event) => {
+      if (ignoreForeign(event)) return;
+      onPointerMove?.(event, task);
+    };
+    const up = (event) => {
+      if (ignoreForeign(event)) return;
+      onPointerUp?.(event, task);
+    };
     node.addEventListener("pointerdown", down);
     node.addEventListener("pointermove", move);
     node.addEventListener("pointerup", up);
@@ -61,6 +68,7 @@ export default function TimelineActionCard({
 
   return (
     <div className="nb-timeline-lane absolute overflow-hidden"
+      data-test="timeline-action-lane"
       style={{
         top, height, left, width, borderRadius: cardRadius,
         zIndex: dragging || sizing ? 20 : 5,
@@ -92,9 +100,6 @@ export default function TimelineActionCard({
             display: "flex", flexDirection: "column", justifyContent: "flex-start",
             borderRadius: cardRadius,
             border: `1px dashed ${sizing ? theme.accent : theme.faint}`,
-            /* The completion backing is a solid reveal surface. The face stays
-               opaque in both open and completed states, so the red action never
-               bleeds through after a completion or a partial swipe. */
             backgroundColor: theme.card,
             backgroundImage: block ? `linear-gradient(${theme.accent}0D, ${theme.accent}0D)` : "none",
             opacity: 1,
@@ -107,14 +112,6 @@ export default function TimelineActionCard({
           </span>
           {block && height >= 40 && (
             <span style={{ fontFamily: mono, color: theme.dimText }} className="nb-task-duration block nb-data truncate pr-2.5 pl-8">{formatDuration(estimate)}</span>
-          )}
-          {block && (
-            <span data-resize={task.id} data-resize-edge="end"
-              onPointerDown={(event) => onResizePointerDown(event, task, estimate)}
-              className="absolute inset-x-0 bottom-0 flex items-end justify-center"
-              style={{ height: 12, cursor: "ns-resize", touchAction: "pan-y" }}>
-              <span style={{ background: theme.faint, width: 22, height: 2, marginBottom: 3, borderRadius: 2 }} />
-            </span>
           )}
         </button>
         <button type="button" data-timeline-complete={task.id}
@@ -129,6 +126,17 @@ export default function TimelineActionCard({
               <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m3 8.2 3 3 7-7" /></svg>
             </span>
          </button>
+        {block && (
+          <span data-resize={task.id} data-resize-edge="end" data-test="timeline-action-resize"
+            onPointerDown={(event) => {
+              event.stopPropagation();
+              onResizePointerDown(event, task, estimate);
+            }}
+            className="absolute inset-x-0 bottom-0 z-30 flex items-end justify-center"
+            style={{ height: 12, cursor: "ns-resize", touchAction: "pan-y" }}>
+            <span style={{ background: theme.faint, width: 22, height: 2, marginBottom: 3, borderRadius: 2 }} />
+          </span>
+        )}
       </div>
     </div>
   );

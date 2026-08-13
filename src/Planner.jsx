@@ -104,6 +104,19 @@ import {
   shouldCommitActionSwipe,
   timelineTouchIntent,
 } from "./features/planner/timelineGesture.js";
+import {
+  INTERACTION_ORIGINS,
+  INTERACTION_OWNERS,
+  activateWithMovement,
+  armInteraction,
+  cancelActiveInteraction,
+  cancelArmedInteraction,
+  clickFollowsCancelledArm,
+  createIdleInteraction,
+  createScrollSession,
+  restoreCancelledInteraction,
+  resolveShortEventEdge,
+} from "./features/planner/timelineInteractionState.js";
 import { loadBackupRecord, saveBackupRecord } from "./platform/persistence/backupStore.js";
 import { textToNoteBlocks } from "./features/notes/noteText.js";
 import { eventNoteLink, taskNoteLink } from "./features/notes/contextLink.js";
@@ -766,12 +779,14 @@ export default function Planner() {
   /* The details sheet has a deliberate reading state and an editing state. The
      record stays in place; only its controls and compact action pill change. */
   const [detailEditing, setDetailEditing] = useState(false);
+  const [inspectField, setInspectField] = useState(null);
   const [discardAsk, setDiscardAsk] = useState(false);
   /* Pending record-field edits stay outside canonical planner state. */
   const [draft, setDraft] = useState(null);
   useEffect(() => {
     setDraft(null);
     setDetailEditing(false);
+    setInspectField(null);
     setDiscardAsk(false);
     setInspectExitSnapshot(null);
   }, [inspect?.id, inspect?.kind]);
@@ -821,13 +836,16 @@ export default function Planner() {
   const [listManager, setListManager] = useState(false);
   const [viewMode, setViewMode] = useState("timeline");
   const [timelineFocused, setTimelineFocused] = useState(false);
+  const [timelineFocusSource, setTimelineFocusSource] = useState(null);
   const timelineChromeInnerRef = useRef(null);
   const timelineChromeObserverRef = useRef(null);
   const [timelineChromeHeight, setTimelineChromeHeight] = useState(null);
   useEffect(() => {
     timelineUserScrollRef.current = false;
+    timelineScrollSessionRef.current?.expire?.();
     timelineAutoPositionRef.current = false;
     setTimelineFocused(false);
+    setTimelineFocusSource(null);
   }, [dateKey, viewMode, zoom]);
   const attachTimelineChromeInner = useCallback((inner) => {
     timelineChromeObserverRef.current?.disconnect();
@@ -909,6 +927,9 @@ export default function Planner() {
   const timelineScrollTopRef = useRef(0);
   const timelineAutoPositionRef = useRef(false);
   const timelineUserScrollRef = useRef(false);
+  const timelineScrollSessionRef = useRef(createScrollSession());
+  const ribbonNodeRef = useRef(null);
+  const interactionRef = useRef(createIdleInteraction());
   const [streamNode, setStreamNode] = useState(null);
   const [dayHourHeight, setDayHourHeight] = useState(HOUR_H);
   const dayHeight = dayHourHeight * 24;
@@ -917,6 +938,13 @@ export default function Planner() {
     streamRef.current = node;
     timelineScrollTopRef.current = node?.scrollTop ?? 0;
     setStreamNode(node);
+  }, []);
+  const attachRibbon = useCallback((node) => {
+    stripRef.current = node;
+    if (ribbonNodeRef.current !== node) {
+      ribbonNodeRef.current = node;
+      ribbonPositionedRef.current = false;
+    }
   }, []);
   useEffect(() => {
     if (!streamNode) return undefined;
@@ -985,7 +1013,7 @@ export default function Planner() {
      this the day cell at the edge is sliced down the middle by the arrow beside
      it, which reads as a rendering fault rather than "there is more this way". */
   const [, stripFade] = useEdgeFade(stripRef);
-  const revealRibbonCell = useCallback((behavior = "smooth", center = false) => {
+  const revealRibbonCell = useCallback((behavior = "auto", center = false) => {
     const strip = stripRef.current;
     const cell = activeRef.current;
     if (!strip || !cell) return;
@@ -1000,7 +1028,10 @@ export default function Planner() {
     if (!center && left < visibleLeft + inset) next = Math.max(0, left - inset);
     else if (!center && right > visibleRight - inset) next = Math.max(0, right - strip.clientWidth + inset);
     if (Math.abs(next - visibleLeft) < 1) return;
-    strip.scrollTo({ left: next, behavior });
+    /* Returning from Actions remounts the strip. Instant placement keeps the
+       selected cell inside the first painted frame instead of waiting on a
+       smooth scroll that can be cancelled mid-flight. */
+    strip.scrollTo({ left: next, behavior: behavior === "smooth" && ribbonPositionedRef.current ? "smooth" : "auto" });
   }, []);
   const setRibbonWindow = useCallback((next) => {
     const proposed = typeof next === "function" ? next(ribbonWindowStartRef.current) : next;
@@ -1559,17 +1590,20 @@ export default function Planner() {
     prevLevel.current = level;
   }, [level, preferences, beep, buzz]);
 
-  useEffect(() => {
-    if (ready && (zoom === "week" || zoom === "day") && activeRef.current && stripRef.current) {
-      /* Let the highlight travel through the visible cells. Only reveal it when
-         it reaches an edge; recentering on every date change made the whole
-         ribbon jump instead of the selected day moving naturally. */
-      const initial = !ribbonPositionedRef.current;
-      revealRibbonCell(initial ? "auto" : "smooth", initial);
-      ribbonPositionedRef.current = true;
-      ribbonCenterPendingRef.current = false;
+  useLayoutEffect(() => {
+    if (viewMode === "actions" || (zoom !== "week" && zoom !== "day")) return;
+    if (!ready || !activeRef.current || !stripRef.current) return;
+    const initial = !ribbonPositionedRef.current;
+    /* Remounts and date/view changes re-anchor. Virtual-window shifts from the
+       person's own scroll must not yank the selected cell back into view. */
+    if (!initial && ribbonCenterPendingRef.current === false) {
+      revealRibbonCell("smooth", false);
+      return;
     }
-  }, [dateKey, ready, zoom, revealRibbonCell]);
+    revealRibbonCell("auto", initial);
+    ribbonPositionedRef.current = true;
+    ribbonCenterPendingRef.current = false;
+  }, [dateKey, ready, zoom, viewMode, revealRibbonCell]);
   useLayoutEffect(() => {
     if (!ribbonCenterPendingRef.current || !activeRef.current || !stripRef.current) return;
     revealRibbonCell("auto");
@@ -1821,7 +1855,7 @@ export default function Planner() {
       if ((e.key === "f" || e.key === "F") && viewMode === "timeline" && (zoom === "day" || zoom === "week")) {
         e.preventDefault();
         beep("tick");
-        setTimelineFocused((current) => !current);
+        setTimelineFocusSource("manual"); setTimelineFocused((current) => !current);
         return;
       }
       if (e.key === "[") { e.preventDefault(); zoomOut(); }
@@ -2485,6 +2519,7 @@ export default function Planner() {
     if (p.inline) {
       setDraft(null);
       setDetailEditing(false);
+      setInspectField(null);
     } else {
       requestSheetClose("composer");
       requestSheetClose("inspect");
@@ -2737,7 +2772,7 @@ export default function Planner() {
      apart from a click that means something. A touch's compatibility click can
      trail its release by ~300ms. */
   const gestureEndedAt = useRef(0);
-  const clickFollowsGesture = () => Date.now() - gestureEndedAt.current < 350;
+  const clickFollowsGesture = () => Date.now() - gestureEndedAt.current < 350 || clickFollowsCancelledArm(interactionRef.current);
 
   const applyMove = (x, y) => {
     const g = gestureRef.current;
@@ -2800,7 +2835,7 @@ export default function Planner() {
        without a person scrolling it. Focus mode must respond to intent, not to
        those layout corrections; the touch/wheel listeners below mark the first
        real scroll gesture. */
-    if (!timelineUserScrollRef.current) {
+    if (timelineFocusSource === "manual" || !timelineScrollSessionRef.current?.isActive?.()) {
       timelineScrollTopRef.current = nextScrollTop;
       return;
     }
@@ -2811,11 +2846,31 @@ export default function Planner() {
     const timelineView = viewMode === "timeline" && (zoom === "day" || zoom === "week");
     const mobileTimeline = window.matchMedia?.("(max-width:1023px)").matches && timelineView;
     if (!mobileTimeline) return;
-    if (nextScrollTop <= Math.max(48, dayHourHeight) && movingTowardMidnight) setTimelineFocused(false);
-    if (movingAwayFromMidnight && nextScrollTop >= TIMELINE_FOCUS_TRIGGER_PX) setTimelineFocused(true);
-  }, [dayHourHeight, viewMode, zoom]);
+    if (nextScrollTop <= Math.max(48, dayHourHeight) && movingTowardMidnight) {
+      setTimelineFocused(false);
+      setTimelineFocusSource("auto");
+    }
+    if (movingAwayFromMidnight && nextScrollTop >= TIMELINE_FOCUS_TRIGGER_PX) {
+      setTimelineFocused(true);
+      setTimelineFocusSource("auto");
+    }
+  }, [dayHourHeight, viewMode, zoom, timelineFocusSource]);
 
-  const finishGesture = (x, y) => {
+  const abortGesture = () => {
+    const cancelled = cancelActiveInteraction(interactionRef.current);
+    interactionRef.current = restoreCancelledInteraction(cancelled);
+    gestureEndedAt.current = Date.now();
+    armedResizeRef.current = null;
+    setTaskSwipe(null);
+    setDraftPreview(null);
+    endGesture();
+  };
+
+  const finishGesture = (x, y, { cancelled = false } = {}) => {
+    if (cancelled) {
+      abortGesture();
+      return;
+    }
     const g = gestureRef.current;
     const finishedDraft = g?.mode === "draft"
       ? { date: dateKeyRef.current, start: g.start, dur: g.dur }
@@ -2933,7 +2988,7 @@ export default function Planner() {
          point of keeping them apart: it cancels a press that was going to lift a
          card, and it starts a press that was holding an edge. */
       if (armedResizeRef.current && movedEnoughToCancelHold(armedResizeRef.current, { x: e.clientX, y: e.clientY }, 2)) {
-        beginResizeRef.current();
+        beginResizeRef.current(e.clientX, e.clientY);
         return;
       }
       const armed = armedRef.current;
@@ -2946,13 +3001,18 @@ export default function Planner() {
     /* Whatever the release lands on, an edge that was never dragged is not held
        any more. */
     const drop = () => { armedResizeRef.current = null; };
+    const cancel = () => {
+      armedResizeRef.current = null;
+      if (gestureRef.current) abortGesture();
+      else interactionRef.current = cancelArmedInteraction(interactionRef.current);
+    };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", drop);
-    window.addEventListener("pointercancel", drop);
+    window.addEventListener("pointercancel", cancel);
     return () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", drop);
-      window.removeEventListener("pointercancel", drop);
+      window.removeEventListener("pointercancel", cancel);
     };
   }, [disarmHold]);
 
@@ -3045,18 +3105,41 @@ export default function Planner() {
     e.stopPropagation();
     disarmHold();
     tappedRef.current = true;
+    const origin = kind === "task"
+      ? INTERACTION_ORIGINS.actionResize
+      : (edge === "start" ? INTERACTION_ORIGINS.eventStart : INTERACTION_ORIGINS.eventEnd);
+    interactionRef.current = armInteraction(interactionRef.current, {
+      owner: INTERACTION_OWNERS.dayStream,
+      surface: "day",
+      input: e.pointerType || "pointer",
+      origin,
+      mode: kind === "task" ? "task-resize" : `resize-${edge}`,
+      id: ev.id,
+      before: { start: ev.start, duration: ev.dur },
+    });
     armedResizeRef.current = { x: e.clientX, y: e.clientY, ev, edge, kind };
   };
-  const beginArmedResize = () => {
+  const beginArmedResize = (clientX, clientY) => {
     const armed = armedResizeRef.current;
     armedResizeRef.current = null;
     if (!armed) return;
     tappedRef.current = false;
     beep("lift");
+    const mode = armed.kind === "task" ? "task-resize" : `resize-${armed.edge}`;
+    const proposal = proposeGesture(mode === "task-resize" ? "resize-end" : mode, {
+      start: armed.ev.start,
+      duration: armed.ev.dur,
+      pointerMinute: minutesAt(clientY ?? armed.y),
+      kind: armed.kind,
+    });
+    interactionRef.current = activateWithMovement(interactionRef.current, {
+      start: proposal.start,
+      duration: proposal.duration,
+    });
     startGesture({
-      mode: armed.kind === "task" ? "task-resize" : `resize-${armed.edge}`,
-      kind: armed.kind, id: armed.ev.id, start: armed.ev.start, dur: armed.ev.dur,
+      mode, kind: armed.kind, id: armed.ev.id, start: proposal.start, dur: proposal.duration,
       was: { start: armed.ev.start, dur: armed.ev.dur },
+      x: clientX ?? armed.x, y: clientY ?? armed.y,
     });
   };
   beginResizeRef.current = beginArmedResize;
@@ -3090,7 +3173,8 @@ export default function Planner() {
          after a device compositor applies the offset), so establish intent at
          touch start. A tap alone never changes focus; it only authorizes a
          following scroll event to do so. */
-      timelineUserScrollRef.current = true;
+      timelineScrollSessionRef.current.begin();
+      timelineUserScrollRef.current = timelineScrollSessionRef.current.isActive();
       if (e.target.closest?.("[data-timeline-complete]")) return;
       /* JOIN is an action inside an event card, not a card gesture. The native
          listener owns touch intent before React's synthetic click reaches the
@@ -3174,7 +3258,7 @@ export default function Planner() {
       if (!t) return;
       p.lastX = t.clientX;
       p.lastY = t.clientY;
-      if (p.chipId && (p.swiping || (t.clientX > p.x && timelineTouchIntent(p, { x: t.clientX, y: t.clientY }) === "horizontal"))) {
+      if (p.chipId && !p.resizing && (p.swiping || (t.clientX > p.x && timelineTouchIntent(p, { x: t.clientX, y: t.clientY }) === "horizontal"))) {
         if (e.cancelable) e.preventDefault();
         e.stopPropagation();
         cancelPress();
@@ -3183,7 +3267,10 @@ export default function Planner() {
         return;
       }
       if (Math.abs(t.clientX - p.x) > 12 || Math.abs(t.clientY - p.y) > 12) cancelPress();
-      if (Math.abs(t.clientY - p.y) > 4) timelineUserScrollRef.current = true;
+      if (Math.abs(t.clientY - p.y) > 4) {
+        timelineScrollSessionRef.current.begin();
+        timelineUserScrollRef.current = true;
+      }
     };
 
     const onScroll = () => {
@@ -3192,7 +3279,11 @@ export default function Planner() {
       if (!p) return;
       cancelPress();
     };
-    const onWheel = () => { timelineUserScrollRef.current = true; };
+    const onWheel = () => {
+      timelineScrollSessionRef.current.begin();
+      timelineUserScrollRef.current = true;
+      timelineScrollSessionRef.current.end();
+    };
 
     const onEnd = (e) => {
       const g = gestureRef.current;
@@ -3221,11 +3312,11 @@ export default function Planner() {
       }
     };
 
-    const onCancel = (e) => {
-      const g = gestureRef.current;
+    const onCancel = () => {
       disarm();
       setTaskSwipe(null);
-      if (g) { const t = e.changedTouches && e.changedTouches[0]; finishRef.current(t ? t.clientX : g.x, t ? t.clientY : g.y); }
+      if (gestureRef.current) finishRef.current(0, 0, { cancelled: true });
+      else interactionRef.current = cancelArmedInteraction(interactionRef.current);
     };
 
     el.addEventListener("touchstart", onStart, { passive: true });
@@ -3260,21 +3351,26 @@ export default function Planner() {
       const g = gestureRef.current;
       if (g) finishRef.current(t ? t.clientX : g.x, t ? t.clientY : g.y);
     };
+    const tcancel = () => {
+      if (gestureRef.current) finishRef.current(0, 0, { cancelled: true });
+    };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", tcancel);
     window.addEventListener("mousemove", move);
     window.addEventListener("mouseup", up);
     document.addEventListener("touchmove", tmove, { passive: false });
     document.addEventListener("touchend", tend);
-    document.addEventListener("touchcancel", tend);
+    document.addEventListener("touchcancel", tcancel);
     return () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", tcancel);
       window.removeEventListener("mousemove", move);
       window.removeEventListener("mouseup", up);
       document.removeEventListener("touchmove", tmove);
       document.removeEventListener("touchend", tend);
-      document.removeEventListener("touchcancel", tend);
+      document.removeEventListener("touchcancel", tcancel);
     };
   }, [gesture && gesture.mode, gesture && gesture.id]);
 
@@ -3363,6 +3459,10 @@ export default function Planner() {
        into its editing state rather than gatekeeping it. */
     setDetailEditing(true);
   };
+  const openInspectField = (field, element = null) => {
+    setInspectField(field);
+    beginDetailEdit(element);
+  };
   const beginDetailEdit = (element = null) => {
     setDetailEditing(true);
     if (!(element instanceof HTMLElement)) return;
@@ -3383,6 +3483,7 @@ export default function Planner() {
   const commitDraft = (pending = draft) => {
     if (!inspect || !inspectRecord || !hasDetailDraft(pending)) {
       setDetailEditing(false);
+      setInspectField(null);
       return false;
     }
     const next = { ...entryPayload(inspect.kind, inspectRecord), ...pending, inline: true };
@@ -3412,6 +3513,7 @@ export default function Planner() {
         setComposer({ ...next, inline: undefined, openRepeat: true });
         setDraft(null);
         setDetailEditing(false);
+        setInspectField(null);
         setInspect(null);
         return true;
       }
@@ -3426,6 +3528,7 @@ export default function Planner() {
       return false;
     }
     setDetailEditing(false);
+    setInspectField(null);
     return true;
   };
   const draggingTask = gesture && gesture.mode === "task" ? dayTasks.find((t) => t.id === gesture.id) : null;
@@ -4071,7 +4174,7 @@ export default function Planner() {
           )}
         </div>
 
-        {zoom === "month" && (
+        {zoom === "month" && viewMode !== "actions" && (
           <div className="px-3 sm:px-5 pb-3">
             <div className="grid grid-cols-7 mb-1">{weekdayOrder.map((d) => <span key={d} style={{ fontFamily: MONO, color: T.dimText }} className="text-center nb-data">{WD1[d]}</span>)}</div>
             <div className="grid grid-cols-7 gap-px" style={{ background: T.line }}>
@@ -4140,7 +4243,7 @@ export default function Planner() {
             {zoom === "day" && (
               <button onClick={() => goDay(-1)} aria-label="Previous day" style={{ color: T.dimText }} className="nb-tap shrink-0 px-2 sm:px-3 py-1 flex items-center justify-center"><ChevronIcon direction="left" /></button>
             )}
-            <div ref={stripRef} data-test="day-ribbon" data-ribbon-start={ribbonRange.startKey}
+            <div ref={attachRibbon} data-test="day-ribbon" data-ribbon-start={ribbonRange.startKey}
               data-ribbon-end={addDaysToKey(ribbonRange.endKey, -1)} data-ribbon-total-days={ribbonSpan}
               data-ribbon-window-start={ribbonWindowStart} data-ribbon-window-end={ribbonWindowEnd - 1}
               onScroll={onRibbonScroll} style={stripFade} className="nb-x overflow-x-auto flex-1 min-w-0">
@@ -4205,7 +4308,7 @@ export default function Planner() {
               aria-label={timelineViewFocused ? "Expand timeline navigation" : "Focus timeline"}
               aria-expanded={!timelineViewFocused}
               aria-keyshortcuts="F"
-              onClick={() => { beep("tick"); setTimelineFocused((current) => !current); }}
+              onClick={() => { beep("tick"); setTimelineFocusSource("manual"); setTimelineFocused((current) => !current); }}
               className="nb-tap mb-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
               style={{ color: T.dimText, border: `1px solid ${T.line}` }}>
               <span aria-hidden="true" style={{ transform: timelineViewFocused ? "rotate(180deg)" : "none", transition: "transform 220ms cubic-bezier(.77,0,.175,1)" }}><ChevronIcon direction="up" /></span>
@@ -4270,14 +4373,16 @@ export default function Planner() {
 
       {gestureHintVisible && !firstRun && viewMode === "timeline" && zoom === "day" && (
         <div className="px-3 sm:px-5 pb-3">
-          <div data-test="gesture-hint" className="nb-up flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2"
+          <div data-test="gesture-hint" className="nb-up flex flex-col gap-2 px-3 py-2 sm:flex-row sm:items-center sm:gap-x-3"
             style={{ background: surface, color: T.text, borderRadius: CARD_R, boxShadow: `inset 0 0 0 1px ${T.line}` }}>
             <span style={{ fontFamily: MONO, color: T.accentText }} className="nb-label shrink-0">GESTURES</span>
             <span className="nb-body min-w-0 flex-1">Hold a slot to create · hold to move · swipe an Action right to complete.</span>
+            <div className="flex items-center gap-3">
             <button onClick={() => { beep("click"); dismissGestureHint(); setShortcuts(true); }}
               style={{ fontFamily: MONO, color: T.accentText }} className="nb-tap text-xs font-bold tracking-widest shrink-0 underline">SHORTCUTS</button>
             <button data-test="gesture-hint-dismiss" onClick={() => { beep("click"); dismissGestureHint(); }}
               style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-data shrink-0" aria-label="Dismiss gesture hint">GOT IT</button>
+            </div>
           </div>
         </div>
       )}
@@ -4345,7 +4450,11 @@ export default function Planner() {
                     setComposer({ kind: "event", date: draft.date, start: draft.start, dur: draft.dur });
                   }}
                   onTimelineScroll={onTimelineScrollPosition}
-                  onTimelineIntent={() => { timelineUserScrollRef.current = true; }}
+                  onTimelineIntent={() => {
+                    timelineScrollSessionRef.current.begin();
+                    timelineUserScrollRef.current = true;
+                    timelineScrollSessionRef.current.end();
+                  }}
                   onOpenDay={(k) => { beep("tick"); if (k !== dateKey) jumpTo(k); setZoom("day"); }}
                   onOpenEvent={(id, key) => { beep("click"); if (key !== dateKey) jumpTo(key); setTimeout(() => setInspect({ kind: "event", id }), key !== dateKey ? 80 : 0); }}
                   onOpenTask={(id, key) => { beep("click"); if (key !== dateKey) jumpTo(key); setTimeout(() => setInspect({ kind: "task", id }), key !== dateKey ? 80 : 0); }}
@@ -4493,7 +4602,16 @@ export default function Planner() {
                       && (gesture.mode === "move" || gesture.mode === "resize-end" || gesture.mode === "resize-start");
                     return (
                       <div key={e.id} data-event-id={e.id} className="nb-timeline-lane absolute" style={{ top: top + 2, height: h, left: `${(e.lane / e.cols) * 100}%`, width: `calc(${100 / e.cols}% - 6px)`, zIndex: held ? 20 : 1, opacity: held && gesture.overDay ? 0.35 : 1, pointerEvents: "auto" }}>
-                        <div onPointerDown={(ev) => eventDown(ev, e)} onPointerUp={(ev) => eventUp(ev, e)} onContextMenu={(ev) => ev.preventDefault()}
+                        <div role="button" tabIndex={0} aria-label={e.title}
+                          onPointerDown={(ev) => eventDown(ev, e)} onPointerUp={(ev) => eventUp(ev, e)}
+                          onKeyDown={(ev) => {
+                            if (ev.key !== "Enter" && ev.key !== " ") return;
+                            ev.preventDefault();
+                            if (clickFollowsGesture()) return;
+                            beep("click");
+                            setInspect({ kind: "event", id: e.id });
+                          }}
+                          onContextMenu={(ev) => ev.preventDefault()}
                           className="relative w-full h-full overflow-hidden"
                           style={{
                             background: surface,
@@ -4525,15 +4643,7 @@ export default function Planner() {
                               {conflictIds.has(e.id) && <span title="Overlaps another event" style={{ color: NOW_RED }} className="nb-event-secondary shrink-0"><WarningIcon /></span>}
                               {e.repeat && <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-event-secondary shrink-0"><RepeatIcon /></span>}
                               {normalizeMeetingLink(e.link) && (
-                                <a href={normalizeMeetingLink(e.link)} target="_blank" rel="noopener noreferrer" draggable={false}
-                                  onPointerDownCapture={(ev) => ev.stopPropagation()}
-                                  onPointerUpCapture={(ev) => ev.stopPropagation()}
-                                  onPointerCancel={(ev) => ev.stopPropagation()}
-                                  onTouchStart={(ev) => ev.stopPropagation()}
-                                  onTouchEnd={(ev) => ev.stopPropagation()}
-                                  onClick={(ev) => ev.stopPropagation()}
-                                  aria-label={`Join ${e.title}`}
-                                  style={{ fontFamily: MONO, color: T.accentText }} className="inline-flex items-center gap-1 text-xs font-bold tracking-widest shrink-0">JOIN <ExternalLinkIcon /></a>
+                                <span aria-hidden="true" style={{ fontFamily: MONO, color: T.accentText }} className="inline-flex items-center gap-1 text-xs font-bold tracking-widest shrink-0">JOIN <ExternalLinkIcon /></span>
                               )}
                               {e.alerts && e.alerts.length > 0 && (
                                 <span style={{ color: T.dimText }} className="nb-event-secondary shrink-0" title="Has a reminder"><BellIcon /></span>
@@ -4571,17 +4681,28 @@ export default function Planner() {
                               allowed to treat it as one. The hold fires before any
                               movement, so a real resize still claims the gesture
                               first and `preventDefault` keeps it. */}
-                          {h >= 52 && (
-                            <div data-resize={e.id} data-resize-edge="start" onPointerDown={(ev) => resizeDown(ev, e, "start")} className="absolute inset-x-0 top-0 flex items-start justify-center" style={{ height: 8, cursor: "ns-resize", touchAction: "pan-y" }}>
-                              <span style={{ background: T.faint, width: 22, height: 2, marginTop: 2, borderRadius: 2 }} />
-                            </div>
-                          )}
-                          {h >= 32 && (
-                            <div data-resize={e.id} data-resize-edge="end" onPointerDown={(ev) => resizeDown(ev, e, "end")} className="absolute inset-x-0 bottom-0 flex items-end justify-center" style={{ height: 12, cursor: "ns-resize", touchAction: "pan-y" }}>
-                              <span style={{ background: T.faint, width: 22, height: 2, marginBottom: 3, borderRadius: 2 }} />
-                            </div>
-                          )}
+                          <div data-resize={e.id} data-resize-edge="start" onPointerDown={(ev) => resizeDown(ev, e, "start")} className="absolute inset-x-0 top-0 flex items-start justify-center" style={{ height: h < 28 ? 8 : 8, cursor: "ns-resize", touchAction: "pan-y" }}>
+                            <span style={{ background: T.faint, width: 22, height: 2, marginTop: 2, borderRadius: 2 }} />
+                          </div>
+                          <div data-resize={e.id} data-resize-edge="end" onPointerDown={(ev) => resizeDown(ev, e, "end")} className="absolute inset-x-0 bottom-0 flex items-end justify-center" style={{ height: 12, cursor: "ns-resize", touchAction: "pan-y" }}>
+                            <span style={{ background: T.faint, width: 22, height: 2, marginBottom: 3, borderRadius: 2 }} />
+                          </div>
                         </div>
+                        {normalizeMeetingLink(e.link) && (
+                          <a href={normalizeMeetingLink(e.link)} target="_blank" rel="noopener noreferrer" draggable={false}
+                            onPointerDownCapture={(ev) => ev.stopPropagation()}
+                            onPointerUpCapture={(ev) => ev.stopPropagation()}
+                            onPointerCancel={(ev) => ev.stopPropagation()}
+                            onTouchStart={(ev) => ev.stopPropagation()}
+                            onTouchEnd={(ev) => ev.stopPropagation()}
+                            onClick={(ev) => ev.stopPropagation()}
+                            aria-label={`Join ${e.title}`}
+                            className="absolute right-1 top-1 z-20 inline-flex items-center gap-1 px-1"
+                            style={{ fontFamily: MONO, color: T.accentText }}>
+                            <span className="sr-only">JOIN</span>
+                            <ExternalLinkIcon />
+                          </a>
+                        )}
                       </div>
                     );
                   })}
@@ -4801,8 +4922,8 @@ export default function Planner() {
           headerAction={(
             <FluidEditActions T={T} editing={detailEditing} dirty={hasDetailDraft(draft)}
               label={inspect.kind === "event" ? "EDIT EVENT" : "EDIT ACTION"}
-              onEdit={() => { beep("click"); setDetailEditing(true); }}
-              onRevert={() => { beep("abort"); setDraft(null); setDetailEditing(false); }}
+              onEdit={() => { beep("click"); setDetailEditing(true); setInspectField(null); }}
+              onRevert={() => { beep("abort"); setDraft(null); setDetailEditing(false); setInspectField(null); }}
               onSave={() => { beep("commit"); commitDraft(); }} />
           )}
           beforeClose={closeInspector}
@@ -4824,6 +4945,7 @@ export default function Planner() {
               </div>
 
               <div className="flex flex-col gap-1.5 mt-4">
+                {detailEditing && <InlineAdd T={T} surface={surface} onAdd={(v) => addSub(inspect.id, v)} />}
                 {(inspectDraft.checklist ?? []).map((item) => (
                   <div key={item.id} className="flex items-center gap-3 px-3 py-2.5" style={{ background: surface, borderRadius: 999 }}>
                     <button onClick={() => toggleSub(inspect.id, item.id)} className="shrink-0" aria-label={item.done ? "Reopen step" : "Complete step"}>
@@ -4843,7 +4965,6 @@ export default function Planner() {
                     {detailEditing && <button onClick={() => removeSub(inspect.id, item.id)} style={{ color: T.dimText }} className="text-xs px-1" aria-label="Remove step"><CloseIcon /></button>}
                   </div>
                 ))}
-                {detailEditing && <InlineAdd T={T} surface={surface} onAdd={(v) => addSub(inspect.id, v)} />}
               </div>
 
               {(inspectDraft.checklist ?? []).length > 0 && (
@@ -4872,7 +4993,7 @@ export default function Planner() {
                 {/* §4.6. When it is planned, and when it is due, are edited where
                     they are read. §4.7 keeps the repeat rule behind its own gesture. */}
                 <DetailRow T={T} icon={<CalendarIcon />} divider>
-                  {detailEditing ? (
+                  {detailEditing && inspectField === "planning" ? (
                     <div className="flex flex-col gap-2">
                       <PillNav T={T} ariaLabel="Action planning state"
                         value={inspectDraft.planned.date ? "day" : "inbox"}
@@ -4906,7 +5027,7 @@ export default function Planner() {
                       </label>
                     </div>
                   ) : (
-                    <button onClick={() => { beep("click"); beginDetailEdit(); }} className="block w-full text-left" aria-label="Edit planning">
+                    <button onClick={() => { beep("click"); openInspectField("planning"); }} className="block w-full text-left" aria-label="Edit planning">
                       <span className="block text-sm">{inspectDraft.planned.date ? plannedLabel(inspectDraft.planned.date, todayKey) : "Unplanned"}</span>
                       <span style={{ color: T.dimText }} className="block text-xs mt-0.5">
                         {inspectDraft.planned.startMinute != null ? tm(inspectDraft.planned.startMinute) : "Any time"}
@@ -4916,7 +5037,10 @@ export default function Planner() {
                     </button>
                   )}
                 </DetailRow>
-                <InlineChoiceRow T={T} icon={<BellIcon size={13} />} divider onBeginEdit={beginDetailEdit}
+                <InlineChoiceRow T={T} icon={<BellIcon size={13} />} divider
+                  open={inspectField === "reminder"}
+                  onToggle={() => openInspectField(inspectField === "reminder" ? null : "reminder")}
+                  onBeginEdit={() => openInspectField("reminder")}
                   label={(inspectDraft.reminders ?? []).length
                     ? (inspectDraft.reminders[0].offsetMinutes === 0
                       ? `When it starts${inspectDraft.planned.startMinute != null ? `, ${tm(inspectDraft.planned.startMinute)}` : ""}`
@@ -4933,7 +5057,7 @@ export default function Planner() {
                     <InlineStamp T={T} dark={dark} type="date" ariaLabel="Deadline"
                       value={inspectDraft.deadline.date || ""} onCommit={(v) => editEntry({ due: v })}
                       display={inspectDraft.deadline.date ? fmtDay(inspectDraft.deadline.date) : "No deadline"}
-                      onBeginEdit={beginDetailEdit}
+                      onBeginEdit={() => openInspectField("due")}
                       style={{ color: inspectDraft.deadline.date && inspectDraft.deadline.date < todayKey ? NOW_RED : T.text }}
                       className="text-sm" />
                     {inspectDraft.deadline.date && (
@@ -4943,7 +5067,11 @@ export default function Planner() {
                 </DetailRow>
                 {/* §8.2. The label names the attribute; it does not repeat the value
                     the selected chip already carries. */}
-                 <InlineChoiceRow T={T} icon={<UiIcon size={13}><path d="m8 2.5 1.2 3.2 3.3 1.1-3.3 1.2L8 11.5l-1.2-3.5-3.3-1.2 3.3-1.1L8 2.5Z" /></UiIcon>} divider onBeginEdit={beginDetailEdit} label={`Worth ${inspectDraft.reward}`}
+                 <InlineChoiceRow T={T} icon={<UiIcon size={13}><path d="m8 2.5 1.2 3.2 3.3 1.1-3.3 1.2L8 11.5l-1.2-3.5-3.3-1.2 3.3-1.1L8 2.5Z" /></UiIcon>} divider
+                  open={inspectField === "reward"}
+                  onToggle={() => openInspectField(inspectField === "reward" ? null : "reward")}
+                  onBeginEdit={() => openInspectField("reward")}
+                  label={`Worth ${inspectDraft.reward}`}
                   value={inspectDraft.reward} options={[20, 30, 40, 60].map((xp) => [xp, String(xp)])}
                   onPick={(xp) => editEntry({ xp })} />
                 {inspectDraft.status === "waiting" && (
@@ -4955,16 +5083,20 @@ export default function Planner() {
                     dependency could be added from here but never taken back. */}
                 <DetailRow T={T} icon={<MenuIcon />} divider>
                   <button
-                    onClick={() => { beep("click"); beginDetailEdit(); setListPicker({ taskId: inspect.id, draft: true }); }} className="text-left w-full">
+                    onClick={() => { beep("click"); openInspectField("list"); setListPicker({ taskId: inspect.id, draft: true }); }} className="text-left w-full">
                     <span className="block text-sm">{(db.taskLists.find((l) => l.id === inspectDraft.listId) || {}).name || "—"}</span>
                     <span style={{ color: T.dimText }} className="block text-xs mt-0.5">Tap to move to another list</span>
                   </button>
                 </DetailRow>
-                 <InlineChoiceRow T={T} icon={<UiIcon size={13}><path d="M8 2.5a5.5 5.5 0 1 0 0 11V2.5Z" /><circle cx="8" cy="8" r="5.5" /></UiIcon>} divider onBeginEdit={beginDetailEdit} label={inspectDraft.category} dot={catColor}
+                 <InlineChoiceRow T={T} icon={<UiIcon size={13}><path d="M8 2.5a5.5 5.5 0 1 0 0 11V2.5Z" /><circle cx="8" cy="8" r="5.5" /></UiIcon>} divider
+                  open={inspectField === "category"}
+                  onToggle={() => openInspectField(inspectField === "category" ? null : "category")}
+                  onBeginEdit={() => openInspectField("category")}
+                  label={inspectDraft.category} dot={catColor}
                   value={inspectDraft.category} options={CATS.map((c) => [c, c])}
                   onPick={(cat) => editEntry({ cat })} />
                 <DetailRow T={T} icon="#" divider={inspectDependsOn.length > 0}>
-                  <TagField T={T} tags={inspectDraft.tags} onBeginEdit={beginDetailEdit} onChange={(tags) => editEntry({ tags })} />
+                  <TagField T={T} tags={inspectDraft.tags} onBeginEdit={() => openInspectField("tags")} onChange={(tags) => editEntry({ tags })} />
                 </DetailRow>
                 {inspectDependsOn.map((blocker, i) => (
                    <DetailRow key={blocker.id} T={T} icon={<BlockIcon />} divider={i < inspectDependsOn.length - 1}>
@@ -5013,7 +5145,7 @@ export default function Planner() {
             ) : (
               <div className="flex items-center justify-center gap-1.5 mt-1.5">
                 <InlineStamp T={T} dark={dark} type="time" ariaLabel="Starts" value={hhmm(inspectDraft.start)}
-                  display={tm(inspectDraft.start)} onCommit={(v) => v && editEntry({ start: fromHhmm(v) })} onBeginEdit={beginDetailEdit}
+                  display={tm(inspectDraft.start)} onCommit={(v) => v && editEntry({ start: fromHhmm(v) })} onBeginEdit={() => openInspectField("start")}
                   className="text-base font-semibold" />
                 <span style={{ color: T.dimText }} className="text-base">–</span>
                 <InlineStamp T={T} dark={dark} type="time" ariaLabel="Ends" value={hhmm((inspectDraft.start + inspectDraft.dur) % 1440)}
@@ -5022,18 +5154,18 @@ export default function Planner() {
                     if (!v) return;
                     const end = fromHhmm(v);
                     editEntry({ dur: durationFromClockRange(inspectDraft.start, end) });
-                  }} onBeginEdit={beginDetailEdit} className="text-base font-semibold" />
+                  }} onBeginEdit={() => openInspectField("duration")} className="text-base font-semibold" />
               </div>
             )}
             <InlineStamp T={T} dark={dark} type="date" ariaLabel="Day"
               value={splitId(inspect.id).date || inspectDraft.date || dateKey}
               display={fmtDay(splitId(inspect.id).date || inspectDraft.date || dateKey)}
               onCommit={(v) => v && editEntry({ date: v })}
-              onBeginEdit={beginDetailEdit}
+              onBeginEdit={() => openInspectField("date")}
               style={{ fontFamily: MONO, color: T.dimText }} className="nb-data mt-1" />
           </div>
 
-          {detailEditing && (
+          {detailEditing && (inspectField === "date" || inspectField === "start" || inspectField === "duration") && (
             <EventScheduleEditor T={T} dark={dark} event={inspectDraft}
               date={splitId(inspect.id).date || inspectDraft.date || dateKey}
               onChange={editEntry} />
@@ -5064,11 +5196,17 @@ export default function Planner() {
           {/* One row per attribute, each one the control for it (§4.6). Collapsed it
               costs a line; touched, it grows the alternatives underneath. */}
           <div className="flex flex-col gap-2">
-            <InlineChoice T={T} surface={surface} icon="◑" tint={catColor(inspectDraft.cat)} onBeginEdit={beginDetailEdit}
+            <InlineChoice T={T} surface={surface} icon="◑" tint={catColor(inspectDraft.cat)}
+              open={inspectField === "category"}
+              onToggle={() => openInspectField(inspectField === "category" ? null : "category")}
+              onBeginEdit={() => openInspectField("category")}
               label={inspectDraft.cat || "—"} value={inspectDraft.cat} dot={catColor}
               options={CATS.map((c) => [c, c])} onPick={(cat) => editEntry({ cat })} />
 
-            <InlineChoice T={T} surface={surface} icon={<ClockIcon />} label={inspectDraft.allDay ? "All day" : "At a time"} onBeginEdit={beginDetailEdit}
+            <InlineChoice T={T} surface={surface} icon={<ClockIcon />} label={inspectDraft.allDay ? "All day" : "At a time"}
+              open={inspectField === "allDay"}
+              onToggle={() => openInspectField(inspectField === "allDay" ? null : "allDay")}
+              onBeginEdit={() => openInspectField("allDay")}
               value={inspectDraft.allDay ? "all" : "timed"} options={[["timed", "AT A TIME"], ["all", "ALL DAY"]]}
               onPick={(v) => editEntry({ allDay: v === "all", ...(v === "all" ? {} : { start: inspectDraft.start || 540, dur: inspectDraft.dur || 60 }) })} />
 
@@ -5079,7 +5217,7 @@ export default function Planner() {
                   value={inspectDraft.endDate || inspectDraft.date || dateKey} min={inspectDraft.date || dateKey}
                   display={fmtDay(inspectDraft.endDate || inspectDraft.date || dateKey)}
                   onCommit={(v) => v && editEntry({ endDate: v })}
-                  onBeginEdit={beginDetailEdit}
+                  onBeginEdit={() => openInspectField("endDate")}
                   style={{ fontFamily: MONO }} className="text-sm" />
               </InlineField>
             )}
@@ -5090,13 +5228,19 @@ export default function Planner() {
                 chosen here rather than in a form somewhere else. The safety was never
                 the separate surface — it is the scope question, which the save still
                 asks. */}
-            <InlineChoice T={T} surface={surface} icon={<RepeatIcon />} onBeginEdit={beginDetailEdit}
+            <InlineChoice T={T} surface={surface} icon={<RepeatIcon />}
+              open={inspectField === "repeat"}
+              onToggle={() => openInspectField(inspectField === "repeat" ? null : "repeat")}
+              onBeginEdit={() => openInspectField("repeat")}
               label={inspectDraft.repeat ? repeatLabel(inspectDraft.repeat) : "Does not repeat"}
               value={inspectDraft.repeat?.freq ?? "never"}
               options={REPEATS}
               onPick={(freq) => editEntry({ repeat: repeatFor(freq, inspectDraft.repeat, inspectDraft.date || dateKey) })} />
 
-            <InlineChoice T={T} surface={surface} icon={<BellIcon size={13} />} onBeginEdit={beginDetailEdit}
+            <InlineChoice T={T} surface={surface} icon={<BellIcon size={13} />}
+              open={inspectField === "reminder"}
+              onToggle={() => openInspectField(inspectField === "reminder" ? null : "reminder")}
+              onBeginEdit={() => openInspectField("reminder")}
               label={(inspectDraft.alerts || []).length
                 ? inspectDraft.alerts.map((a) => (a === 0 ? "When it starts" : `${dur(a)} before`)).join(", ")
                 : "No reminder"}
@@ -5106,12 +5250,12 @@ export default function Planner() {
 
             <InlineField T={T} surface={surface} icon={<LocationIcon />}>
               <InlineText T={T} value={inspectDraft.place} placeholder="Add a place" ariaLabel="Place"
-                onCommit={(place) => editEntry({ place })} onBeginEdit={beginDetailEdit} className="text-sm" />
+                onCommit={(place) => editEntry({ place })} onBeginEdit={() => openInspectField("place")} className="text-sm" />
             </InlineField>
 
             <InlineField T={T} surface={surface} icon={<LinkIcon />}>
               <InlineText T={T} value={inspectDraft.link || ""} placeholder="Add a meeting link" ariaLabel="Meeting link"
-                onCommit={(link) => editEntry({ link: normalizeMeetingLink(link) })} onBeginEdit={beginDetailEdit} className="text-sm" />
+                onCommit={(link) => editEntry({ link: normalizeMeetingLink(link) })} onBeginEdit={() => openInspectField("link")} className="text-sm" />
               {normalizeMeetingLink(inspectDraft.link) && (
                 <a href={normalizeMeetingLink(inspectDraft.link)} target="_blank" rel="noopener noreferrer"
                   onClick={(e) => e.stopPropagation()}
@@ -5130,7 +5274,7 @@ export default function Planner() {
             <div className="flex items-start gap-3 px-3 py-2.5" style={{ background: surface, borderRadius: CARD_R }}>
               <span style={{ color: T.dimText }} className="text-sm shrink-0 w-4 text-center pt-0.5"><MoreIcon /></span>
               <InlineText T={T} value={inspectDraft.note} placeholder="Add a note" ariaLabel="Note" multiline
-                onCommit={(note) => editEntry({ note })} onBeginEdit={beginDetailEdit} className="text-sm leading-relaxed" />
+                onCommit={(note) => editEntry({ note })} onBeginEdit={() => openInspectField("note")} className="text-sm leading-relaxed" />
             </div>
           </div>
 
@@ -5173,6 +5317,7 @@ export default function Planner() {
               beep("abort");
               setDraft(null);
               setDetailEditing(false);
+              setInspectField(null);
               setDiscardAsk(false);
               requestSheetClose("inspect");
             }} style={{ fontFamily: MONO, color: NOW_RED, border: `1px solid ${T.line}` }} className="nb-tap py-3 nb-label">DISCARD CHANGES</button>
@@ -6220,13 +6365,17 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
     if (!draft) return undefined;
     const move = (event) => { event.preventDefault(); updateDraft(event.clientX, event.clientY); };
     const up = () => finishDraft();
+    const cancel = () => {
+      draftRef.current = null;
+      setDraft(null);
+    };
     window.addEventListener("pointermove", move, { passive: false });
     window.addEventListener("pointerup", up);
-    window.addEventListener("pointercancel", up);
+    window.addEventListener("pointercancel", cancel);
     return () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
-      window.removeEventListener("pointercancel", up);
+      window.removeEventListener("pointercancel", cancel);
     };
   }, [Boolean(draft)]);
 
@@ -6273,13 +6422,17 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
     if (!dragging) return undefined;
     const move = (e) => { e.preventDefault(); updateDrag(e.clientX, e.clientY); };
     const up = () => endDrag();
+    const cancel = () => {
+      dragRef.current = null;
+      setDrag(null);
+    };
     window.addEventListener("pointermove", move, { passive: false });
     window.addEventListener("pointerup", up);
-    window.addEventListener("pointercancel", up);
+    window.addEventListener("pointercancel", cancel);
     return () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
-      window.removeEventListener("pointercancel", up);
+      window.removeEventListener("pointercancel", cancel);
     };
   }, [dragging]);
 
@@ -6292,10 +6445,19 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
     const { clientX, clientY } = e.touches[0];
     tapRef.current = true;
     clearTimeout(holdRef.current);
+    armedRef.current = { x: clientX, y: clientY };
     holdRef.current = setTimeout(() => beginDrag(event, day, clientX, clientY), LIFT_MS);
   };
   const touchMove = (e) => {
-    if (!dragRef.current) { disarm(); tapRef.current = false; return; }
+    if (!dragRef.current) {
+      const t = e.touches[0];
+      const armed = armedRef.current;
+      if (armed && t && movedEnoughToCancelHold(armed, { x: t.clientX, y: t.clientY })) {
+        disarm();
+        tapRef.current = false;
+      }
+      return;
+    }
     e.preventDefault();
     updateDrag(e.touches[0].clientX, e.touches[0].clientY);
   };
@@ -6464,34 +6626,32 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
                     const top = (e.start / 1440) * DAY_H;
                     const h = Math.max(16, (e.dur / 1440) * DAY_H) - 2;
                     const past = !e.lifted && (day.key < todayKey || (isToday && nowMin >= e.start + e.dur));
+                    const href = normalizeMeetingLink(e.link);
                     return (
-                      <button key={e.segmentId ?? `${e.id}-${e.start}`}
+                      <div key={e.segmentId ?? `${e.id}-${e.start}`} className="absolute" style={{
+                        top: top + 1, height: h,
+                        left: `calc(${(e.lane / e.cols) * 100}% + 2px)`, width: `calc(${100 / e.cols}% - 4px)`,
+                        zIndex: e.lifted ? 8 : 2,
+                      }}>
+                      <button
                         data-test="week-event" data-event-id={e.id}
                         onPointerDown={(ev) => pointerDown(ev, e, day.key)}
                         onPointerUp={(ev) => pointerUp(ev, e, day.key)}
                         onTouchStart={(ev) => touchStart(ev, e, day.key)}
                         onTouchMove={(ev) => { ev.stopPropagation(); touchMove(ev); }}
                         onTouchEnd={(ev) => { ev.stopPropagation(); touchEnd(ev, e, day.key); }}
-                        onTouchCancel={(ev) => { ev.stopPropagation(); disarm(); endDrag(); }}
+                        onTouchCancel={(ev) => { ev.stopPropagation(); disarm(); dragRef.current = null; setDrag(null); }}
                         onClick={(ev) => ev.stopPropagation()}
-                        className="absolute text-left overflow-hidden"
+                        className="absolute inset-0 text-left overflow-hidden"
                         style={{
-                          /* A button centres its contents vertically — that is the
-                             browser's own layout for buttons, and it does not care
-                             that this one happens to be a two-hour block. The title
-                             of a 9-to-11 event was floating 55px down the card,
-                             nowhere near the hour it starts at, while the identical
-                             card on the day timeline (a div) had it at the top. */
                           display: "flex", flexDirection: "column", justifyContent: "flex-start",
-                          top: top + 1, height: h,
-                          left: `calc(${(e.lane / e.cols) * 100}% + 2px)`, width: `calc(${100 / e.cols}% - 4px)`,
                           background: surface, borderRadius: CARD_R,
                           opacity: past ? 0.74 : 1,
                           /* The lifted card rides above everything, is not a drop
                              target for its own hit-test, and says it is lifted. */
                           zIndex: e.lifted ? 8 : 2,
                           pointerEvents: e.lifted ? "none" : "auto",
-                          touchAction: "none",
+                          touchAction: "pan-y",
                           transform: e.lifted ? "scale(1.04)" : "none",
                           boxShadow: e.lifted
                             ? `0 8px 24px rgba(0,0,0,0.32), inset 0 0 0 1.5px ${T.accent}`
@@ -6506,10 +6666,19 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
                           {e.cols === 1 && <span className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: catColor(e.cat) }} />}
                           <span className="font-semibold leading-tight truncate" style={{ fontSize: 10 }}>{e.title}</span>
                         </span>
-                        {/* A lifted card always states its time, however short it
-                            is: the number is the whole feedback of the drag. */}
                         {(e.lifted || (h >= 30 && e.cols === 1)) && <span className="block truncate tracking-widest" style={{ fontFamily: MONO, color: e.lifted ? T.accent : T.dim, fontSize: 9, paddingLeft: e.lifted && e.cols > 1 ? 4 : 15 }}>{fmtTime(e.start, clock)}</span>}
                       </button>
+                      {href && (
+                        <a href={href} target="_blank" rel="noopener noreferrer" draggable={false}
+                          onPointerDown={(ev) => ev.stopPropagation()}
+                          onClick={(ev) => ev.stopPropagation()}
+                          aria-label={`Join ${e.title}`}
+                          className="absolute right-0.5 top-0.5 z-10 inline-flex items-center"
+                          style={{ fontFamily: MONO, color: T.accentText }}>
+                          <ExternalLinkIcon />
+                        </a>
+                      )}
+                      </div>
                     );
                   })}
                   {day.tasks.map((t) => (
@@ -6790,11 +6959,16 @@ function InlineText({ T, value, onCommit, placeholder = "Untitled", multiline = 
 
 /* §4.6. Collapsed, an attribute costs one line. Tapping it grows the alternatives
    underneath rather than showing every choice all the time. */
-function InlineChoice({ T, surface, icon, label, options, value, onPick, tint = null, dot = null, children = null, editable = true, onBeginEdit = null }) {
-  const [open, setOpen] = useState(false);
+function InlineChoice({ T, surface, icon, label, options, value, onPick, tint = null, dot = null, children = null, editable = true, onBeginEdit = null, open: openProp = undefined, onToggle = null }) {
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = openProp ?? uncontrolledOpen;
+  const setOpen = (next) => {
+    if (onToggle) onToggle(typeof next === "function" ? next(open) : next);
+    else setUncontrolledOpen(next);
+  };
   const optionsRef = useRef(null);
   const { box, stretch, settled } = useLiquidPill(optionsRef, [value, options.length, open]);
-  useEffect(() => { if (!editable) setOpen(false); }, [editable]);
+  useEffect(() => { if (!editable && openProp == null) setUncontrolledOpen(false); }, [editable, openProp]);
   return (
     <div style={{ background: tint ? `${tint}22` : surface, borderRadius: CARD_R }} className="overflow-hidden">
       <button disabled={!editable} onClick={(event) => { if (!open) onBeginEdit?.(event.currentTarget); setOpen(!open); }} className="nb-tap flex items-center gap-3 px-3 py-2.5 w-full text-left disabled:opacity-100">
@@ -7178,11 +7352,16 @@ function PillNav({ T, value, options, onPick, ariaLabel, surface = "transparent"
 /* §4.4/§4.6. The same expansion inside the task's grouped rules card, which reads as
    one block of rules with its icons on the right — so the choices cannot bring their
    own surface without breaking the group. */
-function InlineChoiceRow({ T, icon, label, sub, options, value, onPick, dot = null, divider = false, editable = true, onBeginEdit = null }) {
-  const [open, setOpen] = useState(false);
+function InlineChoiceRow({ T, icon, label, sub, options, value, onPick, dot = null, divider = false, editable = true, onBeginEdit = null, open: openProp = undefined, onToggle = null }) {
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = openProp ?? uncontrolledOpen;
+  const setOpen = (next) => {
+    if (onToggle) onToggle(typeof next === "function" ? next(open) : next);
+    else setUncontrolledOpen(next);
+  };
   const optionsRef = useRef(null);
   const { box, stretch, settled } = useLiquidPill(optionsRef, [value, options.length, open]);
-  useEffect(() => { if (!editable) setOpen(false); }, [editable]);
+  useEffect(() => { if (!editable && openProp == null) setUncontrolledOpen(false); }, [editable, openProp]);
   return (
     <div style={{ borderBottom: divider ? `1px solid ${T.line}` : "none" }}>
       <button disabled={!editable} onClick={(event) => { if (!open) onBeginEdit?.(event.currentTarget); setOpen(!open); }} className="nb-tap flex items-center gap-3 px-3 py-3 w-full text-left disabled:opacity-100">

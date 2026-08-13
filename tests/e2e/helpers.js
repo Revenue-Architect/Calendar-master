@@ -91,6 +91,61 @@ export async function storedState(page) {
   return raw ? JSON.parse(raw) : null;
 }
 
+/** Snapshot one persisted event or task by id. */
+export async function storedRecord(page, kind, id) {
+  const state = await storedState(page);
+  if (!state) return null;
+  const list = kind === "task" ? state.tasks : state.events;
+  return (list ?? []).find((item) => item.id === id) ?? null;
+}
+
+/** Is the inner box fully inside the outer box on both axes? */
+export async function isContainedBy(inner, outer, axis = "both") {
+  const child = await inner.boundingBox();
+  const parent = await outer.boundingBox();
+  if (!child || !parent) return false;
+  const horizontal = child.x >= parent.x - 1 && child.x + child.width <= parent.x + parent.width + 1;
+  const vertical = child.y >= parent.y - 1 && child.y + child.height <= parent.y + parent.height + 1;
+  if (axis === "horizontal") return horizontal;
+  if (axis === "vertical") return vertical;
+  return horizontal && vertical;
+}
+
+/** The element under a point, using the page's own hit-testing. */
+export async function hitTarget(page, x, y) {
+  return page.evaluate(({ x: px, y: py }) => {
+    const node = document.elementFromPoint(px, py);
+    if (!node) return null;
+    return {
+      tag: node.tagName.toLowerCase(),
+      test: node.getAttribute("data-test"),
+      id: node.id || null,
+      role: node.getAttribute("role"),
+      name: node.getAttribute("aria-label") || node.textContent?.trim()?.slice(0, 80) || "",
+      resize: node.closest("[data-resize]")?.getAttribute("data-resize-edge") ?? null,
+      complete: Boolean(node.closest("[data-timeline-complete]")),
+      join: Boolean(node.closest("a[href]")),
+      chip: node.closest("[data-task-chip]")?.getAttribute("data-task-chip") ?? null,
+      event: node.closest("[data-event-id]")?.getAttribute("data-event-id") ?? null,
+    };
+  }, { x, y });
+}
+
+/** Dispatch a browser cancellation against the current pointer or touch. */
+export async function cancelCurrentPointer(page, kind = "pointer") {
+  await page.evaluate((type) => {
+    const target = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2) || document.body;
+    const eventName = type === "touch" ? "touchcancel" : "pointercancel";
+    const EventCtor = type === "touch" ? Event : PointerEvent;
+    const init = type === "touch"
+      ? { bubbles: true, cancelable: true }
+      : { bubbles: true, cancelable: true, pointerId: 1, pointerType: "mouse" };
+    target.dispatchEvent(new EventCtor(eventName, init));
+    window.dispatchEvent(new EventCtor(eventName, init));
+    document.dispatchEvent(new EventCtor(eventName, init));
+  }, kind);
+}
+
 /* A point the pointer can actually be at: a week column is the full 24-hour
    height and mostly scrolled out of view, so its own centre is usually off the
    screen, where `elementFromPoint` returns nothing and the drop hits no day. */
