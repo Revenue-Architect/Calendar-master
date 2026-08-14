@@ -835,6 +835,7 @@ export default function Planner() {
   const [dependencyPicker, setDependencyPicker] = useState(null);
   const [listManager, setListManager] = useState(false);
   const [viewMode, setViewMode] = useState("timeline");
+  const [viewHandoff, setViewHandoff] = useState(0);
   const [timelineFocused, setTimelineFocused] = useState(false);
   const [timelineFocusSource, setTimelineFocusSource] = useState(null);
   const timelineChromeInnerRef = useRef(null);
@@ -1296,6 +1297,18 @@ export default function Planner() {
      filter is neither, so components that mount one ask directly. */
   const reducedMotion = Boolean(preferences?.display.reducedMotion)
     || (typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
+  const selectViewMode = useCallback((mode, source = "programmatic") => {
+    /* Alternating names lets the new surface begin its opacity handoff in the
+       same render as the view change. A next-frame class would first paint the
+       replacement fully visible, then flash it back to transparent. */
+    setViewHandoff((current) => (
+      source === "pointer" && !reducedMotion && mode !== viewMode
+        ? (current === 1 ? 2 : 1)
+        : 0
+    ));
+    setViewMode(mode);
+    if (mode === "actions") setSheet(false);
+  }, [reducedMotion, viewMode]);
   const tm = (m) => fmtTime(m, clock);
 
   const navOpen = navPhase === "opening" || navPhase === "open";
@@ -3610,10 +3623,10 @@ export default function Planner() {
     { id: "new-event", label: "New event", keywords: ["create", "add", "meeting"], run: runCommand(() => setComposer({ kind: "event", start: startSlot(nowMin), dur: 60 })) },
     { id: "new-action", label: "New action", keywords: ["create", "add", "task", "todo"], run: runCommand(() => setComposer({ kind: "task" })) },
     { id: "jump-today", label: "Jump to today", keywords: ["now"], run: runCommand(() => jumpTo(todayKey)) },
-    { id: "view-day", label: "Day view", keywords: ["timeline", "zoom"], run: runCommand(() => { setViewMode("timeline"); setZoom("day"); }) },
-    { id: "view-week", label: "Week view", keywords: ["zoom", "7"], run: runCommand(() => { setViewMode("timeline"); setZoom("week"); }) },
-    { id: "view-month", label: "Month view", keywords: ["zoom", "grid"], run: runCommand(() => { setViewMode("timeline"); setMonthCursor(activeDate); setZoom("month"); }) },
-    { id: "view-agenda", label: "Agenda view", keywords: ["list", "upcoming"], run: runCommand(() => setViewMode("agenda")) },
+    { id: "view-day", label: "Day view", keywords: ["timeline", "zoom"], run: runCommand(() => { selectViewMode("timeline"); setZoom("day"); }) },
+    { id: "view-week", label: "Week view", keywords: ["zoom", "7"], run: runCommand(() => { selectViewMode("timeline"); setZoom("week"); }) },
+    { id: "view-month", label: "Month view", keywords: ["zoom", "grid"], run: runCommand(() => { selectViewMode("timeline"); setMonthCursor(activeDate); setZoom("month"); }) },
+    { id: "view-agenda", label: "Agenda view", keywords: ["list", "upcoming"], run: runCommand(() => selectViewMode("agenda")) },
     { id: "switch-theme", label: "Switch theme", keywords: ["dark", "light", "colour", "color", "appearance"], run: runCommand(() => {
       const next = THEMES[(THEMES.findIndex((theme) => theme.id === T.id) + 1) % THEMES.length];
       setPreferences((current) => current ? { ...current, display: { ...current.display, themeId: next.id } } : current);
@@ -3740,8 +3753,8 @@ export default function Planner() {
       <NavigationShell
         phase={navPhase}
         firstItemRef={navFirstItemRef}
-        onTimeline={() => { beep("tick"); setViewMode("timeline"); closeNavigation(); }}
-        onActions={() => { beep("tick"); setViewMode("actions"); setSheet(false); closeNavigation(); }}
+        onTimeline={() => { beep("tick"); selectViewMode("timeline"); closeNavigation(); }}
+        onActions={() => { beep("tick"); selectViewMode("actions"); closeNavigation(); }}
         onSetup={() => { beep("click"); setSettings(true); closeNavigation(); }}
         onNotes={() => { beep("click"); setNotebook("all"); closeNavigation(); }}
         onShortcuts={() => { beep("click"); setShortcuts(true); closeNavigation(); }}
@@ -3835,7 +3848,7 @@ export default function Planner() {
           .nb-hud-notes{display:none}
           .nb-hud-settings{display:none}
         }
-        .nb-main{padding-bottom:var(--sheet-pad);transition:padding-bottom 260ms cubic-bezier(.2,.8,.25,1)}
+        .nb-main{padding-bottom:var(--sheet-pad);transition:padding-bottom 260ms var(--motion-settle)}
         @media(min-width:1024px){
           .nb-main{padding-bottom:2rem}
           .nb-main.nb-main-day-timeline{padding-bottom:.75rem}
@@ -3962,8 +3975,15 @@ export default function Planner() {
         /* Low-frequency collections get one quiet entrance so a filter change
            does not replace the whole surface on a single frame. Four pixels is
            enough to establish continuity without making readable content travel. */
-        .nb-list-enter{animation:nb-list-enter 180ms cubic-bezier(.23,1,.32,1) both;animation-delay:calc(var(--nb-list-index, 0) * 30ms);will-change:transform,opacity}
+        .nb-list-enter{animation:nb-list-enter 180ms var(--motion-enter) both;animation-delay:calc(var(--nb-list-index, 0) * 30ms);will-change:transform,opacity}
         @keyframes nb-list-enter{from{opacity:0;transform:translate3d(0,4px,0)}to{opacity:1;transform:translate3d(0,0,0)}}
+        /* View tabs replace a complete query, so a small opacity handoff stops
+           pointer-led switches feeling like a paint flash. It deliberately has
+           no travel: this is a change of lens, not a page moving through space. */
+        .nb-view-enter-a{animation:nb-view-enter-a 140ms var(--motion-enter) both}
+        .nb-view-enter-b{animation:nb-view-enter-b 140ms var(--motion-enter) both}
+        @keyframes nb-view-enter-a{from{opacity:0}to{opacity:1}}
+        @keyframes nb-view-enter-b{from{opacity:0}to{opacity:1}}
         /* Completion is a durable state, not a toast. Keep the accent surface
            mounted after its reveal so the card remains visibly complete; the
            same interruptible clip transition reverses when the user reopens it. */
@@ -4085,8 +4105,12 @@ export default function Planner() {
            to do their own jobs. */
         .nb-timeline-lane{
           container-type:inline-size;
-          transition:left 240ms cubic-bezier(.22,.61,.36,1),width 240ms cubic-bezier(.22,.61,.36,1),scale 220ms cubic-bezier(.23,1,.32,1),opacity 160ms ease;
+          transition:left 240ms var(--motion-lane),width 240ms var(--motion-lane),scale 220ms var(--motion-enter),opacity 160ms ease;
         }
+        /* Collision layout can settle after a gesture ends. During the gesture,
+           though, the lane is the physical object under the pointer: interpolated
+           left/width geometry makes it visibly trail a line across the timeline. */
+        .nb-timeline-lane.nb-timeline-lane-active{transition:none}
         /* A shared lane is information in itself. Once a card is narrow, repeat,
            alert, conflict and time badges stop repeating that information and
            yield to the two things the card must preserve: its title and JOIN. */
@@ -4182,7 +4206,11 @@ export default function Planner() {
                 coming". Same days, same data, two questions. */}
             <PillNav T={T} ariaLabel="View mode" value={viewMode}
               options={[["timeline", "TIMELINE"], ["agenda", "AGENDA"], ["actions", "ACTIONS"]]}
-              onPick={(mode) => { beep("tick"); setViewMode(mode); if (mode === "actions") setSheet(false); }}
+              onPick={(mode, source) => {
+                if (mode === viewMode) return;
+                beep("tick");
+                selectViewMode(mode, source);
+              }}
               className="shrink-0" style={{ border: `1px solid ${T.line}` }} />
           </div>
           {zoom === "month" ? (
@@ -4416,7 +4444,7 @@ export default function Planner() {
       )}
 
       {/* ══ BODY ══ */}
-      <main className={`nb-main px-3 sm:px-5 grid grid-cols-1 lg:grid-cols-12 gap-5 flex-1 min-h-0 ${viewMode === "timeline" && zoom === "day" ? "nb-main-day-timeline" : ""} ${actionsLayout}`}
+      <main className={`nb-main px-3 sm:px-5 grid grid-cols-1 lg:grid-cols-12 gap-5 flex-1 min-h-0 ${viewMode === "timeline" && zoom === "day" ? "nb-main-day-timeline" : ""} ${actionsLayout} ${viewHandoff === 1 ? "nb-view-enter-a" : viewHandoff === 2 ? "nb-view-enter-b" : ""}`}
         style={{ "--sheet-pad": sheetPad }}>
         <section className="flex flex-col min-h-0 min-w-0" onTouchStart={onSwipeStart} onTouchMove={onSwipeMove} onTouchEnd={onSwipeEnd} onTouchCancel={onSwipeEnd}
           style={{
@@ -4429,7 +4457,7 @@ export default function Planner() {
               <div className="nb-s overflow-y-auto min-h-0 flex-1">
                 <div className="flex items-center justify-between pb-2">
                   <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label">ALL ACTIONS</span>
-                  <button onClick={() => setViewMode("timeline")} style={{ fontFamily: MONO, color: T.accentText }} className="nb-tap nb-label">BACK TO DAY</button>
+                  <button onClick={() => selectViewMode("timeline")} style={{ fontFamily: MONO, color: T.accentText }} className="nb-tap nb-label">BACK TO DAY</button>
                 </div>
                 {actionsPanel}
               </div>
@@ -4626,7 +4654,7 @@ export default function Planner() {
                     const held = gesture && gesture.id === e.id
                       && (gesture.mode === "move" || gesture.mode === "resize-end" || gesture.mode === "resize-start");
                     return (
-                      <div key={e.id} data-event-id={e.id} className="nb-timeline-lane absolute" style={{ top: top + 2, height: h, left: `${(e.lane / e.cols) * 100}%`, width: `calc(${100 / e.cols}% - 6px)`, zIndex: held ? 20 : 1, opacity: held && gesture.overDay ? 0.35 : 1, pointerEvents: "auto" }}>
+                      <div key={e.id} data-event-id={e.id} className={`nb-timeline-lane absolute ${held ? "nb-timeline-lane-active" : ""}`} style={{ top: top + 2, height: h, left: `${(e.lane / e.cols) * 100}%`, width: `calc(${100 / e.cols}% - 6px)`, zIndex: held ? 20 : 1, opacity: held && gesture.overDay ? 0.35 : 1, pointerEvents: "auto" }}>
                         <div role="button" tabIndex={0} aria-label={e.title}
                           onPointerDown={(ev) => eventDown(ev, e)} onPointerUp={(ev) => eventUp(ev, e)}
                           onKeyDown={(ev) => {
@@ -5758,12 +5786,41 @@ function NavigationShell({ phase, firstItemRef, onTimeline, onActions, onSetup, 
 
 function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, onOpenDeadline, overdue, deadlines, showOverdue, todayKey, gesture, blockersFor, onPromoteSub, smartView, viewCounts, onSmartView, lists, onManageLists, clock = "12", selection, onToggleSelect, onStartSelect, onCancelSelect, onBulk, onPullOverdue, beep, buzz, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onAddTask, onEditNote, onUnschedule, onJump, onCollapse = null }) {
   const [overdueReviewOpen, setOverdueReviewOpen] = useState(false);
+  const smartViewRef = useRef(smartView);
+  const smartViewRevealTimer = useRef(null);
+  const [smartViewRevealRows, setSmartViewRevealRows] = useState([]);
   const pullable = overdue.filter((t) => t.planned?.date !== todayKey);
   const open = tasks.filter((t) => t.status !== "completed");
   const done = tasks.filter((t) => t.status === "completed");
   useEffect(() => {
     if (!pullable.length) setOverdueReviewOpen(false);
   }, [pullable.length]);
+  useLayoutEffect(() => {
+    if (smartViewRef.current === smartView) return undefined;
+    smartViewRef.current = smartView;
+    /* The filtered rows are already in the DOM by this layout pass, but have not
+       painted. Mark only the rows actually in the Actions viewport so a person
+       who changed filter while scrolled down sees continuity where they are. */
+    const root = listRef.current;
+    const scroller = root?.closest?.(".nb-s.overflow-y-auto");
+    const viewport = scroller?.getBoundingClientRect() ?? { top: 0, bottom: window.innerHeight };
+    const visible = root
+      ? [...root.querySelectorAll("[data-task]")].filter((node) => {
+        const box = node.getBoundingClientRect();
+        return box.bottom > viewport.top && box.top < viewport.bottom;
+      })
+      : [];
+    const rows = visible.slice(0, 5).map((node) => ({ id: node.dataset.task, status: node.dataset.taskStatus }));
+    setSmartViewRevealRows(rows);
+    clearTimeout(smartViewRevealTimer.current);
+    smartViewRevealTimer.current = setTimeout(() => setSmartViewRevealRows([]), 360);
+    return undefined;
+  }, [smartView]);
+  useEffect(() => () => clearTimeout(smartViewRevealTimer.current), []);
+  const revealIndex = (task) => {
+    const index = smartViewRevealRows.findIndex((row) => row.id === task.id && row.status === task.status);
+    return index === -1 ? null : index;
+  };
   return (
     <div ref={listRef}>
       <div className="hidden lg:flex items-baseline justify-between mb-3">
@@ -5885,7 +5942,7 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
       <div className="flex flex-col gap-2">
         {open.map((t) => (
           <TaskCard key={t.id} T={T} t={t} beep={beep} buzz={buzz} target={gesture && gesture.overTask === t.id} todayKey={todayKey} blockers={blockersFor(t)} onPromoteSub={onPromoteSub} clock={clock} selection={selection} onToggleSelect={onToggleSelect} onStartSelect={onStartSelect}
-            onComplete={onComplete} onReopen={onReopen} onDefer={onDefer} onInspect={onInspect} onToggleSub={onToggleSub} onAddSub={onAddSub} onRemoveSub={onRemoveSub} onDragStart={onDragStart} onUnschedule={onUnschedule} />
+            onComplete={onComplete} onReopen={onReopen} onDefer={onDefer} onInspect={onInspect} onToggleSub={onToggleSub} onAddSub={onAddSub} onRemoveSub={onRemoveSub} onDragStart={onDragStart} onUnschedule={onUnschedule} listEnterIndex={revealIndex(t)} />
         ))}
       </div>
 
@@ -5895,7 +5952,7 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
           <div className="flex flex-col gap-2 mt-2">
             {done.map((t) => (
               <TaskCard key={t.id} T={T} t={t} beep={beep} buzz={buzz} todayKey={todayKey} blockers={blockersFor(t)} onPromoteSub={onPromoteSub} clock={clock} selection={selection} onToggleSelect={onToggleSelect} onStartSelect={onStartSelect}
-                onComplete={onComplete} onReopen={onReopen} onDefer={onDefer} onInspect={onInspect} onToggleSub={onToggleSub} onAddSub={onAddSub} onRemoveSub={onRemoveSub} onDragStart={onDragStart} onUnschedule={onUnschedule} />
+                onComplete={onComplete} onReopen={onReopen} onDefer={onDefer} onInspect={onInspect} onToggleSub={onToggleSub} onAddSub={onAddSub} onRemoveSub={onRemoveSub} onDragStart={onDragStart} onUnschedule={onUnschedule} listEnterIndex={revealIndex(t)} />
             ))}
           </div>
         </div>
@@ -5988,7 +6045,7 @@ function NoteBlock({ T, block, ordinal, onOpen }) {
   return <button onClick={onOpen} className="text-left w-full">{body}</button>;
 }
 
-function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromoteSub, clock = "12", selection = null, onToggleSelect, onStartSelect, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onUnschedule }) {
+function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromoteSub, clock = "12", selection = null, onToggleSelect, onStartSelect, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onUnschedule, listEnterIndex = null }) {
   const [prog, setProg] = useState(0);
   const [dx, setDx] = useState(0);
   const [burst, setBurst] = useState(null);
@@ -6045,7 +6102,7 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromote
   const isDone = t.status === "completed";
 
   return (
-    <div data-task={t.id} className="relative overflow-hidden" style={{ background: "transparent", borderRadius: CARD_R, boxShadow: target ? `inset 0 2px 0 ${T.accent}, var(--e1)` : "var(--e1)" }}>
+    <div data-task={t.id} data-task-status={t.status} className={`relative overflow-hidden ${listEnterIndex != null ? "nb-list-enter" : ""}`} style={{ background: "transparent", borderRadius: CARD_R, boxShadow: target ? `inset 0 2px 0 ${T.accent}, var(--e1)` : "var(--e1)", "--nb-list-index": listEnterIndex ?? undefined }}>
         <div data-test="task-completion-backdrop" className="absolute inset-0 flex items-center justify-between px-4"
           style={{ fontFamily: MONO, background: dx > 0 ? T.accent : surface, color: dx > 0 ? T.on : T.dimText, borderRadius: CARD_R }}>
           <span className="nb-data" style={{ color: T.on, opacity: dx > 20 ? 1 : 0 }}>COMPLETE</span>
@@ -7352,7 +7409,7 @@ function PillNav({ T, value, options, onPick, ariaLabel, surface = "transparent"
         const on = key === value;
         return (
           <button key={String(key)} role="tab" aria-selected={on} data-active={on ? "true" : "false"}
-            onClick={() => onPick(key)}
+            onClick={(event) => onPick(key, event.detail === 0 ? "keyboard" : "pointer")}
             className="nb-tap relative px-3 py-1 nb-label"
             style={{ color: on ? T.on : T.dim, borderRadius: 999, zIndex: 1, transition: "color 260ms ease" }}>
             {label}

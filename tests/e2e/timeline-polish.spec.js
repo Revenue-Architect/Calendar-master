@@ -319,6 +319,10 @@ test.describe("short mobile timeline density", () => {
   });
 
   test("a short meeting keeps its title when it shares a narrow lane", async ({ page }) => {
+    /* The next day must be a weekday: Standup repeats Monday through Friday,
+       and an unpinned clock eventually turned this into a Saturday fixture with
+       no Standup card to inspect. */
+    await page.clock.setFixedTime(new Date(2026, 7, 10, 9, 30, 0, 0));
     await openPlanner(page, { keepSample: true });
     await page.getByRole("button", { name: "Next day" }).click();
 

@@ -37,6 +37,27 @@ test.describe("the liquid pill", () => {
     await page.getByRole("tab", { name: "AGENDA", exact: true }).click();
     await expect(page.getByRole("tab", { name: "AGENDA", exact: true })).toHaveAttribute("aria-selected", "true");
   });
+
+  test("a pointer-selected view gets a quiet handoff while a keyboard-selected view stays immediate", async ({ page }) => {
+    await openPlanner(page);
+    const main = page.locator("main.nb-main");
+
+    await page.getByRole("tab", { name: "AGENDA", exact: true }).click();
+    await expect(main).toHaveClass(/nb-view-enter-[ab]/);
+
+    await page.getByRole("tab", { name: "ACTIONS", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("tab", { name: "ACTIONS", exact: true })).toHaveAttribute("aria-selected", "true");
+    await expect(main).not.toHaveClass(/nb-view-enter/);
+
+    await page.getByRole("tab", { name: "AGENDA", exact: true }).click();
+    await expect(main).toHaveClass(/nb-view-enter-[ab]/);
+    await page.keyboard.press("ControlOrMeta+k");
+    await page.getByTestId("palette-input").fill("Day view");
+    await page.getByText("Day view", { exact: true }).click();
+    await expect(page.getByRole("tab", { name: "TIMELINE", exact: true })).toHaveAttribute("aria-selected", "true");
+    await expect(main).not.toHaveClass(/nb-view-enter/);
+  });
 });
 
 test.describe("adjacent weekdays", () => {

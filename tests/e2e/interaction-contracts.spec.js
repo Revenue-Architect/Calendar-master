@@ -99,6 +99,48 @@ test.describe("short Event resize", () => {
 });
 
 test.describe("Action exclusive owners", () => {
+  test("active Event moves and Event or Action resizes never interpolate lane layout", async ({ page }) => {
+    await seedPlanner(page, notebook());
+    const noLayoutTransition = async (lane, label) => {
+      const properties = await lane.evaluate((node) => getComputedStyle(node).transitionProperty);
+      expect(properties, `${label} must not interpolate left geometry under the pointer`).not.toContain("left");
+      expect(properties, `${label} must not interpolate width geometry under the pointer`).not.toContain("width");
+    };
+
+    const event = page.locator('[data-event-id="evt-short"]');
+    await event.scrollIntoViewIfNeeded();
+    const eventBox = await event.boundingBox();
+    await page.mouse.move(eventBox.x + eventBox.width / 2, eventBox.y + eventBox.height / 2);
+    await page.mouse.down();
+    await page.waitForTimeout(360);
+    await page.mouse.move(eventBox.x + eventBox.width / 2, eventBox.y + 42, { steps: 6 });
+    await expect(event).toHaveClass(/nb-timeline-lane-active/);
+    await noLayoutTransition(event, "active Event move");
+    await page.mouse.up();
+    await expect.poll(() => event.evaluate((node) => getComputedStyle(node).transitionProperty)).toContain("left");
+    await expect.poll(() => event.evaluate((node) => getComputedStyle(node).transitionProperty)).toContain("width");
+
+    const eventGrip = event.locator('[data-resize-edge="end"]');
+    const eventGripBox = await eventGrip.boundingBox();
+    await page.mouse.move(eventGripBox.x + eventGripBox.width / 2, eventGripBox.y + eventGripBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(eventGripBox.x + eventGripBox.width / 2, eventGripBox.y + 28, { steps: 4 });
+    await expect(event).toHaveClass(/nb-timeline-lane-active/);
+    await noLayoutTransition(event, "active Event resize");
+    await page.mouse.up();
+
+    const actionGrip = page.getByTestId("timeline-action-resize");
+    await actionGrip.scrollIntoViewIfNeeded();
+    const actionGripBox = await actionGrip.boundingBox();
+    await page.mouse.move(actionGripBox.x + actionGripBox.width / 2, actionGripBox.y + actionGripBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(actionGripBox.x + actionGripBox.width / 2, actionGripBox.y + 28, { steps: 4 });
+    const actionLane = page.getByTestId("timeline-action-lane");
+    await expect(actionLane).toHaveClass(/nb-timeline-lane-active/);
+    await noLayoutTransition(actionLane, "active Action resize");
+    await page.mouse.up();
+  });
+
   test("the bottom edge resizes estimate instead of moving or completing", async ({ page }) => {
     await seedPlanner(page, notebook());
     const grip = page.getByTestId("timeline-action-resize");

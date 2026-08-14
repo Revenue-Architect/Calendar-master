@@ -228,6 +228,15 @@ test.describe("the actions column", () => {
     const dropPreview = page.getByTestId("timeline-drop-preview");
     await expect(dropPreview).toBeVisible();
     expect(await dropPreview.evaluate((node) => getComputedStyle(node).zIndex), "the landing guide must sit behind cards").toBe("0");
+
+    /* A lane can settle into a collision after a drag, but the lane currently
+       under the pointer must follow the pointer exactly. Interpolating its
+       left/width geometry makes a visible trailing rule race across the card. */
+    const lane = page.getByTestId("timeline-action-lane");
+    await expect(lane).toHaveClass(/nb-timeline-lane-active/);
+    const activeProperties = await lane.evaluate((node) => getComputedStyle(node).transitionProperty);
+    expect(activeProperties, "an active Action lane must not interpolate left geometry").not.toContain("left");
+    expect(activeProperties, "an active Action lane must not interpolate width geometry").not.toContain("width");
     await page.mouse.up();
   });
 
@@ -309,6 +318,20 @@ test.describe("the actions column", () => {
     expect(motion.name).toBe("nb-list-enter");
     expect(motion.duration).toBe("0.18s");
     expect(motion.transform).toMatch(/^(none|matrix\(1, 0, 0, 1, 0, [0-9.]+\))$/);
+  });
+
+  test("changing an Actions smart view reveals only its replacement rows", async ({ page }) => {
+    const state = scheduledAction({ id: "task-today-motion", title: "Today action" });
+    const inbox = createTask(state.tasks, {
+      id: "task-inbox-motion", title: "Inbox action",
+      planned: { date: null, startMinute: null, estimateMinutes: null },
+    });
+    await seedPlanner(page, { ...state, tasks: inbox.tasks });
+    await page.getByRole("tab", { name: "ACTIONS", exact: true }).click();
+
+    await page.getByRole("button", { name: /INBOX/ }).click();
+    const replacement = page.locator('[data-task="task-inbox-motion"]');
+    await expect(replacement).toHaveClass(/nb-list-enter/);
   });
 
   test("every open Action exposes Add a step immediately", async ({ page }) => {
