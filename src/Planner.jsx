@@ -4088,7 +4088,7 @@ export default function Planner() {
         /* The notch morph: one object changing shape, rather than a panel fading
            in. Shape and contents stay on one compositor path at full opacity;
            the animated clip itself reveals and conceals what belongs inside. */
-        .nb-fluid[data-fluid-origin="notch"]{animation-name:nbnotchin;animation-duration:300ms;animation-timing-function:cubic-bezier(.23,1,.32,1)}
+        .nb-fluid[data-fluid-origin="notch"]{animation-name:nbnotchin;animation-duration:360ms;animation-timing-function:cubic-bezier(.23,1,.32,1)}
         @keyframes nbnotchin{
           0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round 999px)}
           100%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px round 24px)}
@@ -4098,8 +4098,8 @@ export default function Planner() {
            composer is already mounted below it. The sheet itself still does all
            of the travelling and clipping, so readable form controls never scale
            or fade independently. */
-        .nb-notch-surface{position:absolute;inset:0;z-index:8;display:flex;align-items:center;justify-content:center;pointer-events:none;opacity:0;background:var(--nb-notch-surface-background);color:var(--nb-notch-surface-color);border-radius:inherit;font-family:var(--nb-notch-surface-font);font-size:.75rem;font-weight:700;letter-spacing:.1em;animation:nbnotchsurfaceout 180ms cubic-bezier(.23,1,.32,1) 72ms both;will-change:opacity}
-        @keyframes nbnotchsurfaceout{0%,28%{opacity:1}100%{opacity:0}}
+        .nb-notch-surface{position:absolute;inset:0;z-index:8;display:flex;align-items:center;justify-content:center;pointer-events:none;opacity:0;background:var(--nb-notch-surface-background);color:var(--nb-notch-surface-color);border-radius:inherit;font-family:var(--nb-notch-surface-font);font-size:.75rem;font-weight:700;letter-spacing:.1em;animation:nbnotchsurfaceout 360ms cubic-bezier(.23,1,.32,1) both;will-change:opacity}
+        @keyframes nbnotchsurfaceout{0%,42%{opacity:1}76%,100%{opacity:0}}
         .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"]{animation:nbnotchout 260ms cubic-bezier(.4,0,.3,1) forwards}
         @keyframes nbnotchout{
           0%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px round 24px)}
@@ -4720,6 +4720,7 @@ export default function Planner() {
                     const pct = live ? ((nowMin - e.start) / e.dur) * 100 : 0;
                     const held = gesture && gesture.id === e.id
                       && (gesture.mode === "move" || gesture.mode === "resize-end" || gesture.mode === "resize-start");
+                    const joinUrl = normalizeMeetingLink(e.link);
                     return (
                       <div key={e.id} data-event-id={e.id} className={`nb-timeline-lane absolute ${held ? "nb-timeline-lane-active" : "nb-hover-tile"}`} style={{ top: top + 2, height: h, left: `${(e.lane / e.cols) * 100}%`, width: `calc(${100 / e.cols}% - 6px)`, zIndex: held ? 20 : 1, opacity: held && gesture.overDay ? 0.35 : 1, pointerEvents: "auto" }}>
                         <div role="button" tabIndex={0} aria-label={e.title}
@@ -4754,7 +4755,7 @@ export default function Planner() {
                               <span className="absolute inset-y-0" style={{ right: 0, width: 2, background: T.accent }} />
                             </span>
                           )}
-                          <div className={`relative pl-2.5 pr-2.5 ${h < 28 ? "h-full py-0" : "py-1.5"}`}>
+                          <div className={`relative pl-2.5 pr-2.5 ${h < 28 ? "h-full py-0" : "py-1.5"}`} style={{ paddingRight: joinUrl ? 64 : undefined }}>
                             <div className={`nb-event-row flex items-center gap-2 ${h < 28 ? "h-full" : ""}`}>
                               {/* the category dot is the card's only colour, so it stays
                                   legible at 22px height where a left rail would vanish */}
@@ -4762,15 +4763,12 @@ export default function Planner() {
                               <span title={e.title} className="nb-lead min-w-0 truncate flex-1">{e.title}</span>
                               {conflictIds.has(e.id) && <span title="Overlaps another event" style={{ color: NOW_RED }} className="nb-event-secondary shrink-0"><WarningIcon /></span>}
                               {e.repeat && <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-event-secondary shrink-0"><RepeatIcon /></span>}
-                              {normalizeMeetingLink(e.link) && (
-                                <span aria-hidden="true" className="inline-flex items-center gap-1 text-xs font-bold tracking-widest shrink-0 opacity-0 pointer-events-none">JOIN <ExternalLinkIcon /></span>
-                              )}
                               {e.alerts && e.alerts.length > 0 && (
                                 <span style={{ color: T.dimText }} className="nb-event-secondary shrink-0" title="Has a reminder"><BellIcon /></span>
                               )}
                               {live && <span style={{ fontFamily: MONO, background: T.accent, color: T.on, borderRadius: 4 }} className="nb-event-secondary shrink-0 px-1 nb-data">{Math.round(pct)}%</span>}
                               {held && <span style={{ fontFamily: MONO, background: T.accent, color: T.on, borderRadius: 4 }} className="shrink-0 px-1 nb-data">{gesture.overDay ? fmtDay(gesture.overDay) : tm(e.start)}</span>}
-                              {!held && !live && h < 38 && <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-event-secondary nb-data shrink-0">{tm(e.start)} → {tm(e.start + e.dur)}</span>}
+                              {!held && !live && h < 38 && <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-event-secondary nb-event-short-time nb-data min-w-0 truncate shrink-0">{tm(e.start)} → {tm(e.start + e.dur)}</span>}
                             </div>
                             {h >= 38 && (
                               <span style={{ fontFamily: MONO, color: T.dimText }} className="block nb-data truncate mt-0.5 pl-4">
@@ -4808,8 +4806,8 @@ export default function Planner() {
                             <span style={{ background: T.faint, width: 22, height: 2, marginBottom: 3, borderRadius: 2 }} />
                           </div>
                         </div>
-                        {normalizeMeetingLink(e.link) && (
-                          <a href={normalizeMeetingLink(e.link)} target="_blank" rel="noopener noreferrer" draggable={false} data-join={e.id}
+                        {joinUrl && (
+                          <a href={joinUrl} target="_blank" rel="noopener noreferrer" draggable={false} data-join={e.id}
                             onPointerDownCapture={(ev) => ev.stopPropagation()}
                             onPointerUpCapture={(ev) => ev.stopPropagation()}
                             onPointerCancel={(ev) => ev.stopPropagation()}
@@ -4817,7 +4815,7 @@ export default function Planner() {
                             onTouchEnd={(ev) => ev.stopPropagation()}
                             onClick={(ev) => ev.stopPropagation()}
                             aria-label={`Join ${e.title}`}
-                            className="absolute inset-y-0 right-1 z-20 inline-flex items-center gap-1 px-1.5 text-xs font-bold leading-none tracking-widest"
+                            className="absolute inset-y-0 right-1 z-20 inline-flex w-14 items-center justify-center gap-1 text-xs font-bold leading-none tracking-widest"
                             style={{ fontFamily: MONO, color: T.accentText }}>
                             JOIN <ExternalLinkIcon />
                           </a>
@@ -7834,7 +7832,7 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
     window.addEventListener("scroll", restorePageScroll, true);
     const unlock = window.setTimeout(() => window.removeEventListener("scroll", restorePageScroll, true), 480);
     /* `nb-sheet-h` transitions height, and it used to switch on one frame into
-       the notch's own 300ms morph — two curves animating the same box, which is
+       the notch's own 360ms morph — two curves animating the same box, which is
        the bounce. The height transition waits until the shape has finished
        arriving. */
     return () => {

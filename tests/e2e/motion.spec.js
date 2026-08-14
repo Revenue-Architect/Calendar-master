@@ -175,14 +175,21 @@ test.describe("the notch morph", () => {
     await expect(surface).toHaveText("NEW");
     await expect(trigger).toHaveCSS("visibility", "hidden");
 
-    const openingOpacity = await surface.evaluate((node) => {
+    const materialSamples = await surface.evaluate((node) => {
       const animation = node.getAnimations().find((candidate) => candidate.effect?.getTiming);
-      if (!animation) return -1;
+      if (!animation) return null;
+      const duration = Number(animation.effect.getTiming().duration);
       animation.pause();
-      animation.currentTime = 0;
-      return Number(getComputedStyle(node).opacity);
+      const at = (fraction) => {
+        animation.currentTime = duration * fraction;
+        return Number(getComputedStyle(node).opacity);
+      };
+      return { start: at(0), held: at(.4), handedOff: at(.9) };
     });
-    expect(openingOpacity, "the visible material must start as the pressed NEW button").toBeGreaterThanOrEqual(.99);
+    expect(materialSamples, "the source material must animate with the composer").not.toBeNull();
+    expect(materialSamples.start, "the visible material must start as the pressed NEW button").toBeGreaterThanOrEqual(.99);
+    expect(materialSamples.held, "the source material must remain visible through the early morph").toBeGreaterThanOrEqual(.99);
+    expect(materialSamples.handedOff, "the composer must own the surface by the end of the morph").toBeLessThanOrEqual(.01);
 
     await page.keyboard.press("Escape");
     await expect(sheet).toHaveCount(0, { timeout: 3000 });
