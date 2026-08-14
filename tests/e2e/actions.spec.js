@@ -540,6 +540,36 @@ test.describe("the actions column", () => {
     await expect(chip.getByTestId("timeline-action-subtasks")).toContainText("1 SUBTASK");
   });
 
+  test.describe("on a mobile Timeline sheet", () => {
+    test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+    test("offers a visible touch-sized way to convert a checklist item to a subtask", async ({ page }) => {
+      const action = scheduledAction({ id: "task-mobile-promote", title: "Prepare the mobile release" });
+      action.tasks[0].checklist = [
+        { id: "step-mobile-promote", title: "Confirm the checklist", done: false, order: 0, completedAt: null },
+      ];
+      await seedPlanner(page, action);
+
+      const chip = page.locator('[data-task-chip="task-mobile-promote"]');
+      await chip.scrollIntoViewIfNeeded();
+      await chip.click();
+
+      const sheet = page.getByTestId("sheet");
+      const promote = sheet.getByRole("button", { name: "Convert step to a subtask" });
+      await expect(promote).toBeVisible();
+      await expect(promote).toHaveText("MAKE SUBTASK");
+      await expect(promote).toHaveCSS("min-height", "44px");
+
+      await promote.click();
+      await settledState(
+        page,
+        (stored) => stored.tasks.some((task) => task.parentTaskId === "task-mobile-promote" && task.title === "Confirm the checklist"),
+        "mobile Timeline promotion did not create a child Action",
+      );
+      await expect(sheet.getByTestId("task-subtask")).toContainText("Confirm the checklist");
+    });
+  });
+
   test("a short Timeline Action keeps its subtask count in the title row", async ({ page }) => {
     const action = scheduledAction({ id: "task-short-child", title: "Call the client" });
     action.tasks[0].planned.estimateMinutes = 15;

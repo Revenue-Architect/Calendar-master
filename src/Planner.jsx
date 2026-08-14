@@ -5102,9 +5102,15 @@ export default function Planner() {
                     </button>
                     <span className="flex-1 text-sm truncate" style={{ textDecoration: item.done ? "line-through" : "none", color: item.done ? T.dim : T.text }}>{item.title}</span>
                     {/* Structure edits write to the record immediately rather than the
-                        draft, so they stay behind the editing state — otherwise Revert
-                        would appear to cover a change it cannot take back. */}
-                    {detailEditing && !inspectIsSubtask && <button onClick={() => promoteSub(inspect.id, item.id)} style={{ color: T.dimText }} className="text-xs px-1" aria-label="Convert step to a subtask" title="Turn this checklist item into tracked child work"><ArrowUpIcon /></button>}
+                        draft, so they must not imply that Revert can undo them. The
+                        Timeline sheet opens in reading mode, though, so mobile gets a
+                        labeled control here instead of hiding the capability behind the
+                        header's EDIT ACTION affordance. */}
+                    {!inspectIsSubtask && <button type="button" onClick={() => promoteSub(inspect.id, item.id)}
+                      style={{ color: T.dimText, background: T.faint }}
+                      className="nb-tap inline-flex min-h-11 shrink-0 items-center rounded-full px-3 text-[10px] font-bold tracking-[.08em] sm:hidden"
+                      aria-label="Convert step to a subtask" title="Turn this checklist item into tracked child work">MAKE SUBTASK</button>}
+                    {detailEditing && !inspectIsSubtask && <button type="button" onClick={() => promoteSub(inspect.id, item.id)} style={{ color: T.dimText }} className="nb-tap nb-hover-icon hidden h-11 w-11 shrink-0 items-center justify-center sm:inline-flex" aria-label="Convert step to a subtask" title="Turn this checklist item into tracked child work"><ArrowUpIcon /></button>}
                     {detailEditing && <button onClick={() => removeSub(inspect.id, item.id)} style={{ color: T.dimText }} className="text-xs px-1" aria-label="Remove step"><CloseIcon /></button>}
                   </div>
                 ))}
