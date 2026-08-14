@@ -3474,6 +3474,12 @@ export default function Planner() {
       ? inspectExitSnapshot.item
       : null
   );
+  const inspectIsSubtask = inspect?.kind === "task" && Boolean(inspectRecord?.parentTaskId);
+  const inspectParentTask = inspectIsSubtask
+    ? db?.tasks.find((task) => task.id === inspectRecord.parentTaskId) ?? null
+    : null;
+  const inspectSheetTitle = inspect?.kind === "event" ? "EVENT" : inspectIsSubtask ? "SUBTASK" : "ACTION";
+  const inspectEditLabel = inspect?.kind === "event" ? "EDIT EVENT" : inspectIsSubtask ? "EDIT SUBTASK" : "EDIT ACTION";
   const inspectBlockers = inspect && inspect.kind === "task" && db
     ? getTaskBlockers(db.tasks, parseTaskOccurrenceId(inspect.id).seriesId)
     : [];
@@ -5017,11 +5023,11 @@ export default function Planner() {
 
       {/* ══ INSPECTOR ══ */}
       {inspectRecord && (
-        <Sheet T={T} title={inspect.kind === "event" ? "EVENT" : "ACTION"}
+        <Sheet T={T} title={inspectSheetTitle}
           closeSignal={sheetCloseSignals.inspect}
           headerAction={(
             <FluidEditActions T={T} editing={detailEditing} dirty={hasDetailDraft(draft)}
-              label={inspect.kind === "event" ? "EDIT EVENT" : "EDIT ACTION"}
+              label={inspectEditLabel}
               onEdit={() => { beep("click"); setDetailEditing(true); setInspectField(null); }}
               onRevert={() => { beep("abort"); setDraft(null); setDetailEditing(false); setInspectField(null); }}
               onSave={() => { beep("commit"); commitDraft(); }} />
@@ -5043,8 +5049,27 @@ export default function Planner() {
                   {(db.taskLists.find((l) => l.id === inspectDraft.listId) || {}).name || "—"} · {inspectDraft.category}
                 </span>
               </div>
+              {inspectIsSubtask && (
+                <button type="button" onClick={() => {
+                  if (!inspectParentTask) return;
+                  beep("click");
+                  setDraft(null);
+                  setDetailEditing(false);
+                  setInspectField(null);
+                  setInspect({ kind: "task", id: inspectParentTask.id });
+                }} disabled={!inspectParentTask}
+                  aria-label={inspectParentTask ? `Open parent action ${inspectParentTask.title}` : "Parent action unavailable"}
+                  className="nb-tap nb-hover-control mt-3 flex max-w-full items-center gap-2 text-left disabled:opacity-60"
+                  style={{ color: T.dimText }}>
+                  <span style={{ fontFamily: MONO }} className="nb-label shrink-0">PART OF</span>
+                  <span className="truncate text-sm" style={{ color: inspectParentTask ? T.text : T.dimText }}>{inspectParentTask?.title ?? "PARENT ACTION UNAVAILABLE"}</span>
+                </button>
+              )}
 
-              <div className="flex flex-col gap-1.5 mt-4">
+              <section aria-label="Checklist" className="flex flex-col gap-1.5 mt-4">
+                {((inspectDraft.checklist ?? []).length > 0 || inspectDraft.status !== "completed") && (
+                  <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data">CHECKLIST</span>
+                )}
                 {inspectDraft.status !== "completed" && <InlineAdd T={T} surface={surface} onAdd={(v) => addSub(inspect.id, v)} />}
                 {(inspectDraft.checklist ?? []).map((item) => (
                   <div key={item.id} className="flex items-center gap-3 px-3 py-2.5" style={{ background: surface, borderRadius: 999 }}>
@@ -5061,11 +5086,11 @@ export default function Planner() {
                     {/* Structure edits write to the record immediately rather than the
                         draft, so they stay behind the editing state — otherwise Revert
                         would appear to cover a change it cannot take back. */}
-                    {detailEditing && <button onClick={() => promoteSub(inspect.id, item.id)} style={{ color: T.dimText }} className="text-xs px-1" aria-label="Promote step to a subtask"><ArrowUpIcon /></button>}
+                    {detailEditing && !inspectIsSubtask && <button onClick={() => promoteSub(inspect.id, item.id)} style={{ color: T.dimText }} className="text-xs px-1" aria-label="Convert step to a subtask" title="Turn this checklist item into tracked child work"><ArrowUpIcon /></button>}
                     {detailEditing && <button onClick={() => removeSub(inspect.id, item.id)} style={{ color: T.dimText }} className="text-xs px-1" aria-label="Remove step"><CloseIcon /></button>}
                   </div>
                 ))}
-              </div>
+              </section>
 
               {(inspectDraft.checklist ?? []).length > 0 && (() => {
                 const checklistDone = inspectDraft.checklist.filter((x) => x.done).length;
@@ -6105,6 +6130,7 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], subtasks 
   const [prog, setProg] = useState(0);
   const [dx, setDx] = useState(0);
   const [burst, setBurst] = useState(null);
+  const [quickStepOpen, setQuickStepOpen] = useState(false);
   const raf = useRef(null), t0 = useRef(0), lastTick = useRef(0), holding = useRef(false);
   const sw = useRef(null);
 
@@ -6156,6 +6182,7 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], subtasks 
   const subDone = checklist.filter((s) => s.done).length;
   const dueLeft = t.deadline.date ? diffDays(t.deadline.date, todayKey) : null;
   const isDone = t.status === "completed";
+  const showChecklistComposer = checklist.length > 0 || subtasks.length === 0 || quickStepOpen;
 
   return (
     <div data-task={t.id} data-task-status={t.status} className={`relative overflow-hidden ${listEnterIndex != null ? "nb-list-enter" : ""}`} style={{ background: "transparent", borderRadius: CARD_R, boxShadow: target ? `inset 0 2px 0 ${T.accent}, var(--e1)` : "var(--e1)", "--nb-list-index": listEnterIndex ?? undefined }}>
@@ -6235,10 +6262,16 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], subtasks 
               className="nb-tap shrink-0 w-7 h-8 flex items-center justify-center text-xs" aria-label="Drag to schedule, reorder, or move to another day"><GripIcon /></button>
         </div>
 
-        {!isDone && (
-          <div data-test="task-add-step" className={`pl-8 pr-3 ${checklist.length > 0 ? "pb-3" : "pt-1 pb-2"}`}>
-            <div className="pl-3" style={{ borderLeft: `2px solid ${T.faint}` }}>
-              <SubComposer T={T} onAdd={(v) => onAddSub(t.id, v)} />
+        {!isDone && showChecklistComposer && (
+          <section data-test="task-checklist" aria-label="Checklist" className={`pl-8 pr-3 ${checklist.length > 0 ? "pb-3" : "pt-1 pb-2"}`}>
+            <div data-test="task-add-step" className="pl-3" style={{ borderLeft: `2px solid ${T.faint}` }}>
+              {(checklist.length > 0 || quickStepOpen) && (
+                <div style={{ fontFamily: MONO, color: T.dimText }} className="flex items-center gap-2 pt-0.5 nb-data">
+                  <span>CHECKLIST</span>
+                  {checklist.length > 0 && <span>{subDone}/{checklist.length}</span>}
+                </div>
+              )}
+              <SubComposer T={T} autoFocus={quickStepOpen && checklist.length === 0} onAdd={(v) => onAddSub(t.id, v)} />
               {checklist.map((s) => (
                 <div key={s.id} className="nb-row flex items-center gap-2 w-full py-1.5">
                   <button onClick={() => {
@@ -6254,11 +6287,19 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], subtasks 
                     <span className="w-3 h-3 shrink-0" style={{ background: s.done ? T.accent : "transparent", boxShadow: `inset 0 0 0 1px ${s.done ? T.accent : T.faint}` }} />
                     <span className="text-xs" style={{ textDecoration: s.done ? "line-through" : "none", color: s.done ? T.dim : T.text }}>{s.title}</span>
                   </button>
-                  <button onClick={() => onPromoteSub(t.id, s.id)} style={{ color: T.dimText }} className="text-xs px-1" aria-label="Promote step to a subtask" title="Needs its own planning? Promote to a subtask"><ArrowUpIcon /></button>
+                  <button onClick={() => onPromoteSub(t.id, s.id)} style={{ color: T.dimText }} className="text-xs px-1" aria-label="Convert step to a subtask" title="Turn this checklist item into tracked child work"><ArrowUpIcon /></button>
                   <button onClick={() => onRemoveSub(t.id, s.id)} style={{ color: T.dimText }} className="text-xs px-1" aria-label="Remove step"><CloseIcon /></button>
                 </div>
               ))}
             </div>
+          </section>
+        )}
+        {!isDone && checklist.length === 0 && subtasks.length > 0 && !quickStepOpen && (
+          <div className="mx-3 mb-2">
+            <button type="button" onClick={() => setQuickStepOpen(true)}
+              className="nb-tap nb-hover-control py-1 nb-label" style={{ color: T.dimText }}>
+              + QUICK STEP
+            </button>
           </div>
         )}
         <PromotedSubtasks T={T} subtasks={subtasks}
@@ -6275,30 +6316,35 @@ function PromotedSubtasks({ T, subtasks, onComplete, onReopen, onOpen, className
   if (!subtasks.length) return null;
   const done = subtasks.filter((task) => task.status === "completed").length;
   return (
-    <div data-test="task-subtasks" className={`mx-3 mb-3 pl-3 ${className}`} style={{ borderLeft: `2px solid ${T.faint}` }}>
+    <section data-test="task-subtasks" aria-label={`Subtasks, ${done} of ${subtasks.length} complete`} className={`mx-3 mb-3 pl-3 ${className}`} style={{ borderLeft: `2px solid ${T.accent}` }}>
       <div style={{ fontFamily: MONO, color: T.dimText }} className="flex items-center gap-2 pb-1 pt-0.5 nb-data">
         <span>SUBTASKS</span>
         <span>{done}/{subtasks.length}</span>
       </div>
       {subtasks.map((subtask) => {
         const complete = subtask.status === "completed";
+        const status = complete ? "DONE" : subtask.status === "waiting" ? "WAITING" : subtask.status === "in_progress" ? "DOING" : null;
         return (
-          <div key={subtask.id} data-test="task-subtask" data-subtask-id={subtask.id} className="flex min-w-0 items-center gap-2 py-1">
+          <div key={subtask.id} data-test="task-subtask" data-subtask-id={subtask.id} className="flex min-w-0 items-center gap-2 px-1.5 py-1.5" style={{ background: T.card, border: `1px solid ${T.line}`, borderRadius: 10 }}>
             <button type="button" aria-label={complete ? `Reopen ${subtask.title}` : `Complete ${subtask.title}`}
               onPointerDown={(event) => event.stopPropagation()}
               onClick={(event) => { event.stopPropagation(); (complete ? onReopen : onComplete)(subtask.id); }}
               className="nb-hover-icon flex h-6 w-6 shrink-0 items-center justify-center" style={{ color: T.accent }}>
-              <span aria-hidden="true" className="h-3 w-3" style={{ background: complete ? T.accent : "transparent", boxShadow: `inset 0 0 0 1px ${complete ? T.accent : T.faint}` }} />
+              <span aria-hidden="true" className="h-3 w-3 rounded-full" style={{ background: complete ? T.accent : "transparent", boxShadow: `inset 0 0 0 1px ${complete ? T.accent : T.faint}` }} />
             </button>
             <button type="button" onPointerDown={(event) => event.stopPropagation()}
               onClick={(event) => { event.stopPropagation(); onOpen(subtask.id); }}
               className="nb-hover-control min-w-0 flex-1 py-1 text-left">
               <span className="block truncate text-xs" style={{ color: complete ? T.dim : T.text, textDecoration: complete ? "line-through" : "none" }}>{subtask.title}</span>
+              <span style={{ fontFamily: MONO, color: T.dimText }} className="mt-0.5 flex items-center gap-1.5 nb-label">
+                <span>SUBTASK</span>
+                {status && <span data-test="task-subtask-status">{status}</span>}
+              </span>
             </button>
           </div>
         );
       })}
-    </div>
+    </section>
   );
 }
 
@@ -7810,13 +7856,13 @@ function NewListField({ T, onAdd }) {
   );
 }
 
-function SubComposer({ T, onAdd }) {
+function SubComposer({ T, onAdd, autoFocus = false }) {
   const [v, setV] = useState("");
   const go = () => { if (v.trim()) { onAdd(v.trim()); setV(""); } };
   return (
     <div className="flex items-center gap-2 py-1.5">
       <span className="w-3 h-3 shrink-0" style={{ boxShadow: `inset 0 0 0 1px ${T.faint}` }} />
-      <input value={v} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => e.key === "Enter" && go()} placeholder="Add a step" style={{ background: "transparent", border: "none" }} className="flex-1 text-xs py-0.5" />
+      <input autoFocus={autoFocus} value={v} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => e.key === "Enter" && go()} placeholder="Add a step" style={{ background: "transparent", border: "none" }} className="flex-1 text-xs py-0.5" />
       {v.trim() && <button onClick={go} style={{ fontFamily: MONO, color: T.accentText }} className="nb-label">ADD</button>}
     </div>
   );

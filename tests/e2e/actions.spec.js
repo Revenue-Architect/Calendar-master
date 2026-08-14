@@ -343,6 +343,24 @@ test.describe("the actions column", () => {
     await expect(card.getByPlaceholder("Add a step")).toBeVisible();
   });
 
+  test("a parent with only subtasks hides its empty checklist until Quick Step is chosen", async ({ page }) => {
+    const action = scheduledAction({ id: "task-child-only", title: "Plan the launch" });
+    action.tasks = createTask(action.tasks, {
+      id: "task-child-only-research", title: "Confirm the audience", parentTaskId: "task-child-only",
+    }).tasks;
+    await seedPlanner(page, action);
+    await page.getByRole("tab", { name: "ACTIONS", exact: true }).click();
+
+    const parent = page.locator('[data-task="task-child-only"]');
+    await expect(parent.getByTestId("task-add-step")).toHaveCount(0);
+    await expect(parent.getByRole("button", { name: "+ QUICK STEP" })).toBeVisible();
+
+    await parent.getByRole("button", { name: "+ QUICK STEP" }).click();
+    await expect(parent.getByTestId("task-add-step")).toBeVisible();
+    await expect(parent.getByPlaceholder("Add a step")).toBeVisible();
+    await expect(parent.getByPlaceholder("Add a step")).toBeFocused();
+  });
+
   test("Add a step precedes existing steps in the full-screen Actions view", async ({ page }) => {
     const action = scheduledAction({ id: "task-step-order", title: "Ordered checklist" });
     action.tasks[0].checklist = [
@@ -362,6 +380,46 @@ test.describe("the actions column", () => {
     expect(order).toBe("add-first");
   });
 
+  test("a parent separates checklist steps from tracked subtasks", async ({ page }) => {
+    const action = scheduledAction({ id: "task-hierarchy-groups", title: "Prepare the demo" });
+    action.tasks[0].checklist = [
+      { id: "step-hierarchy", title: "Collect screenshots", done: false, order: 0, completedAt: null },
+    ];
+    action.tasks = createTask(action.tasks, {
+      id: "task-hierarchy-child", title: "Write the talk track", parentTaskId: "task-hierarchy-groups", status: "waiting",
+    }).tasks;
+    await seedPlanner(page, action);
+    await page.getByRole("tab", { name: "ACTIONS", exact: true }).click();
+
+    const parent = page.locator('[data-task="task-hierarchy-groups"]');
+    await expect(parent.getByTestId("task-checklist")).toContainText("CHECKLIST");
+    await expect(parent.getByTestId("task-subtasks")).toContainText("SUBTASKS");
+    await expect(parent.getByTestId("task-subtask")).toContainText("WAITING");
+    await expect(parent.getByRole("button", { name: "Convert step to a subtask" })).toBeVisible();
+  });
+
+  test("a subtask inspector names its parent and does not offer a second hierarchy level", async ({ page }) => {
+    const action = scheduledAction({ id: "task-inspect-parent", title: "Ship the workshop" });
+    action.tasks = createTask(action.tasks, {
+      id: "task-inspect-child", title: "Confirm the speakers", parentTaskId: "task-inspect-parent",
+      checklist: [{ id: "child-step", title: "Check biographies", done: false, order: 0, completedAt: null }],
+    }).tasks;
+    await seedPlanner(page, action);
+    await page.getByRole("tab", { name: "ACTIONS", exact: true }).click();
+
+    const parent = page.locator('[data-task="task-inspect-parent"]');
+    await parent.getByTestId("task-subtask").locator("button").nth(1).click();
+
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).toHaveAttribute("data-sheet-title", "SUBTASK");
+    await expect(sheet.getByRole("button", { name: "Open parent action Ship the workshop" })).toBeVisible();
+    await sheet.getByRole("button", { name: "EDIT SUBTASK" }).click();
+    await expect(sheet.getByRole("button", { name: "Convert step to a subtask" })).toHaveCount(0);
+
+    await sheet.getByRole("button", { name: "Open parent action Ship the workshop" }).click();
+    await expect(sheet).toHaveAttribute("data-sheet-title", "ACTION");
+  });
+
   test("a promoted checklist step remains visible beneath its parent Action", async ({ page }) => {
     const action = scheduledAction({ id: "task-promote", title: "Prepare the workshop" });
     action.tasks[0].checklist = [
@@ -371,7 +429,7 @@ test.describe("the actions column", () => {
     await page.getByRole("tab", { name: "ACTIONS", exact: true }).click();
 
     const parent = page.locator('[data-task="task-promote"]');
-    await parent.getByRole("button", { name: "Promote step to a subtask" }).click();
+    await parent.getByRole("button", { name: "Convert step to a subtask" }).click();
 
     const state = await settledState(
       page,
@@ -408,7 +466,7 @@ test.describe("the actions column", () => {
     await chip.click();
     const sheet = page.getByTestId("sheet");
     await sheet.getByRole("button", { name: "EDIT ACTION" }).click();
-    await sheet.getByRole("button", { name: "Promote step to a subtask" }).click();
+    await sheet.getByRole("button", { name: "Convert step to a subtask" }).click();
     await settledState(
       page,
       (stored) => stored.tasks.some((task) => task.parentTaskId === "task-timeline-promote" && task.title === "Send the briefing"),
@@ -417,6 +475,20 @@ test.describe("the actions column", () => {
 
     await expect(sheet.getByTestId("task-subtask")).toContainText("Send the briefing");
     await expect(chip.getByTestId("timeline-action-subtasks")).toContainText("1 SUBTASK");
+  });
+
+  test("a short Timeline Action keeps its subtask count in the title row", async ({ page }) => {
+    const action = scheduledAction({ id: "task-short-child", title: "Call the client" });
+    action.tasks[0].planned.estimateMinutes = 15;
+    action.tasks = createTask(action.tasks, {
+      id: "task-short-child-follow-up", title: "Send the recap", parentTaskId: "task-short-child",
+    }).tasks;
+    await seedPlanner(page, action);
+
+    const chip = page.locator('[data-task-chip="task-short-child"]');
+    await chip.scrollIntoViewIfNeeded();
+    await expect(chip.getByTestId("timeline-action-subtask-marker")).toContainText("1");
+    await expect(chip.getByTestId("timeline-action-subtasks")).toHaveCount(0);
   });
 
   test("the haptics preference suppresses completion vibration without blocking completion", async ({ page }) => {
