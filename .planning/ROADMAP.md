@@ -33,7 +33,7 @@ Plans:
   1. Opening the default daily editor resolves or creates the one primary note for that user/date
   2. Additional day-linked notes require an explicit add action
   3. New behavior is added beside the owner, not appended to Planner
-**Plans**: TBD
+**Plans**: 2 plans in 2 waves
 
 Plans:
 - [ ] 02-01: Domain uniqueness for primary daily note plus explicit additional notes
