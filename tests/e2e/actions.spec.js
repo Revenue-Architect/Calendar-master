@@ -361,6 +361,30 @@ test.describe("the actions column", () => {
     await expect(parent.getByPlaceholder("Add a step")).toBeFocused();
   });
 
+  test("Quick Step stays secondary to the Action title without shrinking its hit target", async ({ page }) => {
+    const action = scheduledAction({ id: "task-quick-step-type", title: "Plan the launch" });
+    action.tasks = createTask(action.tasks, {
+      id: "task-quick-step-child", title: "Confirm the audience", parentTaskId: "task-quick-step-type",
+    }).tasks;
+    await seedPlanner(page, action);
+    await page.getByRole("tab", { name: "ACTIONS", exact: true }).click();
+
+    const card = page.locator('[data-task="task-quick-step-type"]');
+    const quickStep = card.getByRole("button", { name: "+ QUICK STEP" });
+    const metrics = await card.evaluate((node) => {
+      const title = node.querySelector("span.text-sm.font-semibold");
+      const prompt = [...node.querySelectorAll("button")].find((button) => button.textContent?.includes("QUICK STEP"));
+      return {
+        titleSize: title ? parseFloat(getComputedStyle(title).fontSize) : 0,
+        promptSize: prompt ? parseFloat(getComputedStyle(prompt).fontSize) : 0,
+        promptHeight: prompt?.getBoundingClientRect().height ?? 0,
+      };
+    });
+    expect(metrics.promptSize).toBeLessThan(metrics.titleSize);
+    expect(metrics.promptHeight).toBeGreaterThanOrEqual(44);
+    await expect(quickStep).toBeVisible();
+  });
+
   test("Add a step precedes existing steps in the full-screen Actions view", async ({ page }) => {
     const action = scheduledAction({ id: "task-step-order", title: "Ordered checklist" });
     action.tasks[0].checklist = [
@@ -396,6 +420,21 @@ test.describe("the actions column", () => {
     await expect(parent.getByTestId("task-subtasks")).toContainText("SUBTASKS");
     await expect(parent.getByTestId("task-subtask")).toContainText("WAITING");
     await expect(parent.getByRole("button", { name: "Convert step to a subtask" })).toBeVisible();
+
+    const hierarchy = await parent.evaluate((node) => {
+      const title = node.querySelector('[data-test="task-subtask"] span.text-xs');
+      const label = [...node.querySelectorAll('[data-test="task-subtask"] span')]
+        .find((span) => span.textContent?.trim() === "SUBTASK");
+      const card = node.querySelector("article");
+      const subtasks = node.querySelector('[data-test="task-subtasks"]');
+      return {
+        titleSize: title ? parseFloat(getComputedStyle(title).fontSize) : 0,
+        labelSize: label ? parseFloat(getComputedStyle(label).fontSize) : 0,
+        bottomGap: card && subtasks ? Math.abs(card.getBoundingClientRect().bottom - subtasks.getBoundingClientRect().bottom) : 999,
+      };
+    });
+    expect(hierarchy.labelSize).toBeLessThan(hierarchy.titleSize);
+    expect(hierarchy.bottomGap).toBeLessThanOrEqual(1);
   });
 
   test("a subtask inspector names its parent and does not offer a second hierarchy level", async ({ page }) => {
@@ -430,6 +469,7 @@ test.describe("the actions column", () => {
 
     const parent = page.locator('[data-task="task-promote"]');
     await parent.getByRole("button", { name: "Convert step to a subtask" }).click();
+    await expect(page.getByTestId("sheet")).toHaveCount(0);
 
     const state = await settledState(
       page,
@@ -437,6 +477,7 @@ test.describe("the actions column", () => {
       "promotion did not create a child Action",
     );
     expect(state.tasks.find((task) => task.parentTaskId === "task-promote")?.status).toBe("open");
+    await expect(parent.getByTestId("task-checklist")).toHaveCount(0);
     const child = parent.getByTestId("task-subtask");
     await expect(child).toContainText("Book the room");
     await child.getByRole("button", { name: "Complete Book the room" }).click();
@@ -452,6 +493,27 @@ test.describe("the actions column", () => {
       "nested subtask did not reopen",
     );
     await expect(page.locator("[data-task]"), "a child must stay nested instead of duplicating the parent Action").toHaveCount(1);
+  });
+
+  test("inline promotion preserves a completed checklist item's state", async ({ page }) => {
+    const action = scheduledAction({ id: "task-promote-completed", title: "Close the launch loop" });
+    action.tasks[0].checklist = [
+      { id: "step-promote-completed", title: "Archive the notes", done: true, order: 0, completedAt: "2026-08-09T09:00" },
+    ];
+    await seedPlanner(page, action);
+    await page.getByRole("tab", { name: "ACTIONS", exact: true }).click();
+
+    const parent = page.locator('[data-task="task-promote-completed"]');
+    await parent.getByTestId("task-promote-subtask").click();
+    const state = await settledState(
+      page,
+      (stored) => stored.tasks.some((task) => task.parentTaskId === "task-promote-completed" && task.title === "Archive the notes"),
+      "completed inline promotion did not create a child Action",
+    );
+    const child = state.tasks.find((task) => task.parentTaskId === "task-promote-completed" && task.title === "Archive the notes");
+    expect(child?.status).toBe("completed");
+    await expect(parent.getByTestId("task-checklist")).toHaveCount(0);
+    await expect(parent.getByTestId("task-subtask")).toContainText("Archive the notes");
   });
 
   test("the Timeline keeps a promoted subtask legible on its parent Action", async ({ page }) => {

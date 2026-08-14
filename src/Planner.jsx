@@ -3960,6 +3960,12 @@ export default function Planner() {
           .nb-hover-tile:not(:disabled):not([aria-disabled="true"]):hover{
             box-shadow:var(--e1),var(--sheen),inset 0 0 0 1px ${T.accent}38!important;
           }
+          /* An Action is one material surface, including its promoted children.
+             The child title still gets a quiet text affordance, never a second
+             tile-shaped hover patch that makes the parent look clipped. */
+          .nb-action-card .nb-subtask-title:not(:disabled):hover{
+            background-color:transparent!important;
+          }
           .nb-hover-choice:not(:disabled):not([aria-disabled="true"]):not(.is-selected):hover{
             background-color:${T.accent}12!important;color:${T.accentText}!important;
             box-shadow:inset 0 0 0 1px ${T.accent}52!important;
@@ -6185,14 +6191,14 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], subtasks 
   const showChecklistComposer = checklist.length > 0 || subtasks.length === 0 || quickStepOpen;
 
   return (
-    <div data-task={t.id} data-task-status={t.status} className={`relative overflow-hidden ${listEnterIndex != null ? "nb-list-enter" : ""}`} style={{ background: "transparent", borderRadius: CARD_R, boxShadow: target ? `inset 0 2px 0 ${T.accent}, var(--e1)` : "var(--e1)", "--nb-list-index": listEnterIndex ?? undefined }}>
+    <div data-task={t.id} data-task-status={t.status} className={`relative ${listEnterIndex != null ? "nb-list-enter" : ""}`} style={{ background: "transparent", borderRadius: CARD_R, boxShadow: target ? `inset 0 2px 0 ${T.accent}, var(--e1)` : "var(--e1)", "--nb-list-index": listEnterIndex ?? undefined }}>
         <div data-test="task-completion-backdrop" className="absolute inset-0 flex items-center justify-between px-4"
           style={{ fontFamily: MONO, background: dx > 0 ? T.accent : surface, color: dx > 0 ? T.on : T.dimText, borderRadius: CARD_R }}>
           <span className="nb-data" style={{ color: T.on, opacity: dx > 20 ? 1 : 0 }}>COMPLETE</span>
           <span className="nb-data" style={{ color: T.dimText, opacity: dx < -20 ? 1 : 0 }}>TOMORROW</span>
         </div>
 
-      <article className="nb-hover-tile relative" style={{ background: surface, borderRadius: CARD_R, transform: `translateX(${dx}px)`, transition: dx === 0 ? "transform 220ms cubic-bezier(.2,.8,.25,1), box-shadow 200ms cubic-bezier(.2,.8,.25,1)" : "none", opacity: 1, touchAction: "pan-y", userSelect: "none", WebkitUserSelect: "none" }}
+      <article className="nb-action-card nb-hover-tile relative overflow-hidden" style={{ background: surface, borderRadius: CARD_R, boxShadow: `inset 0 0 0 1px ${T.line}`, transform: `translateX(${dx}px)`, transition: dx === 0 ? "transform 220ms cubic-bezier(.2,.8,.25,1), box-shadow 200ms cubic-bezier(.2,.8,.25,1)" : "none", opacity: 1, touchAction: "pan-y", userSelect: "none", WebkitUserSelect: "none" }}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
         <div data-test="task-completion-overlay" data-visible={String(isDone)} aria-hidden="true"
           className={`nb-action-complete-overlay absolute inset-0 z-10 flex items-center gap-2 pl-14 pr-4 pointer-events-none ${isDone ? "is-visible" : ""}`}
@@ -6287,8 +6293,17 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], subtasks 
                     <span className="w-3 h-3 shrink-0" style={{ background: s.done ? T.accent : "transparent", boxShadow: `inset 0 0 0 1px ${s.done ? T.accent : T.faint}` }} />
                     <span className="text-xs" style={{ textDecoration: s.done ? "line-through" : "none", color: s.done ? T.dim : T.text }}>{s.title}</span>
                   </button>
-                  <button onClick={() => onPromoteSub(t.id, s.id)} style={{ color: T.dimText }} className="text-xs px-1" aria-label="Convert step to a subtask" title="Turn this checklist item into tracked child work"><ArrowUpIcon /></button>
-                  <button onClick={() => onRemoveSub(t.id, s.id)} style={{ color: T.dimText }} className="text-xs px-1" aria-label="Remove step"><CloseIcon /></button>
+                  <button type="button" data-test="task-promote-subtask"
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => { event.stopPropagation(); onPromoteSub(t.id, s.id); }}
+                    style={{ color: T.dimText, touchAction: "manipulation" }}
+                    className="nb-tap nb-hover-icon flex h-11 w-11 shrink-0 items-center justify-center"
+                    aria-label="Convert step to a subtask" title="Turn this checklist item into tracked child work"><ArrowUpIcon /></button>
+                  <button type="button" onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => { event.stopPropagation(); onRemoveSub(t.id, s.id); }}
+                    style={{ color: T.dimText, touchAction: "manipulation" }}
+                    className="nb-tap nb-hover-icon flex h-11 w-11 shrink-0 items-center justify-center"
+                    aria-label="Remove step"><CloseIcon /></button>
                 </div>
               ))}
             </div>
@@ -6297,7 +6312,7 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], subtasks 
         {!isDone && checklist.length === 0 && subtasks.length > 0 && !quickStepOpen && (
           <div className="mx-3 mb-2">
             <button type="button" onClick={() => setQuickStepOpen(true)}
-              className="nb-tap nb-hover-control py-1 nb-label" style={{ color: T.dimText }}>
+              className="nb-tap nb-hover-control nb-micro inline-flex min-h-11 items-center py-1" style={{ color: T.dimText, minHeight: 44 }}>
               + QUICK STEP
             </button>
           </div>
@@ -6316,7 +6331,7 @@ function PromotedSubtasks({ T, subtasks, onComplete, onReopen, onOpen, className
   if (!subtasks.length) return null;
   const done = subtasks.filter((task) => task.status === "completed").length;
   return (
-    <section data-test="task-subtasks" aria-label={`Subtasks, ${done} of ${subtasks.length} complete`} className={`mx-3 mb-3 pl-3 ${className}`} style={{ borderLeft: `2px solid ${T.accent}` }}>
+    <section data-test="task-subtasks" aria-label={`Subtasks, ${done} of ${subtasks.length} complete`} className={`mx-3 pl-3 ${className}`} style={{ borderLeft: `2px solid ${T.accent}` }}>
       <div style={{ fontFamily: MONO, color: T.dimText }} className="flex items-center gap-2 pb-1 pt-0.5 nb-data">
         <span>SUBTASKS</span>
         <span>{done}/{subtasks.length}</span>
@@ -6334,9 +6349,9 @@ function PromotedSubtasks({ T, subtasks, onComplete, onReopen, onOpen, className
             </button>
             <button type="button" onPointerDown={(event) => event.stopPropagation()}
               onClick={(event) => { event.stopPropagation(); onOpen(subtask.id); }}
-              className="nb-hover-control min-w-0 flex-1 py-1 text-left">
+              className="nb-hover-control nb-subtask-title min-w-0 flex-1 py-1 text-left">
               <span className="block truncate text-xs" style={{ color: complete ? T.dim : T.text, textDecoration: complete ? "line-through" : "none" }}>{subtask.title}</span>
-              <span style={{ fontFamily: MONO, color: T.dimText }} className="mt-0.5 flex items-center gap-1.5 nb-label">
+              <span style={{ fontFamily: MONO, color: T.dimText }} className="mt-0.5 flex items-center gap-1.5 nb-micro">
                 <span>SUBTASK</span>
                 {status && <span data-test="task-subtask-status">{status}</span>}
               </span>
