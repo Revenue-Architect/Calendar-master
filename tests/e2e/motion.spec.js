@@ -158,7 +158,35 @@ test.describe("the notch morph", () => {
     await page.getByTestId("new-action").click();
     const sheet = page.getByTestId("sheet");
     await expect(sheet).toHaveAttribute("data-fluid-origin", "notch");
+    await expect(sheet).toHaveAttribute("data-morph-source", "new-action");
+    await expect(sheet.getByTestId("notch-surface")).toHaveText("+ ACTION");
+    await expect(page.getByTestId("new-action")).toHaveCSS("visibility", "hidden");
     await expect(page.getByTestId("composer")).toHaveAttribute("data-composer-kind", "task");
+  });
+
+  test("the visible NEW material hands off to the live composer and returns to its source", async ({ page }) => {
+    await openPlanner(page);
+    const trigger = page.getByTestId("new-entry");
+    await trigger.click();
+
+    const sheet = page.getByTestId("sheet");
+    const surface = sheet.getByTestId("notch-surface");
+    await expect(sheet).toHaveAttribute("data-morph-source", "new-entry");
+    await expect(surface).toHaveText("NEW");
+    await expect(trigger).toHaveCSS("visibility", "hidden");
+
+    const openingOpacity = await surface.evaluate((node) => {
+      const animation = node.getAnimations().find((candidate) => candidate.effect?.getTiming);
+      if (!animation) return -1;
+      animation.pause();
+      animation.currentTime = 0;
+      return Number(getComputedStyle(node).opacity);
+    });
+    expect(openingOpacity, "the visible material must start as the pressed NEW button").toBeGreaterThanOrEqual(.99);
+
+    await page.keyboard.press("Escape");
+    await expect(sheet).toHaveCount(0, { timeout: 3000 });
+    await expect(trigger).toHaveCSS("visibility", "visible");
   });
 
   test("a sheet opened from the keyboard arrives on its own terms", async ({ page }) => {
@@ -172,6 +200,24 @@ test.describe("the notch morph", () => {
     const sheet = page.getByTestId("sheet");
     await expect(sheet).toBeVisible();
     expect(await sheet.getAttribute("data-fluid-origin"), "a keystroke is not a control").toBeNull();
+    await expect(sheet.getByTestId("notch-surface")).toHaveCount(0);
+    await expect(page.getByTestId("new-entry")).toHaveCSS("visibility", "visible");
+  });
+
+  test("reduced motion leaves no source skin behind", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await openPlanner(page);
+    const trigger = page.getByTestId("new-entry");
+    await trigger.click();
+
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).toBeVisible();
+    await expect(sheet.getByTestId("notch-surface")).toHaveCSS("opacity", "0");
+    await expect(trigger).toHaveCSS("visibility", "hidden");
+
+    await page.keyboard.press("Escape");
+    await expect(sheet).toHaveCount(0, { timeout: 3000 });
+    await expect(trigger).toHaveCSS("visibility", "visible");
   });
 
   test("a press still gives the sheet its origin, and a later keystroke does not steal it", async ({ page }) => {

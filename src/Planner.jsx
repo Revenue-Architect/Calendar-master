@@ -4088,17 +4088,25 @@ export default function Planner() {
         /* The notch morph: one object changing shape, rather than a panel fading
            in. Shape and contents stay on one compositor path at full opacity;
            the animated clip itself reveals and conceals what belongs inside. */
-        .nb-fluid[data-fluid-origin="notch"]{animation-name:nbnotchin;animation-duration:380ms;animation-timing-function:cubic-bezier(.22,.85,.28,1)}
+        .nb-fluid[data-fluid-origin="notch"]{animation-name:nbnotchin;animation-duration:300ms;animation-timing-function:cubic-bezier(.23,1,.32,1)}
         @keyframes nbnotchin{
           0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round 999px)}
           100%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px round 24px)}
         }
         .nb-fluid[data-fluid-origin="notch"] .nb-notch-body{animation:none;opacity:1;transform:none}
+        /* The source skin is the visible NEW/+ ACTION material while the live
+           composer is already mounted below it. The sheet itself still does all
+           of the travelling and clipping, so readable form controls never scale
+           or fade independently. */
+        .nb-notch-surface{position:absolute;inset:0;z-index:8;display:flex;align-items:center;justify-content:center;pointer-events:none;opacity:0;background:var(--nb-notch-surface-background);color:var(--nb-notch-surface-color);border-radius:inherit;font-family:var(--nb-notch-surface-font);font-size:.75rem;font-weight:700;letter-spacing:.1em;animation:nbnotchsurfaceout 180ms cubic-bezier(.23,1,.32,1) 72ms both;will-change:opacity}
+        @keyframes nbnotchsurfaceout{0%,28%{opacity:1}100%{opacity:0}}
         .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"]{animation:nbnotchout 260ms cubic-bezier(.4,0,.3,1) forwards}
         @keyframes nbnotchout{
           0%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px round 24px)}
           100%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round 999px)}
         }
+        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-notch-surface{animation:nbnotchsurfacein 90ms cubic-bezier(.23,1,.32,1) both}
+        @keyframes nbnotchsurfacein{from{opacity:0}to{opacity:1}}
         .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-notch-body{animation:none;opacity:1;transform:none}
         @media(min-width:640px){.nb-fluid{transform-origin:center;border-radius:24px}}
         /* The blur is set once and never animated. A changing blur radius throws
@@ -4247,7 +4255,10 @@ export default function Planner() {
           <GooeySearch T={T} surface={surface} reduced={reducedMotion}
             onOpen={() => { beep("click"); setSearchQuery(""); setSearch(true); }} />
           <button onClick={() => { beep("click"); setSettings(true); }} style={{ color: T.dim }} className="nb-hud-settings nb-tap nb-hover-icon w-8 h-8 flex items-center justify-center" aria-label="Settings"><MoreIcon /></button>
-          <button data-test="new-entry" onClick={() => { beep("click"); setComposer({ kind: "event", start: startSlot(nowMin), dur: 60, notch: true }); }} style={{ background: T.accent, color: T.on, fontFamily: MONO }} className="nb-tap nb-liquid nb-hover-control px-2 py-1.5 text-xs font-bold tracking-widest">NEW</button>
+          <button data-test="new-entry" data-morph-source="new-entry" tabIndex={composer?.morphSource?.id === "new-entry" ? -1 : undefined}
+            onClick={() => { beep("click"); setComposer({ kind: "event", start: startSlot(nowMin), dur: 60, notch: true, morphSource: { id: "new-entry", label: "NEW" } }); }}
+            style={{ background: T.accent, color: T.on, fontFamily: MONO, visibility: composer?.morphSource?.id === "new-entry" ? "hidden" : undefined }}
+            className="nb-tap nb-liquid nb-hover-control px-2 py-1.5 text-xs font-bold tracking-widest">NEW</button>
         </div>
       </header>
 
@@ -4901,7 +4912,10 @@ export default function Planner() {
             <span style={{ fontFamily: MONO, color: T.accentText }} className="nb-data">{openCount} OPEN</span>
             {isToday && overdue.length > 0 && <span style={{ fontFamily: MONO, color: NOW_RED }} className="nb-data">{overdue.length} LATE</span>}
           </button>
-          <button data-test="new-action" onClick={() => { beep("click"); setComposer({ kind: "task", notch: true }); }} style={{ background: T.accent, color: T.on, fontFamily: MONO }} className="nb-tap nb-liquid nb-hover-control px-3 py-1.5 text-xs font-bold tracking-widest">+ ACTION</button>
+          <button data-test="new-action" data-morph-source="new-action" tabIndex={composer?.morphSource?.id === "new-action" ? -1 : undefined}
+            onClick={() => { beep("click"); setComposer({ kind: "task", notch: true, morphSource: { id: "new-action", label: "+ ACTION" } }); }}
+            style={{ background: T.accent, color: T.on, fontFamily: MONO, visibility: composer?.morphSource?.id === "new-action" ? "hidden" : undefined }}
+            className="nb-tap nb-liquid nb-hover-control px-3 py-1.5 text-xs font-bold tracking-widest">+ ACTION</button>
         </div>
         <div className="nb-s flex-1 overflow-y-auto px-3 pb-6">{actionsPanel}</div>
       </div>
@@ -5584,6 +5598,7 @@ export default function Planner() {
 
       {composer && (
         <Sheet T={T} title={composer.id ? "EDIT" : "NEW"} morph={composer.notch ? "notch" : "auto"}
+          morphSurface={composer.morphSource ? { ...composer.morphSource, background: T.accent, color: T.on, font: MONO } : null}
           closeSignal={sheetCloseSignals.composer}
           onClose={() => { beep("click"); setComposer(null); }}>
           <Composer T={T} initial={composer} dateLabel={fmtDay(dateKey)} dateKey={dateKey} onSubmit={saveEntry} onTick={() => beep("tick")} weekStart={weekStart} />
@@ -7665,7 +7680,7 @@ function Row({ T, k, v }) {
   );
 }
 
-function Sheet({ T, onClose, title, children, headerAction = null, beforeClose = null, morph = "auto", closeSignal = null }) {
+function Sheet({ T, onClose, title, children, headerAction = null, beforeClose = null, morph = "auto", morphSurface = null, closeSignal = null }) {
   /* Ignore a backdrop dismissal that arrives in the same tap that opened the sheet.
      Belt and braces alongside preventDefault at the source: any future path that
      opens a sheet from a touch inherits the protection. */
@@ -7717,7 +7732,7 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
     const measure = () => {
       const next = Math.min(content.scrollHeight, Math.round(window.innerHeight * .88));
       setSheetHeight(next);
-      /* A notch sheet is mid-scale for its opening animation; letting height
+      /* A notch sheet is mid-morph for its opening animation; letting height
          transition underneath it animates the same box on two curves at once. */
       if (morphRef.current === "notch" && !openedRef.current) return;
       window.requestAnimationFrame(() => setHeightReady(true));
@@ -7819,7 +7834,7 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
     window.addEventListener("scroll", restorePageScroll, true);
     const unlock = window.setTimeout(() => window.removeEventListener("scroll", restorePageScroll, true), 480);
     /* `nb-sheet-h` transitions height, and it used to switch on one frame into
-       the notch's own 380ms scale — two curves animating the same box, which is
+       the notch's own 300ms morph — two curves animating the same box, which is
        the bounce. The height transition waits until the shape has finished
        arriving. */
     return () => {
@@ -7831,9 +7846,18 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
   }, []);
   return (
     <div className={`nb-scrim ${closing ? "nb-fluid-closing" : ""} fixed inset-0 z-50 flex items-end sm:items-center justify-center`} style={{ background: "rgba(0,0,0,0.72)" }} onClick={guardedClose}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId.current} data-test="sheet" data-sheet-title={title || "Details"}
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId.current} data-test="sheet" data-sheet-title={title || "Details"} data-morph-source={morphSurface?.id}
         onKeyDown={(event) => trapDialogTab(event, dialogRef.current)} onClick={(e) => e.stopPropagation()}
-        className={`nb-fluid nb-sheet-scroll ${heightReady ? "nb-sheet-h" : ""} ${closing ? "nb-fluid-closing" : ""} w-full sm:max-w-md overflow-y-auto nb-s`} style={{ background: T.card, color: T.text, maxHeight: "88vh", height: sheetHeight == null ? "auto" : sheetHeight }}>
+        className={`nb-fluid nb-sheet-scroll ${heightReady ? "nb-sheet-h" : ""} ${closing ? "nb-fluid-closing" : ""} relative w-full sm:max-w-md overflow-y-auto nb-s`} style={{ background: T.card, color: T.text, maxHeight: "88vh", height: sheetHeight == null ? "auto" : sheetHeight }}>
+        {morph === "notch" && morphSurface && (
+          <div aria-hidden="true" data-test="notch-surface" className="nb-notch-surface" style={{
+            "--nb-notch-surface-background": morphSurface.background,
+            "--nb-notch-surface-color": morphSurface.color,
+            "--nb-notch-surface-font": morphSurface.font,
+          }}>
+            {morphSurface.label}
+          </div>
+        )}
         <div ref={contentRef} className="nb-notch-body">
         <div className="sticky top-0 flex items-center justify-between px-4 sm:px-5 pt-3 pb-2" style={{ background: T.card, zIndex: 3 }}>
           <span id={titleId.current} style={{ fontFamily: MONO, color: T.dimText }} className="nb-data">{title || "Details"}</span>
