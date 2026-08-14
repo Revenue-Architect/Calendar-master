@@ -1,31 +1,43 @@
 # Phase 2: Incremental hardening - Research
 
-**Researched:** 2026-08-14
-**Domain:** Notes Domain, Domain-Oriented Modular Monolith, State Migration & Verification
-**Confidence:** HIGH
+**Researched:** 2026-08-14  
+**Domain:** Notes Domain, Domain-Oriented Modular Monolith (ADR 0001), State Migration & Verification, Master Implementation Plan  
+**Confidence:** HIGH  
 
 <user_constraints>
-## User Constraints (from Ingested Living Contracts & Reconciliation)
+## User Constraints & Ingested Living Authority
 
-### Locked Decisions
-- **Daily note cardinality:** Each user/date has zero or one primary daily note, plus zero or more additional day-linked notes.
-- **Default editor resolution:** Opening the default daily-note editor resolves the primary note; if none exists, the first saved note becomes primary.
-- **Additional daily notes:** A date may have additional day-linked notes created through an explicit "Add note" or contextual creation action.
-- **Designate primary:** Users may designate another day-linked note as primary through an explicit action (`designatePrimaryDailyNote`).
-- **Date-only stability:** A daily note links to a date-only value (`YYYY-MM-DD`) in the user's planning timezone. Changing timezone MUST NOT silently move a date-only daily note.
-- **No phantom records:** Do not create empty daily records merely because a date was viewed.
-- **Composition root freeze (ADR 0001 & `docs/spec/structure.md`):** `Planner.jsx` remains the composition root for existing state wiring. New behavior extracts beside the owner (`src/domains/notes/`, `src/features/notes/`) and MUST NOT append complexity to `Planner.jsx`.
-- **Deferred integrations (PROD-03):** External provider APIs (Google, Microsoft Graph, CalDAV, Todoist) and sync remain strictly deferred.
+### Authority Precedence (per Master Implementation Plan § Documentation Authority)
+1. **Architecture authority:** [`docs/adr/0001-domain-oriented-modular-monolith.md`](file:///C:/Users/Kamran/Calendar-master/docs/adr/0001-domain-oriented-modular-monolith.md)
+2. **Product authority:** [`docs/product/planner-foundation.md`](file:///C:/Users/Kamran/Calendar-master/docs/product/planner-foundation.md) (with resolved § 2.2 Daily notes) & [`docs/product/calendar-master-cross-platform.md`](file:///C:/Users/Kamran/Calendar-master/docs/product/calendar-master-cross-platform.md)
+3. **Visual & motion authority:** [`DESIGN.md`](file:///C:/Users/Kamran/Calendar-master/DESIGN.md)
+4. **Interaction contracts:** [`docs/interaction-contracts/planner-interactions.md`](file:///C:/Users/Kamran/Calendar-master/docs/interaction-contracts/planner-interactions.md)
+5. **Sequencing authority:** [`docs/plans/2026-08-13-calendar-master-implementation-master-plan.md`](file:///C:/Users/Kamran/Calendar-master/docs/plans/2026-08-13-calendar-master-implementation-master-plan.md)
+
+### Locked Decisions & Invariants
+- **Daily note cardinality (NOTE-02, NOTE-03):**
+  - Each user/date has zero or one primary daily note, plus zero or more additional day-linked notes.
+  - Opening the default daily-note editor resolves the primary note; if none exists, the first saved note becomes primary.
+  - A date may have additional day-linked notes created through an explicit "Add note" or contextual creation action.
+  - Users may designate another day-linked note as primary through an explicit action (`designatePrimaryDailyNote`).
+  - A daily note links to a date-only value (`YYYY-MM-DD`) in the user's planning timezone. Changing timezone MUST NOT silently move a date-only daily note.
+  - Do not create empty daily records merely because a date was viewed.
+- **Composition root freeze & extract-beside-owner (ARCH-03, BD-02, BD-08, BD-11):**
+  - `src/Planner.jsx` remains the composition root for existing state wiring and MUST NOT grow.
+  - New behavior extracts beside the owner (`src/domains/notes/`, `src/features/notes/`).
+  - Extracted UI surfaces use prepared controllers/view models and named command/query boundaries; UI cannot import persistence or mutate canonical records directly.
+- **Deferred integrations (PROD-03, BD-08):**
+  - External provider APIs (Google Calendar, Microsoft Graph, CalDAV, Todoist) and sync remain strictly deferred for the trust milestone.
 
 ### Agent Discretion
-- Exact naming and signature of domain helper functions in `src/domains/notes/` (`getPrimaryDailyNote`, `createAdditionalDailyNote`, `designatePrimaryDailyNote`).
-- Internal representation of primary status (e.g., `isPrimary: true`, or `kind: "daily"` designated primary with explicit primary tracking, while preserving backward compatibility with schema v8).
-- Feature-level extraction helpers in `src/features/notes/`.
+- Exact naming and signatures of pure domain helpers in `src/domains/notes/` (`getPrimaryDailyNote`, `createAdditionalDailyNote`, `designatePrimaryDailyNote`).
+- Internal representation of primary status (`isPrimary: true`, `kind: "daily"` with explicit primary tracking, preserving backward compatibility with schema v8).
+- Colocated feature extraction helpers in `src/features/notes/`.
 
 ### Deferred Ideas (OUT OF SCOPE)
 - External provider synchronization (Google Calendar, MS 365, Todoist).
-- Immediate folder reorganization or `git mv Planner.jsx`.
-- Multi-package monorepo refactoring.
+- Immediate structural directory renames or moving `Planner.jsx`.
+- Big-bang monorepo refactoring or moving web under `apps/web`.
 </user_constraints>
 
 <architectural_responsibility_map>
@@ -45,8 +57,9 @@
 Phase 2 focuses on hardening the domain boundaries established in Phase 1 without performing risky structural folder moves or growing the composition root `Planner.jsx`. Specifically, this phase addresses:
 1. **Reconciliation of Daily Note Cardinality (NOTE-02, NOTE-03):** Moving from a rigid "single daily note" constraint to a flexible model: at most one primary daily note per user/date + zero or more additional day-linked notes created explicitly.
 2. **Extraction Discipline (ARCH-03, PROD-03):** Ensuring all new logic extracts beside existing owners in `src/domains/notes/` and `src/features/notes/`, preserving provider deferral and keeping `Planner.jsx` clean.
+3. **Alignment with Master Implementation Plan:** Grounding execution in the sequencing authority of `docs/plans/2026-08-13-calendar-master-implementation-master-plan.md` and ADR 0001.
 
-**Primary recommendation:** Implement pure domain operations (`getPrimaryDailyNote`, `createAdditionalDailyNote`, `designatePrimaryDailyNote`) in `src/domains/notes/`, update `getNotesForDate` and `dayAggregate.js` projections, and colocate feature helpers in `src/features/notes/` accompanied by thorough unit test coverage.
+**Primary recommendation:** Implement pure domain operations (`getPrimaryDailyNote`, `createAdditionalDailyNote`, `designatePrimaryDailyNote`) in `src/domains/notes/`, update `getNotesForDate` and `dayAggregate.js` projections, and colocate feature helpers in `src/features/notes/` accompanied by comprehensive unit test coverage.
 </research_summary>
 
 <standard_stack>
@@ -78,7 +91,7 @@ Daily Note Model:
 ### Domain Operations
 - `getPrimaryDailyNote(notes, dateKey)`: Returns the single primary daily note for `dateKey`, or `null`.
 - `getDailyNote(notes, dateKey)`: Alias to `getPrimaryDailyNote` preserving backward compatibility.
-- `getNotesForDate(notes, dateKey)`: Returns all active notes associated with `dateKey` (primary + additional), sorted by update time.
+- `getNotesForDate(notes, dateKey)`: Returns all active notes associated with `dateKey` (primary + additional), sorted with primary note first, then by `updatedAt`.
 - `createAdditionalDailyNote(notes, input, { now })`: Explicitly creates a non-primary day-linked note for `dateKey`.
 - `designatePrimaryDailyNote(notes, noteId, dateKey, { now })`: Marks the specified note as the primary note for `dateKey`, demoting any existing primary note.
 
@@ -98,8 +111,9 @@ Daily Note Model:
    - Designating a note as primary updates primary slot and demotes prior primary note.
    - Default daily editor resolution logic (primary resolved if present; first note becomes primary on creation).
    - Timezone resilience: DateKey stability across DST / timezone changes.
-2. **Planner Day Projection Tests (`src/domains/planner/tests/dayAggregate.test.js` / `dayProjection.test.js`):**
+2. **Feature & Planner Day Projection Tests (`src/features/notes/dailyNoteResolution.test.js` / `dayAggregate.js`):**
    - Verification that `getDayAggregate` returns `dailyNote` (primary) and `notes` (collection).
+   - Verification that `resolveDailyNoteDraft` returns draft without mutating state for unnoted dates.
 3. **Full Regression Suite:**
-   - Run `npm test` ensuring all 550+ tests remain green.
+   - Run `npm test` ensuring all 550+ tests pass with 0 regressions.
 </validation_architecture>
