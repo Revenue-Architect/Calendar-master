@@ -22,14 +22,14 @@ function scheduledAction({ id = "task-timeline", title = "Review launch brief" }
   return { ...state, tasks: result.tasks };
 }
 
-function liveActionAt(now, { id = "task-live", title = "Live Action" } = {}) {
+function liveActionAt(now, { id = "task-live", title = "Live Action", estimateMinutes = 60 } = {}) {
   const state = createBlankPlannerState({});
   const result = createTask(state.tasks, {
     id, title,
     planned: {
       date: keyOf(now),
       startMinute: now.getHours() * 60,
-      estimateMinutes: 60,
+      estimateMinutes,
     },
   });
   return { ...state, tasks: result.tasks };
@@ -150,6 +150,27 @@ test.describe("the actions column", () => {
     await expect(fill).toHaveCSS("pointer-events", "none");
     await expect.poll(() => fill.evaluate((node) => Number.parseFloat(node.style.width))).toBeCloseTo(33, 0);
 
+    const geometry = await line.evaluate((node) => ({
+      line: node.getBoundingClientRect().width,
+      layer: node.parentElement?.getBoundingClientRect().width,
+    }));
+    expect(geometry.line).toBeLessThan(geometry.layer);
+    await expect.poll(() => nowTime.evaluate((node) => Number.parseFloat(getComputedStyle(node).right))).toBeGreaterThan(0);
+  });
+
+  test("a live unestimated Action uses its rendered default timeline duration", async ({ page }) => {
+    const now = new Date("2026-08-13T10:20:00");
+    await page.clock.setFixedTime(now);
+    await seedPlanner(page, liveActionAt(now, { id: "task-live-default", estimateMinutes: null }));
+
+    const line = page.getByTestId("timeline-now-line");
+    const action = page.locator('[data-task-chip="task-live-default"]');
+    const fill = page.getByTestId("timeline-action-live-fill");
+    const nowTime = page.getByTestId("timeline-now-time");
+    await action.scrollIntoViewIfNeeded();
+
+    await expect(fill).toBeVisible();
+    await expect.poll(() => fill.evaluate((node) => Number.parseFloat(node.style.width))).toBeCloseTo(67, 0);
     const geometry = await line.evaluate((node) => ({
       line: node.getBoundingClientRect().width,
       layer: node.parentElement?.getBoundingClientRect().width,

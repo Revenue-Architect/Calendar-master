@@ -1781,11 +1781,12 @@ export default function Planner() {
   const conflictIds = useMemo(() => new Set(events.filter((e) => e.cols > 1).map((e) => e.id)), [events]);
   const liveEvent = isToday ? events.find((e) => nowMin >= e.start && nowMin < e.start + e.dur) : null;
   /* One NOW signal needs one owner. Events keep precedence — they are fixed
-     commitments — but an estimated Action is still a real block of time when
-     no Event owns this minute. An unestimated Action is only a point, and a
-     completed one is already expressed by its completion face. */
+     commitments — but every scheduled, incomplete Action owns the time the
+     timeline renders for it. An Action without an authored estimate already
+     receives the renderer's 30-minute default duration, so excluding it here
+     made the NOW rule cut through a visibly occupied card. */
   const liveAction = !liveEvent && isToday
-    ? plannedTasks.find((task) => task.status !== "completed" && task.planned.estimateMinutes != null
+    ? plannedTasks.find((task) => task.status !== "completed"
       && nowMin >= task.start && nowMin < task.start + task.dur)
     : null;
   const liveTimelineItem = liveEvent ?? liveAction;
