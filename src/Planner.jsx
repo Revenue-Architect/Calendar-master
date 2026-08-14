@@ -6331,7 +6331,7 @@ function PromotedSubtasks({ T, subtasks, onComplete, onReopen, onOpen, className
   if (!subtasks.length) return null;
   const done = subtasks.filter((task) => task.status === "completed").length;
   return (
-    <section data-test="task-subtasks" aria-label={`Subtasks, ${done} of ${subtasks.length} complete`} className={`mx-3 pl-3 ${className}`} style={{ borderLeft: `2px solid ${T.accent}` }}>
+    <section data-test="task-subtasks" aria-label={`Subtasks, ${done} of ${subtasks.length} complete`} className={`mx-3 mb-3 pl-3 ${className}`} style={{ borderLeft: `2px solid ${T.accent}` }}>
       <div style={{ fontFamily: MONO, color: T.dimText }} className="flex items-center gap-2 pb-1 pt-0.5 nb-data">
         <span>SUBTASKS</span>
         <span>{done}/{subtasks.length}</span>

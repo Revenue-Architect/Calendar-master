@@ -434,7 +434,8 @@ test.describe("the actions column", () => {
       };
     });
     expect(hierarchy.labelSize).toBeLessThan(hierarchy.titleSize);
-    expect(hierarchy.bottomGap).toBeLessThanOrEqual(1);
+    expect(hierarchy.bottomGap).toBeGreaterThanOrEqual(10);
+    expect(hierarchy.bottomGap).toBeLessThanOrEqual(14);
   });
 
   test("a subtask inspector names its parent and does not offer a second hierarchy level", async ({ page }) => {
