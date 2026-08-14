@@ -4721,6 +4721,11 @@ export default function Planner() {
                     const held = gesture && gesture.id === e.id
                       && (gesture.mode === "move" || gesture.mode === "resize-end" || gesture.mode === "resize-start");
                     const joinUrl = normalizeMeetingLink(e.link);
+                    /* A linked card reserves its trailing lane for JOIN. Its padded
+                       title line (19.5px), metadata line (17.55px) and gap need just
+                       over 51px, so a smaller card must remain one line rather than
+                       making the range appear underneath the title. */
+                    const hasRoomForLinkedTime = !joinUrl || h >= 52;
                     return (
                       <div key={e.id} data-event-id={e.id} className={`nb-timeline-lane absolute ${held ? "nb-timeline-lane-active" : "nb-hover-tile"}`} style={{ top: top + 2, height: h, left: `${(e.lane / e.cols) * 100}%`, width: `calc(${100 / e.cols}% - 6px)`, zIndex: held ? 20 : 1, opacity: held && gesture.overDay ? 0.35 : 1, pointerEvents: "auto" }}>
                         <div role="button" tabIndex={0} aria-label={e.title}
@@ -4770,7 +4775,7 @@ export default function Planner() {
                               {held && <span style={{ fontFamily: MONO, background: T.accent, color: T.on, borderRadius: 4 }} className="shrink-0 px-1 nb-data">{gesture.overDay ? fmtDay(gesture.overDay) : tm(e.start)}</span>}
                               {!held && !live && !joinUrl && h < 38 && <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-event-secondary nb-event-short-time nb-data min-w-0 truncate shrink-0">{tm(e.start)} → {tm(e.start + e.dur)}</span>}
                             </div>
-                            {h >= 38 && (
+                            {h >= 38 && hasRoomForLinkedTime && (
                               <span style={{ fontFamily: MONO, color: T.dimText }} className="block nb-data truncate mt-0.5 pl-4">
                                 {tm(e.start)} → {tm(e.start + e.dur)}
                               </span>

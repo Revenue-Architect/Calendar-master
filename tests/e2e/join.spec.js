@@ -51,6 +51,13 @@ function compactLinkedMeeting() {
   }, { id: "evt-compact-linked" }).state;
 }
 
+function twoLineBoundaryLinkedMeeting() {
+  return createEvent(createBlankPlannerState({}), {
+    calendarId: "calendar-default", title: "Design review", category: "PEOPLE", link: LINK,
+    timing: { kind: "timed", timeZoneMode: "floating", startLocal: `${today}T11:30`, endLocal: `${today}T12:10` },
+  }, { id: "evt-two-line-boundary" }).state;
+}
+
 const joins = (page) => page.getByRole("link", { name: /^Join / });
 
 test.describe("joining a meeting", () => {
@@ -120,6 +127,24 @@ test.describe("joining a meeting", () => {
     expect(joinBox).not.toBeNull();
     expect(titleBox.width, "the title must receive a real readable lane").toBeGreaterThan(24);
     expect(titleBox.x + titleBox.width, "the title must finish before the JOIN lane").toBeLessThanOrEqual(joinBox.x - 4);
+  });
+
+  test("a linked card below two-line height keeps its time out of the card", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await seedPlanner(page, twoLineBoundaryLinkedMeeting());
+    const card = page.locator('[data-event-id="evt-two-line-boundary"]');
+    const title = card.getByText("Design review", { exact: true });
+    const range = card.getByText("11:30 AM → 12:10 PM", { exact: true });
+    const join = page.getByRole("link", { name: "Join Design review" });
+    await card.scrollIntoViewIfNeeded();
+
+    const cardBox = await card.boundingBox();
+    expect(cardBox, "the boundary card is missing").not.toBeNull();
+    expect(cardBox.height, "the fixture must exercise the short two-line boundary").toBeGreaterThanOrEqual(38);
+    expect(cardBox.height, "the fixture must remain below the safe two-line height").toBeLessThan(52);
+    await expect(range, "JOIN must not move time metadata to a second line in a short card").toBeHidden();
+    await expect(title).toBeVisible();
+    await expect(join).toBeVisible();
   });
 
   test("Week exposes direct JOIN for all-day meetings", async ({ page }) => {
