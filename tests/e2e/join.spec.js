@@ -43,6 +43,14 @@ function shortBackToBack() {
   }, { id: "evt-following" }).state;
 }
 
+function compactLinkedMeeting() {
+  return createEvent(createBlankPlannerState({}), {
+    calendarId: "calendar-default", title: "Client handoff", category: "PEOPLE", link: LINK,
+    alerts: [5],
+    timing: { kind: "timed", timeZoneMode: "floating", startLocal: `${today}T11:30`, endLocal: `${today}T11:55` },
+  }, { id: "evt-compact-linked" }).state;
+}
+
 const joins = (page) => page.getByRole("link", { name: /^Join / });
 
 test.describe("joining a meeting", () => {
@@ -81,21 +89,37 @@ test.describe("joining a meeting", () => {
     await seedPlanner(page, shortBackToBack());
     const card = page.locator('[data-event-id="evt-short-linked"]');
     const title = card.getByText("Short linked meeting", { exact: true });
-    const range = card.locator(".nb-event-short-time");
     const join = page.getByRole("link", { name: "Join Short linked meeting" });
     await card.scrollIntoViewIfNeeded();
 
-    const [cardBox, titleBox, rangeBox, joinBox] = await Promise.all([
-      card.boundingBox(), title.boundingBox(), range.boundingBox(), join.boundingBox(),
+    await expect(card.locator(".nb-event-short-time")).toBeHidden();
+    const [cardBox, titleBox, joinBox] = await Promise.all([
+      card.boundingBox(), title.boundingBox(), join.boundingBox(),
     ]);
-    for (const [label, box] of [["card", cardBox], ["title", titleBox], ["range", rangeBox], ["JOIN", joinBox]]) {
+    for (const [label, box] of [["card", cardBox], ["title", titleBox], ["JOIN", joinBox]]) {
       expect(box, `${label} is missing`).not.toBeNull();
     }
     expect(titleBox.y, "the title must remain top-aligned in a short linked card").toBeLessThanOrEqual(cardBox.y + 2);
-    expect(rangeBox.y, "the range must stay in the card's existing row").toBeLessThanOrEqual(cardBox.y + 3);
     expect(titleBox.x + titleBox.width, "JOIN must not cover the title").toBeLessThanOrEqual(joinBox.x - 4);
-    expect(rangeBox.x + rangeBox.width, "JOIN must not cover the time range").toBeLessThanOrEqual(joinBox.x - 4);
     expect(joinBox.y + joinBox.height, "JOIN must stay inside the existing card height").toBeLessThanOrEqual(cardBox.y + cardBox.height + 1);
+  });
+
+  test("a compact linked Day card gives its single row to the title and JOIN", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await seedPlanner(page, compactLinkedMeeting());
+    const card = page.locator('[data-event-id="evt-compact-linked"]');
+    const title = card.getByText("Client handoff", { exact: true });
+    const range = card.locator(".nb-event-short-time");
+    const join = page.getByRole("link", { name: "Join Client handoff" });
+    await card.scrollIntoViewIfNeeded();
+
+    await expect(title).toBeVisible();
+    await expect(range, "time is already expressed by vertical position in a compact linked card").toBeHidden();
+    const [titleBox, joinBox] = await Promise.all([title.boundingBox(), join.boundingBox()]);
+    expect(titleBox).not.toBeNull();
+    expect(joinBox).not.toBeNull();
+    expect(titleBox.width, "the title must receive a real readable lane").toBeGreaterThan(24);
+    expect(titleBox.x + titleBox.width, "the title must finish before the JOIN lane").toBeLessThanOrEqual(joinBox.x - 4);
   });
 
   test("Week exposes direct JOIN for all-day meetings", async ({ page }) => {
