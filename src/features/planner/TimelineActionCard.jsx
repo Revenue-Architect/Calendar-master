@@ -69,7 +69,7 @@ export default function TimelineActionCard({
   }, [task, onPointerDown, onPointerMove, onPointerUp]);
 
   return (
-    <div className={`nb-timeline-lane absolute overflow-hidden ${dragging || sizing ? "nb-timeline-lane-active" : ""}`}
+    <div className={`nb-timeline-lane absolute overflow-hidden ${dragging || sizing ? "nb-timeline-lane-active" : "nb-hover-tile"}`}
       data-test="timeline-action-lane"
       style={{
         top, height, left, width, borderRadius: cardRadius,

@@ -3923,6 +3923,38 @@ export default function Planner() {
            The previous nb-tap transform multiplied with that scale and gave
            every button two different release curves. */
         .nb-tap{transition:opacity 120ms ease}
+        /* Hover is a desktop reading aid, not a second selection system. These
+           four roles are opt-in: timeline gesture layers, sheet materials, and
+           invisible coarse-pointer targets must never inherit decorative state. */
+        .nb-hover-control,.nb-hover-tile,.nb-hover-choice,.nb-hover-icon{
+          transition:background-color 160ms ease,color 160ms ease,border-color 160ms ease,box-shadow 200ms var(--motion-settle),outline-color 160ms ease;
+        }
+        @media(hover:hover) and (pointer:fine){
+          .nb-hover-control:not(:disabled):not([aria-disabled="true"]):hover{
+            background-color:${T.faint}88!important;color:${T.text}!important;
+          }
+          .nb-hover-control.nb-liquid:not(:disabled):hover{
+            background-color:${T.accent}!important;box-shadow:var(--e1),var(--sheen);
+          }
+          .nb-hover-tile:not(:disabled):not([aria-disabled="true"]):hover{
+            box-shadow:var(--e1),var(--sheen),inset 0 0 0 1px ${T.accent}38!important;
+          }
+          .nb-hover-choice:not(:disabled):not([aria-disabled="true"]):not(.is-selected):hover{
+            background-color:${T.accent}12!important;color:${T.accentText}!important;
+            box-shadow:inset 0 0 0 1px ${T.accent}52!important;
+          }
+          .nb-hover-choice.is-selected:not(:disabled):hover{
+            box-shadow:inset 0 0 0 1px ${T.on}55!important;
+          }
+          .nb-hover-icon:not(:disabled):not([aria-disabled="true"]):hover{
+            background-color:${T.faint}88!important;color:${T.text}!important;
+            box-shadow:inset 0 0 0 1px ${T.line};
+          }
+          .nb-hover-danger:not(:disabled):hover{
+            background-color:transparent!important;color:${NOW_RED}!important;
+            box-shadow:inset 0 0 0 1px ${NOW_RED}!important;
+          }
+        }
         /* A 13px label with a little padding measures about 62 x 25, and the
            floor for a finger is 44 x 44. Fifteen controls had been under it for
            the life of the project and nothing had ever measured them.
@@ -4105,7 +4137,7 @@ export default function Planner() {
            to do their own jobs. */
         .nb-timeline-lane{
           container-type:inline-size;
-          transition:left 240ms var(--motion-lane),width 240ms var(--motion-lane),scale 220ms var(--motion-enter),opacity 160ms ease;
+          transition:left 240ms var(--motion-lane),width 240ms var(--motion-lane),scale 220ms var(--motion-enter),opacity 160ms ease,box-shadow 200ms var(--motion-settle);
         }
         /* Collision layout can settle after a gesture ends. During the gesture,
            though, the lane is the physical object under the pointer: interpolated
@@ -4127,9 +4159,6 @@ export default function Planner() {
           scale:.965;transition:scale 90ms cubic-bezier(.4,0,.6,1);
         }
         button:disabled,button[disabled]{scale:1!important}
-        @media(hover:hover){
-          [data-event-id]:hover,[data-task-chip]:hover{scale:1.006}
-        }
         /* A control that completes something pops rather than just filling in. */
         .nb-pop{animation:nbpop 300ms cubic-bezier(.23,1,.32,1)}
         @keyframes nbpop{0%{scale:1}35%{scale:1.12}100%{scale:1}}
@@ -4175,7 +4204,7 @@ export default function Planner() {
       <header style={{ background: T.bg, borderBottom: `1px solid ${T.line}`, color: T.text }} className="nb-hud sticky top-0 z-30 px-3 sm:px-5 py-2 flex items-center justify-between gap-3">
         <div className="nb-hud-left flex items-center gap-2 min-w-0">
           <button ref={navToggleRef} data-test="nav-toggle" type="button" aria-label="Toggle primary navigation" aria-controls="planner-navigation" aria-expanded={navOpen}
-            onClick={() => { beep("click"); navOpen ? closeNavigation() : openNavigation(); }} className="nb-shell-control nb-tap w-8 h-8 flex items-center justify-center" title="Navigation"><MenuIcon /></button>
+            onClick={() => { beep("click"); navOpen ? closeNavigation() : openNavigation(); }} className="nb-shell-control nb-tap nb-hover-icon w-8 h-8 flex items-center justify-center" title="Navigation"><MenuIcon /></button>
           <div className="flex items-baseline gap-2 min-w-0">
           {level != null && <>
             <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label">LVL</span>
@@ -4186,19 +4215,19 @@ export default function Planner() {
           </div>
         </div>
         <div className="nb-hud-actions flex items-center gap-1 shrink-0">
-          <button onClick={() => { jumpTo(todayKey); setMonthCursor(new Date()); }} style={{ fontFamily: MONO, color: T.dim }} className="nb-hud-today nb-tap px-2 py-1 text-xs tracking-widest">TODAY</button>
-          <button onClick={() => { beep("click"); setNotebook("all"); }} style={{ fontFamily: MONO, color: T.dim }} className="nb-hud-notes nb-tap px-2 py-1 text-xs tracking-widest">NOTES</button>
+          <button onClick={() => { jumpTo(todayKey); setMonthCursor(new Date()); }} style={{ fontFamily: MONO, color: T.dim }} className="nb-hud-today nb-tap nb-hover-control px-2 py-1 text-xs tracking-widest">TODAY</button>
+          <button onClick={() => { beep("click"); setNotebook("all"); }} style={{ fontFamily: MONO, color: T.dim }} className="nb-hud-notes nb-tap nb-hover-control px-2 py-1 text-xs tracking-widest">NOTES</button>
           <GooeySearch T={T} surface={surface} reduced={reducedMotion}
             onOpen={() => { beep("click"); setSearchQuery(""); setSearch(true); }} />
-          <button onClick={() => { beep("click"); setSettings(true); }} style={{ color: T.dim }} className="nb-hud-settings nb-tap w-8 h-8 flex items-center justify-center" aria-label="Settings"><MoreIcon /></button>
-          <button data-test="new-entry" onClick={() => { beep("click"); setComposer({ kind: "event", start: startSlot(nowMin), dur: 60, notch: true }); }} style={{ background: T.accent, color: T.on, fontFamily: MONO }} className="nb-tap nb-liquid px-2 py-1.5 text-xs font-bold tracking-widest">NEW</button>
+          <button onClick={() => { beep("click"); setSettings(true); }} style={{ color: T.dim }} className="nb-hud-settings nb-tap nb-hover-icon w-8 h-8 flex items-center justify-center" aria-label="Settings"><MoreIcon /></button>
+          <button data-test="new-entry" onClick={() => { beep("click"); setComposer({ kind: "event", start: startSlot(nowMin), dur: 60, notch: true }); }} style={{ background: T.accent, color: T.on, fontFamily: MONO }} className="nb-tap nb-liquid nb-hover-control px-2 py-1.5 text-xs font-bold tracking-widest">NEW</button>
         </div>
       </header>
 
       {/* ══ NAVIGATOR ══ */}
       <div onTouchStart={onTouchStartNav} onTouchMove={onTouchMoveNav} style={{ borderBottom: `1px solid ${T.line}` }}>
         <div className={`nb-month-navigator flex items-center justify-between px-3 sm:px-5 py-1.5 ${zoom === "month" ? "is-month" : ""}`}>
-          <button data-test="zoom-out" onClick={zoomOut} style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-data shrink-0 whitespace-nowrap" disabled={zoom === "month"}>
+          <button data-test="zoom-out" onClick={zoomOut} style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-hover-control nb-data shrink-0 whitespace-nowrap" disabled={zoom === "month"}>
             {zoom === "day" || zoom === "week" ? <span className="inline-flex items-center gap-1"><ChevronIcon direction="left" />{zoom === "day" ? "WEEK" : "MONTH"}</span> : `${MO[monthCursor.getMonth()]} ${monthCursor.getFullYear()}`}
           </button>
           <div className="nb-month-view-mode flex items-center gap-2 min-w-0">
@@ -4215,15 +4244,15 @@ export default function Planner() {
           </div>
           {zoom === "month" ? (
             <div className="nb-month-controls flex items-center justify-end gap-2">
-              <button aria-label="Previous month" onClick={() => { beep("page"); setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() - 1, 1)); }} style={{ color: T.dimText }} className="nb-tap px-2 text-xs flex items-center justify-center"><ChevronIcon direction="left" /></button>
-              <button aria-label="Next month" onClick={() => { beep("page"); setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1)); }} style={{ color: T.dimText }} className="nb-tap px-2 text-xs flex items-center justify-center"><ChevronIcon /></button>
-              <button data-test="zoom-in" onClick={zoomIn} style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-data" disabled={zoom === "day"}>
+              <button aria-label="Previous month" onClick={() => { beep("page"); setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() - 1, 1)); }} style={{ color: T.dimText }} className="nb-tap nb-hover-icon px-2 text-xs flex items-center justify-center"><ChevronIcon direction="left" /></button>
+              <button aria-label="Next month" onClick={() => { beep("page"); setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1)); }} style={{ color: T.dimText }} className="nb-tap nb-hover-icon px-2 text-xs flex items-center justify-center"><ChevronIcon /></button>
+              <button data-test="zoom-in" onClick={zoomIn} style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-hover-control nb-data" disabled={zoom === "day"}>
                 <span className="inline-flex items-center gap-1">WEEK<ChevronIcon /></span>
               </button>
             </div>
           ) : (
             zoom === "week" && (
-              <button data-test="zoom-in" onClick={zoomIn} style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-data">
+              <button data-test="zoom-in" onClick={zoomIn} style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-hover-control nb-data">
                 <span className="inline-flex items-center gap-1">DAY<ChevronIcon /></span>
               </button>
             )
@@ -4273,7 +4302,7 @@ export default function Planner() {
                     }}
                     onMouseLeave={() => clearTimeout(monthHoverT.current)}
                     onContextMenu={(e) => e.preventDefault()}
-                    className="nb-cell relative pt-2 pb-3.5"
+            className="nb-cell nb-hover-tile relative pt-2 pb-3.5"
                     style={{ background: T.bg, opacity: mounted ? (inMonth ? 1 : 0.32) : 0, transitionDelay: `${Math.min(i, 24) * 8}ms` }}>
                     <span className="absolute inset-0" style={{ background: T.accent, opacity: heat }} />
                     <span className="relative text-xs font-semibold" style={{ fontFamily: MONO, color: heat > 0.4 ? T.on : T.text }}>{d.getDate()}</span>
@@ -4297,7 +4326,7 @@ export default function Planner() {
         {(zoom === "week" || zoom === "day") && viewMode !== "actions" && (
               <div className="flex items-center">
             {zoom === "day" && (
-              <button onClick={() => goDay(-1)} aria-label="Previous day" style={{ color: T.dimText }} className="nb-tap shrink-0 px-2 sm:px-3 py-1 flex items-center justify-center"><ChevronIcon direction="left" /></button>
+              <button onClick={() => goDay(-1)} aria-label="Previous day" style={{ color: T.dimText }} className="nb-tap nb-hover-icon shrink-0 px-2 sm:px-3 py-1 flex items-center justify-center"><ChevronIcon direction="left" /></button>
             )}
             <div ref={attachRibbon} data-test="day-ribbon" data-ribbon-start={ribbonRange.startKey}
               data-ribbon-end={addDaysToKey(ribbonRange.endKey, -1)} data-ribbon-total-days={ribbonSpan}
@@ -4313,7 +4342,7 @@ export default function Planner() {
                 const target = gesture && gesture.overDay === k;
                 return (
                   <button key={k} data-day={k} ref={on ? activeRef : null} onClick={() => jumpTo(k)}
-                    className="nb-cell nb-tap relative w-16 sm:w-20 lg:w-24 shrink-0 py-2.5"
+                    className="nb-cell nb-tap nb-hover-tile relative w-16 sm:w-20 lg:w-24 shrink-0 py-2.5"
                     style={{ opacity: mounted ? 1 : 0, transform: mounted ? "none" : "translateY(10px)", transitionDelay: `${Math.min(i, 10) * 14}ms`, boxShadow: target ? `inset 0 0 0 2px ${T.accent}` : "none" }}>
                     {/* Selection is a filled cell and today is an outlined one. Washing
                         every busy day in accent turned the whole strip a muddy tint and
@@ -4341,7 +4370,7 @@ export default function Planner() {
             </div>
             </div>
             {zoom === "day" && (
-              <button onClick={() => goDay(1)} aria-label="Next day" style={{ color: T.dimText }} className="nb-tap shrink-0 px-2 sm:px-3 py-1 flex items-center justify-center"><ChevronIcon /></button>
+              <button onClick={() => goDay(1)} aria-label="Next day" style={{ color: T.dimText }} className="nb-tap nb-hover-icon shrink-0 px-2 sm:px-3 py-1 flex items-center justify-center"><ChevronIcon /></button>
             )}
               </div>
         )}
@@ -4365,7 +4394,7 @@ export default function Planner() {
               aria-expanded={!timelineViewFocused}
               aria-keyshortcuts="F"
               onClick={() => { beep("tick"); setTimelineFocusSource("manual"); setTimelineFocused((current) => !current); }}
-              className="nb-tap mb-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
+              className="nb-tap nb-hover-icon mb-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
               style={{ color: T.dimText, border: `1px solid ${T.line}` }}>
               <span aria-hidden="true" style={{ transform: timelineViewFocused ? "rotate(180deg)" : "none", transition: "transform 220ms cubic-bezier(.77,0,.175,1)" }}><ChevronIcon direction="up" /></span>
             </button>
@@ -4390,9 +4419,9 @@ export default function Planner() {
                 : `${missedReport.length} reminders came due`}
             </span>
             <button data-test="missed-reminders-review" onClick={() => { beep("click"); setMissedSheet(true); }}
-              style={{ fontFamily: MONO, color: T.accentText }} className="nb-tap text-xs font-bold tracking-widest shrink-0 underline">REVIEW</button>
+              style={{ fontFamily: MONO, color: T.accentText }} className="nb-tap nb-hover-control text-xs font-bold tracking-widest shrink-0 underline">REVIEW</button>
             <button data-test="missed-reminders-dismiss" onClick={() => { beep("tick"); closeMissedReport(); }}
-              style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-label shrink-0">CLEAR</button>
+              style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-hover-control nb-label shrink-0">CLEAR</button>
           </div>
         </div>
       )}
@@ -4419,10 +4448,10 @@ export default function Planner() {
             <span style={{ fontFamily: MONO, color: T.accentText }} className="nb-label shrink-0">BACK UP</span>
             <span className="nb-body truncate flex-1">This notebook only exists on this device.</span>
             <button data-test="backup-nudge-save" onClick={() => { beep("click"); exportJson(); }}
-              style={{ fontFamily: MONO, color: T.accentText }} className="nb-tap text-xs font-bold tracking-widest shrink-0 underline">SAVE A COPY</button>
+              style={{ fontFamily: MONO, color: T.accentText }} className="nb-tap nb-hover-control text-xs font-bold tracking-widest shrink-0 underline">SAVE A COPY</button>
             <button data-test="backup-nudge-dismiss"
               onClick={() => { beep("click"); setBackupRecord((current) => recordBackupDismissed(current, { state: db, today: todayKey })); }}
-              style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-data shrink-0" aria-label="Not now">NOT NOW</button>
+              style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-hover-control nb-data shrink-0" aria-label="Not now">NOT NOW</button>
           </div>
         </div>
       )}
@@ -4435,9 +4464,9 @@ export default function Planner() {
             <span className="nb-body min-w-0 flex-1">Hold a slot to create · hold to move · swipe an Action right to complete.</span>
             <div className="flex items-center gap-3">
             <button onClick={() => { beep("click"); dismissGestureHint(); setShortcuts(true); }}
-              style={{ fontFamily: MONO, color: T.accentText }} className="nb-tap text-xs font-bold tracking-widest shrink-0 underline">SHORTCUTS</button>
+              style={{ fontFamily: MONO, color: T.accentText }} className="nb-tap nb-hover-control text-xs font-bold tracking-widest shrink-0 underline">SHORTCUTS</button>
             <button data-test="gesture-hint-dismiss" onClick={() => { beep("click"); dismissGestureHint(); }}
-              style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-data shrink-0" aria-label="Dismiss gesture hint">GOT IT</button>
+              style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-hover-control nb-data shrink-0" aria-label="Dismiss gesture hint">GOT IT</button>
             </div>
           </div>
         </div>
@@ -4457,7 +4486,7 @@ export default function Planner() {
               <div className="nb-s overflow-y-auto min-h-0 flex-1">
                 <div className="flex items-center justify-between pb-2">
                   <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label">ALL ACTIONS</span>
-                  <button onClick={() => selectViewMode("timeline")} style={{ fontFamily: MONO, color: T.accentText }} className="nb-tap nb-label">BACK TO DAY</button>
+                  <button onClick={() => selectViewMode("timeline")} style={{ fontFamily: MONO, color: T.accentText }} className="nb-tap nb-hover-control nb-label">BACK TO DAY</button>
                 </div>
                 {actionsPanel}
               </div>
@@ -4476,7 +4505,7 @@ export default function Planner() {
                   <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label mr-0.5">FIND A SLOT</span>
                   {[30, 60, 120].map((d) => (
                     <button key={d} onClick={() => { beep("tick"); setSlotDur((cur) => (cur === d ? null : d)); }}
-                      className="nb-tap px-2 py-0.5 text-xs font-bold tracking-widest"
+                      className={`nb-tap nb-hover-choice ${slotDur === d ? "is-selected" : ""} px-2 py-0.5 text-xs font-bold tracking-widest`}
                       style={{ fontFamily: MONO, borderRadius: 999, background: slotDur === d ? T.accent : "transparent", color: slotDur === d ? T.on : T.dim, border: `1px solid ${slotDur === d ? T.accent : T.line}` }}>
                       {d >= 60 ? `${d / 60}H` : `${d}M`}
                     </button>
@@ -4488,7 +4517,7 @@ export default function Planner() {
                       <button key={`${s.date}-${s.start}`}
                         data-test="week-slot" data-slot-date={s.date}
                         onClick={() => { beep("click"); if (s.date !== dateKey) jumpTo(s.date); setComposer({ kind: "event", date: s.date, start: s.start, dur: s.dur }); }}
-                        className="nb-tap px-2 py-0.5 nb-data"
+                        className="nb-tap nb-hover-choice px-2 py-0.5 nb-data"
                         style={{ fontFamily: MONO, color: T.accentText, borderRadius: 999, border: `1.5px dashed ${T.accent}` }}>
                         {plannedLabel(s.date, todayKey).toUpperCase()} {tm(s.start)}
                       </button>
@@ -4547,7 +4576,7 @@ export default function Planner() {
                             if (event.pointerType === "mouse" && event.button !== 0) return;
                             startGesture({ mode: "task", kind: "task", id: task.id, x: event.clientX, y: event.clientY });
                           }}
-                          className="nb-tap shrink-0 flex items-center gap-2 px-2.5 py-1.5 text-left"
+                          className="nb-tap nb-hover-tile shrink-0 flex items-center gap-2 px-2.5 py-1.5 text-left"
                           style={{ background: surface, borderRadius: 999, opacity: task.status === "completed" ? .55 : 1 }}>
                           <span className="rounded-full shrink-0" style={{ width: 7, height: 7, background: task.status === "completed" ? T.accent : "transparent", boxShadow: `inset 0 0 0 1.5px ${T.accent}` }} />
                           <span className="text-xs font-semibold max-w-48 truncate" style={{ textDecoration: task.status === "completed" ? "line-through" : "none" }}>{task.title}</span>
@@ -4654,7 +4683,7 @@ export default function Planner() {
                     const held = gesture && gesture.id === e.id
                       && (gesture.mode === "move" || gesture.mode === "resize-end" || gesture.mode === "resize-start");
                     return (
-                      <div key={e.id} data-event-id={e.id} className={`nb-timeline-lane absolute ${held ? "nb-timeline-lane-active" : ""}`} style={{ top: top + 2, height: h, left: `${(e.lane / e.cols) * 100}%`, width: `calc(${100 / e.cols}% - 6px)`, zIndex: held ? 20 : 1, opacity: held && gesture.overDay ? 0.35 : 1, pointerEvents: "auto" }}>
+                      <div key={e.id} data-event-id={e.id} className={`nb-timeline-lane absolute ${held ? "nb-timeline-lane-active" : "nb-hover-tile"}`} style={{ top: top + 2, height: h, left: `${(e.lane / e.cols) * 100}%`, width: `calc(${100 / e.cols}% - 6px)`, zIndex: held ? 20 : 1, opacity: held && gesture.overDay ? 0.35 : 1, pointerEvents: "auto" }}>
                         <div role="button" tabIndex={0} aria-label={e.title}
                           onPointerDown={(ev) => eventDown(ev, e)} onPointerUp={(ev) => eventUp(ev, e)}
                           onKeyDown={(ev) => {
@@ -4838,13 +4867,13 @@ export default function Planner() {
       <div className="nb-msheet lg:hidden fixed inset-x-0 bottom-0 z-40 flex flex-col"
          style={{ height: "76vh", background: T.card, borderTop: `1px solid ${T.line}`, transform: sheet ? "translateY(0)" : "translateY(calc(100% - 52px))", transition: "transform 360ms cubic-bezier(.23,1,.32,1)" }}>
         <div className="flex items-center gap-3 px-3 shrink-0" style={{ height: 52 }}>
-          <button onClick={() => { beep("tick"); setSheet(!sheet); }} className="nb-tap flex-1 flex items-center gap-2 text-left" aria-label="Toggle actions">
+          <button onClick={() => { beep("tick"); setSheet(!sheet); }} className="nb-tap nb-hover-control flex-1 flex items-center gap-2 text-left" aria-label="Toggle actions">
             <span style={{ background: T.faint }} className="w-8 h-0.5" />
             <span style={{ fontFamily: MONO }} className="nb-label">ACTIONS</span>
             <span style={{ fontFamily: MONO, color: T.accentText }} className="nb-data">{openCount} OPEN</span>
             {isToday && overdue.length > 0 && <span style={{ fontFamily: MONO, color: NOW_RED }} className="nb-data">{overdue.length} LATE</span>}
           </button>
-          <button data-test="new-action" onClick={() => { beep("click"); setComposer({ kind: "task", notch: true }); }} style={{ background: T.accent, color: T.on, fontFamily: MONO }} className="nb-tap nb-liquid px-3 py-1.5 text-xs font-bold tracking-widest">+ ACTION</button>
+          <button data-test="new-action" onClick={() => { beep("click"); setComposer({ kind: "task", notch: true }); }} style={{ background: T.accent, color: T.on, fontFamily: MONO }} className="nb-tap nb-liquid nb-hover-control px-3 py-1.5 text-xs font-bold tracking-widest">+ ACTION</button>
         </div>
         <div className="nb-s flex-1 overflow-y-auto px-3 pb-6">{actionsPanel}</div>
       </div>
@@ -4942,14 +4971,14 @@ export default function Planner() {
                 <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label py-3">NOTHING SCHEDULED — ALL FREE</span>
               )}
               {allDayP.map((e) => (
-                <button key={e.id} onClick={() => openFrom("event", e.id)} className="nb-tap flex items-center gap-2.5 px-3 py-2.5 text-left" style={{ background: surface, borderRadius: CARD_R }}>
+                <button key={e.id} onClick={() => openFrom("event", e.id)} className="nb-tap nb-hover-tile flex items-center gap-2.5 px-3 py-2.5 text-left" style={{ background: surface, borderRadius: CARD_R }}>
                   <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: catColor(e.cat) }} />
                   <span className="flex-1 text-sm font-semibold truncate">{e.title}</span>
                   <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label shrink-0">ALL DAY</span>
                 </button>
               ))}
               {timedP.map((e) => (
-                <button key={e.id} onClick={() => openFrom("event", e.id)} className="nb-tap flex items-center gap-2.5 px-3 py-2.5 text-left" style={{ background: surface, borderRadius: CARD_R }}>
+                <button key={e.id} onClick={() => openFrom("event", e.id)} className="nb-tap nb-hover-tile flex items-center gap-2.5 px-3 py-2.5 text-left" style={{ background: surface, borderRadius: CARD_R }}>
                   <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: catColor(e.cat) }} />
                   <span className="flex-1 min-w-0">
                     <span className="block text-sm font-semibold truncate">{e.title}</span>
@@ -4959,7 +4988,7 @@ export default function Planner() {
                 </button>
               ))}
               {tasksP.map((t) => (
-                <button key={t.id} onClick={() => openFrom("task", t.id)} className="nb-tap flex items-center gap-2.5 px-3 py-2.5 text-left" style={{ background: surface, borderRadius: CARD_R, opacity: t.status === "completed" ? 0.45 : 1 }}>
+                <button key={t.id} onClick={() => openFrom("task", t.id)} className="nb-tap nb-hover-tile flex items-center gap-2.5 px-3 py-2.5 text-left" style={{ background: surface, borderRadius: CARD_R, opacity: t.status === "completed" ? 0.45 : 1 }}>
                   <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, boxShadow: `inset 0 0 0 1.5px ${catColor(t.category)}`, background: t.status === "completed" ? catColor(t.category) : "transparent" }} />
                   <span className="flex-1 text-sm font-semibold truncate" style={{ textDecoration: t.status === "completed" ? "line-through" : "none" }}>{t.title}</span>
                   <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data shrink-0">{t.planned.startMinute != null ? tm(t.planned.startMinute) : "ACTION"}</span>
@@ -5350,10 +5379,10 @@ export default function Planner() {
                 if (inspect.kind === "event") duplicateEvent(inspect.id);
                 else { inspectDraft.status === "completed" ? reopenTask(inspect.id) : completeTask(inspect.id); requestSheetClose("inspect"); }
               }}
-              style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="nb-tap nb-liquid w-full py-3 mt-5 text-xs font-bold tracking-widest">
+              style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="nb-tap nb-liquid nb-hover-control w-full py-3 mt-5 text-xs font-bold tracking-widest">
               {inspect.kind === "event" ? "DUPLICATE" : inspectDraft.status === "completed" ? "REOPEN" : "MARK COMPLETE"}
             </button>
-            <button onClick={() => removeItem(inspect.kind, inspect.id)} style={{ fontFamily: MONO, color: NOW_RED, border: `1px solid ${T.line}` }} className="nb-tap w-full py-3 mt-2 nb-label">DELETE</button>
+            <button onClick={() => removeItem(inspect.kind, inspect.id)} style={{ fontFamily: MONO, color: NOW_RED, border: `1px solid ${T.line}` }} className="nb-tap nb-hover-danger w-full py-3 mt-2 nb-label">DELETE</button>
           </>}
         </Sheet>
       )}
@@ -5366,7 +5395,7 @@ export default function Planner() {
           </p>
           <div className="flex flex-col gap-2">
             <button onClick={() => { beep("click"); setDiscardAsk(false); }}
-              style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="nb-tap nb-liquid py-3 text-xs font-bold tracking-widest">KEEP EDITING</button>
+              style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="nb-tap nb-liquid nb-hover-control py-3 text-xs font-bold tracking-widest">KEEP EDITING</button>
             <button onClick={() => {
               beep("abort");
               setDraft(null);
@@ -5374,7 +5403,7 @@ export default function Planner() {
               setInspectField(null);
               setDiscardAsk(false);
               requestSheetClose("inspect");
-            }} style={{ fontFamily: MONO, color: NOW_RED, border: `1px solid ${T.line}` }} className="nb-tap py-3 nb-label">DISCARD CHANGES</button>
+            }} style={{ fontFamily: MONO, color: NOW_RED, border: `1px solid ${T.line}` }} className="nb-tap nb-hover-danger py-3 nb-label">DISCARD CHANGES</button>
           </div>
         </Sheet>
       )}
@@ -5390,9 +5419,9 @@ export default function Planner() {
           </p>
           <div className="flex flex-col gap-2">
             <button onClick={() => completeTask(confirmComplete.id, true)}
-              style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="nb-tap py-3 text-xs font-bold tracking-widest">COMPLETE ANYWAY</button>
+              style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="nb-tap nb-liquid nb-hover-control py-3 text-xs font-bold tracking-widest">COMPLETE ANYWAY</button>
             <button onClick={() => { beep("click"); setConfirmComplete(null); }}
-              style={{ fontFamily: MONO, border: `1px solid ${T.line}` }} className="nb-tap py-3 nb-label">KEEP IT OPEN</button>
+              style={{ fontFamily: MONO, border: `1px solid ${T.line}` }} className="nb-tap nb-hover-control py-3 nb-label">KEEP IT OPEN</button>
           </div>
         </Sheet>
       )}
@@ -5605,21 +5634,21 @@ export default function Planner() {
 
           <div className="mt-4">
             <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label">FEEDBACK</span>
-            <button onClick={() => { beep("tick"); setPreferences((current) => current ? { ...current, feedback: { ...current.feedback, sound: !current.feedback.sound } } : current); }} className="w-full flex items-center justify-between py-2.5" style={{ borderBottom: `1px solid ${T.line}` }}>
+            <button onClick={() => { beep("tick"); setPreferences((current) => current ? { ...current, feedback: { ...current.feedback, sound: !current.feedback.sound } } : current); }} className="nb-tap nb-hover-choice w-full flex items-center justify-between py-2.5" style={{ borderBottom: `1px solid ${T.line}` }}>
               <span className="text-sm">Sound</span>
               <span style={{ fontFamily: MONO, color: preferences.feedback.sound ? T.accent : T.dim }} className="nb-data">{preferences.feedback.sound ? "ON" : "OFF"}</span>
             </button>
-            <button data-test="haptics-toggle" onClick={() => { beep("tick"); setPreferences((current) => current ? { ...current, feedback: { ...current.feedback, haptics: !current.feedback.haptics } } : current); }} className="w-full flex items-center justify-between py-2.5" style={{ borderBottom: `1px solid ${T.line}` }}>
+            <button data-test="haptics-toggle" onClick={() => { beep("tick"); setPreferences((current) => current ? { ...current, feedback: { ...current.feedback, haptics: !current.feedback.haptics } } : current); }} className="nb-tap nb-hover-choice w-full flex items-center justify-between py-2.5" style={{ borderBottom: `1px solid ${T.line}` }}>
               <span className="text-sm">Haptics</span>
               <span style={{ fontFamily: MONO, color: preferences.feedback.haptics ? T.accent : T.dim }} className="nb-data">{preferences.feedback.haptics ? "ON" : "OFF"}</span>
             </button>
-            <button onClick={() => { beep("tick"); setPreferences((current) => current ? { ...current, display: { ...current.display, clock: current.display.clock === "24" ? "12" : "24" } } : current); }} className="w-full flex items-center justify-between py-2.5" style={{ borderBottom: `1px solid ${T.line}` }}>
+            <button onClick={() => { beep("tick"); setPreferences((current) => current ? { ...current, display: { ...current.display, clock: current.display.clock === "24" ? "12" : "24" } } : current); }} className="nb-tap nb-hover-choice w-full flex items-center justify-between py-2.5" style={{ borderBottom: `1px solid ${T.line}` }}>
               <span className="text-sm">Clock</span>
               <span style={{ fontFamily: MONO, color: T.accentText }} className="nb-data">{clock === "24" ? "24-HOUR" : "12-HOUR"}</span>
             </button>
             <button data-test="week-start-toggle"
               onClick={() => { beep("tick"); setPreferences((current) => current ? { ...current, display: { ...current.display, weekStart: current.display.weekStart === 1 ? 0 : 1 } } : current); }}
-              className="w-full flex items-center justify-between py-2.5" style={{ borderBottom: `1px solid ${T.line}` }}>
+              className="nb-tap nb-hover-choice w-full flex items-center justify-between py-2.5" style={{ borderBottom: `1px solid ${T.line}` }}>
               <span className="text-sm">Week starts</span>
               <span style={{ fontFamily: MONO, color: T.accentText }} className="nb-data">{weekStart === 1 ? "MONDAY" : "SUNDAY"}</span>
             </button>
@@ -5628,7 +5657,7 @@ export default function Planner() {
                 and it will not: a page cannot set an alarm for a time when it is
                 not running, and a notebook with no server has nothing to send one.
                 What arrives instead is a report, the next time the app is open. */}
-            <button onClick={askNotifs} className="w-full flex items-start justify-between gap-3 py-2.5 text-left" style={{ borderBottom: `1px solid ${T.line}` }}>
+            <button onClick={askNotifs} className="nb-tap nb-hover-control w-full flex items-start justify-between gap-3 py-2.5 text-left" style={{ borderBottom: `1px solid ${T.line}` }}>
               <span className="min-w-0">
                 <span className="block text-sm">System notifications</span>
                 <span style={{ color: T.dimText }} className="block text-xs mt-0.5">Only while the app is open. Anything missed is reported next time.</span>
@@ -5641,7 +5670,7 @@ export default function Planner() {
             <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label">THEME</span>
             <div className="flex flex-col mt-1">
               {THEMES.map((th) => (
-                <button key={th.id} onClick={() => { beep("tick"); setPreferences((current) => current ? { ...current, display: { ...current.display, themeId: th.id } } : current); }} className="nb-row flex items-center gap-3 py-2 px-1 text-left" style={{ borderBottom: `1px solid ${T.line}` }}>
+                <button key={th.id} onClick={() => { beep("tick"); setPreferences((current) => current ? { ...current, display: { ...current.display, themeId: th.id } } : current); }} className={`nb-tap nb-row nb-hover-choice ${th.id === T.id ? "is-selected" : ""} flex items-center gap-3 py-2 px-1 text-left`} style={{ borderBottom: `1px solid ${T.line}` }}>
                   <span className="flex shrink-0">
                     <span className="w-4 h-6" style={{ background: th.bg }} />
                     <span className="w-4 h-6" style={{ background: th.card }} />
@@ -5663,7 +5692,7 @@ export default function Planner() {
               ["streaks", "Streaks", preferences.motivation.streaks, (current) => ({ ...current, motivation: { ...current.motivation, streaks: !current.motivation.streaks } })],
               ["celebrations", "Celebrations", preferences.motivation.celebrations, (current) => ({ ...current, motivation: { ...current.motivation, celebrations: !current.motivation.celebrations } })],
             ].map(([id, label, enabled, update]) => (
-              <button key={id} onClick={() => { beep("tick"); setPreferences((current) => current ? update(current) : current); }} className="w-full flex items-center justify-between py-2.5" style={{ borderBottom: `1px solid ${T.line}` }}>
+              <button key={id} onClick={() => { beep("tick"); setPreferences((current) => current ? update(current) : current); }} className="nb-tap nb-hover-choice w-full flex items-center justify-between py-2.5" style={{ borderBottom: `1px solid ${T.line}` }}>
                 <span className="text-sm">{label}</span>
                 <span style={{ fontFamily: MONO, color: enabled ? T.accent : T.dim }} className="nb-data">{enabled ? "ON" : "OFF"}</span>
               </button>
@@ -5765,13 +5794,13 @@ function NavigationShell({ phase, firstItemRef, onTimeline, onActions, onSetup, 
       <div className="flex flex-col gap-1">
         {items.map(([label, onClick], index) => (
           <button key={label} ref={index === 0 ? firstItemRef : null} type="button" onClick={onClick}
-            className="nb-nav-item" style={{ "--nav-index": index + 1 }}>{label}</button>
+            className="nb-nav-item nb-hover-control" style={{ "--nav-index": index + 1 }}>{label}</button>
         ))}
       </div>
       <div className="flex flex-col gap-1 mt-5 pt-5" style={{ borderTop: "1px solid #313237" }}>
         {utilityItems.map(([label, onClick], index) => (
           <button key={label} type="button" onClick={onClick}
-            className="nb-nav-item" style={{ "--nav-index": index + 4 }}>{label}</button>
+            className="nb-nav-item nb-hover-control" style={{ "--nav-index": index + 4 }}>{label}</button>
         ))}
       </div>
       <div className="nb-nav-membership" style={{ "--nav-index": 7 }}>
@@ -5826,12 +5855,12 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
       <div className="hidden lg:flex items-baseline justify-between mb-3">
         <h2 className="text-2xl font-bold tracking-tight">Actions</h2>
         <div className="flex items-center gap-3">
-          <button onClick={() => (selection ? onCancelSelect() : onStartSelect(null))} style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-label">SELECT</button>
-          <button onClick={onManageLists} style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-label">LISTS</button>
-          <button onClick={onAddTask} style={{ fontFamily: MONO, color: T.accentText }} className="nb-tap nb-data">+ ADD</button>
+          <button onClick={() => (selection ? onCancelSelect() : onStartSelect(null))} style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-hover-control nb-label">SELECT</button>
+          <button onClick={onManageLists} style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-hover-control nb-label">LISTS</button>
+          <button onClick={onAddTask} style={{ fontFamily: MONO, color: T.accentText }} className="nb-tap nb-hover-control nb-data">+ ADD</button>
           {onCollapse && (
             <button data-test="actions-collapse" onClick={onCollapse} style={{ fontFamily: MONO, color: T.dimText }}
-              className="nb-tap nb-data" aria-label="Collapse Actions column">COLLAPSE ›</button>
+              className="nb-tap nb-hover-control nb-data" aria-label="Collapse Actions column">COLLAPSE ›</button>
           )}
         </div>
       </div>
@@ -5840,7 +5869,7 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
         <div className="flex flex-wrap items-center gap-1 mb-2 px-2 py-2" style={{ boxShadow: `inset 0 0 0 1px ${T.accent}`, borderRadius: CARD_R }}>
           <span style={{ fontFamily: MONO, color: T.accentText }} className="nb-data mr-1">{selection.size} SELECTED</span>
           {[["complete", "COMPLETE"], ["today", "TODAY"], ["defer", "TOMORROW"]].map(([action, label]) => (
-            <button key={action} onClick={() => onBulk(action)} className="nb-tap px-2 py-1 nb-data"
+            <button key={action} onClick={() => onBulk(action)} className="nb-tap nb-hover-choice px-2 py-1 nb-data"
               style={{ fontFamily: MONO, borderRadius: 999, color: T.text, border: `1px solid ${T.line}` }}>{label}</button>
           ))}
           {/* §11.3. The three that benefit most from being done at once, each
@@ -5856,8 +5885,8 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
             {["urgent", "high", "normal", "low", "none"].map((v) => <option key={v} value={v}>{v.toUpperCase()}</option>)}
           </select>
           <button onClick={() => { const t = prompt("Tag to add"); if (t && t.trim()) onBulk("tag", t.trim()); }}
-            className="nb-tap px-2 py-1 nb-data" style={{ fontFamily: MONO, borderRadius: 999, color: T.text, border: `1px solid ${T.line}` }}>TAG…</button>
-          <button onClick={() => onBulk("delete")} className="nb-tap px-2 py-1 nb-data"
+            className="nb-tap nb-hover-choice px-2 py-1 nb-data" style={{ fontFamily: MONO, borderRadius: 999, color: T.text, border: `1px solid ${T.line}` }}>TAG…</button>
+          <button onClick={() => onBulk("delete")} className="nb-tap nb-hover-danger px-2 py-1 nb-data"
             style={{ fontFamily: MONO, borderRadius: 999, color: NOW_RED, border: `1px solid ${T.line}` }}>DELETE</button>
           <button onClick={onCancelSelect} style={{ fontFamily: MONO, color: T.dimText }} className="ml-auto nb-label">CANCEL</button>
         </div>
@@ -5869,7 +5898,7 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
           const count = viewCounts?.[view.id] ?? 0;
           if (!on && count === 0 && view.id !== "today") return null;
           return (
-            <button key={view.id} onClick={() => onSmartView(view.id)} className="nb-tap shrink-0 px-2 py-1 nb-label"
+            <button key={view.id} onClick={() => onSmartView(view.id)} className={`nb-tap nb-hover-choice ${on ? "is-selected" : ""} shrink-0 px-2 py-1 nb-label`}
               style={{ fontFamily: MONO, background: on ? T.accent : "transparent", color: on ? T.on : T.dim, border: `1px solid ${on ? T.accent : T.line}` }}>
               {view.label}{count ? ` ${count}` : ""}
             </button>
@@ -5881,7 +5910,7 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
           planned onto today would make the button a visible no-op. */}
       {showOverdue && pullable.length > 0 && (
         <>
-          <button data-test="plan-today" onClick={() => { beep("click"); setOverdueReviewOpen((current) => !current); }} className="w-full flex items-center gap-2 px-3 py-2 mb-2 text-left" style={{ boxShadow: `inset 0 0 0 1px ${NOW_RED}` }} aria-expanded={overdueReviewOpen}>
+        <button data-test="plan-today" onClick={() => { beep("click"); setOverdueReviewOpen((current) => !current); }} className="nb-hover-tile w-full flex items-center gap-2 px-3 py-2 mb-2 text-left" style={{ boxShadow: `inset 0 0 0 1px ${NOW_RED}` }} aria-expanded={overdueReviewOpen}>
           <span style={{ fontFamily: MONO, color: NOW_RED }} className="nb-data shrink-0">{pullable.length} OVERDUE</span>
           <span className="flex-1 text-xs truncate" style={{ color: T.dimText }}>{pullable.map((t) => t.title).join(" · ")}</span>
             <span style={{ fontFamily: MONO, color: T.accentText }} className="nb-label shrink-0">PLAN TODAY</span>
@@ -5895,13 +5924,13 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
               <div className="flex flex-col gap-1.5">
                 {pullable.map((t) => (
                   <div key={t.id} data-test={`overdue-plan-${t.id}`} className="flex items-center gap-2 py-1.5" style={{ borderTop: `1px solid ${T.line}` }}>
-                    <button data-test="overdue-plan-open" onClick={() => { beep("click"); setOverdueReviewOpen(false); onInspect(t.id); }} className="nb-tap min-w-0 flex-1 text-left">
+                    <button data-test="overdue-plan-open" onClick={() => { beep("click"); setOverdueReviewOpen(false); onInspect(t.id); }} className="nb-tap nb-hover-control min-w-0 flex-1 text-left">
                       <span className="block text-sm font-semibold truncate">{t.title}</span>
                       <span style={{ fontFamily: MONO, color: T.dimText }} className="block nb-data truncate">
                         DUE {t.deadline?.date || "—"} · WAS {t.planned?.date ? `${plannedLabel(t.planned.date, todayKey)}${t.planned.startMinute != null ? ` ${fmtTime(t.planned.startMinute, clock)}` : ""}` : "UNPLANNED"}{t.planned?.estimateMinutes ? ` · ${dur(t.planned.estimateMinutes)}` : ""}
                       </span>
                     </button>
-                    <button data-test="overdue-plan-one" onClick={() => onPullOverdue([t.id])} style={{ fontFamily: MONO, color: T.accentText, border: `1px solid ${T.line}`, borderRadius: 999 }} className="nb-tap shrink-0 px-2 py-1 nb-label">PLAN</button>
+                    <button data-test="overdue-plan-one" onClick={() => onPullOverdue([t.id])} style={{ fontFamily: MONO, color: T.accentText, border: `1px solid ${T.line}`, borderRadius: 999 }} className="nb-tap nb-hover-choice shrink-0 px-2 py-1 nb-label">PLAN</button>
                   </div>
                 ))}
               </div>
@@ -6109,7 +6138,7 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromote
           <span className="nb-data" style={{ color: T.dimText, opacity: dx < -20 ? 1 : 0 }}>TOMORROW</span>
         </div>
 
-      <article className="relative" style={{ background: surface, borderRadius: CARD_R, transform: `translateX(${dx}px)`, transition: dx === 0 ? "transform 220ms cubic-bezier(.2,.8,.25,1)" : "none", opacity: 1, touchAction: "pan-y", userSelect: "none", WebkitUserSelect: "none" }}
+      <article className="nb-hover-tile relative" style={{ background: surface, borderRadius: CARD_R, transform: `translateX(${dx}px)`, transition: dx === 0 ? "transform 220ms cubic-bezier(.2,.8,.25,1), box-shadow 200ms cubic-bezier(.2,.8,.25,1)" : "none", opacity: 1, touchAction: "pan-y", userSelect: "none", WebkitUserSelect: "none" }}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
         <div data-test="task-completion-overlay" data-visible={String(isDone)} aria-hidden="true"
           className={`nb-action-complete-overlay absolute inset-0 z-10 flex items-center gap-2 pl-14 pr-4 pointer-events-none ${isDone ? "is-visible" : ""}`}
@@ -6127,7 +6156,7 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromote
               if (isDone) onReopen(t.id); else stopHold(true);
             }}
             onPointerLeave={() => stopHold(true)} onPointerCancel={() => stopHold(true)}
-            className="relative z-20 mt-0.5 w-8 h-8 shrink-0 flex items-center justify-center"
+            className="nb-hover-icon relative z-20 mt-0.5 w-8 h-8 shrink-0 flex items-center justify-center"
             aria-label={selection ? (selection.has(t.id) ? "Deselect" : "Select") : isDone ? "Reopen" : "Hold to complete"} style={{ touchAction: "none" }}>
             <svg width="32" height="32" viewBox="0 0 32 32" className="absolute inset-0">
               <circle cx="16" cy="16" r="13" fill="none" stroke={selection && selection.has(t.id) ? T.accent : T.faint} strokeWidth="2" />
@@ -6141,7 +6170,7 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromote
           </button>
 
             <div className="flex-1 min-w-0">
-              <button onClick={() => onInspect(t.id)} className="text-left w-full">
+              <button onClick={() => onInspect(t.id)} className="nb-hover-control text-left w-full">
                 <span className="block text-sm font-semibold leading-snug" style={{ color: isDone ? T.dimText : T.text }}>{t.title}</span>
               </button>
               <div className="flex flex-wrap items-center gap-2 mt-1" style={{ fontFamily: MONO }}>
@@ -6160,7 +6189,7 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromote
                 <span style={{ color: T.dimText, border: `1px solid ${T.line}`, borderRadius: 999 }} className="px-1.5 py-0.5 nb-label shrink-0">WAITING</span>
               )}
               {t.recurrence && <span style={{ color: T.dimText }} className="text-xs"><RepeatIcon /></span>}
-              {t.planned.startMinute != null && <button onClick={() => onUnschedule(t.id)} style={{ color: T.accentText }} className="nb-data">{fmtTime(t.planned.startMinute, clock)}</button>}
+              {t.planned.startMinute != null && <button onClick={() => onUnschedule(t.id)} style={{ color: T.accentText }} className="nb-hover-control nb-data">{fmtTime(t.planned.startMinute, clock)}</button>}
               {dueLeft != null && <span style={{ color: dueLeft <= 0 ? NOW_RED : T.dim }} className="nb-data">DUE {dueLeft === 0 ? "TODAY" : dueLeft < 0 ? `${-dueLeft}D LATE` : `${dueLeft}D`}</span>}
               {checklist.length > 0 && <span style={{ color: T.dimText }} className="nb-data">{subDone}/{checklist.length}</span>}
               {blockers.length > 0 && (
@@ -6705,7 +6734,7 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
                         onTouchEnd={(ev) => { ev.stopPropagation(); touchEnd(ev, e, day.key); }}
                         onTouchCancel={(ev) => { ev.stopPropagation(); disarm(); dragRef.current = null; setDrag(null); }}
                         onClick={(ev) => ev.stopPropagation()}
-                        className="absolute inset-y-0 left-0 text-left overflow-hidden"
+                        className="nb-hover-tile absolute inset-y-0 left-0 text-left overflow-hidden"
                         style={{
                           /* The sibling JOIN is about 47px at this type scale.
                              Reserve its real hit lane rather than clipping the
@@ -6797,8 +6826,8 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
 function RowWithJoin({ T, surface, link, title, onOpen, className = "", padding = "px-3 py-2.5", style = {}, children }) {
   const href = normalizeMeetingLink(link);
   return (
-    <div className={`grid items-stretch ${href ? "grid-cols-[minmax(0,1fr)_auto]" : "grid-cols-1"}`} style={{ background: surface, borderRadius: CARD_R, boxShadow: "var(--e1)", ...style }}>
-      <button onClick={onOpen} className={`nb-tap min-w-0 w-full flex items-center gap-2.5 text-left ${padding} ${className}`}
+    <div className={`nb-hover-tile grid items-stretch ${href ? "grid-cols-[minmax(0,1fr)_auto]" : "grid-cols-1"}`} style={{ background: surface, borderRadius: CARD_R, boxShadow: "var(--e1)", ...style }}>
+      <button onClick={onOpen} className={`nb-tap nb-hover-control min-w-0 w-full flex items-center gap-2.5 text-left ${padding} ${className}`}
         style={{ background: "transparent", borderRadius: CARD_R }}>
         {children}
       </button>
@@ -6807,7 +6836,7 @@ function RowWithJoin({ T, surface, link, title, onOpen, className = "", padding 
           onClick={(e) => e.stopPropagation()}
           aria-label={`Join ${title}`}
           style={{ fontFamily: MONO, color: T.accentText }}
-           className="nb-tap self-center justify-self-end mx-2 inline-flex items-center gap-1 px-1.5 py-1 text-xs font-bold tracking-widest">JOIN <ExternalLinkIcon /></a>
+           className="nb-tap nb-hover-control self-center justify-self-end mx-2 inline-flex items-center gap-1 px-1.5 py-1 text-xs font-bold tracking-widest">JOIN <ExternalLinkIcon /></a>
       )}
     </div>
   );
@@ -6822,7 +6851,7 @@ function Agenda({ T, surface, days, dateKey, todayKey, clock, onOpenEvent, onOpe
         const count = day.allDay.length + day.timed.length + day.tasks.length;
         return (
           <div key={day.key} className="flex" style={{ borderTop: `1px solid ${T.line}`, minHeight: 76 }}>
-            <button onClick={() => onJump(day.key)} className="shrink-0 w-16 py-3 text-center" style={{ background: T.bg }}>
+            <button onClick={() => onJump(day.key)} className="nb-hover-tile shrink-0 w-16 py-3 text-center" style={{ background: T.bg }}>
               <span className="inline-flex flex-col items-center px-2 py-1"
                 style={{ borderRadius: CARD_R, boxShadow: isToday ? `inset 0 0 0 1.5px ${T.text}` : "none" }}>
                 <span style={{ fontFamily: MONO, color: T.dimText }} className="block nb-data">{WD[d.getDay()]}</span>
@@ -6855,7 +6884,7 @@ function Agenda({ T, surface, days, dateKey, todayKey, clock, onOpenEvent, onOpe
                 </RowWithJoin>
               ))}
               {day.tasks.map((t) => (
-                <button key={t.id} onClick={() => onOpenTask(t.id, day.key)} className="nb-tap flex items-center gap-2.5 px-3 py-2.5 text-left"
+                <button key={t.id} onClick={() => onOpenTask(t.id, day.key)} className="nb-tap nb-hover-tile flex items-center gap-2.5 px-3 py-2.5 text-left"
                   style={{ background: surface, borderRadius: CARD_R, opacity: t.status === "completed" ? 0.45 : 1 }}>
                   <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, boxShadow: `inset 0 0 0 1.5px ${catColor(t.category)}`, background: t.status === "completed" ? catColor(t.category) : "transparent" }} />
                   <span className="flex-1 text-sm font-semibold truncate" style={{ textDecoration: t.status === "completed" ? "line-through" : "none" }}>{t.title}</span>
@@ -7042,7 +7071,7 @@ function InlineChoice({ T, surface, icon, label, options, value, onPick, tint = 
   useEffect(() => { if (!editable && openProp == null) setUncontrolledOpen(false); }, [editable, openProp]);
   return (
     <div style={{ background: tint ? `${tint}22` : surface, borderRadius: CARD_R }} className="overflow-hidden">
-      <button disabled={!editable} onClick={(event) => { if (!open) onBeginEdit?.(event.currentTarget); setOpen(!open); }} className="nb-tap flex items-center gap-3 px-3 py-2.5 w-full text-left disabled:opacity-100">
+      <button disabled={!editable} onClick={(event) => { if (!open) onBeginEdit?.(event.currentTarget); setOpen(!open); }} className="nb-tap nb-hover-control flex items-center gap-3 px-3 py-2.5 w-full text-left disabled:opacity-100">
         <span style={{ color: tint || T.dim }} className="text-sm shrink-0 w-4 text-center">{icon}</span>
         <span className="flex-1 text-sm truncate" style={{ color: tint || T.text }}>{label}</span>
         {editable && <span style={{ color: T.dimText, transform: open ? "rotate(180deg)" : "none", transition: "transform 200ms cubic-bezier(.2,.8,.25,1)" }}
@@ -7066,7 +7095,7 @@ function InlineChoice({ T, surface, icon, label, options, value, onPick, tint = 
               return (
                 <button key={String(key)} data-active={on ? "true" : "false"}
                   onClick={() => { onPick(key); setOpen(false); }}
-                  className="nb-tap relative inline-flex items-center gap-1.5 px-2.5 py-1.5 nb-data"
+                  className={`nb-tap nb-hover-choice ${on ? "is-selected" : ""} relative inline-flex items-center gap-1.5 px-2.5 py-1.5 nb-data`}
                   style={{
                     fontFamily: MONO, borderRadius: 999, zIndex: 1,
                     background: "transparent",
@@ -7410,7 +7439,7 @@ function PillNav({ T, value, options, onPick, ariaLabel, surface = "transparent"
         return (
           <button key={String(key)} role="tab" aria-selected={on} data-active={on ? "true" : "false"}
             onClick={(event) => onPick(key, event.detail === 0 ? "keyboard" : "pointer")}
-            className="nb-tap relative px-3 py-1 nb-label"
+          className={`nb-tap nb-hover-choice ${on ? "is-selected" : ""} relative px-3 py-1 nb-label`}
             style={{ color: on ? T.on : T.dim, borderRadius: 999, zIndex: 1, transition: "color 260ms ease" }}>
             {label}
           </button>
@@ -7435,7 +7464,7 @@ function InlineChoiceRow({ T, icon, label, sub, options, value, onPick, dot = nu
   useEffect(() => { if (!editable && openProp == null) setUncontrolledOpen(false); }, [editable, openProp]);
   return (
     <div style={{ borderBottom: divider ? `1px solid ${T.line}` : "none" }}>
-      <button disabled={!editable} onClick={(event) => { if (!open) onBeginEdit?.(event.currentTarget); setOpen(!open); }} className="nb-tap flex items-center gap-3 px-3 py-3 w-full text-left disabled:opacity-100">
+      <button disabled={!editable} onClick={(event) => { if (!open) onBeginEdit?.(event.currentTarget); setOpen(!open); }} className="nb-tap nb-hover-control flex items-center gap-3 px-3 py-3 w-full text-left disabled:opacity-100">
         <span className="flex-1 min-w-0">
           <span className="flex items-center gap-2">
             {dot && <span className="rounded-full shrink-0" style={{ width: 8, height: 8, background: dot(value) }} />}
@@ -7457,7 +7486,7 @@ function InlineChoiceRow({ T, icon, label, sub, options, value, onPick, dot = nu
               return (
                 <button key={String(key)} data-active={on ? "true" : "false"}
                   onClick={() => { onPick(key); setOpen(false); }}
-                  className="nb-tap relative inline-flex items-center gap-1.5 px-2.5 py-1 nb-data"
+                  className={`nb-tap nb-hover-choice ${on ? "is-selected" : ""} relative inline-flex items-center gap-1.5 px-2.5 py-1 nb-data`}
                   style={{
                     fontFamily: MONO, borderRadius: 999, zIndex: 1,
                     background: "transparent", color: on ? T.on : T.dim,
@@ -7686,7 +7715,7 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
           <span id={titleId.current} style={{ fontFamily: MONO, color: T.dimText }} className="nb-data">{title || "Details"}</span>
           <div className="flex items-center gap-1.5">
             {headerAction}
-            <button onClick={requestClose} aria-label="Close" style={{ color: T.dimText, fontFamily: MONO }} className="nb-tap -mr-1 px-2 py-1 text-sm flex items-center justify-center"><CloseIcon /></button>
+            <button onClick={requestClose} aria-label="Close" style={{ color: T.dimText, fontFamily: MONO }} className="nb-tap nb-hover-icon -mr-1 px-2 py-1 text-sm flex items-center justify-center"><CloseIcon /></button>
           </div>
         </div>
         {/* Padding deeper than the panel's 24px corner radius, so the last row
@@ -7779,14 +7808,14 @@ function EntityNotes({ T, notes, kind, onNew, onOpen }) {
         <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data">
           NOTES · {notes.length}
         </span>
-        <button onClick={onNew} style={{ fontFamily: MONO, color: T.accentText }} className="nb-tap nb-data">+ NEW NOTE</button>
+        <button onClick={onNew} style={{ fontFamily: MONO, color: T.accentText }} className="nb-tap nb-hover-control nb-data">+ NEW NOTE</button>
       </div>
       {notes.length === 0 ? (
         <p style={{ fontFamily: SERIF, color: T.dimText }} className="nb-voice mt-2">Keep the thinking beside this {kind}, not inside a field it will outgrow.</p>
       ) : (
         <div className="flex flex-col mt-2">
           {notes.map((note, index) => (
-            <button key={note.id} onClick={() => onOpen(note)} className="nb-row nb-list-enter text-left py-2.5" style={{ borderBottom: `1px solid ${T.line}`, "--nb-list-index": Math.min(index, 4) }}>
+            <button key={note.id} onClick={() => onOpen(note)} className="nb-tap nb-row nb-hover-tile nb-list-enter text-left py-2.5" style={{ borderBottom: `1px solid ${T.line}`, "--nb-list-index": Math.min(index, 4) }}>
               <span className="block text-sm truncate">{note.title || noteExcerpt(note, 90) || "Untitled note"}</span>
               <span style={{ fontFamily: MONO, color: T.dimText }} className="block nb-data mt-0.5">
                 {note.pinned ? "PINNED · " : ""}{note.updatedAt ? "UPDATED" : "NEW"}
@@ -7807,21 +7836,21 @@ function NotebookPanel({ T, view, notes, onView, onNew, onOpen, onPin, onArchive
         className="w-full [&>button]:flex-1 [&>button]:py-2"
         style={{ border: `1px solid ${T.line}` }} />
       {view !== "archived" && (
-        <button onClick={onNew} style={{ fontFamily: MONO, color: T.on, background: T.accent }} className="nb-tap nb-liquid w-full py-3 mt-4 text-xs font-bold tracking-widest">+ NEW NOTE</button>
+        <button onClick={onNew} style={{ fontFamily: MONO, color: T.on, background: T.accent }} className="nb-tap nb-liquid nb-hover-control w-full py-3 mt-4 text-xs font-bold tracking-widest">+ NEW NOTE</button>
       )}
       <div className="flex flex-col mt-3">
         {notes.map((note, index) => (
           <div key={note.id} className="nb-list-enter flex items-center gap-2 py-3" style={{ borderBottom: `1px solid ${T.line}`, "--nb-list-index": Math.min(index, 4) }}>
-            <button onClick={() => onOpen(note)} className="nb-row text-left flex-1 min-w-0">
+            <button onClick={() => onOpen(note)} className="nb-tap nb-row nb-hover-tile text-left flex-1 min-w-0">
               <span className="block text-sm truncate">{note.title || noteExcerpt(note, 100) || "Untitled note"}</span>
               <span style={{ fontFamily: MONO, color: T.dimText }} className="block nb-data mt-0.5 truncate">
                 {noteContextLabel(note)}{note.pinned ? " · PINNED" : ""}
               </span>
             </button>
             {view !== "archived" && <button onClick={() => onPin(note)} aria-label={note.pinned ? "Unpin note" : "Pin note"}
-              style={{ color: note.pinned ? T.accent : T.dim }} className="nb-tap p-2 text-sm flex items-center justify-center"><PinIcon filled={note.pinned} /></button>}
+              style={{ color: note.pinned ? T.accent : T.dim }} className="nb-tap nb-hover-icon p-2 text-sm flex items-center justify-center"><PinIcon filled={note.pinned} /></button>}
             <button onClick={() => onArchive(note)} aria-label={note.archived ? "Restore note" : "Archive note"}
-              style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap p-2 nb-data">{note.archived ? "RESTORE" : "ARCHIVE"}</button>
+              style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-hover-control p-2 nb-data">{note.archived ? "RESTORE" : "ARCHIVE"}</button>
           </div>
         ))}
         {notes.length === 0 && <p style={{ fontFamily: SERIF, color: T.dimText }} className="nb-voice py-6 text-center">
@@ -8272,7 +8301,7 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick, weekStart 
                     return (
                       <button key={d} data-test="weekday-chip" data-weekday={i} data-on={on ? "true" : "false"}
                         aria-pressed={on} aria-label={DAY_LETTERS[i]}
-                        onClick={() => toggleDay(i)} className="nb-tap relative flex-1 py-1 nb-data"
+                        onClick={() => toggleDay(i)} className={`nb-tap nb-hover-choice ${on ? "is-selected" : ""} relative flex-1 py-1 nb-data`}
                         style={{ fontFamily: MONO, borderRadius: 999, background: "transparent", color: on ? T.on : T.dim,
                           border: `1px solid ${on ? "transparent" : T.line}`, transition: "color 260ms ease, border-color 180ms ease" }}>
                         <LiquidFill T={T} on={on} />
@@ -8291,7 +8320,7 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick, weekStart 
         </div>
       </div>
 
-      <button onClick={submit} disabled={!ok} className="nb-tap w-full py-3 mt-2 text-xs font-bold tracking-widest"
+      <button onClick={submit} disabled={!ok} className="nb-tap nb-liquid nb-hover-control w-full py-3 mt-2 text-xs font-bold tracking-widest"
         style={{ fontFamily: MONO, borderRadius: CARD_R, background: ok ? T.accent : surface, color: ok ? T.on : T.dim, border: "none", transition: "background 180ms ease" }}>
         {editing ? "SAVE CHANGES" : kind === "event" ? "ADD TO TIMELINE" : "ADD ACTION"}
       </button>
@@ -8322,7 +8351,7 @@ function Chips({ T, surface, label, value, onChange, options, multi = false, wra
           const on = selected(key);
           return (
             <button key={String(key)} onClick={() => pick(key)} data-active={!multi && on ? "true" : "false"}
-              className={`nb-tap relative ${wrap ? "" : "flex-1"} inline-flex items-center justify-center gap-1.5 px-3 py-2 nb-data`}
+              className={`nb-tap nb-hover-choice ${on ? "is-selected" : ""} relative ${wrap ? "" : "flex-1"} inline-flex items-center justify-center gap-1.5 px-3 py-2 nb-data`}
               style={{
                 fontFamily: MONO, borderRadius: 999,
                 zIndex: 1,
