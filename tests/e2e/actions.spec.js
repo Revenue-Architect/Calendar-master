@@ -362,6 +362,63 @@ test.describe("the actions column", () => {
     expect(order).toBe("add-first");
   });
 
+  test("a promoted checklist step remains visible beneath its parent Action", async ({ page }) => {
+    const action = scheduledAction({ id: "task-promote", title: "Prepare the workshop" });
+    action.tasks[0].checklist = [
+      { id: "step-promote", title: "Book the room", done: false, order: 0, completedAt: null },
+    ];
+    await seedPlanner(page, action);
+    await page.getByRole("tab", { name: "ACTIONS", exact: true }).click();
+
+    const parent = page.locator('[data-task="task-promote"]');
+    await parent.getByRole("button", { name: "Promote step to a subtask" }).click();
+
+    const state = await settledState(
+      page,
+      (stored) => stored.tasks.some((task) => task.parentTaskId === "task-promote" && task.title === "Book the room"),
+      "promotion did not create a child Action",
+    );
+    expect(state.tasks.find((task) => task.parentTaskId === "task-promote")?.status).toBe("open");
+    const child = parent.getByTestId("task-subtask");
+    await expect(child).toContainText("Book the room");
+    await child.getByRole("button", { name: "Complete Book the room" }).click();
+    await settledState(
+      page,
+      (stored) => stored.tasks.some((task) => task.parentTaskId === "task-promote" && task.status === "completed"),
+      "nested subtask did not complete",
+    );
+    await child.getByRole("button", { name: "Reopen Book the room" }).click();
+    await settledState(
+      page,
+      (stored) => stored.tasks.some((task) => task.parentTaskId === "task-promote" && task.status === "open"),
+      "nested subtask did not reopen",
+    );
+    await expect(page.locator("[data-task]"), "a child must stay nested instead of duplicating the parent Action").toHaveCount(1);
+  });
+
+  test("the Timeline keeps a promoted subtask legible on its parent Action", async ({ page }) => {
+    const action = scheduledAction({ id: "task-timeline-promote", title: "Run the workshop" });
+    action.tasks[0].checklist = [
+      { id: "step-timeline-promote", title: "Send the briefing", done: false, order: 0, completedAt: null },
+    ];
+    await seedPlanner(page, action);
+
+    const chip = page.locator('[data-task-chip="task-timeline-promote"]');
+    await chip.scrollIntoViewIfNeeded();
+    await chip.click();
+    const sheet = page.getByTestId("sheet");
+    await sheet.getByRole("button", { name: "EDIT ACTION" }).click();
+    await sheet.getByRole("button", { name: "Promote step to a subtask" }).click();
+    await settledState(
+      page,
+      (stored) => stored.tasks.some((task) => task.parentTaskId === "task-timeline-promote" && task.title === "Send the briefing"),
+      "Timeline promotion did not create a child Action",
+    );
+
+    await expect(sheet.getByTestId("task-subtask")).toContainText("Send the briefing");
+    await expect(chip.getByTestId("timeline-action-subtasks")).toContainText("1 SUBTASK");
+  });
+
   test("the haptics preference suppresses completion vibration without blocking completion", async ({ page }) => {
     await recordVibrations(page);
     await seedPlanner(page, scheduledAction({ id: "task-quiet", title: "Quiet completion" }));

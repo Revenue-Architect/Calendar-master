@@ -13,6 +13,7 @@ export default function TimelineActionCard({
   reducedMotion = false,
   live = false,
   livePct = 0,
+  subtaskProgress = null,
   swipeOffset = 0,
   theme,
   mono,
@@ -123,6 +124,11 @@ export default function TimelineActionCard({
           </span>
           {block && height >= 40 && (
             <span style={{ fontFamily: mono, color: theme.dimText }} className="nb-task-duration block nb-data truncate pr-2.5 pl-8">{formatDuration(estimate)}</span>
+          )}
+          {subtaskProgress?.total > 0 && block && height >= 54 && (
+            <span data-test="timeline-action-subtasks" style={{ fontFamily: mono, color: theme.dimText }} className="block nb-data truncate pr-2.5 pl-8">
+              {subtaskProgress.total} SUBTASK{subtaskProgress.total === 1 ? "" : "S"} · {subtaskProgress.done} DONE
+            </span>
           )}
         </button>
         <button type="button" data-timeline-complete={task.id}

@@ -1533,6 +1533,20 @@ export default function Planner() {
     () => dayTasks.filter((task) => task.planned.startMinute != null),
     [dayTasks],
   );
+  /* Children deliberately stay out of top-level day queries. Keep their compact
+     progress with the parent, though, so a promotion remains discoverable from
+     the scheduled Action that owns it. */
+  const subtaskProgressByParent = useMemo(() => {
+    const progress = new Map();
+    for (const task of db?.tasks ?? []) {
+      if (!task.parentTaskId || task.status === "cancelled") continue;
+      const current = progress.get(task.parentTaskId) ?? { done: 0, total: 0 };
+      current.total += 1;
+      if (task.status === "completed") current.done += 1;
+      progress.set(task.parentTaskId, current);
+    }
+    return progress;
+  }, [db]);
   const notes = dayProjection?.notes ?? [];
   const openCount = countOpen(dayTasks);
 
@@ -3733,6 +3747,7 @@ export default function Planner() {
       onExtract={extractTask}
       onUnschedule={(id) => scheduleTask(id, null)}
       blockersFor={(t) => (db ? getTaskBlockers(db.tasks, parseTaskOccurrenceId(t.id).seriesId) : [])}
+      subtasksFor={(t) => (db ? getSubtasksOf(db, parseTaskOccurrenceId(t.id).seriesId) : [])}
       onPromoteSub={promoteSub}
       onJump={jumpTo}
       onOpenDeadline={(t) => {
@@ -4342,7 +4357,7 @@ export default function Planner() {
                 const target = gesture && gesture.overDay === k;
                 return (
                   <button key={k} data-day={k} ref={on ? activeRef : null} onClick={() => jumpTo(k)}
-                    className="nb-cell nb-tap nb-hover-tile relative w-16 sm:w-20 lg:w-24 shrink-0 py-2.5"
+                    className="nb-cell nb-tap relative w-16 sm:w-20 lg:w-24 shrink-0 py-2.5"
                     style={{ opacity: mounted ? 1 : 0, transform: mounted ? "none" : "translateY(10px)", transitionDelay: `${Math.min(i, 10) * 14}ms`, boxShadow: target ? `inset 0 0 0 2px ${T.accent}` : "none" }}>
                     {/* Selection is a filled cell and today is an outlined one. Washing
                         every busy day in accent turned the whole strip a muddy tint and
@@ -4815,6 +4830,7 @@ export default function Planner() {
                         height={h} left={`${(t.lane / t.cols) * 100}%`} width={`calc(${100 / t.cols}% - 6px)`}
                         estimate={estimate} block={block} sizing={sizing} dragging={dragging} reducedMotion={reducedMotion}
                         live={live} livePct={pct}
+                        subtaskProgress={subtaskProgressByParent.get(parseTaskOccurrenceId(t.id).seriesId) ?? null}
                         swipeOffset={taskSwipe?.id === t.id ? taskSwipe.offset : 0}
                         theme={T} mono={MONO} cardRadius={CARD_R} formatTime={tm} formatDuration={dur}
                         clickFollowsGesture={clickFollowsGesture}
@@ -5063,6 +5079,17 @@ export default function Planner() {
                   </div>
                 );
               })()}
+
+              <PromotedSubtasks T={T} subtasks={inspectSubtasks}
+                className="mx-0 mt-3"
+                onComplete={completeTask} onReopen={reopenTask}
+                onOpen={(id) => {
+                  beep("click");
+                  setDraft(null);
+                  setDetailEditing(false);
+                  setInspectField(null);
+                  setInspect({ kind: "task", id });
+                }} />
 
               <div className="flex items-start gap-3 px-3 py-3 mt-4" style={{ background: surface, borderRadius: CARD_R }}>
                 <InlineText T={T} value={inspectDraft.note} placeholder="Add a note" ariaLabel="Note" multiline
@@ -5813,7 +5840,7 @@ function NavigationShell({ phase, firstItemRef, onTimeline, onActions, onSetup, 
 
 /* ═══════════════════════ ACTIONS ═══════════════════════ */
 
-function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, onOpenDeadline, overdue, deadlines, showOverdue, todayKey, gesture, blockersFor, onPromoteSub, smartView, viewCounts, onSmartView, lists, onManageLists, clock = "12", selection, onToggleSelect, onStartSelect, onCancelSelect, onBulk, onPullOverdue, beep, buzz, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onAddTask, onEditNote, onUnschedule, onJump, onCollapse = null }) {
+function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, onOpenDeadline, overdue, deadlines, showOverdue, todayKey, gesture, blockersFor, subtasksFor, onPromoteSub, smartView, viewCounts, onSmartView, lists, onManageLists, clock = "12", selection, onToggleSelect, onStartSelect, onCancelSelect, onBulk, onPullOverdue, beep, buzz, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onAddTask, onEditNote, onUnschedule, onJump, onCollapse = null }) {
   const [overdueReviewOpen, setOverdueReviewOpen] = useState(false);
   const smartViewRef = useRef(smartView);
   const smartViewRevealTimer = useRef(null);
@@ -5910,7 +5937,7 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
           planned onto today would make the button a visible no-op. */}
       {showOverdue && pullable.length > 0 && (
         <>
-        <button data-test="plan-today" onClick={() => { beep("click"); setOverdueReviewOpen((current) => !current); }} className="nb-hover-tile w-full flex items-center gap-2 px-3 py-2 mb-2 text-left" style={{ boxShadow: `inset 0 0 0 1px ${NOW_RED}` }} aria-expanded={overdueReviewOpen}>
+        <button data-test="plan-today" onClick={() => { beep("click"); setOverdueReviewOpen((current) => !current); }} className="w-full flex items-center gap-2 px-3 py-2 mb-2 text-left" style={{ boxShadow: `inset 0 0 0 1px ${NOW_RED}` }} aria-expanded={overdueReviewOpen}>
           <span style={{ fontFamily: MONO, color: NOW_RED }} className="nb-data shrink-0">{pullable.length} OVERDUE</span>
           <span className="flex-1 text-xs truncate" style={{ color: T.dimText }}>{pullable.map((t) => t.title).join(" · ")}</span>
             <span style={{ fontFamily: MONO, color: T.accentText }} className="nb-label shrink-0">PLAN TODAY</span>
@@ -5970,7 +5997,7 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
 
       <div className="flex flex-col gap-2">
         {open.map((t) => (
-          <TaskCard key={t.id} T={T} t={t} beep={beep} buzz={buzz} target={gesture && gesture.overTask === t.id} todayKey={todayKey} blockers={blockersFor(t)} onPromoteSub={onPromoteSub} clock={clock} selection={selection} onToggleSelect={onToggleSelect} onStartSelect={onStartSelect}
+          <TaskCard key={t.id} T={T} t={t} beep={beep} buzz={buzz} target={gesture && gesture.overTask === t.id} todayKey={todayKey} blockers={blockersFor(t)} subtasks={subtasksFor(t)} onPromoteSub={onPromoteSub} clock={clock} selection={selection} onToggleSelect={onToggleSelect} onStartSelect={onStartSelect}
             onComplete={onComplete} onReopen={onReopen} onDefer={onDefer} onInspect={onInspect} onToggleSub={onToggleSub} onAddSub={onAddSub} onRemoveSub={onRemoveSub} onDragStart={onDragStart} onUnschedule={onUnschedule} listEnterIndex={revealIndex(t)} />
         ))}
       </div>
@@ -5980,7 +6007,7 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
           <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data">DONE · {done.length}</span>
           <div className="flex flex-col gap-2 mt-2">
             {done.map((t) => (
-              <TaskCard key={t.id} T={T} t={t} beep={beep} buzz={buzz} todayKey={todayKey} blockers={blockersFor(t)} onPromoteSub={onPromoteSub} clock={clock} selection={selection} onToggleSelect={onToggleSelect} onStartSelect={onStartSelect}
+              <TaskCard key={t.id} T={T} t={t} beep={beep} buzz={buzz} todayKey={todayKey} blockers={blockersFor(t)} subtasks={subtasksFor(t)} onPromoteSub={onPromoteSub} clock={clock} selection={selection} onToggleSelect={onToggleSelect} onStartSelect={onStartSelect}
                 onComplete={onComplete} onReopen={onReopen} onDefer={onDefer} onInspect={onInspect} onToggleSub={onToggleSub} onAddSub={onAddSub} onRemoveSub={onRemoveSub} onDragStart={onDragStart} onUnschedule={onUnschedule} listEnterIndex={revealIndex(t)} />
             ))}
           </div>
@@ -6074,7 +6101,7 @@ function NoteBlock({ T, block, ordinal, onOpen }) {
   return <button onClick={onOpen} className="text-left w-full">{body}</button>;
 }
 
-function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromoteSub, clock = "12", selection = null, onToggleSelect, onStartSelect, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onUnschedule, listEnterIndex = null }) {
+function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], subtasks = [], onPromoteSub, clock = "12", selection = null, onToggleSelect, onStartSelect, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onUnschedule, listEnterIndex = null }) {
   const [prog, setProg] = useState(0);
   const [dx, setDx] = useState(0);
   const [burst, setBurst] = useState(null);
@@ -6234,7 +6261,43 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], onPromote
             </div>
           </div>
         )}
+        <PromotedSubtasks T={T} subtasks={subtasks}
+          onComplete={onComplete} onReopen={onReopen} onOpen={onInspect} />
       </article>
+    </div>
+  );
+}
+
+/* A promoted step is now a task record rather than checklist text. Keep it in the
+   parent’s visual tree: it is intentionally absent from top-level day queries, so
+   rendering it nowhere would turn a successful promotion into apparent deletion. */
+function PromotedSubtasks({ T, subtasks, onComplete, onReopen, onOpen, className = "" }) {
+  if (!subtasks.length) return null;
+  const done = subtasks.filter((task) => task.status === "completed").length;
+  return (
+    <div data-test="task-subtasks" className={`mx-3 mb-3 pl-3 ${className}`} style={{ borderLeft: `2px solid ${T.faint}` }}>
+      <div style={{ fontFamily: MONO, color: T.dimText }} className="flex items-center gap-2 pb-1 pt-0.5 nb-data">
+        <span>SUBTASKS</span>
+        <span>{done}/{subtasks.length}</span>
+      </div>
+      {subtasks.map((subtask) => {
+        const complete = subtask.status === "completed";
+        return (
+          <div key={subtask.id} data-test="task-subtask" data-subtask-id={subtask.id} className="flex min-w-0 items-center gap-2 py-1">
+            <button type="button" aria-label={complete ? `Reopen ${subtask.title}` : `Complete ${subtask.title}`}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => { event.stopPropagation(); (complete ? onReopen : onComplete)(subtask.id); }}
+              className="nb-hover-icon flex h-6 w-6 shrink-0 items-center justify-center" style={{ color: T.accent }}>
+              <span aria-hidden="true" className="h-3 w-3" style={{ background: complete ? T.accent : "transparent", boxShadow: `inset 0 0 0 1px ${complete ? T.accent : T.faint}` }} />
+            </button>
+            <button type="button" onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => { event.stopPropagation(); onOpen(subtask.id); }}
+              className="nb-hover-control min-w-0 flex-1 py-1 text-left">
+              <span className="block truncate text-xs" style={{ color: complete ? T.dim : T.text, textDecoration: complete ? "line-through" : "none" }}>{subtask.title}</span>
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 }
