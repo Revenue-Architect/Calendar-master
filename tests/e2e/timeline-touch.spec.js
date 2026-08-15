@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import { seedPlanner, settledState } from "./helpers.js";
 import { createBlankPlannerState } from "../../src/platform/persistence/plannerStateImport.js";
 import { createEvent } from "../../src/domains/calendar/index.js";
+import { createTask } from "../../src/domains/tasks/index.js";
 import { keyOf } from "../../src/shared/time/dateKey.js";
 
 /* The timeline, under a finger.
@@ -30,6 +31,15 @@ function seeded() {
       startLocal: `${today}T10:00`, endLocal: `${today}T12:00`,
     },
   }, { id: "evt-standup" }).state;
+}
+
+function compactAction() {
+  const state = createBlankPlannerState({});
+  const planned = createTask(state.tasks, {
+    id: "task-touch-compact", title: "Resize me directly",
+    planned: { date: today, startMinute: 10 * 60, estimateMinutes: 15 },
+  });
+  return { ...state, tasks: planned.tasks };
 }
 
 const card = (page) => page.locator('[data-event-id="evt-standup"]');
@@ -217,6 +227,25 @@ test.describe("a resize grip is part of the card it sits on", () => {
     expect(timing.endLocal, "resizing the start moved the end").toBe(`${today}T12:00`);
     expect(minutesInto(timing.startLocal), "the start did not follow the finger by about an hour")
       .toBeGreaterThan(minutesInto(`${today}T10:45`));
+  });
+});
+
+test.describe("the visible Action estimate owns a direct resize on touch", () => {
+  test("a short Action resizes from its estimate without waiting for a long press", async ({ page }) => {
+    await seedPlanner(page, compactAction());
+    const estimate = page.getByTestId("timeline-action-resize");
+    await estimate.scrollIntoViewIfNeeded();
+    const box = await estimate.boundingBox();
+    const before = await settledState(page, () => true, "the notebook never settled");
+
+    await finger(page, {
+      x: box.x + box.width / 2,
+      y: box.y + box.height / 2,
+      to: { x: box.x + box.width / 2, y: box.y + box.height / 2 + HOUR_PX },
+    });
+
+    const after = await settledState(page, (state) => state.tasks[0].planned.estimateMinutes !== before.tasks[0].planned.estimateMinutes, "the estimate did not resize directly");
+    expect(after.tasks[0].planned.startMinute).toBe(before.tasks[0].planned.startMinute);
   });
 });
 

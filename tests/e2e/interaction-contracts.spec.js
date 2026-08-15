@@ -28,6 +28,15 @@ function notebook() {
   return { ...state, tasks: planned.tasks };
 }
 
+function compactActionNotebook() {
+  let state = createBlankPlannerState({});
+  const planned = createTask(state.tasks, {
+    id: "task-compact", title: "Compact planning action",
+    planned: { date: today, startMinute: 11 * 60, estimateMinutes: 15 },
+  });
+  return { ...state, tasks: planned.tasks };
+}
+
 async function selectedCellInsideRibbon(page) {
   const ribbon = page.getByTestId("day-ribbon");
   const date = await page.getByTestId("day-heading").getAttribute("data-date");
@@ -99,6 +108,33 @@ test.describe("short Event resize", () => {
 });
 
 test.describe("Action exclusive owners", () => {
+  test("a compact Action dedicates its visible estimate to resizing", async ({ page }) => {
+    await seedPlanner(page, compactActionNotebook());
+    const card = page.locator('[data-task-chip="task-compact"]');
+    const move = card.getByTestId("timeline-action-move");
+    const estimate = page.locator('[data-resize="task-compact"]');
+    await card.scrollIntoViewIfNeeded();
+    await expect(move).toBeVisible();
+    await expect(estimate).toHaveText("15m");
+
+    const [moveBox, estimateBox] = await Promise.all([move.boundingBox(), estimate.boundingBox()]);
+    expect(moveBox, "the Action body has no measurable move region").not.toBeNull();
+    expect(estimateBox, "the visible estimate has no measurable resize target").not.toBeNull();
+    expect(estimateBox.x, "the estimate must sit beside the body, not over it").toBeGreaterThanOrEqual(moveBox.x + moveBox.width - 1);
+
+    const hit = await hitTarget(page, estimateBox.x + estimateBox.width / 2, estimateBox.y + estimateBox.height / 2);
+    expect(hit.resize).toBe("end");
+    expect(hit.complete).toBe(false);
+
+    const before = await storedRecord(page, "task", "task-compact");
+    await page.mouse.move(estimateBox.x + estimateBox.width / 2, estimateBox.y + estimateBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(estimateBox.x + estimateBox.width / 2, estimateBox.y + estimateBox.height + 40, { steps: 6 });
+    await page.mouse.up();
+    const after = await settledState(page, (state) => state.tasks[0].planned.estimateMinutes !== before.planned.estimateMinutes);
+    expect(after.tasks[0].planned.startMinute).toBe(before.planned.startMinute);
+  });
+
   test("active Event moves and Event or Action resizes never interpolate lane layout", async ({ page }) => {
     await seedPlanner(page, notebook());
     const noLayoutTransition = async (lane, label) => {

@@ -1914,7 +1914,7 @@ export default function Planner() {
       /* N and A open a sheet whose first field autofocuses. Without
          preventDefault the same keystroke then lands in that field, so the
          composer opened with "n" already typed into the title. */
-      if (e.key === "n" || e.key === "N") { e.preventDefault(); setComposer({ kind: "event", start: startSlot(nowMin), dur: 60 }); }
+      if (e.key === "n" || e.key === "N") { e.preventDefault(); setComposer({ kind: "event", start: startSlot(nowMin), dur: 60, morph: "none" }); }
       /* Completion, deferral and inspection were pointer-only — a hold, a swipe and a
          tap with no keyboard path. These act on the first open action of the day. */
       if (e.key === "c" || e.key === "C") {
@@ -1925,7 +1925,7 @@ export default function Planner() {
         const next = dayTasks.find((t) => t.status !== "completed");
         if (next && next.planned.date) deferTask(next.id, 1);
       }
-      if (e.key === "a" || e.key === "A") { e.preventDefault(); setComposer({ kind: "task" }); }
+      if (e.key === "a" || e.key === "A") { e.preventDefault(); setComposer({ kind: "task", morph: "none" }); }
       if ((e.key === "z" && (e.metaKey || e.ctrlKey)) && undo) { e.preventDefault(); runUndo(); }
     };
     window.addEventListener("keydown", h);
@@ -3320,6 +3320,29 @@ export default function Planner() {
         setTaskSwipe({ id: p.chipId, offset: Math.max(0, Math.min(96, t.clientX - p.x)) });
         return;
       }
+      /* The Action estimate is a dedicated, visible resize control rather than
+         a thin edge laid over the card. Once its drag has a deliberate vertical
+         direction it can respond immediately: there is no title or checkmark
+         underneath for it to steal, and a user should not have to wait out a
+         long-press just to extend a fifteen-minute Action. */
+      if (p.resizing?.kind === "task" && !p.held && !p.cancelled
+        && Math.abs(t.clientY - p.y) > 4
+        && Math.abs(t.clientY - p.y) >= Math.abs(t.clientX - p.x)) {
+        const task = plannedRef.current.find((item) => item.id === p.chipId);
+        if (task?.planned?.startMinute != null) {
+          clearPressTimer(p);
+          p.held = true;
+          armedResizeRef.current = {
+            x: p.x, y: p.y,
+            ev: { id: task.id, start: task.planned.startMinute, dur: task.planned.estimateMinutes ?? 30 },
+            edge: p.resizing.edge,
+            kind: "task",
+          };
+          if (e.cancelable) e.preventDefault();
+          beginResizeRef.current(t.clientX, t.clientY);
+          return;
+        }
+      }
       if (Math.abs(t.clientX - p.x) > 12 || Math.abs(t.clientY - p.y) > 12) cancelPress();
       if (Math.abs(t.clientY - p.y) > 4) {
         timelineScrollSessionRef.current.begin();
@@ -4085,29 +4108,27 @@ export default function Planner() {
           100%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round 999px)}
         }
         .nb-fluid.nb-fluid-closing[data-fluid-origin="trigger"] .nb-notch-body{animation:none;opacity:1}
-        /* The notch morph: one object changing shape, rather than a panel fading
-           in. Shape and contents stay on one compositor path at full opacity;
-           the animated clip itself reveals and conceals what belongs inside. */
-        .nb-fluid[data-fluid-origin="notch"]{animation-name:nbnotchin;animation-duration:360ms;animation-timing-function:cubic-bezier(.23,1,.32,1)}
+        /* The notch is the sheet itself taking on the trigger's material and
+           geometry — not a coloured copy fading in front of it. The panel is
+           clipped from the real button bounds, transitions from that button's
+           theme accent to its own card surface, then lets content arrive after
+           the physical move has established the new space. */
+        .nb-fluid[data-fluid-origin="notch"]{animation-name:nbnotchin;animation-duration:320ms;animation-timing-function:cubic-bezier(.23,1,.32,1);transition:background-color 210ms cubic-bezier(.22,.85,.28,1)}
         @keyframes nbnotchin{
           0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round 999px)}
           100%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px round 24px)}
         }
-        .nb-fluid[data-fluid-origin="notch"] .nb-notch-body{animation:none;opacity:1;transform:none}
-        /* The source skin is the visible NEW/+ ACTION material while the live
-           composer is already mounted below it. The sheet itself still does all
-           of the travelling and clipping, so readable form controls never scale
-           or fade independently. */
-        .nb-notch-surface{position:absolute;inset:0;z-index:8;display:flex;align-items:center;justify-content:center;pointer-events:none;opacity:0;background:var(--nb-notch-surface-background);color:var(--nb-notch-surface-color);border-radius:inherit;font-family:var(--nb-notch-surface-font);font-size:.75rem;font-weight:700;letter-spacing:.1em;animation:nbnotchsurfaceout 360ms cubic-bezier(.23,1,.32,1) both;will-change:opacity}
-        @keyframes nbnotchsurfaceout{0%,42%{opacity:1}76%,100%{opacity:0}}
-        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"]{animation:nbnotchout 260ms cubic-bezier(.4,0,.3,1) forwards}
+        .nb-fluid[data-fluid-origin="notch"] .nb-notch-body{animation:none;opacity:0;transform:translateY(10px);pointer-events:none;transition:opacity 180ms cubic-bezier(.22,.85,.28,1),transform 180ms cubic-bezier(.22,.85,.28,1);will-change:transform,opacity}
+        .nb-fluid[data-fluid-origin="notch"][data-morph-stage="content"] .nb-notch-body,.nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-notch-body{opacity:1;transform:translateY(0);pointer-events:auto}
+        .nb-morph-source-label{position:absolute;inset:0;z-index:8;display:flex;align-items:center;justify-content:center;pointer-events:none;font-size:.75rem;font-weight:700;letter-spacing:.1em;opacity:1;transition:opacity 80ms ease;will-change:opacity}
+        .nb-fluid[data-fluid-origin="notch"][data-morph-stage="reveal"] .nb-morph-source-label,.nb-fluid[data-fluid-origin="notch"][data-morph-stage="content"] .nb-morph-source-label,.nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-morph-source-label{opacity:0}
+        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"]:not([data-fluid-reverse="true"]){animation:nbnotchout 260ms cubic-bezier(.4,0,.3,1) forwards}
         @keyframes nbnotchout{
           0%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px round 24px)}
           100%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round 999px)}
         }
-        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-notch-surface{animation:nbnotchsurfacein 90ms cubic-bezier(.23,1,.32,1) both}
-        @keyframes nbnotchsurfacein{from{opacity:0}to{opacity:1}}
-        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-notch-body{animation:none;opacity:1;transform:none}
+        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-morph-source-label{opacity:1;transition-delay:130ms}
+        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-notch-body{animation:none;opacity:0;transform:translateY(-4px);pointer-events:none;transition-duration:80ms}
         @media(min-width:640px){.nb-fluid{transform-origin:center;border-radius:24px}}
         /* The blur is set once and never animated. A changing blur radius throws
            away the compositor's cached backdrop every frame and re-blurs the whole
@@ -5606,7 +5627,7 @@ export default function Planner() {
       )}
 
       {composer && (
-        <Sheet T={T} title={composer.id ? "EDIT" : "NEW"} morph={composer.notch ? "notch" : "auto"}
+        <Sheet T={T} title={composer.id ? "EDIT" : "NEW"} morph={composer.morph ?? (composer.notch ? "notch" : "auto")}
           morphSurface={composer.morphSource ? { ...composer.morphSource, background: T.accent, color: T.on, font: MONO } : null}
           closeSignal={sheetCloseSignals.composer}
           onClose={() => { beep("click"); setComposer(null); }}>
@@ -7714,6 +7735,7 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
   const [closing, setClosing] = useState(false);
   const [sheetHeight, setSheetHeight] = useState(null);
   const [heightReady, setHeightReady] = useState(false);
+  const [morphStage, setMorphStage] = useState(morph === "notch" && morphSurface ? "source" : "open");
   const titleId = useRef(`sheet-title-${Math.random().toString(36).slice(2, 9)}`);
   const closeSignalRef = useRef(closeSignal);
   useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
@@ -7721,14 +7743,56 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
   const requestClose = useCallback(() => {
     if (closingRef.current) return;
     if (beforeCloseRef.current && beforeCloseRef.current() === false) return;
-    closingRef.current = true;
-    setClosing(true);
     const panel = dialogRef.current;
     const reduced = typeof window !== "undefined" && (
       window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
       || (panel && window.getComputedStyle(panel).animationName === "none")
     );
-    closeTimer.current = window.setTimeout(() => onCloseRef.current(), reduced ? 0 : (morphRef.current === "notch" ? 260 : 300));
+    let closeDuration = morphRef.current === "notch" ? 260 : 300;
+    /* If someone dismisses while the source is still opening, reverse the same
+       animation from its rendered position. Restarting a separate exit keyframe
+       at a full-size sheet was the subtle snap behind the old close regression. */
+    if (!reduced && morphRef.current === "notch" && panel) {
+      const entry = panel.getAnimations().find((animation) => (
+        animation.animationName === "nbnotchin" || animation.effect?.target === panel
+      ));
+      const duration = Number(entry?.effect?.getTiming().duration);
+      const currentTime = Number(entry?.currentTime);
+      const boundedTime = Number.isFinite(duration) && duration > 0 && Number.isFinite(currentTime)
+        ? Math.max(0, Math.min(duration, currentTime))
+        : null;
+      const style = window.getComputedStyle(panel);
+      const x = panel.style.getPropertyValue("--fluid-x");
+      const y = panel.style.getPropertyValue("--fluid-y");
+      const insetX = panel.style.getPropertyValue("--fluid-inset-x");
+      const insetY = panel.style.getPropertyValue("--fluid-inset-y");
+      if (x && y && insetX && insetY && typeof panel.animate === "function") {
+        panel.dataset.fluidReverse = "true";
+        /* Freeze exactly what is on screen before removing the CSS animation,
+           then let WAAPI fold those compositor properties back to the trigger. */
+        const from = { transform: style.transform, clipPath: style.clipPath };
+        entry?.cancel();
+        panel.style.animation = "none";
+        panel.style.transform = from.transform;
+        panel.style.clipPath = from.clipPath;
+        panel.animate([
+          from,
+          {
+            transform: `translate(${x}, ${y})`,
+            clipPath: `inset(${insetY} ${insetX} round 999px)`,
+          },
+        ], {
+          duration: boundedTime == null ? 260 : (boundedTime / duration) * 260,
+          easing: "cubic-bezier(.4,0,.3,1)",
+          fill: "forwards",
+        });
+        closeDuration = boundedTime == null ? 260 : (boundedTime / duration) * 260;
+      }
+    }
+    closingRef.current = true;
+    if (morphRef.current === "notch") setMorphStage("closing");
+    setClosing(true);
+    closeTimer.current = window.setTimeout(() => onCloseRef.current(), reduced ? 0 : closeDuration);
   }, []);
   useEffect(() => {
     if (closeSignal == null || closeSignalRef.current === closeSignal) return;
@@ -7775,6 +7839,25 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
       window.clearTimeout(fallback);
     };
   }, [morph]);
+  useEffect(() => {
+    if (morph !== "notch" || !morphSurface) {
+      setMorphStage("open");
+      return undefined;
+    }
+    /* Geometry owns the first beat. The sheet starts with the trigger's accent,
+       then its own card material and contents settle in separately so neither
+       inputs nor type are scaled, stretched, or revealed by a second overlay. */
+    setMorphStage("source");
+    const stage = (next) => { if (!closingRef.current) setMorphStage(next); };
+    const reveal = window.setTimeout(() => stage("reveal"), 70);
+    const content = window.setTimeout(() => stage("content"), 115);
+    const open = window.setTimeout(() => stage("open"), 320);
+    return () => {
+      window.clearTimeout(reveal);
+      window.clearTimeout(content);
+      window.clearTimeout(open);
+    };
+  }, [morph, morphSurface?.id]);
 
   useEffect(() => {
     const h = (e) => e.key === "Escape" && requestClose();
@@ -7855,14 +7938,13 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
   }, []);
   return (
     <div className={`nb-scrim ${closing ? "nb-fluid-closing" : ""} fixed inset-0 z-50 flex items-end sm:items-center justify-center`} style={{ background: "rgba(0,0,0,0.72)" }} onClick={guardedClose}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId.current} data-test="sheet" data-sheet-title={title || "Details"} data-morph-source={morphSurface?.id}
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId.current} data-test="sheet" data-sheet-title={title || "Details"} data-morph-source={morphSurface?.id} data-morph-stage={morphStage}
         onKeyDown={(event) => trapDialogTab(event, dialogRef.current)} onClick={(e) => e.stopPropagation()}
-        className={`nb-fluid nb-sheet-scroll ${heightReady ? "nb-sheet-h" : ""} ${closing ? "nb-fluid-closing" : ""} relative w-full sm:max-w-md overflow-y-auto nb-s`} style={{ background: T.card, color: T.text, maxHeight: "88vh", height: sheetHeight == null ? "auto" : sheetHeight }}>
+        className={`nb-fluid nb-sheet-scroll ${heightReady ? "nb-sheet-h" : ""} ${closing ? "nb-fluid-closing" : ""} relative w-full sm:max-w-md overflow-y-auto nb-s`} style={{ backgroundColor: morph === "notch" && morphSurface && (morphStage === "source" || morphStage === "closing") ? morphSurface.background : T.card, color: T.text, maxHeight: "88vh", height: sheetHeight == null ? "auto" : sheetHeight }}>
         {morph === "notch" && morphSurface && (
-          <div aria-hidden="true" data-test="notch-surface" className="nb-notch-surface" style={{
-            "--nb-notch-surface-background": morphSurface.background,
-            "--nb-notch-surface-color": morphSurface.color,
-            "--nb-notch-surface-font": morphSurface.font,
+          <div aria-hidden="true" data-test="morph-source-label" className="nb-morph-source-label" style={{
+            color: morphSurface.color,
+            fontFamily: morphSurface.font,
           }}>
             {morphSurface.label}
           </div>

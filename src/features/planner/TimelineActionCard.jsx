@@ -41,8 +41,9 @@ export default function TimelineActionCard({
   };
   const done = task.status === "completed";
 
-  /* Native listeners stay on the body only. The checkmark and resize edge are
-     siblings, so a captured desktop pointer cannot steal their ownership. */
+  /* Native listeners stay on the card root. The move body, checkmark, and
+     estimate each occupy a different region, so a captured pointer cannot turn
+     a compact card's visible estimate into a competing overlay. */
   useEffect(() => {
     const node = chipRef.current;
     if (!node) return undefined;
@@ -96,11 +97,9 @@ export default function TimelineActionCard({
           style={{ background: theme.accent, color: theme.on, borderRadius: cardRadius, fontFamily: mono }}>
           <span className="nb-label">COMPLETE</span>
         </div>
-        <button ref={chipRef} type="button" data-task-chip={task.id}
-          onClick={open} onKeyDown={keyOpen}
-          className="nb-tap absolute inset-0 w-full text-left overflow-hidden"
+        <div ref={chipRef} data-task-chip={task.id}
+          className="absolute inset-0 overflow-hidden"
           style={{
-            display: "flex", flexDirection: "column", justifyContent: "flex-start",
             borderRadius: cardRadius,
             border: `1px dashed ${sizing ? theme.accent : theme.faint}`,
             backgroundColor: theme.card,
@@ -116,27 +115,43 @@ export default function TimelineActionCard({
               <span className="absolute inset-y-0 right-0" style={{ width: 2, background: theme.accent }} />
             </span>
           )}
-          <span className="flex min-w-0 items-center gap-2 py-1 pr-2.5 pl-8">
-            <span className="nb-lead min-w-0 flex-1 truncate" style={{ color: done ? theme.dimText : theme.text }}>{task.title}</span>
-            {subtaskProgress?.total > 0 && (
-              <span data-test="timeline-action-subtask-marker" aria-label={`${subtaskProgress.total} subtask${subtaskProgress.total === 1 ? "" : "s"}`}
-                style={{ fontFamily: mono, color: theme.dimText }} className="nb-data shrink-0">
-                ↳ {subtaskProgress.total}
+          <button type="button" data-test="timeline-action-move" onClick={open} onKeyDown={keyOpen}
+            className="nb-tap absolute inset-y-0 left-8 right-12 min-w-0 overflow-hidden text-left"
+            style={{
+              display: "flex", flexDirection: "column", justifyContent: "flex-start",
+              background: "transparent",
+              borderRadius: 0,
+            }}>
+            <span className="flex min-w-0 items-center gap-2 py-1 pr-1.5">
+              <span className="nb-lead min-w-0 flex-1 truncate" style={{ color: done ? theme.dimText : theme.text }}>{task.title}</span>
+              {subtaskProgress?.total > 0 && (
+                <span data-test="timeline-action-subtask-marker" aria-label={`${subtaskProgress.total} subtask${subtaskProgress.total === 1 ? "" : "s"}`}
+                  style={{ fontFamily: mono, color: theme.dimText }} className="nb-data shrink-0">
+                  ↳ {subtaskProgress.total}
+                </span>
+              )}
+            </span>
+            {block && height >= 40 && (
+              <span style={{ fontFamily: mono, color: theme.dimText }} className="nb-task-time block nb-data truncate pr-1.5">{formatTime(task.planned.startMinute)}</span>
+            )}
+            {subtaskProgress?.total > 0 && block && height >= 54 && (
+              <span data-test="timeline-action-subtasks" style={{ fontFamily: mono, color: theme.dimText }} className="block nb-data truncate pr-1.5">
+                {subtaskProgress.total} SUBTASK{subtaskProgress.total === 1 ? "" : "S"} · {subtaskProgress.done} DONE
               </span>
             )}
-            <span style={{ fontFamily: mono, color: sizing ? theme.accent : theme.dim }} className="nb-task-time ml-auto nb-data shrink-0">
-              {sizing || (block && height < 40) ? formatDuration(estimate) : formatTime(task.planned.startMinute)}
+          </button>
+          {block && (
+            <span data-resize={task.id} data-resize-edge="end" data-test="timeline-action-resize"
+              onPointerDown={(event) => {
+                event.stopPropagation();
+                onResizePointerDown(event, task, estimate);
+              }}
+              className="absolute inset-y-0 right-0 z-30 flex w-12 items-center justify-center"
+              style={{ cursor: "ns-resize", touchAction: "pan-y", fontFamily: mono, color: sizing ? theme.accent : theme.dim }}>
+              <span className="nb-data shrink-0">{formatDuration(estimate)}</span>
             </span>
-          </span>
-          {block && height >= 40 && (
-            <span style={{ fontFamily: mono, color: theme.dimText }} className="nb-task-duration block nb-data truncate pr-2.5 pl-8">{formatDuration(estimate)}</span>
           )}
-          {subtaskProgress?.total > 0 && block && height >= 54 && (
-            <span data-test="timeline-action-subtasks" style={{ fontFamily: mono, color: theme.dimText }} className="block nb-data truncate pr-2.5 pl-8">
-              {subtaskProgress.total} SUBTASK{subtaskProgress.total === 1 ? "" : "S"} · {subtaskProgress.done} DONE
-            </span>
-          )}
-        </button>
+        </div>
         <button type="button" data-timeline-complete={task.id}
             aria-label={`${done ? "Reopen" : "Complete"} ${task.title}`}
             onClick={(event) => { event.stopPropagation(); (done ? onReopen : onComplete)(task.id); }}
@@ -149,17 +164,6 @@ export default function TimelineActionCard({
               <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m3 8.2 3 3 7-7" /></svg>
             </span>
          </button>
-        {block && (
-          <span data-resize={task.id} data-resize-edge="end" data-test="timeline-action-resize"
-            onPointerDown={(event) => {
-              event.stopPropagation();
-              onResizePointerDown(event, task, estimate);
-            }}
-            className="absolute inset-x-0 bottom-0 z-30 flex items-end justify-center"
-            style={{ height: 12, cursor: "ns-resize", touchAction: "pan-y" }}>
-            <span style={{ background: theme.faint, width: 22, height: 2, marginBottom: 3, borderRadius: 2 }} />
-          </span>
-        )}
       </div>
     </div>
   );

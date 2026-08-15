@@ -104,7 +104,7 @@ test.describe("adjacent weekdays", () => {
 });
 
 test.describe("the notch morph", () => {
-  test("creation keeps one visible material through the whole morph", async ({ page }) => {
+  test("creation carries the trigger material until the composer content can arrive", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await openPlanner(page);
     await page.getByTestId("new-action").click();
@@ -115,25 +115,13 @@ test.describe("the notch morph", () => {
         animation.pause();
         animation.currentTime = 0;
       }
-      return Number(getComputedStyle(node.querySelector(".nb-notch-body")).opacity);
-    });
-    expect(opening, "creation should grow from NEW instead of fading content over it").toBeGreaterThanOrEqual(.99);
-
-    await page.keyboard.press("Escape");
-    await expect(sheet).toHaveClass(/nb-fluid-closing/);
-    const closing = await sheet.evaluate((node) => {
-      for (const animation of node.getAnimations({ subtree: true })) {
-        animation.pause();
-        const timing = animation.effect.getTiming();
-        animation.currentTime = Math.max(0, Number(timing.delay || 0) + Number(timing.duration || 0) - 2);
-      }
       return {
         panel: Number(getComputedStyle(node).opacity),
-        body: Number(getComputedStyle(node.querySelector(".nb-notch-body")).opacity),
+        source: Number(getComputedStyle(node.querySelector('[data-test="morph-source-label"]')).opacity),
       };
     });
-    expect(closing.panel).toBeGreaterThanOrEqual(.99);
-    expect(closing.body, "creation should fold into NEW instead of fading away first").toBeGreaterThanOrEqual(.99);
+    expect(opening.panel, "the real sheet owns the trigger's material").toBeGreaterThanOrEqual(.99);
+    expect(opening.source, "the trigger label must be visible while the sheet opens").toBeGreaterThanOrEqual(.99);
   });
 
   test("NEW grows the composer out of the button, and folds it back", async ({ page }) => {
@@ -159,41 +147,48 @@ test.describe("the notch morph", () => {
     const sheet = page.getByTestId("sheet");
     await expect(sheet).toHaveAttribute("data-fluid-origin", "notch");
     await expect(sheet).toHaveAttribute("data-morph-source", "new-action");
-    await expect(sheet.getByTestId("notch-surface")).toHaveText("+ ACTION");
+    await expect(sheet.getByTestId("morph-source-label")).toHaveText("+ ACTION");
+    await expect(sheet.getByTestId("notch-surface")).toHaveCount(0);
     await expect(page.getByTestId("new-action")).toHaveCSS("visibility", "hidden");
     await expect(page.getByTestId("composer")).toHaveAttribute("data-composer-kind", "task");
   });
 
-  test("the visible NEW material hands off to the live composer and returns to its source", async ({ page }) => {
+  test("NEW morphs the sheet material itself before the composer content arrives", async ({ page }) => {
     await openPlanner(page);
     const trigger = page.getByTestId("new-entry");
     await trigger.click();
 
     const sheet = page.getByTestId("sheet");
-    const surface = sheet.getByTestId("notch-surface");
     await expect(sheet).toHaveAttribute("data-morph-source", "new-entry");
-    await expect(surface).toHaveText("NEW");
+    await expect(sheet.getByTestId("morph-source-label")).toHaveText("NEW");
+    await expect(sheet.getByTestId("notch-surface")).toHaveCount(0);
     await expect(trigger).toHaveCSS("visibility", "hidden");
 
-    const materialSamples = await surface.evaluate((node) => {
-      const animation = node.getAnimations().find((candidate) => candidate.effect?.getTiming);
-      if (!animation) return null;
-      const duration = Number(animation.effect.getTiming().duration);
-      animation.pause();
-      const at = (fraction) => {
-        animation.currentTime = duration * fraction;
-        return Number(getComputedStyle(node).opacity);
-      };
-      return { start: at(0), held: at(.4), handedOff: at(.9) };
-    });
-    expect(materialSamples, "the source material must animate with the composer").not.toBeNull();
-    expect(materialSamples.start, "the visible material must start as the pressed NEW button").toBeGreaterThanOrEqual(.99);
-    expect(materialSamples.held, "the source material must remain visible through the early morph").toBeGreaterThanOrEqual(.99);
-    expect(materialSamples.handedOff, "the composer must own the surface by the end of the morph").toBeLessThanOrEqual(.01);
+    const transitions = await sheet.evaluate((node) => ({
+      panel: getComputedStyle(node).transitionProperty,
+      body: getComputedStyle(node.querySelector(".nb-notch-body")).transitionProperty,
+    }));
+    expect(transitions.panel, "the shared panel must transition from the trigger accent to its own surface").toContain("background-color");
+    expect(transitions.body, "form content should fade/slide in after geometry, never stretch with it").toContain("opacity");
 
     await page.keyboard.press("Escape");
     await expect(sheet).toHaveCount(0, { timeout: 3000 });
     await expect(trigger).toHaveCSS("visibility", "visible");
+  });
+
+  test("an in-flight composer morph reverses from its current geometry", async ({ page }) => {
+    await openPlanner(page);
+    await page.getByTestId("new-entry").click();
+    const sheet = page.getByTestId("sheet");
+    await sheet.evaluate((node) => {
+      const entry = node.getAnimations().find((animation) => animation.animationName === "nbnotchin");
+      entry?.pause();
+      if (entry?.effect) entry.currentTime = Number(entry.effect.getTiming().duration) / 2;
+    });
+
+    await page.keyboard.press("Escape");
+    await expect(sheet).toHaveAttribute("data-fluid-reverse", "true");
+    await expect(sheet).toHaveCount(0, { timeout: 3000 });
   });
 
   test("a sheet opened from the keyboard arrives on its own terms", async ({ page }) => {
@@ -206,8 +201,8 @@ test.describe("the notch morph", () => {
     await page.keyboard.press("n");
     const sheet = page.getByTestId("sheet");
     await expect(sheet).toBeVisible();
-    expect(await sheet.getAttribute("data-fluid-origin"), "a keystroke is not a control").toBeNull();
-    await expect(sheet.getByTestId("notch-surface")).toHaveCount(0);
+    await expect(sheet).toHaveAttribute("data-fluid-origin", "none");
+    await expect(sheet.getByTestId("morph-source-label")).toHaveCount(0);
     await expect(page.getByTestId("new-entry")).toHaveCSS("visibility", "visible");
   });
 
@@ -219,7 +214,7 @@ test.describe("the notch morph", () => {
 
     const sheet = page.getByTestId("sheet");
     await expect(sheet).toBeVisible();
-    await expect(sheet.getByTestId("notch-surface")).toHaveCSS("opacity", "0");
+    await expect(sheet.getByTestId("morph-source-label")).toHaveCSS("opacity", "0");
     await expect(trigger).toHaveCSS("visibility", "hidden");
 
     await page.keyboard.press("Escape");
@@ -237,7 +232,7 @@ test.describe("the notch morph", () => {
     /* The remembered press is cleared by the keystroke that closed the last sheet,
        so this one cannot inherit an origin from a button pressed a moment ago. */
     await page.keyboard.press("n");
-    expect(await page.getByTestId("sheet").getAttribute("data-fluid-origin")).toBeNull();
+    await expect(page.getByTestId("sheet")).toHaveAttribute("data-fluid-origin", "none");
   });
 
   test("the composer still saves what it was opened with", async ({ page }) => {
@@ -562,7 +557,7 @@ test.describe("a sheet must not resize what is inside it", () => {
      still running. The endpoints were never the problem -- at 0% and 100% even a
      badly distorted morph measures perfectly. */
   const probeDuringEntry = (sheet) => sheet.evaluate((node) => {
-    const animation = node.getAnimations().find((a) => a.effect?.getTiming);
+    const animation = node.getAnimations().find((a) => a.animationName === "nbnotchin");
     if (!animation) return "the panel has no entry animation to hold";
     /* The close button: it is in every sheet, it is small enough that a magnified
        frame is unmistakable, and it is real content rather than a wrapper. */
