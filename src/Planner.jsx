@@ -4118,16 +4118,18 @@ export default function Planner() {
           0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round 999px)}
           100%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px round 24px)}
         }
-        .nb-fluid[data-fluid-origin="notch"] .nb-notch-body{animation:none;opacity:0;transform:translateY(10px);pointer-events:none;transition:opacity 180ms cubic-bezier(.22,.85,.28,1),transform 180ms cubic-bezier(.22,.85,.28,1);will-change:transform,opacity}
+        .nb-fluid[data-fluid-origin="notch"] .nb-notch-body{opacity:0;transform:translateY(10px);pointer-events:none;animation:nbnotchbodyin 320ms cubic-bezier(.22,.85,.28,1) both;transition:opacity 180ms cubic-bezier(.22,.85,.28,1),transform 180ms cubic-bezier(.22,.85,.28,1);will-change:transform,opacity}
+        @keyframes nbnotchbodyin{0%,60%{opacity:0;transform:translateY(10px)}100%{opacity:1;transform:translateY(0)}}
         .nb-fluid[data-fluid-origin="notch"][data-morph-stage="content"] .nb-notch-body,.nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-notch-body{opacity:1;transform:translateY(0);pointer-events:auto}
-        .nb-morph-source-label{position:absolute;inset:0;z-index:8;display:flex;align-items:center;justify-content:center;pointer-events:none;font-size:.75rem;font-weight:700;letter-spacing:.1em;opacity:1;transition:opacity 80ms ease;will-change:opacity}
+        .nb-morph-source-label{position:absolute;inset:0;z-index:8;display:flex;align-items:center;justify-content:center;pointer-events:none;font-size:.75rem;font-weight:700;letter-spacing:.1em;opacity:1;animation:nbnotchlabelout 320ms cubic-bezier(.23,1,.32,1) both;transition:opacity 100ms cubic-bezier(.23,1,.32,1);will-change:opacity}
+        @keyframes nbnotchlabelout{0%,55%{opacity:1}78%,100%{opacity:0}}
         .nb-fluid[data-fluid-origin="notch"][data-morph-stage="reveal"] .nb-morph-source-label,.nb-fluid[data-fluid-origin="notch"][data-morph-stage="content"] .nb-morph-source-label,.nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-morph-source-label{opacity:0}
         .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"]:not([data-fluid-reverse="true"]){animation:nbnotchout 260ms cubic-bezier(.4,0,.3,1) forwards}
         @keyframes nbnotchout{
           0%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px round 24px)}
           100%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round 999px)}
         }
-        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-morph-source-label{opacity:1;transition-delay:130ms}
+        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-morph-source-label{animation:none;opacity:1;transition-delay:130ms}
         .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-notch-body{animation:none;opacity:0;transform:translateY(-4px);pointer-events:none;transition-duration:80ms}
         @media(min-width:640px){.nb-fluid{transform-origin:center;border-radius:24px}}
         /* The blur is set once and never animated. A changing blur radius throws
@@ -6791,7 +6793,7 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
                   return (
                     <div key={e.segmentId ?? e.id} className="relative overflow-hidden" style={{ background: surface, borderRadius: 6 }}>
                       <button onClick={() => onOpenEvent(e.id, day.key)} className="nb-tap flex w-full items-center gap-1 py-0.5 text-left overflow-hidden"
-                        style={{ paddingLeft: 6, paddingRight: href ? 38 : 6 }}>
+                        style={{ paddingLeft: 6, paddingRight: href ? 20 : 6 }}>
                         <span className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: catColor(e.cat) }} />
                         <span className="font-semibold truncate" style={{ fontSize: 10 }}>{e.title}</span>
                       </button>
@@ -6804,9 +6806,9 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
                           onTouchEnd={(ev) => ev.stopPropagation()}
                           onClick={(ev) => ev.stopPropagation()}
                           aria-label={`Join ${e.title}`}
-                          className="absolute inset-y-0 right-0.5 z-10 inline-flex items-center gap-0.5 px-1 text-[9px] font-bold leading-none tracking-widest"
-                          style={{ fontFamily: MONO, color: T.accentText }}>
-                          JOIN <ExternalLinkIcon />
+                          className="absolute inset-y-0 right-0 z-10 inline-flex w-4 items-center justify-center"
+                          style={{ color: T.accentText }}>
+                          <ExternalLinkIcon size={10} />
                         </a>
                       )}
                     </div>
@@ -6905,10 +6907,10 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
                         onClick={(ev) => ev.stopPropagation()}
                         className="nb-hover-tile absolute inset-y-0 left-0 text-left overflow-hidden"
                         style={{
-                          /* The sibling JOIN is about 47px at this type scale.
-                             Reserve its real hit lane rather than clipping the
-                             title underneath an absolutely positioned link. */
-                          right: href ? 50 : 0,
+                          /* Week columns are ~45px on a phone. A 50px JOIN lane
+                             left a 6px title. Keep an icon-sized hit target and
+                             give the name the rest of the card. */
+                          right: href ? 18 : 0,
                           display: "flex", flexDirection: "column", justifyContent: "flex-start",
                           background: surface, borderRadius: CARD_R,
                           opacity: past ? 0.74 : 1,
@@ -6927,11 +6929,11 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
                             legible. Keeping the dot and the time turned a title
                             into "R…" over "10:…" — two truncations that say
                             nothing where one whole word would have. */}
-                        <span className={`flex flex-1 items-center gap-1 overflow-hidden ${e.cols > 1 ? "px-1" : "px-1.5"} pt-0.5 min-w-0`}>
-                          {e.cols === 1 && <span className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: catColor(e.cat) }} />}
+                        <span className={`flex flex-1 items-center gap-1 overflow-hidden ${e.cols > 1 || href ? "px-1" : "px-1.5"} pt-0.5 min-w-0`}>
+                          {e.cols === 1 && !href && <span className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: catColor(e.cat) }} />}
                           <span className="min-w-0 flex-1 font-semibold leading-tight truncate" style={{ fontSize: 10 }}>{e.title}</span>
                         </span>
-                        {(e.lifted || (h >= 30 && e.cols === 1)) && <span className="block truncate tracking-widest" style={{ fontFamily: MONO, color: e.lifted ? T.accent : T.dim, fontSize: 9, paddingLeft: e.lifted && e.cols > 1 ? 4 : 15 }}>{fmtTime(e.start, clock)}</span>}
+                        {(e.lifted || (h >= 30 && e.cols === 1)) && <span className="block truncate tracking-widest" style={{ fontFamily: MONO, color: e.lifted ? T.accent : T.dim, fontSize: 9, paddingLeft: e.lifted && e.cols > 1 ? 4 : (href ? 4 : 15) }}>{fmtTime(e.start, clock)}</span>}
                       </button>
                       {href && (
                         <a href={href} target="_blank" rel="noopener noreferrer" draggable={false} data-join={e.id}
@@ -6942,9 +6944,9 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
                           onTouchEnd={(ev) => ev.stopPropagation()}
                           onClick={(ev) => ev.stopPropagation()}
                           aria-label={`Join ${e.title}`}
-                          className="absolute inset-y-0 right-0.5 z-10 inline-flex items-center gap-0.5 px-1 text-[9px] font-bold leading-none tracking-widest"
-                          style={{ fontFamily: MONO, color: T.accentText }}>
-                          JOIN <ExternalLinkIcon />
+                          className="absolute inset-y-0 right-0 z-10 inline-flex w-4 items-center justify-center"
+                          style={{ color: T.accentText }}>
+                          <ExternalLinkIcon size={10} />
                         </a>
                       )}
                       </div>
@@ -7844,13 +7846,19 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
       setMorphStage("open");
       return undefined;
     }
-    /* Geometry owns the first beat. The sheet starts with the trigger's accent,
-       then its own card material and contents settle in separately so neither
-       inputs nor type are scaled, stretched, or revealed by a second overlay. */
+    /* Geometry owns the first beat. Keep the trigger's label and accent until
+       the clip has a real sheet to land in; handing off at 70ms left a hole
+       where neither NEW nor the form was the visible material. */
+    const reduced = typeof window !== "undefined"
+      && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (reduced) {
+      setMorphStage("open");
+      return undefined;
+    }
     setMorphStage("source");
     const stage = (next) => { if (!closingRef.current) setMorphStage(next); };
-    const reveal = window.setTimeout(() => stage("reveal"), 70);
-    const content = window.setTimeout(() => stage("content"), 115);
+    const reveal = window.setTimeout(() => stage("reveal"), 180);
+    const content = window.setTimeout(() => stage("content"), 220);
     const open = window.setTimeout(() => stage("open"), 320);
     return () => {
       window.clearTimeout(reveal);

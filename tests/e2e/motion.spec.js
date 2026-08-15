@@ -122,6 +122,26 @@ test.describe("the notch morph", () => {
     });
     expect(opening.panel, "the real sheet owns the trigger's material").toBeGreaterThanOrEqual(.99);
     expect(opening.source, "the trigger label must be visible while the sheet opens").toBeGreaterThanOrEqual(.99);
+
+    const mid = await sheet.evaluate((node) => {
+      const entry = node.getAnimations().find((animation) => animation.animationName === "nbnotchin");
+      if (!entry?.effect) return null;
+      entry.pause();
+      entry.currentTime = Number(entry.effect.getTiming().duration) * 0.4;
+      for (const animation of node.getAnimations({ subtree: true })) {
+        if (animation === entry) continue;
+        animation.pause();
+        const duration = Number(animation.effect?.getTiming().duration || 0);
+        if (duration > 0) animation.currentTime = duration * 0.4;
+      }
+      return {
+        source: Number(getComputedStyle(node.querySelector('[data-test="morph-source-label"]')).opacity),
+        body: Number(getComputedStyle(node.querySelector(".nb-notch-body")).opacity),
+      };
+    });
+    expect(mid, "the notch entry animation must still be running").not.toBeNull();
+    expect(mid.source, "the trigger label must remain the visible material until the sheet has a place to land").toBeGreaterThanOrEqual(.9);
+    expect(mid.body, "form content must wait until the physical move has established the new space").toBeLessThan(.2);
   });
 
   test("NEW grows the composer out of the button, and folds it back", async ({ page }) => {

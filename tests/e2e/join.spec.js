@@ -164,11 +164,16 @@ test.describe("joining a meeting", () => {
     const join = page.getByRole("link", { name: "Join Short linked meeting" });
     const wrapper = join.locator("..");
     const eventFace = wrapper.getByTestId("week-event");
-    const [joinBox, eventBox] = await Promise.all([join.boundingBox(), eventFace.boundingBox()]);
+    const title = eventFace.getByText("Short linked meeting", { exact: true });
+    const [joinBox, eventBox, titleBox] = await Promise.all([
+      join.boundingBox(), eventFace.boundingBox(), title.boundingBox(),
+    ]);
     expect(joinBox).not.toBeNull();
     expect(eventBox).not.toBeNull();
+    expect(titleBox).not.toBeNull();
     expect(eventBox.x + eventBox.width).toBeLessThanOrEqual(joinBox.x - 1);
-    await expect(eventFace.getByText("Short linked meeting", { exact: true })).toHaveCSS("overflow", "hidden");
+    expect(titleBox.width, "a mobile week column must still leave a readable title lane beside JOIN").toBeGreaterThan(20);
+    await expect(title).toHaveCSS("overflow", "hidden");
   });
 
   test("agenda rows offer JOIN for both timed and all-day events", async ({ page }) => {
