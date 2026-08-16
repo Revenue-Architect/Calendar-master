@@ -123,17 +123,70 @@ The reference describes how the motion *looks*. It guesses at mechanism, and the
 
 ---
 
-## 8. Deferred — the NEW → composer morph
+## 8. The NEW → composer morph
 
-Requested alongside this, and **not specified here**, because specifying it from a screenshot is how the previous attempts failed.
+Read from the reference Lottie (600×600, 5 s @ 30 fps, ground `#0A0A0C`). All values below are measured from the file, not estimated.
 
-Established from the reference file in Lottie Creator: a **NEW-pill ↔ composer-sheet morph**, 600×600, 5 s @ 30 fps, ground `#0A0A0C`, acid accent. Sheet fully open ≈ frame 70; by frame 121 it has collapsed to the `NEW` pill at top right beside `JUL 12 24` / `TODAY NOTES`. Layers are named for this app's own controls (`Submit Button Box`, `Type Switcher Text`, `Duration Chips Text`, `Category Text`).
+### 8.1 The easing is authored — only the fades use defaults
 
-What is missing is per-property keyframes and easing — which is exactly what separates a morph that reads as one object from one that reads as a box being resized.
+123 of 133 easing handle pairs in the file are Lottie Creator's default `(0.167,0.167,0.833,0.833)`. Every one of them is on a **content opacity fade**, where a symmetric ease-in-out is fine.
 
-**To unblock, either:**
+The ten that are *not* default are all on the morph itself, and they are deliberate:
 
-1. Export the file as `.json` from Creator and drop it in the repo — no MCP needed, and the keyframes can be read directly; or
-2. Start the Lottie MCP server locally. Creator is currently showing *"Could not connect to MCP server. Is it running?"*, so the bridge is down on the machine, not in the client.
+| Layer | Property | Direction | Curve |
+| --- | --- | --- | --- |
+| Sheet Container | position, `rect.size`, `rect.round` | open | `cubic-bezier(0.22, 0.85, 0.28, 1)` |
+| Sheet Container | position, `rect.size`, `rect.round` | close | `cubic-bezier(0.4, 0, 0.3, 1)` |
+| Trigger Title | position | open / close | same pair |
+| Submit Button Box | scale | open | `cubic-bezier(0.22, 0.85, 0.28, 1)` |
+| Active Type Pill | position | switch | `cubic-bezier(0.22, 1.12, 0.28, 1)` — this is `--spring` exactly |
 
-Relevant existing machinery, for whoever picks this up: `fluidMorphFromRects`, `Sheet` notch geometry and `morphStage`, and commit `712a010` which moved the accent wash onto the clip's own timeline rather than a wall clock.
+So the reference agrees with this codebase's own tokens. Nothing here needs inventing.
+
+### 8.2 Geometry
+
+| | Trigger | Sheet |
+| --- | --- | --- |
+| Size | 56 × 28 | 380 × 510 |
+| Centre | (520, 38) — top right | (300, 300) — centred |
+| Radius | 6 | 24 — matches `--r-sheet` |
+
+As fractions of the frame: trigger is 9.3% × 4.7% at (86.7%, 6.3%); sheet is 63.3% × 85% centred. Scrim fades `0 → 72%` across the whole morph.
+
+### 8.3 Timing
+
+**Open — container:** f15 → f35 = **667 ms**, `cubic-bezier(0.22, 0.85, 0.28, 1)`.
+
+**Open — content cascade.** Six groups, each fading over 333 ms, staggered **133 ms** apart. Offsets are relative to morph start:
+
+| Offset | Group |
+| --- | --- |
+| +233 ms | Sheet Header Title, Close Icon |
+| +367 ms | Type Switcher Box, Active Type Pill, Type Switcher Text |
+| +500 ms | Prompt Title, Date Subtitle |
+| +633 ms | Duration Chips, Time Range, Time Box |
+| +767 ms | Category Text, More Options Text |
+| +900 ms | Submit Button Box (scale 94→100), Submit Button Text |
+
+The container settles at +667 ms; content keeps arriving until +1233 ms. **Total open ≈ 1233 ms.**
+
+**Trigger label handoff.** Trigger Title travels with the container on the same curve and fades out over the first 233 ms — landing exactly when Sheet Header Title begins fading in. A clean cross-dissolve, not a disappearance.
+
+**Close.** Content leaves *first*: groups fade out from f88, and the container only begins collapsing at f95 — a **233 ms lead**. Container collapse is f95 → f115 = **667 ms**, `cubic-bezier(0.4, 0, 0.3, 1)`. The trigger label returns over the final 233 ms.
+
+### 8.4 Diff against what ships today
+
+`nbnotchin` (`Planner.jsx:4139`) already uses the right *mechanism* — `clip-path: inset(… round …)` plus `translate`, which is why it does not violate §7.2. Four things differ, and they are why it does not feel like the reference:
+
+- [ ] **Duration: 320 ms → 667 ms.** Today's morph runs at less than half the reference. A 56×28 box becoming 380×510 in 320 ms reads as a pop, not a morph. This is the single largest difference.
+- [ ] **Content cascade replaces the single block.** `nbnotchbodyin` fades the entire body as one unit starting at 60%. The reference staggers six groups 133 ms apart across 900 ms. **This is most likely why previous attempts failed** — no amount of tuning one opacity transition produces a sheet that assembles itself.
+- [ ] **Close: 260 ms → 667 ms, with content leading the container by 233 ms.** Today everything collapses together.
+- [ ] **Open curve: `cubic-bezier(.23,1,.32,1)` → `cubic-bezier(.22,.85,.28,1)`.** The correct curve is already in the file — it is on `nbnotchbodyin`, applied to the body rather than the container.
+
+Already correct, leave alone: the close curve (`cubic-bezier(.4,0,.3,1)` matches the reference exactly), the `clip-path` mechanism, and the accent→card wash on the clip's own timeline (`712a010`).
+
+Open question for implementation: the cascade needs the sheet's six content groups individually targetable. If they are not, that markup change is the bulk of the work — the animation itself is a keyframe edit.
+
+### 8.5 Do not animate `rect.size`
+
+The Lottie animates `rect.size` because that is what Lottie does. Implementing that literally means animating width/height, which is a layout property and banned by §7.2. Keep the existing `clip-path` reveal; take the *timing and geometry* from the reference, not the mechanism. Same lesson as §6.
