@@ -107,9 +107,15 @@ test.describe("the notch morph", () => {
   test("creation carries the trigger material until the composer content can arrive", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await openPlanner(page);
-    await page.getByTestId("new-action").click();
+    const trigger = page.getByTestId("new-action");
+    const accent = await trigger.evaluate((node) => getComputedStyle(node).backgroundColor);
+    await trigger.click();
 
     const sheet = page.getByTestId("sheet");
+    /* Pause first, scrub second. An unpaused entry animation finishes on the wall
+       clock while the probe is still in flight, and a finished animation is a
+       removed animation — which is how the previous draft of this test both
+       crashed and passed for the wrong reason on the same machine. */
     const opening = await sheet.evaluate((node) => {
       for (const animation of node.getAnimations({ subtree: true })) {
         animation.pause();
@@ -118,30 +124,61 @@ test.describe("the notch morph", () => {
       return {
         panel: Number(getComputedStyle(node).opacity),
         source: Number(getComputedStyle(node.querySelector('[data-test="morph-source-label"]')).opacity),
+        fill: getComputedStyle(node).backgroundColor,
       };
     });
     expect(opening.panel, "the real sheet owns the trigger's material").toBeGreaterThanOrEqual(.99);
     expect(opening.source, "the trigger label must be visible while the sheet opens").toBeGreaterThanOrEqual(.99);
+    expect(opening.fill, "the first frame is the trigger, repainted at sheet size").toBe(accent);
 
-    const mid = await sheet.evaluate((node) => {
+    const sample = await sheet.evaluate((node) => {
       const entry = node.getAnimations().find((animation) => animation.animationName === "nbnotchin");
       if (!entry?.effect) return null;
-      entry.pause();
-      entry.currentTime = Number(entry.effect.getTiming().duration) * 0.4;
-      for (const animation of node.getAnimations({ subtree: true })) {
-        if (animation === entry) continue;
-        animation.pause();
-        const duration = Number(animation.effect?.getTiming().duration || 0);
-        if (duration > 0) animation.currentTime = duration * 0.4;
-      }
-      return {
-        source: Number(getComputedStyle(node.querySelector('[data-test="morph-source-label"]')).opacity),
-        body: Number(getComputedStyle(node.querySelector(".nb-notch-body")).opacity),
+      const at = (fraction) => {
+        for (const animation of node.getAnimations({ subtree: true })) {
+          animation.pause();
+          const duration = Number(animation.effect?.getTiming().duration || 0);
+          if (duration > 0) animation.currentTime = duration * fraction;
+        }
+        return {
+          source: Number(getComputedStyle(node.querySelector('[data-test="morph-source-label"]')).opacity),
+          body: Number(getComputedStyle(node.querySelector(".nb-notch-body")).opacity),
+          fill: getComputedStyle(node).backgroundColor,
+        };
       };
+      return { mid: at(0.4), late: at(0.7), end: at(1) };
     });
-    expect(mid, "the notch entry animation must still be running").not.toBeNull();
-    expect(mid.source, "the trigger label must remain the visible material until the sheet has a place to land").toBeGreaterThanOrEqual(.9);
-    expect(mid.body, "form content must wait until the physical move has established the new space").toBeLessThan(.2);
+
+    expect(sample, "the notch entry animation must still be running").not.toBeNull();
+    expect(sample.mid.source, "the trigger label must remain the visible material until the sheet has a place to land").toBeGreaterThanOrEqual(.9);
+    expect(sample.mid.body, "form content must wait until the physical move has established the new space").toBeLessThan(.2);
+    expect(sample.mid.fill, "at 40% the clipped window is still the accent trigger, not the settled card").toBe(accent);
+    expect(sample.late.fill, "by 70% the surface has begun washing into its own card").not.toBe(accent);
+  });
+
+  test("the notch lands on the composer's own surface", async ({ page }) => {
+    await openPlanner(page);
+    const trigger = page.getByTestId("new-entry");
+    const accent = await trigger.evaluate((node) => getComputedStyle(node).backgroundColor);
+    await trigger.click();
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).toHaveAttribute("data-morph-stage", "open");
+    const settled = await sheet.evaluate((node) => getComputedStyle(node).backgroundColor);
+    expect(settled, "a settled composer is not an accent slab").not.toBe(accent);
+    await expect(sheet.getByTestId("morph-source-label")).toHaveCSS("opacity", "0");
+  });
+
+  test("the in-app reduced-motion preference also skips the morph staging", async ({ page }) => {
+    await openPlanner(page);
+    await page.getByRole("button", { name: "Settings" }).click();
+    await page.getByRole("button", { name: "Reduce motion" }).click();
+    await page.getByRole("button", { name: "DONE" }).click();
+    await expect(page.getByTestId("sheet")).toHaveCount(0, { timeout: 3000 });
+
+    await page.getByTestId("new-entry").click();
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).toHaveAttribute("data-morph-stage", "open");
+    await expect(sheet.getByTestId("morph-source-label")).toHaveCSS("opacity", "0");
   });
 
   test("NEW grows the composer out of the button, and folds it back", async ({ page }) => {

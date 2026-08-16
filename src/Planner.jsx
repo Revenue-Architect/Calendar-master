@@ -4113,7 +4113,14 @@ export default function Planner() {
            clipped from the real button bounds, transitions from that button's
            theme accent to its own card surface, then lets content arrive after
            the physical move has established the new space. */
-        .nb-fluid[data-fluid-origin="notch"]{animation-name:nbnotchin;animation-duration:320ms;animation-timing-function:cubic-bezier(.23,1,.32,1);transition:background-color 210ms cubic-bezier(.22,.85,.28,1)}
+        .nb-fluid[data-fluid-origin="notch"]{animation-name:nbnotchin,nbnotchwash;animation-duration:320ms;animation-timing-function:cubic-bezier(.23,1,.32,1),cubic-bezier(.4,0,.6,1);transition:background-color 210ms cubic-bezier(.22,.85,.28,1)}
+        /* The window stays the button's material until the shape has somewhere to land,
+           then washes into the sheet's own surface on the same 320ms the clip runs on.
+           This used to be React state on three setTimeouts, which meant a paused frame
+           showed whatever the wall clock had reached rather than what the clip was
+           doing — the paint and the shape were two different animations wearing one
+           name. nbnotchin keeps its own easing; the wash keeps a gentler one. */
+        @keyframes nbnotchwash{0%,55%{background-color:var(--morph-accent)}100%{background-color:var(--morph-card)}}
         @keyframes nbnotchin{
           0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round 999px)}
           100%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px round 24px)}
@@ -7849,8 +7856,11 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
     /* Geometry owns the first beat. Keep the trigger's label and accent until
        the clip has a real sheet to land in; handing off at 70ms left a hole
        where neither NEW nor the form was the visible material. */
-    const reduced = typeof window !== "undefined"
-      && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const panel = dialogRef.current;
+    const reduced = typeof window !== "undefined" && (
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+      || (panel && window.getComputedStyle(panel).animationName === "none")
+    );
     if (reduced) {
       setMorphStage("open");
       return undefined;
@@ -7948,7 +7958,7 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
     <div className={`nb-scrim ${closing ? "nb-fluid-closing" : ""} fixed inset-0 z-50 flex items-end sm:items-center justify-center`} style={{ background: "rgba(0,0,0,0.72)" }} onClick={guardedClose}>
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId.current} data-test="sheet" data-sheet-title={title || "Details"} data-morph-source={morphSurface?.id} data-morph-stage={morphStage}
         onKeyDown={(event) => trapDialogTab(event, dialogRef.current)} onClick={(e) => e.stopPropagation()}
-        className={`nb-fluid nb-sheet-scroll ${heightReady ? "nb-sheet-h" : ""} ${closing ? "nb-fluid-closing" : ""} relative w-full sm:max-w-md overflow-y-auto nb-s`} style={{ backgroundColor: morph === "notch" && morphSurface && (morphStage === "source" || morphStage === "closing") ? morphSurface.background : T.card, color: T.text, maxHeight: "88vh", height: sheetHeight == null ? "auto" : sheetHeight }}>
+        className={`nb-fluid nb-sheet-scroll ${heightReady ? "nb-sheet-h" : ""} ${closing ? "nb-fluid-closing" : ""} relative w-full sm:max-w-md overflow-y-auto nb-s`} style={{ backgroundColor: morph === "notch" && morphSurface && (morphStage === "source" || morphStage === "closing") ? morphSurface.background : T.card, color: T.text, maxHeight: "88vh", height: sheetHeight == null ? "auto" : sheetHeight, "--morph-accent": morph === "notch" && morphSurface ? morphSurface.background : "transparent", "--morph-card": T.card }}>
         {morph === "notch" && morphSurface && (
           <div aria-hidden="true" data-test="morph-source-label" className="nb-morph-source-label" style={{
             color: morphSurface.color,
