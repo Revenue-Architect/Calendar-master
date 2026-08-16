@@ -7644,6 +7644,13 @@ function PillNav({ T, value, options, onPick, ariaLabel, surface = "transparent"
   const previousIndex = useRef(activeIndex);
   const [flip, setFlip] = useState(null);
   const [instant, setInstant] = useState(false);
+  const reduced = typeof window !== "undefined"
+    && Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
+  const pick = (key, event) => {
+    const source = event.detail === 0 ? "keyboard" : "pointer";
+    setInstant(source === "keyboard" || reduced);
+    onPick(key, source);
+  };
   useLayoutEffect(() => {
     const from = previousIndex.current;
     previousIndex.current = activeIndex;
@@ -7673,7 +7680,7 @@ function PillNav({ T, value, options, onPick, ariaLabel, surface = "transparent"
             data-test={testId ? `${testId}-${key}` : undefined}
             data-active={on ? "true" : "false"}
             data-compact={compact && !on ? "icon" : "label"}
-            onClick={(event) => onPick(key, event.detail === 0 ? "keyboard" : "pointer")}
+            onClick={(event) => pick(key, event)}
             className={`nb-tap nb-hover-choice ${on ? "is-selected" : ""} relative ${compact ? "py-1" : "px-3 py-1"} nb-label`}
             style={{
               color: on ? T.on : T.dim,

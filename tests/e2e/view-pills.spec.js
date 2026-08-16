@@ -89,3 +89,38 @@ test("desktop keeps three words and a travelling plate", async ({ page }) => {
   }
   await expect(page.getByTestId("view-mode")).not.toHaveAttribute("data-compact", "icon");
 });
+test("a keyboard pick does not travel", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openPlanner(page);
+  const agenda = page.getByTestId("view-mode-agenda");
+  await agenda.focus();
+  await page.keyboard.press("Enter");
+  await expect(agenda).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("view-mode")).toHaveAttribute("data-motion", "instant");
+  const props = await agenda.evaluate((node) => ({
+    tab: getComputedStyle(node).transitionProperty,
+    label: getComputedStyle(node.querySelector('[data-test="view-mode-label"]')).transitionProperty,
+    transform: getComputedStyle(node).transform,
+  }));
+  expect(props.tab).toBe("none");
+  expect(props.label).toBe("none");
+  expect(props.transform === "none" || props.transform === "matrix(1, 0, 0, 1, 0, 0)").toBeTruthy();
+});
+
+test("reduced motion applies the end state with no travel", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openPlanner(page);
+  await page.getByTestId("view-mode-actions").click();
+  const actions = page.getByTestId("view-mode-actions");
+  await expect(actions).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("view-mode")).toHaveAttribute("data-motion", "instant");
+  const drift = await page.getByTestId("view-mode").evaluate((list) => {
+    const plate = list.querySelector('[data-test="pill-indicator"]').getBoundingClientRect();
+    const active = list.querySelector('[aria-selected="true"]').getBoundingClientRect();
+    return Math.abs(plate.left - active.left);
+  });
+  expect(drift, "reduced motion still lands the plate on the active tab").toBeLessThanOrEqual(1);
+  expect((await actions.getByTestId("view-mode-label").boundingBox()).width).toBeGreaterThan(20);
+});
+
