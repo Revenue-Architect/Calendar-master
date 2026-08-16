@@ -3906,7 +3906,18 @@ export default function Planner() {
              recession legible as a deliberate one. */
           --nav-page-scale:.80;
           --nav-page-radius:18px;
-          --nav-page-shadow:0 18px 48px rgb(0 0 0 / .28);
+          /* The app's own dark-ground elevation, not a hand-rolled shadow.
+             This was 0 18px 48px rgb(0 0 0 / .28) — a black shadow cast by a
+             #0A0A0C page onto a #17181B shell, which is a 1.11 contrast ratio
+             with nothing between the two surfaces to separate them. index.css
+             already says why that cannot work: a shadow legible on cream is
+             invisible on obsidian, which is what --e2 and --sheen are for, and
+             the sheen in particular exists so a surface "catches light from
+             above and reads as an object rather than a rectangle of a different
+             colour". That is exactly this problem, and it matters more now the
+             page is smaller — the recession only reads if the page reads as a
+             discrete object rather than as content that shrank. */
+          --nav-page-shadow:var(--e2), var(--sheen);
           --nav-page-duration:340ms;
           --nav-content-duration:260ms;
           --nav-item-stagger:28ms;
