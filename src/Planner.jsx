@@ -7666,14 +7666,29 @@ function GooeySearch({ T, surface, reduced, onOpen }) {
   );
 }
 
+/* The plate travels on `transform`, never on `left`/`width`.
+ *
+ * It used to transition all four of left, width, top and height, which is a
+ * layout pass per frame for the whole tablist and the last layout-property
+ * animation left in the chrome — the exception the shared-layout-motion PRD
+ * said to land and then replace. This replaces it.
+ *
+ * Nothing is distorted by the change, because the plate only ever sits on the
+ * *active* slot and that slot is the same width wherever it is: compact gives
+ * the active tab icon+word and every inactive one icon alone, so the box the
+ * indicator occupies is constant in both tiers. Width is therefore a static
+ * style and travel is a pure translate. `scaleX` stays for the liquid squash
+ * along the direction of travel, which is the one deliberate distortion. */
 function LiquidPillIndicator({ T, box, stretch, settled = true, z = 0 }) {
   if (!box) return null;
   return (
     <span aria-hidden="true" data-test="pill-indicator" data-width={Math.round(box.width)} className="absolute" style={{
-      left: box.left, width: box.width, top: box.top, height: box.height,
+      left: 0, top: 0, width: box.width, height: box.height,
       background: T.accent, borderRadius: 999, zIndex: z,
-      transform: `scaleX(${stretch})`, transformOrigin: "center",
-       transition: settled ? "left 300ms cubic-bezier(.23,1,.32,1), width 300ms cubic-bezier(.23,1,.32,1), height 240ms ease, top 240ms ease, transform 180ms cubic-bezier(.23,1,.32,1)" : "none",
+      transform: `translate3d(${box.left}px, ${box.top}px, 0) scaleX(${stretch})`,
+      transformOrigin: "center",
+      transition: settled ? "transform 300ms cubic-bezier(.23,1,.32,1)" : "none",
+      willChange: "transform",
       pointerEvents: "none",
     }} />
   );
