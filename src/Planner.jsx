@@ -284,15 +284,23 @@ const LIFT_MS = 300;
    machine below, the content cascade's lead, step and fade — is a fraction of
    this, so retuning the whole choreography is one number rather than nine that
    have to be kept in agreement.
-   667ms is the reference motion's container duration (20 frames at 30fps). It is
-   roughly twice what this used to run at, and that is the point: a 56x28 button
-   becoming a full sheet in 320ms reads as a pop rather than a morph. If it ever
-   fails the fortieth-time test, lower this and the cascade compresses with it. */
-const MORPH_MS = 667;
+   The reference motion runs its container for 667ms (20 frames at 30fps), and
+   that is the right shape but not the right speed for a control opened dozens of
+   times a day — a showcase piece is authored to be watched once, and DESIGN.md's
+   fortieth-time test is the standard that actually applies here. 480ms keeps the
+   whole choreography, since every other beat is a fraction of this one: the
+   sheet still assembles itself group by group, it just stops making you wait
+   1.2 seconds to finish doing it. Still half again what the old 320ms pop ran
+   at, which is what made it read as a resize rather than a morph. */
+const MORPH_MS = 480;
 /* The order the three surfaces lie in, left to right. It is the one place that
    knows a view has neighbours, and both the switch animation's direction and
    the swipe's target come from it. */
 const VIEW_ORDER = ["timeline", "agenda", "actions"];
+/* Long enough that a full pane width reads as travel rather than a jump, short
+   enough that it never delays the surface you asked for. The day turn next door
+   moves a fraction of this distance in 240ms; a whole width wants a little more. */
+const VIEW_SLIDE_MS = 300;
 /* Fractions of MORPH_MS, matching the reference: content starts a third of the
    way through the container's travel, each group is a step behind the last, and
    each takes half the container's duration to arrive. */
@@ -856,6 +864,18 @@ export default function Planner() {
   const [turn, setTurn] = useState(null);
   const [swipe, setSwipe] = useState(0);
   const [viewDir, setViewDir] = useState(1);
+  /* A view change mounts its neighbour for exactly as long as the travel takes.
+     The old handoff faded one pane in over 27px, which is a cut with a settle
+     rather than a slide — nothing moved *between* the two views because only one
+     of them ever existed. Both have to be on screen for a pane width of travel
+     to mean anything, and neither should outlive the transition: the timeline is
+     the expensive surface and keeping a spare permanently resident to animate it
+     twice a minute is the trade this avoids. */
+  const [slide, setSlide] = useState(null);
+  const [slideProgress, setSlideProgress] = useState(0);
+  const [sliding, setSliding] = useState(false);
+  const slideTimer = useRef(null);
+  const slideArmedRef = useRef(null);
   const [taskSwipe, setTaskSwipe] = useState(null);
   const [snapping, setSnapping] = useState(false);
   const [alertToast, setAlertToast] = useState(null);
@@ -1332,6 +1352,36 @@ export default function Planner() {
   const reducedMotion = Boolean(preferences?.display.reducedMotion)
     || (typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
   const compactViewPills = useCompactViewPills();
+  /* Mounting the arriving pane is the expensive part of a view change, and doing
+     it on the click put roughly 190ms of blocked main thread between the press
+     and the first frame of travel — a pause, then a slide, which is worse than
+     no slide at all. A press is the earliest honest signal that a view change is
+     coming, and the ~100ms before the click lands is enough to absorb it: the
+     pane mounts at its starting offset with transitions still off, so nothing
+     moves and nothing is committed until the click actually arrives. Releasing
+     elsewhere leaves a mounted neighbour that costs one frame to drop.
+     Declared here rather than beside the slide state it writes, because it reads
+     reducedMotion and viewMode and would sit in their temporal dead zone there. */
+  const armSlide = useCallback((mode) => {
+    if (reducedMotion || mode === viewMode) return;
+    const from = VIEW_ORDER.indexOf(viewMode);
+    const to = VIEW_ORDER.indexOf(mode);
+    if (from === -1 || to === -1) return;
+    window.clearTimeout(slideTimer.current);
+    slideArmedRef.current = mode;
+    setSliding(false);
+    setSlide({ from: viewMode, to: mode, dir: to > from ? 1 : -1 });
+    setSlideProgress(to > from ? 0 : 1);
+    /* A press that never becomes a click — released off the control, or turned
+       into a scroll — would otherwise leave the neighbour mounted indefinitely.
+       Long enough not to race a slow tap, short enough that the spare pane is
+       never resident for anything but the gesture that asked for it. */
+    slideTimer.current = window.setTimeout(() => {
+      slideArmedRef.current = null;
+      setSlide(null);
+      setSliding(false);
+    }, 900);
+  }, [reducedMotion, viewMode]);
   const selectViewMode = useCallback((mode, source = "programmatic") => {
     /* Alternating names lets the new surface begin its handoff in the same
        render as the view change. A next-frame class would first paint the
@@ -1347,10 +1397,32 @@ export default function Planner() {
        which way you moved through them. */
     const from = VIEW_ORDER.indexOf(viewMode);
     const to = VIEW_ORDER.indexOf(mode);
-    if (from !== -1 && to !== -1 && from !== to) setViewDir(to > from ? 1 : -1);
+    const dir = to > from ? 1 : -1;
+    if (from !== -1 && to !== -1 && from !== to) setViewDir(dir);
+    /* Both panes mount, the track starts showing the one being left, and a frame
+       later it travels a full width to the one arriving. Two frames, not one:
+       the first commits the pane at its starting offset, and a transition that
+       starts in the same frame the element appears in has nothing to move from. */
+    if (source === "pointer" && !reducedMotion && from !== -1 && to !== -1 && from !== to) {
+      window.clearTimeout(slideTimer.current);
+      /* Already warmed by armSlide on the press: the pane is mounted and sitting
+         at the start offset, so all that is left is to let it travel. */
+      setSlide((current) => (current && current.to === mode && current.from === viewMode
+        ? current
+        : { from: viewMode, to: mode, dir }));
+      setSlideProgress((current) => (slideArmedRef.current === mode ? current : (dir > 0 ? 0 : 1)));
+      window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+        setSliding(true);
+        setSlideProgress(dir > 0 ? 1 : 0);
+      }));
+      slideTimer.current = window.setTimeout(() => {
+        setSlide(null); setSliding(false); slideArmedRef.current = null;
+      }, VIEW_SLIDE_MS + 40);
+    }
     setViewMode(mode);
     if (mode === "actions") setSheet(false);
   }, [reducedMotion, viewMode]);
+  useEffect(() => () => window.clearTimeout(slideTimer.current), []);
   const tm = (m) => fmtTime(m, clock);
 
   const navOpen = navPhase === "opening" || navPhase === "open";
@@ -4181,10 +4253,24 @@ export default function Planner() {
            distance.
            Two alternating names so the arriving surface can start its handoff in
            the same render as the view change; --nb-view-dir carries which way. */
-        .nb-view-enter-a{animation:nb-view-enter-a 200ms var(--motion-enter) both}
-        .nb-view-enter-b{animation:nb-view-enter-b 200ms var(--motion-enter) both}
-        @keyframes nb-view-enter-a{from{opacity:0;transform:translate3d(calc(var(--nb-view-dir, 1) * 7%),0,0)}to{opacity:1;transform:translate3d(0,0,0)}}
-        @keyframes nb-view-enter-b{from{opacity:0;transform:translate3d(calc(var(--nb-view-dir, 1) * 7%),0,0)}to{opacity:1;transform:translate3d(0,0,0)}}
+        /* The track carries both panes past the window; the window is the section.
+           overflow-x is clipped rather than hidden so this never becomes a scroll
+           container — the timeline inside owns the only scrolling here. */
+        .nb-main>section{overflow-x:clip}
+        .nb-view-track{display:flex;flex:1 1 auto;min-height:0;min-width:0}
+        .nb-view-track.is-sliding{transition:transform ${VIEW_SLIDE_MS}ms var(--motion-enter);will-change:transform}
+        .nb-view-pane{flex:0 0 100%;min-width:0;min-height:0;display:flex;flex-direction:column}
+        /* Reduced motion keeps the handoff but not the journey: the pane it lands
+           on is the same one, arrived at without travel. */
+        @media(prefers-reduced-motion:reduce){.nb-view-track.is-sliding{transition:none}}
+        /* nb-view-enter-a/b no longer paints anything. It stays because it is the
+           marker for "this view change was an animated pointer pick", which is a
+           contract motion.spec.js asserts in both directions, and it still means
+           exactly that — it is set under the same condition as the slide. Giving
+           it back an opacity fade would flash the whole of .nb-main, the desktop
+           Actions column included, underneath a track that is already carrying
+           the motion. The alternating pair is kept so the marker changes identity
+           on consecutive switches. */
         /* Completion is a durable state, not a toast. Keep the accent surface
            mounted after its reveal so the card remains visibly complete; the
            same interruptible clip transition reverses when the user reopens it. */
@@ -4465,6 +4551,7 @@ export default function Planner() {
             {/* Timeline answers "when, and for how long"; agenda answers "what is
                 coming". Same days, same data, two questions. */}
             <PillNav T={T} ariaLabel="View mode" testId="view-mode" value={viewMode}
+              onArm={armSlide}
               compact={compactViewPills}
               icons={{ timeline: CalendarIcon, agenda: ListIcon, actions: CheckIcon }}
               options={[["timeline", "TIMELINE"], ["agenda", "AGENDA"], ["actions", "ACTIONS"]]}
@@ -4695,7 +4782,7 @@ export default function Planner() {
           <div data-test="gesture-hint" className="nb-up flex flex-col gap-2 px-3 py-2 sm:flex-row sm:items-center sm:gap-x-3"
             style={{ background: surface, color: T.text, borderRadius: CARD_R, boxShadow: `inset 0 0 0 1px ${T.line}` }}>
             <span style={{ fontFamily: MONO, color: T.accentText }} className="nb-label shrink-0">GESTURES</span>
-            <span className="nb-body min-w-0 flex-1">Hold a slot to create · hold to move · swipe the page to change view.</span>
+            <span className="nb-body min-w-0 flex-1">Hold a slot to create · swipe an Action right to complete · swipe the page to change view.</span>
             <div className="flex items-center gap-3">
             <button onClick={() => { beep("click"); dismissGestureHint(); setShortcuts(true); }}
               style={{ fontFamily: MONO, color: T.accentText }} className="nb-tap nb-hover-control text-xs font-bold tracking-widest shrink-0 underline">SHORTCUTS</button>
@@ -4715,8 +4802,23 @@ export default function Planner() {
             transition: snapping || swipe !== 0 ? "none" : "transform 260ms cubic-bezier(.2,.8,.25,1)",
           }}>
           <div key={turn ? turn.k : "first"} className={`nb-page flex flex-col min-h-0 flex-1 ${turn ? (turn.dir > 0 ? "nb-turn-next" : "nb-turn-prev") : ""}`}>
+          {/* One pane at rest, two while a switch is travelling. The track holds
+              them in the order they lie in, so the arriving view comes from the
+              side it actually sits on. */}
+          {/* The offset is written as a real transform, not through a custom
+              property inside calc(). An unregistered custom property is not an
+              interpolatable type, so a transform that reads one recomputes in a
+              jump instead of transitioning — the track sat still for the whole
+              300ms and then teleported. Deriving it to 0 whenever no slide is
+              live also makes a stranded offset unrepresentable: the single pane
+              cannot be left translated off-screen because there is nothing to
+              leave behind. */}
+          <div className={`nb-view-track ${sliding ? "is-sliding" : ""}`}
+            style={{ transform: `translate3d(${(slide ? slideProgress : 0) * -100}%,0,0)` }}>
+          {(slide ? (slide.dir > 0 ? [slide.from, slide.to] : [slide.to, slide.from]) : [viewMode]).map((mode) => (
+          <div key={mode} className="nb-view-pane" aria-hidden={slide ? mode !== viewMode : undefined} inert={slide && mode !== viewMode ? "" : undefined}>
 
-            {viewMode === "actions" ? (
+            {mode === "actions" ? (
               <div className="nb-s overflow-y-auto min-h-0 flex-1">
                 <div className="flex items-center justify-between pb-2">
                   <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label">ALL ACTIONS</span>
@@ -4724,7 +4826,7 @@ export default function Planner() {
                 </div>
                 {actionsPanel}
               </div>
-            ) : viewMode === "agenda" ? (
+            ) : mode === "agenda" ? (
               <Agenda
                 T={T} surface={surface} days={agenda} dateKey={dateKey} todayKey={todayKey} clock={clock}
                 onOpenEvent={(id, key) => { beep("click"); if (key !== dateKey) jumpTo(key); setTimeout(() => setInspect({ kind: "event", id }), key !== dateKey ? 80 : 0); }}
@@ -5081,6 +5183,9 @@ export default function Planner() {
             </div>
             </>
             )}
+          </div>
+          ))}
+          </div>
           </div>
         </section>
 
@@ -6095,6 +6200,18 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
   const [overdueReviewOpen, setOverdueReviewOpen] = useState(false);
   const smartViewRef = useRef(smartView);
   const smartViewRevealTimer = useRef(null);
+  /* The panel measures itself through its own ref, not the one the parent lends
+     it. `listRef` is shared by the two places an ActionsPanel can be mounted —
+     the desktop column and the full-view pane — so a switch between them has a
+     moment where the departing instance has nulled it and the arriving one has
+     not yet claimed it. Whichever order React commits in, a panel that reads the
+     shared ref during that window measures nothing and silently skips its reveal.
+     A ref this component owns cannot be cleared by another instance of it. */
+  const ownListRef = useRef(null);
+  const attachList = useCallback((node) => {
+    ownListRef.current = node;
+    if (listRef) listRef.current = node;
+  }, [listRef]);
   const [smartViewRevealRows, setSmartViewRevealRows] = useState([]);
   const pullable = overdue.filter((t) => t.planned?.date !== todayKey);
   const open = tasks.filter((t) => t.status !== "completed");
@@ -6108,7 +6225,7 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
     /* The filtered rows are already in the DOM by this layout pass, but have not
        painted. Mark only the rows actually in the Actions viewport so a person
        who changed filter while scrolled down sees continuity where they are. */
-    const root = listRef.current;
+    const root = ownListRef.current;
     const scroller = root?.closest?.(".nb-s.overflow-y-auto");
     const viewport = scroller?.getBoundingClientRect() ?? { top: 0, bottom: window.innerHeight };
     const visible = root
@@ -6129,7 +6246,7 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
     return index === -1 ? null : index;
   };
   return (
-    <div ref={listRef}>
+    <div ref={attachList}>
       <div className="hidden lg:flex items-baseline justify-between mb-3">
         <h2 className="text-2xl font-bold tracking-tight">Actions</h2>
         <div className="flex items-center gap-3">
@@ -7628,11 +7745,19 @@ function useLiquidPill(wrapRef, deps) {
   const [settled, setSettled] = useState(false);
   const boxRef = useRef(null);
   const settle = useRef(null);
+  /* Whether the plate has ever had a position. It is the only case that must not
+     animate — a plate arriving from 0,0 on first paint would fly in from the
+     corner. Every later move is a real travel and should transition.
+     This used to unsettle on every dependency change, which meant each tab pick
+     spent a frame with transitions off and then a requestAnimationFrame turning
+     them back on. Measured, that put the plate 120ms behind the click: the page
+     finished its 300ms slide while the plate was still waiting to start, which
+     is most of why the nav and the page read as two separate events. */
+  const placed = useRef(false);
 
   useLayoutEffect(() => {
     const wrap = wrapRef.current;
     if (!wrap) return undefined;
-    setSettled(false);
     let settleFrame = null;
     const move = () => {
       const active = wrap.querySelector('[data-active="true"]');
@@ -7651,6 +7776,10 @@ function useLiquidPill(wrapRef, deps) {
       }
       boxRef.current = next;
       setBox(next);
+      if (placed.current) { setSettled(true); return; }
+      /* First placement only: commit the box with transitions off, then enable
+         them a frame later so the plate is simply *there* rather than arriving. */
+      placed.current = true;
       window.cancelAnimationFrame(settleFrame);
       settleFrame = window.requestAnimationFrame(() => setSettled(true));
     };
@@ -7800,7 +7929,7 @@ function LiquidFill({ T, on, radius = 999 }) {
   );
 }
 
-function PillNav({ T, value, options, onPick, ariaLabel, surface = "transparent",
+function PillNav({ T, value, options, onPick, onArm = null, ariaLabel, surface = "transparent",
                    className = "", style = {}, compact = false, icons = null, testId = null }) {
   const wrapRef = useRef(null);
   const { box, stretch, settled } = useLiquidPill(wrapRef, [value, options.length, compact]);
@@ -7850,6 +7979,7 @@ function PillNav({ T, value, options, onPick, ariaLabel, surface = "transparent"
             data-test={testId ? `${testId}-${key}` : undefined}
             data-active={on ? "true" : "false"}
             data-compact={compact && !on ? "icon" : "label"}
+            onPointerDown={onArm ? () => onArm(key) : undefined}
             onClick={(event) => pick(key, event)}
             className={`nb-tap nb-hover-choice ${on ? "is-selected" : ""} relative ${compact ? "py-1" : "px-3 py-1"} nb-label`}
             style={{
