@@ -2,7 +2,17 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
+    <!--
+      interactive-widget=overlays-content is the one that matters on a phone.
+      By default the software keyboard *resizes* the layout viewport, so every
+      frame of the keyboard sliding up fires a resize, and anything measuring
+      window.innerHeight re-lays-out underneath whatever animation is running.
+      Opening the composer autofocuses its title field, so the keyboard arrives
+      in the middle of the sheet's own morph — the sheet was being re-measured
+      and re-laid-out a dozen times while it was still growing. Overlaying keeps
+      the layout viewport still and lets the keyboard sit on top of it.
+    -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no, interactive-widget=overlays-content" />
     <meta name="theme-color" content="#0A0A0C" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <link

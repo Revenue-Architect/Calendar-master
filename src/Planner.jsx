@@ -8138,6 +8138,10 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
   const [morphStage, setMorphStage] = useState(morph === "notch" && morphSurface ? "source" : "open");
   const titleId = useRef(`sheet-title-${Math.random().toString(36).slice(2, 9)}`);
   const closeSignalRef = useRef(closeSignal);
+  /* Captured once per sheet and refreshed only on a real change of window shape,
+     so the keyboard cannot drive the sheet's height. See the measure effect. */
+  const viewportCap = useRef(0);
+  const viewportWidth = useRef(0);
   useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
   useEffect(() => { beforeCloseRef.current = beforeClose; }, [beforeClose]);
   const requestClose = useCallback(() => {
@@ -8202,19 +8206,34 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
   useLayoutEffect(() => {
     const content = contentRef.current;
     if (!content) return undefined;
+    /* The cap is taken once and then only when the window genuinely changes
+       shape. A software keyboard changes the height and never the width, and
+       this sheet autofocuses a field the moment it opens — so reading
+       innerHeight on every resize meant the keyboard's own slide-up animation
+       re-measured and re-laid-out the sheet on every frame of it, underneath a
+       morph that was still running. Width is the tell that separates a rotation
+       or a window drag, which should re-cap, from a keyboard, which must not. */
+    if (!viewportCap.current) viewportCap.current = window.innerHeight;
+    if (!viewportWidth.current) viewportWidth.current = window.innerWidth;
     const measure = () => {
-      const next = Math.min(content.scrollHeight, Math.round(window.innerHeight * .88));
+      const next = Math.min(content.scrollHeight, Math.round(viewportCap.current * .88));
       setSheetHeight(next);
       /* A notch sheet is mid-morph for its opening animation; letting height
          transition underneath it animates the same box on two curves at once. */
       if (morphRef.current === "notch" && !openedRef.current) return;
       window.requestAnimationFrame(() => setHeightReady(true));
     };
+    const onResize = () => {
+      if (window.innerWidth === viewportWidth.current) return;
+      viewportWidth.current = window.innerWidth;
+      viewportCap.current = window.innerHeight;
+      measure();
+    };
     measure();
     const observer = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
     observer?.observe(content);
-    window.addEventListener("resize", measure);
-    return () => { observer?.disconnect(); window.removeEventListener("resize", measure); };
+    window.addEventListener("resize", onResize);
+    return () => { observer?.disconnect(); window.removeEventListener("resize", onResize); };
   }, [morph]);
   const guardedClose = useCallback(() => {
     if (Date.now() - openedAt.current < 350) return;
@@ -8353,7 +8372,7 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
     <div className={`nb-scrim ${closing ? "nb-fluid-closing" : ""} fixed inset-0 z-50 flex items-end sm:items-center justify-center`} style={{ background: "rgba(0,0,0,0.72)" }} onClick={guardedClose}>
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId.current} data-test="sheet" data-sheet-title={title || "Details"} data-morph-source={morphSurface?.id} data-morph-stage={morphStage}
         onKeyDown={(event) => trapDialogTab(event, dialogRef.current)} onClick={(e) => e.stopPropagation()}
-        className={`nb-fluid nb-sheet-scroll ${heightReady ? "nb-sheet-h" : ""} ${closing ? "nb-fluid-closing" : ""} relative w-full sm:max-w-md overflow-y-auto nb-s`} style={{ backgroundColor: morph === "notch" && morphSurface && (morphStage === "source" || morphStage === "closing") ? morphSurface.background : T.card, color: T.text, maxHeight: "88vh", height: sheetHeight == null ? "auto" : sheetHeight, "--morph-accent": morph === "notch" && morphSurface ? morphSurface.background : "transparent", "--morph-card": T.card }}>
+        className={`nb-fluid nb-sheet-scroll ${heightReady ? "nb-sheet-h" : ""} ${closing ? "nb-fluid-closing" : ""} relative w-full sm:max-w-md overflow-y-auto nb-s`} style={{ backgroundColor: morph === "notch" && morphSurface && (morphStage === "source" || morphStage === "closing") ? morphSurface.background : T.card, color: T.text, maxHeight: "88svh", height: sheetHeight == null ? "auto" : sheetHeight, "--morph-accent": morph === "notch" && morphSurface ? morphSurface.background : "transparent", "--morph-card": T.card }}>
         {morph === "notch" && morphSurface && (
           <div aria-hidden="true" data-test="morph-source-label" className="nb-morph-source-label" style={{
             color: morphSurface.color,
