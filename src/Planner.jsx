@@ -280,6 +280,21 @@ const MIN_DAY_HOUR_H = 44;
 const DAY_H = HOUR_H * 24;
 const HOLD_MS = 420;
 const LIFT_MS = 300;
+/* The notch morph's one dial. Every other beat in the sequence — the stage
+   machine below, the content cascade's lead, step and fade — is a fraction of
+   this, so retuning the whole choreography is one number rather than nine that
+   have to be kept in agreement.
+   667ms is the reference motion's container duration (20 frames at 30fps). It is
+   roughly twice what this used to run at, and that is the point: a 56x28 button
+   becoming a full sheet in 320ms reads as a pop rather than a morph. If it ever
+   fails the fortieth-time test, lower this and the cascade compresses with it. */
+const MORPH_MS = 667;
+/* Fractions of MORPH_MS, matching the reference: content starts a third of the
+   way through the container's travel, each group is a step behind the last, and
+   each takes half the container's duration to arrive. */
+const MORPH_LEAD = 0.35;
+const MORPH_STEP = 0.2;
+const MORPH_FADE = 0.5;
 const SNAP = 5;
 const NOW_RED = "#C43A56";
 const ALERT_CHOICES = [0, 5, 15, 30, 60];
@@ -4128,7 +4143,15 @@ export default function Planner() {
            clipped from the real button bounds, transitions from that button's
            theme accent to its own card surface, then lets content arrive after
            the physical move has established the new space. */
-        .nb-fluid[data-fluid-origin="notch"]{animation-name:nbnotchin,nbnotchwash;animation-duration:320ms;animation-timing-function:cubic-bezier(.23,1,.32,1),cubic-bezier(.4,0,.6,1);transition:background-color 210ms cubic-bezier(.22,.85,.28,1)}
+        .nb-fluid[data-fluid-origin="notch"]{
+          --nb-morph-dur:${MORPH_MS}ms;
+          --nb-morph-lead:calc(var(--nb-morph-dur) * ${MORPH_LEAD});
+          --nb-morph-step:calc(var(--nb-morph-dur) * ${MORPH_STEP});
+          --nb-morph-fade:calc(var(--nb-morph-dur) * ${MORPH_FADE});
+          animation-name:nbnotchin,nbnotchwash;animation-duration:var(--nb-morph-dur);
+          animation-timing-function:cubic-bezier(.22,.85,.28,1),cubic-bezier(.4,0,.6,1);
+          transition:background-color 210ms cubic-bezier(.22,.85,.28,1);
+        }
         /* The window stays the button's material until the shape has somewhere to land,
            then washes into the sheet's own surface on the same 320ms the clip runs on.
            This used to be React state on three setTimeouts, which meant a paused frame
@@ -4140,13 +4163,49 @@ export default function Planner() {
           0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round 999px)}
           100%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px round 24px)}
         }
-        .nb-fluid[data-fluid-origin="notch"] .nb-notch-body{opacity:0;transform:translateY(10px);pointer-events:none;animation:nbnotchbodyin 320ms cubic-bezier(.22,.85,.28,1) both;transition:opacity 180ms cubic-bezier(.22,.85,.28,1),transform 180ms cubic-bezier(.22,.85,.28,1);will-change:transform,opacity}
-        @keyframes nbnotchbodyin{0%,60%{opacity:0;transform:translateY(10px)}100%{opacity:1;transform:translateY(0)}}
-        .nb-fluid[data-fluid-origin="notch"][data-morph-stage="content"] .nb-notch-body,.nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-notch-body{opacity:1;transform:translateY(0);pointer-events:auto}
-        .nb-morph-source-label{position:absolute;inset:0;z-index:8;display:flex;align-items:center;justify-content:center;pointer-events:none;font-size:.75rem;font-weight:700;letter-spacing:.1em;opacity:1;animation:nbnotchlabelout 320ms cubic-bezier(.23,1,.32,1) both;transition:opacity 100ms cubic-bezier(.23,1,.32,1);will-change:opacity}
+        /* The sheet assembles itself rather than appearing.
+           The body used to fade as a single block from 60% of the morph, which
+           is the one thing that cannot be tuned into the reference feeling: a
+           panel whose contents all arrive together reads as a panel, however
+           well-eased. The reference staggers its groups a fifth of the
+           container's duration apart, starting a third of the way in and still
+           landing after the shape has settled — so the eye follows the sheet
+           being built instead of catching it already built.
+           Groups are DOM order. The sheet's own header is the first; anything
+           inside a .nb-notch-cascade root follows. A sheet that does not opt in
+           keeps the old single-block behaviour on the new timing, which is why
+           the :has() guard is here rather than a second class on every sheet. */
+        .nb-fluid[data-fluid-origin="notch"] .nb-notch-body{pointer-events:none}
+        .nb-fluid[data-fluid-origin="notch"][data-morph-stage="content"] .nb-notch-body,.nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-notch-body{pointer-events:auto}
+        .nb-fluid[data-fluid-origin="notch"] .nb-notch-body>:last-child:not(:has(.nb-notch-cascade)){--nb-stage:1}
+        ${Array.from({ length: 8 }, (_, n) => `.nb-fluid[data-fluid-origin="notch"] .nb-notch-cascade>*:nth-child(${n + 1}){--nb-stage:${n + 1}}`).join("")}
+        .nb-fluid[data-fluid-origin="notch"] .nb-notch-cascade>*:nth-child(n+9){--nb-stage:8}
+        .nb-fluid[data-fluid-origin="notch"] .nb-notch-body>:first-child,
+        .nb-fluid[data-fluid-origin="notch"] .nb-notch-cascade>*,
+        .nb-fluid[data-fluid-origin="notch"] .nb-notch-body>:last-child:not(:has(.nb-notch-cascade)){
+          animation:nbnotchgroupin var(--nb-morph-fade) cubic-bezier(.22,.85,.28,1) both;
+          animation-delay:calc(var(--nb-morph-lead) + var(--nb-stage,0) * var(--nb-morph-step));
+          will-change:transform,opacity;
+        }
+        /* Opacity only, and deliberately so on both counts.
+           The reference animates nothing but opacity on its content groups, and
+           a transformed descendant extends its scroller's overflow: the 10px
+           rise this replaced was measured into scrollHeight, so the sheet was
+           sized ten pixels taller than its content and the morph's clip no
+           longer matched the button it grew from. The stagger is what carries
+           the arrival; the rise was never doing the work. */
+        @keyframes nbnotchgroupin{from{opacity:0}to{opacity:1}}
+        .nb-morph-source-label{position:absolute;inset:0;z-index:8;display:flex;align-items:center;justify-content:center;pointer-events:none;font-size:.75rem;font-weight:700;letter-spacing:.1em;opacity:1;animation:nbnotchlabelout var(--nb-morph-dur,320ms) cubic-bezier(.23,1,.32,1) both;transition:opacity 100ms cubic-bezier(.23,1,.32,1);will-change:opacity}
         @keyframes nbnotchlabelout{0%,55%{opacity:1}78%,100%{opacity:0}}
         .nb-fluid[data-fluid-origin="notch"][data-morph-stage="reveal"] .nb-morph-source-label,.nb-fluid[data-fluid-origin="notch"][data-morph-stage="content"] .nb-morph-source-label,.nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-morph-source-label{opacity:0}
-        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"]:not([data-fluid-reverse="true"]){animation:nbnotchout 260ms cubic-bezier(.4,0,.3,1) forwards}
+        /* The close runs the container on the same duration as the open — the
+           reference makes both 20 frames. The order still inverts, because the
+           body's exit transition below is far shorter than the container's: the
+           content is gone well before the shape finishes folding, which is what
+           stops the collapse reading as the sheet being deleted. It is done that
+           way rather than by delaying the container, because the reverse path in
+           requestClose owns the unmount clock and a delay here would outlive it. */
+        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"]:not([data-fluid-reverse="true"]){animation:nbnotchout var(--nb-morph-dur,260ms) cubic-bezier(.4,0,.3,1) forwards}
         @keyframes nbnotchout{
           0%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px round 24px)}
           100%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round 999px)}
@@ -7848,7 +7907,7 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
       window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
       || (panel && window.getComputedStyle(panel).animationName === "none")
     );
-    let closeDuration = morphRef.current === "notch" ? 260 : 300;
+    let closeDuration = morphRef.current === "notch" ? MORPH_MS : 300;
     /* If someone dismisses while the source is still opening, reverse the same
        animation from its rendered position. Restarting a separate exit keyframe
        at a full-size sheet was the subtle snap behind the old close regression. */
@@ -7882,11 +7941,11 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
             clipPath: `inset(${insetY} ${insetX} round 999px)`,
           },
         ], {
-          duration: boundedTime == null ? 260 : (boundedTime / duration) * 260,
+          duration: boundedTime == null ? MORPH_MS : (boundedTime / duration) * MORPH_MS,
           easing: "cubic-bezier(.4,0,.3,1)",
           fill: "forwards",
         });
-        closeDuration = boundedTime == null ? 260 : (boundedTime / duration) * 260;
+        closeDuration = boundedTime == null ? MORPH_MS : (boundedTime / duration) * MORPH_MS;
       }
     }
     closingRef.current = true;
@@ -7958,9 +8017,13 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
     }
     setMorphStage("source");
     const stage = (next) => { if (!closingRef.current) setMorphStage(next); };
-    const reveal = window.setTimeout(() => stage("reveal"), 180);
-    const content = window.setTimeout(() => stage("content"), 220);
-    const open = window.setTimeout(() => stage("open"), 320);
+    /* Kept as the same fractions of the container's travel the 320ms version
+       used — 56%, 69%, 100% — so stretching MORPH_MS moves these with it rather
+       than leaving the handoff stranded at an absolute millisecond that no
+       longer means anything in the new timeline. */
+    const reveal = window.setTimeout(() => stage("reveal"), MORPH_MS * 0.56);
+    const content = window.setTimeout(() => stage("content"), MORPH_MS * 0.69);
+    const open = window.setTimeout(() => stage("open"), MORPH_MS);
     return () => {
       window.clearTimeout(reveal);
       window.clearTimeout(content);
@@ -8498,7 +8561,7 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick, weekStart 
   };
 
   return (
-    <div data-test="composer" data-composer-kind={kind}>
+    <div data-test="composer" data-composer-kind={kind} className="nb-notch-cascade">
       {!editing && (
         <PillNav T={T} ariaLabel="What to add" value={kind}
           options={[["event", "EVENT"], ["task", "ACTION"]]}

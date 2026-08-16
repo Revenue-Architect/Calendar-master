@@ -140,9 +140,15 @@ test.describe("the notch morph", () => {
           const duration = Number(animation.effect?.getTiming().duration || 0);
           if (duration > 0) animation.currentTime = duration * fraction;
         }
+        /* The brightest content group, not the wrapper. `.nb-notch-body` no
+           longer fades as a unit — its groups do, on a stagger — so the honest
+           question is whether *any* of them has become visible yet. */
+        const groups = node.getAnimations({ subtree: true })
+          .filter((animation) => animation.animationName === "nbnotchgroupin")
+          .map((animation) => Number(getComputedStyle(animation.effect.target).opacity));
         return {
           source: Number(getComputedStyle(node.querySelector('[data-test="morph-source-label"]')).opacity),
-          body: Number(getComputedStyle(node.querySelector(".nb-notch-body")).opacity),
+          body: groups.length ? Math.max(...groups) : 1,
           fill: getComputedStyle(node).backgroundColor,
         };
       };
@@ -221,12 +227,30 @@ test.describe("the notch morph", () => {
     await expect(sheet.getByTestId("notch-surface")).toHaveCount(0);
     await expect(trigger).toHaveCSS("visibility", "hidden");
 
-    const transitions = await sheet.evaluate((node) => ({
-      panel: getComputedStyle(node).transitionProperty,
-      body: getComputedStyle(node.querySelector(".nb-notch-body")).transitionProperty,
-    }));
+    /* The body is no longer one faded block — its groups arrive on a stagger, so
+       what has to be true is that each group animates opacity and nothing that
+       costs layout. Reading `.nb-notch-body`'s own transition would now report
+       the wrapper, which is deliberately inert. */
+    const transitions = await sheet.evaluate((node) => {
+      const groups = node.getAnimations({ subtree: true })
+        .filter((animation) => animation.animationName === "nbnotchgroupin");
+      return {
+        panel: getComputedStyle(node).transitionProperty,
+        groupCount: groups.length,
+        groupDelays: groups.map((animation) => Math.round(Number(animation.effect.getTiming().delay))).sort((a, b) => a - b),
+        groupProps: [...new Set(groups.flatMap((animation) => (
+          animation.effect.getKeyframes().flatMap((frame) => Object.keys(frame))
+        )))],
+      };
+    });
     expect(transitions.panel, "the shared panel must transition from the trigger accent to its own surface").toContain("background-color");
-    expect(transitions.body, "form content should fade/slide in after geometry, never stretch with it").toContain("opacity");
+    expect(transitions.groupCount, "the composer's content must arrive as staggered groups, not one block").toBeGreaterThan(2);
+    expect(transitions.groupProps, "form content should fade in after geometry, never stretch with it").toContain("opacity");
+    for (const property of ["width", "height", "top", "left", "margin", "padding"]) {
+      expect(transitions.groupProps, `content groups must not animate ${property}`).not.toContain(property);
+    }
+    const [first, second] = transitions.groupDelays;
+    expect(second - first, "each group must wait a beat behind the one before it").toBeGreaterThan(50);
 
     await page.keyboard.press("Escape");
     await expect(sheet).toHaveCount(0, { timeout: 3000 });
