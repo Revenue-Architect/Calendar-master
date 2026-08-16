@@ -128,6 +128,11 @@ are too detailed for the repository README.
 - [`superpowers/plans/2026-08-10-hardening-phase-3g.md`](superpowers/plans/2026-08-10-hardening-phase-3g.md)
   completes the final non-provider hardening slice for keyboard dialog behavior,
   local diagnostics, and bounded Notes imports.
+- [`superpowers/plans/2026-08-16-responsive-tiers-and-motion.md`](superpowers/plans/2026-08-16-responsive-tiers-and-motion.md)
+  records the measured responsive and motion audit — the missing 640–1023 px
+  tier, the five layout-property transitions that violate §7.2, the safe-area
+  gap, and the drifted breakpoint constants — with a seven-phase remediation
+  plan and the ship-first items that remove both measured jank sources.
 
 ## Architecture decisions
 
