@@ -75,14 +75,29 @@ test.describe("a gesture belongs to the nearest control that wants it", () => {
     expect(await activeView(page), "scrolling a row must not navigate").toBe(before);
   });
 
-  test("the view still switches on a drag across open page body", async ({ page }) => {
-    await openPlanner(page);
-    const before = await activeView(page);
-    /* The section itself, not a control inside it — this is the gesture the
-       isolation must not have broken on its way to fixing the others. */
-    await fingerDrag(page, ".nb-main > section", 0.9, 0.1);
-    expect(await activeView(page), "a drag on open body must still navigate").not.toBe(before);
-  });
+  /* A horizontal drag turns the day, and only ever that. All three views are
+     anchored to the selected day, so there is no surface where the gesture
+     should mean something else, and changing view belongs to the pill nav.
+     Asserted on each view in turn, and each asserts the pair — the day moved and
+     the view did not — because either half alone passes for a build that has
+     handed the gesture back to the view list. */
+  for (const view of ["TIMELINE", "AGENDA", "ACTIONS"]) {
+    test(`a drag on ${view} turns the day and never changes view`, async ({ page }) => {
+      await openPlanner(page);
+      if (view !== "TIMELINE") {
+        await page.getByRole("tab", { name: view, exact: true }).click();
+        await page.waitForTimeout(500);
+      }
+      const heading = page.getByTestId("day-heading");
+      const beforeDay = await heading.getAttribute("data-date");
+      const beforeView = await activeView(page);
+
+      await fingerDrag(page, ".nb-main > section", 0.9, 0.1);
+
+      expect(await heading.getAttribute("data-date"), "the drag must turn the day").not.toBe(beforeDay);
+      expect(await activeView(page), "the drag must leave the view alone").toBe(beforeView);
+    });
+  }
 
   test("every horizontal scroller in the body declares itself", async ({ page }) => {
     await openPlanner(page, { keepSample: true });

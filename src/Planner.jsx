@@ -2001,31 +2001,30 @@ export default function Planner() {
       setSwipe(s.dx);
     }
   };
-  /* A horizontal drag across the body moves between the three views, not
-     between days.
-     Both readings are horizontal, and one surface cannot serve both without a
-     modifier nobody would find. The ribbon is already a horizontally scrolling
-     row of dates sitting directly above this one, so day-turn has a home that
-     is more discoverable than the gesture it lost — while "drag the page to the
-     next page" is what a page-level horizontal swipe means on both phone
-     platforms. Arrow keys, TODAY and the ribbon all still turn the day, and the
-     turn animation is unchanged; only the trigger moved. */
+  /* A horizontal drag turns the day. On every surface, with no exceptions.
+     Two earlier passes got this wrong in opposite directions — first by giving
+     the gesture to the view list everywhere, then by splitting it per surface —
+     and both were reasoning about the views instead of reading what they show.
+     All three are anchored to the selected day: the Timeline is that day,
+     Agenda's window is measured from it, and the Actions default smart view
+     lists that day's tasks. So there is no surface where turning the day is
+     meaningless, and no honest reason for the same gesture to mean two things.
+     Changing view is the pill nav's job, which is always on screen and is one
+     tap. Keeping the two apart is also what stops a view switch competing with
+     the card swipes, the horizontal scrollers and the timeline's own gestures —
+     a whole class of conflict that simply cannot occur if the gesture only ever
+     has one meaning. */
   const onSwipeEnd = () => {
     const s = swipeRef.current;
     swipeRef.current = null;
     if (s && s.live && Math.abs(s.dx) > 64) {
-      const from = VIEW_ORDER.indexOf(viewMode);
-      /* Clamped, never wrapped. Falling off Actions back onto Timeline would
-         make the three surfaces a carousel, and they are not one — the ends are
-         ends, and running into one should feel like it. */
-      const to = Math.max(0, Math.min(VIEW_ORDER.length - 1, from + (s.dx < 0 ? 1 : -1)));
-      /* Drop the drag offset in the same commit as the switch and without a
-         transition. Springing the page back while the arriving view plays its
-         own travel animates two transforms against each other on nested
-         elements, which is the jump. Only the switch should play. */
+      /* Drop the drag offset in the same commit as the turn and without a
+         transition. Springing the page back while the turn animation plays
+         animates two transforms against each other on nested elements, which is
+         the jump. Only the turn should play. */
       setSnapping(true);
       setSwipe(0);
-      if (from !== -1 && to !== from) selectViewMode(VIEW_ORDER[to], "pointer");
+      goDay(s.dx < 0 ? 1 : -1);
       requestAnimationFrame(() => setSnapping(false));
       return;
     }
@@ -4782,7 +4781,9 @@ export default function Planner() {
           <div data-test="gesture-hint" className="nb-up flex flex-col gap-2 px-3 py-2 sm:flex-row sm:items-center sm:gap-x-3"
             style={{ background: surface, color: T.text, borderRadius: CARD_R, boxShadow: `inset 0 0 0 1px ${T.line}` }}>
             <span style={{ fontFamily: MONO, color: T.accentText }} className="nb-label shrink-0">GESTURES</span>
-            <span className="nb-body min-w-0 flex-1">Hold a slot to create · swipe an Action right to complete · swipe the page to change view.</span>
+            {/* This hint only ever shows on the Timeline at day zoom, so it
+                describes the Timeline's own axis. */}
+            <span className="nb-body min-w-0 flex-1">Hold a slot to create · swipe an Action right to complete · swipe the day left or right.</span>
             <div className="flex items-center gap-3">
             <button onClick={() => { beep("click"); dismissGestureHint(); setShortcuts(true); }}
               style={{ fontFamily: MONO, color: T.accentText }} className="nb-tap nb-hover-control text-xs font-bold tracking-widest shrink-0 underline">SHORTCUTS</button>
@@ -7912,9 +7913,9 @@ function LiquidPillIndicator({ T, box, stretch, settled = true, z = 0 }) {
       background: T.accent, borderRadius: 999, zIndex: z,
       transform: `translate3d(${box.left}px, ${box.top}px, 0) scaleX(${stretch})`,
       transformOrigin: "center",
-      /* Matched to the siblings' 340ms so the plate and the tabs it moves between
-         are one gesture rather than two overlapping ones. */
-      transition: settled ? "transform 340ms cubic-bezier(.23,1,.32,1)" : "none",
+      /* Same duration and same curve as the siblings, so the plate and the tabs
+         it travels between are one gesture rather than two overlapping ones. */
+      transition: settled ? "transform 380ms var(--motion-lane)" : "none",
       willChange: "transform",
       pointerEvents: "none",
     }} />
@@ -7995,11 +7996,17 @@ function PillNav({ T, value, options, onPick, onArm = null, ariaLabel, surface =
                 alignItems: "center",
                 justifyItems: "center",
                 transform: flip ? `translate3d(${flip[index]}px,0,0)` : "none",
-                /* 340ms, not 200. Measured off the reference, whose siblings take
-                   about 360ms to redistribute — at 200 the travel is over before
-                   the eye has found the thing that moved, which is the other half
-                   of why this read as "nothing happens". */
-                transition: flip || instant ? "none" : "transform 340ms cubic-bezier(.23,1,.32,1), color 260ms ease",
+                /* 380ms on the gentlest curve the system owns.
+                   Duration was never the reason this felt snappy — --motion-enter
+                   is a hard ease-out that reaches roughly four fifths of the
+                   distance in the first quarter of its time, so the pill lunges
+                   and then crawls, and lengthening it only stretches the crawl.
+                   --motion-lane is about half that at the same point, which is
+                   what turns a lunge into travel. 380ms sits in the band this
+                   app's own reference point wants: index.css pitches it at
+                   Moleskine Timepage, and that is premium-archetype motion —
+                   350-600ms, no overshoot, evenly paced. */
+                transition: flip || instant ? "none" : "transform 380ms var(--motion-lane), color 260ms ease",
               } : {
                 transition: "color 260ms ease",
               }),
@@ -8034,7 +8041,7 @@ function PillNav({ T, value, options, onPick, onArm = null, ariaLabel, surface =
                      reads as the word being squeezed out rather than switched off,
                      which is only possible if the fade outlasts the first third of
                      the travel. */
-                  transition: instant ? "none" : "clip-path 340ms cubic-bezier(.23,1,.32,1), opacity 220ms ease 60ms",
+                  transition: instant ? "none" : "clip-path 380ms var(--motion-lane), opacity 240ms ease 60ms",
                 } : null),
               }}>
               {label}
