@@ -39,6 +39,10 @@ are too detailed for the repository README.
 - [`superpowers/specs/2026-08-10-hardening-design.md`](superpowers/specs/2026-08-10-hardening-design.md)
   defines the Phase 3G dialog-focus, redacted diagnostics, and untrusted-import
   hardening boundary.
+- [`superpowers/specs/2026-08-15-shared-layout-motion-prd.md`](superpowers/specs/2026-08-15-shared-layout-motion-prd.md)
+  defines the NEW-to-composer material morph and compact TIMELINE / AGENDA / ACTIONS
+  expanding-sibling motion. Implementation plan:
+  [`superpowers/plans/2026-08-15-shared-layout-motion.md`](superpowers/plans/2026-08-15-shared-layout-motion.md).
 
 ## Quality reports
 
