@@ -289,6 +289,10 @@ const LIFT_MS = 300;
    becoming a full sheet in 320ms reads as a pop rather than a morph. If it ever
    fails the fortieth-time test, lower this and the cascade compresses with it. */
 const MORPH_MS = 667;
+/* The order the three surfaces lie in, left to right. It is the one place that
+   knows a view has neighbours, and both the switch animation's direction and
+   the swipe's target come from it. */
+const VIEW_ORDER = ["timeline", "agenda", "actions"];
 /* Fractions of MORPH_MS, matching the reference: content starts a third of the
    way through the container's travel, each group is a step behind the last, and
    each takes half the container's duration to arrive. */
@@ -851,6 +855,7 @@ export default function Planner() {
   }, [composer]);
   const [turn, setTurn] = useState(null);
   const [swipe, setSwipe] = useState(0);
+  const [viewDir, setViewDir] = useState(1);
   const [taskSwipe, setTaskSwipe] = useState(null);
   const [snapping, setSnapping] = useState(false);
   const [alertToast, setAlertToast] = useState(null);
@@ -1328,14 +1333,21 @@ export default function Planner() {
     || (typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
   const compactViewPills = useCompactViewPills();
   const selectViewMode = useCallback((mode, source = "programmatic") => {
-    /* Alternating names lets the new surface begin its opacity handoff in the
-       same render as the view change. A next-frame class would first paint the
+    /* Alternating names lets the new surface begin its handoff in the same
+       render as the view change. A next-frame class would first paint the
        replacement fully visible, then flash it back to transparent. */
     setViewHandoff((current) => (
       source === "pointer" && !reducedMotion && mode !== viewMode
         ? (current === 1 ? 2 : 1)
         : 0
     ));
+    /* Which way the views lie relative to each other, so the arriving surface
+       enters from the side it came from rather than from a fixed direction. A
+       switch that always slides the same way tells you a view changed but not
+       which way you moved through them. */
+    const from = VIEW_ORDER.indexOf(viewMode);
+    const to = VIEW_ORDER.indexOf(mode);
+    if (from !== -1 && to !== -1 && from !== to) setViewDir(to > from ? 1 : -1);
     setViewMode(mode);
     if (mode === "actions") setSheet(false);
   }, [reducedMotion, viewMode]);
@@ -1900,17 +1912,31 @@ export default function Planner() {
       setSwipe(s.dx);
     }
   };
+  /* A horizontal drag across the body moves between the three views, not
+     between days.
+     Both readings are horizontal, and one surface cannot serve both without a
+     modifier nobody would find. The ribbon is already a horizontally scrolling
+     row of dates sitting directly above this one, so day-turn has a home that
+     is more discoverable than the gesture it lost — while "drag the page to the
+     next page" is what a page-level horizontal swipe means on both phone
+     platforms. Arrow keys, TODAY and the ribbon all still turn the day, and the
+     turn animation is unchanged; only the trigger moved. */
   const onSwipeEnd = () => {
     const s = swipeRef.current;
     swipeRef.current = null;
     if (s && s.live && Math.abs(s.dx) > 64) {
-      /* Drop the drag offset in the same commit as the page turn and without a
-         transition. Springing the page back while the turn animation rotates the
-         new one in animates two transforms against each other on nested elements,
-         which is the jump. Only the turn should play. */
+      const from = VIEW_ORDER.indexOf(viewMode);
+      /* Clamped, never wrapped. Falling off Actions back onto Timeline would
+         make the three surfaces a carousel, and they are not one — the ends are
+         ends, and running into one should feel like it. */
+      const to = Math.max(0, Math.min(VIEW_ORDER.length - 1, from + (s.dx < 0 ? 1 : -1)));
+      /* Drop the drag offset in the same commit as the switch and without a
+         transition. Springing the page back while the arriving view plays its
+         own travel animates two transforms against each other on nested
+         elements, which is the jump. Only the switch should play. */
       setSnapping(true);
       setSwipe(0);
-      goDay(s.dx < 0 ? 1 : -1);
+      if (from !== -1 && to !== from) selectViewMode(VIEW_ORDER[to], "pointer");
       requestAnimationFrame(() => setSnapping(false));
       return;
     }
@@ -4089,13 +4115,21 @@ export default function Planner() {
            enough to establish continuity without making readable content travel. */
         .nb-list-enter{animation:nb-list-enter 180ms var(--motion-enter) both;animation-delay:calc(var(--nb-list-index, 0) * 30ms);will-change:transform,opacity}
         @keyframes nb-list-enter{from{opacity:0;transform:translate3d(0,4px,0)}to{opacity:1;transform:translate3d(0,0,0)}}
-        /* View tabs replace a complete query, so a small opacity handoff stops
-           pointer-led switches feeling like a paint flash. It deliberately has
-           no travel: this is a change of lens, not a page moving through space. */
-        .nb-view-enter-a{animation:nb-view-enter-a 140ms var(--motion-enter) both}
-        .nb-view-enter-b{animation:nb-view-enter-b 140ms var(--motion-enter) both}
-        @keyframes nb-view-enter-a{from{opacity:0}to{opacity:1}}
-        @keyframes nb-view-enter-b{from{opacity:0}to{opacity:1}}
+        /* The three views do move through space, and the switch says so.
+           This used to be opacity alone, on the reasoning that a view change is
+           a change of lens rather than a page moving. That holds while the only
+           way to change view is to press a tab. It stops holding once the views
+           can be dragged between: a surface that follows your thumb and then
+           cross-fades has told you two different stories about what it is. The
+           travel is small — a fourteenth of the width, matching the day turn's
+           idiom at 6% — because the direction is the information, not the
+           distance.
+           Two alternating names so the arriving surface can start its handoff in
+           the same render as the view change; --nb-view-dir carries which way. */
+        .nb-view-enter-a{animation:nb-view-enter-a 200ms var(--motion-enter) both}
+        .nb-view-enter-b{animation:nb-view-enter-b 200ms var(--motion-enter) both}
+        @keyframes nb-view-enter-a{from{opacity:0;transform:translate3d(calc(var(--nb-view-dir, 1) * 7%),0,0)}to{opacity:1;transform:translate3d(0,0,0)}}
+        @keyframes nb-view-enter-b{from{opacity:0;transform:translate3d(calc(var(--nb-view-dir, 1) * 7%),0,0)}to{opacity:1;transform:translate3d(0,0,0)}}
         /* Completion is a durable state, not a toast. Keep the accent surface
            mounted after its reveal so the card remains visibly complete; the
            same interruptible clip transition reverses when the user reopens it. */
@@ -4605,7 +4639,7 @@ export default function Planner() {
           <div data-test="gesture-hint" className="nb-up flex flex-col gap-2 px-3 py-2 sm:flex-row sm:items-center sm:gap-x-3"
             style={{ background: surface, color: T.text, borderRadius: CARD_R, boxShadow: `inset 0 0 0 1px ${T.line}` }}>
             <span style={{ fontFamily: MONO, color: T.accentText }} className="nb-label shrink-0">GESTURES</span>
-            <span className="nb-body min-w-0 flex-1">Hold a slot to create · hold to move · swipe an Action right to complete.</span>
+            <span className="nb-body min-w-0 flex-1">Hold a slot to create · hold to move · swipe the page to change view.</span>
             <div className="flex items-center gap-3">
             <button onClick={() => { beep("click"); dismissGestureHint(); setShortcuts(true); }}
               style={{ fontFamily: MONO, color: T.accentText }} className="nb-tap nb-hover-control text-xs font-bold tracking-widest shrink-0 underline">SHORTCUTS</button>
@@ -4618,7 +4652,7 @@ export default function Planner() {
 
       {/* ══ BODY ══ */}
       <main className={`nb-main px-3 sm:px-5 grid grid-cols-1 lg:grid-cols-12 gap-5 flex-1 min-h-0 ${viewMode === "timeline" && zoom === "day" ? "nb-main-day-timeline" : ""} ${actionsLayout} ${viewHandoff === 1 ? "nb-view-enter-a" : viewHandoff === 2 ? "nb-view-enter-b" : ""}`}
-        style={{ "--sheet-pad": sheetPad }}>
+        style={{ "--sheet-pad": sheetPad, "--nb-view-dir": viewDir }}>
         <section className="flex flex-col min-h-0 min-w-0" onTouchStart={onSwipeStart} onTouchMove={onSwipeMove} onTouchEnd={onSwipeEnd} onTouchCancel={onSwipeEnd}
           style={{
             transform: swipe === 0 ? "none" : `translateX(${swipe * 0.32}px)`,
