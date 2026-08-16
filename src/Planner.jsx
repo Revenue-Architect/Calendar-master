@@ -7912,7 +7912,9 @@ function LiquidPillIndicator({ T, box, stretch, settled = true, z = 0 }) {
       background: T.accent, borderRadius: 999, zIndex: z,
       transform: `translate3d(${box.left}px, ${box.top}px, 0) scaleX(${stretch})`,
       transformOrigin: "center",
-      transition: settled ? "transform 300ms cubic-bezier(.23,1,.32,1)" : "none",
+      /* Matched to the siblings' 340ms so the plate and the tabs it moves between
+         are one gesture rather than two overlapping ones. */
+      transition: settled ? "transform 340ms cubic-bezier(.23,1,.32,1)" : "none",
       willChange: "transform",
       pointerEvents: "none",
     }} />
@@ -7993,11 +7995,31 @@ function PillNav({ T, value, options, onPick, onArm = null, ariaLabel, surface =
                 alignItems: "center",
                 justifyItems: "center",
                 transform: flip ? `translate3d(${flip[index]}px,0,0)` : "none",
-                transition: flip || instant ? "none" : "transform 200ms cubic-bezier(.23,1,.32,1), color 260ms ease",
+                /* 340ms, not 200. Measured off the reference, whose siblings take
+                   about 360ms to redistribute — at 200 the travel is over before
+                   the eye has found the thing that moved, which is the other half
+                   of why this read as "nothing happens". */
+                transition: flip || instant ? "none" : "transform 340ms cubic-bezier(.23,1,.32,1), color 260ms ease",
               } : {
                 transition: "color 260ms ease",
               }),
             }}>
+            {/* The sibling's body.
+                The FLIP was always running — siblings travel the full slot width
+                and ease back — but an inactive tab was a bare glyph, so there was
+                nothing on screen whose movement you could read. The reference this
+                is modelled on gives every tab a filled surface, and that is what
+                makes a switch look like three objects redistributing space rather
+                than one highlight sliding behind text.
+                Inset two pixels so adjacent surfaces read as separate objects
+                without changing a single slot width, and painted only when the tab
+                is inactive so it never covers the accent plate. */}
+            {compact && !on && (
+              <span aria-hidden="true" className="absolute" style={{
+                inset: "0 2px", background: T.faint, borderRadius: 999, zIndex: -1,
+                transition: instant ? "none" : "background-color 260ms ease, opacity 260ms ease",
+              }} />
+            )}
             {Icon ? <Icon size={13} /> : null}
             <span data-test={testId ? `${testId}-label` : undefined}
               style={{
@@ -8006,7 +8028,13 @@ function PillNav({ T, value, options, onPick, onArm = null, ariaLabel, surface =
                   justifySelf: "start",
                   clipPath: viewPillLabelClip(on),
                   opacity: on ? 1 : 0,
-                  transition: instant ? "none" : "clip-path 200ms cubic-bezier(.23,1,.32,1), opacity 160ms ease 40ms",
+                  /* The outgoing word leaves before the incoming one arrives, and
+                     both are slower than the pill they sit in. In the reference the
+                     departing label is still legible while its pill narrows — it
+                     reads as the word being squeezed out rather than switched off,
+                     which is only possible if the fade outlasts the first third of
+                     the travel. */
+                  transition: instant ? "none" : "clip-path 340ms cubic-bezier(.23,1,.32,1), opacity 220ms ease 60ms",
                 } : null),
               }}>
               {label}
