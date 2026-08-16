@@ -1895,8 +1895,25 @@ export default function Planner() {
     setDateKey(k);
   };
 
+  /* A view switch is the gesture of last resort: it only gets the finger when
+     nothing nearer to it wanted one.
+     The handler sits on the section wrapping every surface in the app, so
+     without this it answers for touches that were never meant for it. Two were
+     reproducible and both felt like the app misfiring rather than navigating:
+     swiping an Action card right to complete it left the task open and threw
+     the view sideways, and dragging the ANY TIME row — a horizontal scroller —
+     navigated instead of scrolling. The card is the harder of the two, because
+     it handles its swipe with pointer events while this handler listens to
+     touch, and one finger on glass emits both streams, so neither handler can
+     see the other by inspecting its own events.
+     Ownership is therefore declared rather than inferred. An element that means
+     to keep horizontal movement for itself says so with data-owns-swipe, and a
+     touch starting anywhere inside one never becomes a view switch. Declared
+     beats heuristic here: testing overflow-x would catch the two known cases
+     and silently miss the next control someone adds. */
   const onSwipeStart = (e) => {
     if (e.touches.length !== 1 || gestureRef.current) return;
+    if (e.target instanceof Element && e.target.closest("[data-owns-swipe]")) return;
     swipeRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, dx: 0, live: false };
   };
   const onSwipeMove = (e) => {
@@ -4547,6 +4564,7 @@ export default function Planner() {
             <div ref={attachRibbon} data-test="day-ribbon" data-ribbon-start={ribbonRange.startKey}
               data-ribbon-end={addDaysToKey(ribbonRange.endKey, -1)} data-ribbon-total-days={ribbonSpan}
               data-ribbon-window-start={ribbonWindowStart} data-ribbon-window-end={ribbonWindowEnd - 1}
+              data-owns-swipe="scroller"
               onScroll={onRibbonScroll} style={stripFade} className="nb-x overflow-x-auto flex-1 min-w-0">
             <div className="flex min-w-max">
               <div aria-hidden="true" className="nb-ribbon-spacer" style={{ "--nb-ribbon-cells": ribbonWindowStart }} />
@@ -4784,7 +4802,7 @@ export default function Planner() {
                 {dayTasks.some((task) => task.planned.startMinute == null) && (
                   <>
                     <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label mt-1">ANY TIME</span>
-                    <div ref={anyTimeRef} style={anyTimeFade} className="flex gap-1.5 overflow-x-auto nb-x pb-0.5">
+                    <div ref={anyTimeRef} data-owns-swipe="scroller" style={anyTimeFade} className="flex gap-1.5 overflow-x-auto nb-x pb-0.5">
                       {dayTasks.filter((task) => task.planned.startMinute == null).map((task) => (
                         <button key={task.id}
                           onClick={() => { beep("click"); setInspect({ kind: "task", id: task.id }); }}
@@ -6152,7 +6170,7 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
         </div>
       )}
 
-      <div className="nb-x flex gap-1 overflow-x-auto mb-3 -mx-1 px-1">
+      <div data-owns-swipe="scroller" className="nb-x flex gap-1 overflow-x-auto mb-3 -mx-1 px-1">
         {SMART_VIEWS.map((view) => {
           const on = view.id === smartView;
           const count = viewCounts?.[view.id] ?? 0;
@@ -6400,7 +6418,13 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], subtasks 
           <span className="nb-data" style={{ color: T.dimText, opacity: dx < -20 ? 1 : 0 }}>TOMORROW</span>
         </div>
 
-      <article className="nb-action-card nb-hover-tile relative overflow-hidden" style={{ background: surface, borderRadius: CARD_R, boxShadow: `inset 0 0 0 1px ${T.line}`, transform: `translateX(${dx}px)`, transition: dx === 0 ? "transform 220ms cubic-bezier(.2,.8,.25,1), box-shadow 200ms cubic-bezier(.2,.8,.25,1)" : "none", opacity: 1, touchAction: "pan-y", userSelect: "none", WebkitUserSelect: "none" }}
+      {/* Complete-right and defer-left are this card's own, and it says so twice
+          over: the attribute stops the view switch claiming the same finger, and
+          stopping the touch stream keeps the two from racing on a real screen,
+          where one finger emits pointer *and* touch and this card only reads the
+          first of them. */}
+      <article data-owns-swipe="card" className="nb-action-card nb-hover-tile relative overflow-hidden" style={{ background: surface, borderRadius: CARD_R, boxShadow: `inset 0 0 0 1px ${T.line}`, transform: `translateX(${dx}px)`, transition: dx === 0 ? "transform 220ms cubic-bezier(.2,.8,.25,1), box-shadow 200ms cubic-bezier(.2,.8,.25,1)" : "none", opacity: 1, touchAction: "pan-y", userSelect: "none", WebkitUserSelect: "none" }}
+        onTouchStart={(ev) => ev.stopPropagation()} onTouchMove={(ev) => ev.stopPropagation()}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
         <div data-test="task-completion-overlay" data-visible={String(isDone)} aria-hidden="true"
           className={`nb-action-complete-overlay absolute inset-0 z-10 flex items-center gap-2 pl-14 pr-4 pointer-events-none ${isDone ? "is-visible" : ""}`}
