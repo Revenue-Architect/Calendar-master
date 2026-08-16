@@ -8,6 +8,7 @@
 **Product authority:** the approved cross-platform PRD, promoted by Phase 1 to docs/product/calendar-master-cross-platform.md  
 **Visual and motion authority:** DESIGN.md  
 **Sequencing authority:** this plan  
+**Amended:** 2026-08-16 — see Amendment 1 at the end of this document. The evidence below was measured on 2026-08-13 and has drifted materially since: Planner.jsx is 9,079 lines, not ~8,100. Read Amendment 1 before executing any phase.  
 
 This plan supersedes the sequencing and stale commit-transfer instructions in docs/superpowers/plans/2026-08-11-cross-platform-trust-phase-1.md wherever they conflict. It does not replace that document as historical planning evidence. It does not create or use a competing .planning source of truth.
 
@@ -1171,3 +1172,90 @@ Result: ready for phased execution once the blockers below are resolved at their
 - Clerk Expo quickstart: https://clerk.com/docs/expo/getting-started/quickstart
 - Clerk and Convex integration: https://clerk.com/docs/guides/development/integrations/databases/convex
 - Chrono: https://github.com/wanasit/chrono
+
+---
+
+## Amendment 1 — 2026-08-16: re-baseline and continuous budget
+
+**Status:** Binding amendment. Where this section conflicts with the body above, this section controls.
+**Reason:** Forty-one commits landed in the three days after this plan was written. Its evidence has drifted, and the drift is in the direction the plan exists to prevent.
+
+### A1.1 — Measured re-baseline
+
+Every figure below was measured on 2026-08-16, not estimated.
+
+| Claim in the body | Measured today | Consequence |
+|---|---|---|
+| `src/Planner.jsx` is approximately 8,100 lines | **9,079 lines** | The file grew **+1,014 lines (+12.6%)** from the 8,065-line baseline at 9deff64. The plan's central premise is not merely unmet; it is moving backwards. |
+| Baseline is origin/main at 9deff64 | Still a valid ancestor of HEAD, but **41 commits behind** | The baseline is sound and does not need replacing. It needs re-measuring, which is a different act. |
+| The regression plan is untracked | **Now tracked** | Unresolved blocker 2 is closed. No other blocker has changed. |
+| There is no `src/ui` layer and only a small `src/app` layer | Unchanged — no `src/ui`; `src/app` still holds 3 files | Phase 2 has not started. |
+| No architecture enforcement in `scripts/` | Unchanged — `scripts/` holds only contact-sheet, post-merge, sites-worker | **P1.2 has not started.** |
+| `docs/README.md` has no typed authority table | Unchanged | **P1.1 has not started.** |
+
+Commit mix over those 41 commits: 23 `fix`, 10 `docs`, 7 `feat`, 1 `test`.
+
+**The finding that matters:** real work has continued at pace, but none of it was Phase 1 or Phase 2, and the gate meant to precede it — G2, governed architecture — never closed. BD-09's binding order is being violated in practice, not by decision.
+
+### A1.2 — The ratchet is aspirational; make it mechanical
+
+Gate G3 requires that the debt ledger "never grows" and that Planner.jsx has "measurably fewer" inline declarations. Both are **phase gates**, evaluated at the end of a phase that has not begun. Between gates there is nothing stopping the file growing, and it grew 12.6%.
+
+A ratchet that is only checked at a gate is not a ratchet.
+
+**Amendment:** Introduce the boundary budget as a per-commit check, ahead of and independent of Phase 1's full checker.
+
+- **New unit P0.10 — Planner.jsx growth ratchet.** Type: governance/enforcement. Owned files: `scripts/check-planner-budget.mjs`, `scripts/planner-budget.json`, `package.json`.
+- Record today's 9,079 lines and the current count of inline component declarations as the ceiling. The check fails if either rises.
+- Wire into `npm run check` so it runs before unit tests, as P1.3 already specifies for the architecture checker.
+- **Dependency:** none. This is deliberately placed before G1, not after G2, because the cost of waiting is measured at ~340 lines per day.
+- **Negative control:** add ten lines to Planner.jsx, observe failure naming the ceiling and the delta; remove, observe green.
+- **Acceptance:** the ceiling can only move down, and only inside an extraction unit that removes a boundary edge.
+
+### A1.3 — Gates must re-validate their own evidence
+
+Nothing in the Definition of Done requires re-measuring the claims in "Live repository evidence" before a phase begins. That is how a 12.6% drift went unrecorded for three days.
+
+**Amendment:** Add to **Per-unit Definition of Done**:
+
+> - The unit's preconditions were re-measured against the current HEAD at the moment execution began, and any figure in "Live repository evidence" that has moved by more than 5 percent is corrected in the same PR.
+
+### A1.4 — The motion and stylesheet layer has no home in this plan
+
+The plan names DESIGN.md as visual and motion authority and correctly puts Timeline last as the highest-risk seam. But it has no unit for the motion system itself, and that system is not in Timeline — it is a **439-line CSS template literal inside Planner.jsx**, rebuilt as a string on every render and re-parsed by the browser on every theme change.
+
+This is load-bearing for three separate goals the plan already holds:
+
+- It is a meaningful share of the Planner.jsx line count Phase 2 must reduce.
+- It is where the layout-property animations live that violate the no-layout-animation rule recorded in `docs/superpowers/specs/2026-08-15-shared-layout-motion-prd.md` §7.2.
+- Phase 6 ports "launch-critical event and Action interactions" to a second client. Those interaction contracts are still being rewritten — 23 of the last 41 commits were `fix`. Porting an unsettled contract doubles the surface that has to settle.
+
+Evidence: `docs/superpowers/plans/2026-08-16-responsive-tiers-and-motion.md` and `docs/superpowers/plans/2026-08-16-motion-regression-repair.md`.
+
+**Amendment:** Insert **Phase 2.5 — Lift the stylesheet and settle the motion contract**, between G3 and Phase 3.
+
+- **P2.5.1** Extract the template-literal stylesheet from `Planner.jsx` into a real CSS file; theme values become custom properties on the root element, the pattern `--nb-line` already uses. Extraction-only; no visual change; parity proof is a computed-style diff across all fifteen themes.
+- **P2.5.2** Close the remaining layout-property animations recorded in the responsive-tiers plan, and add the guard that rejects new ones. Behavior-changing; each needs a negative control.
+- **P2.5.3** Declare the interaction contract frozen for the surfaces Phase 6 will port. Any later change to those contracts is a behavior-changing unit with its own gate, not incidental polish.
+- **Gate G3.5:** the stylesheet is out of the render path; zero elements transition layout properties; the frozen contract list is written down and links to its e2e assertions.
+
+**Rationale for the position:** before Phase 3, because Phase 3 creates the second consumer. Every day the contract stays unsettled after that, it has to settle twice.
+
+### A1.5 — State the resourcing assumption
+
+The plan specifies roughly fifty units across nine phases and requires Clerk, Convex, Google OAuth, an EAS or equivalent distribution account, and continued access to a specific Samsung device. It carries no effort estimate, no statement of who executes it, and no calendar horizon.
+
+That is defensible for a sequencing document — order is its stated authority, not scheduling. But it becomes a risk when read as a commitment, because Phases 4 through 6 are a single stretch with no shippable user value until the trust slice completes.
+
+**Amendment:** Add to the header block, above Executive decision:
+
+> **Resourcing assumption:** This plan states order, not schedule. Phases 4-6 form one indivisible trust program with no intermediate user-visible value; do not begin P4.T without confirming continuous access to the identity, backend, and device prerequisites listed under Genuine unresolved blockers. If that access is uncertain, stop after G3.5 — the web client is healthy, governed, and shippable at that point.
+
+### A1.6 — Blockers, restated
+
+1. Fresh remote baseline — **still open**, and now 41 commits wide.
+2. Untracked regression plan — **closed.** The file is tracked.
+3. Identity environment — **still open.** Blocks P4.T onward.
+4. Hosted preview target — **still open.** Blocks P8.2.
+5. Android distribution and hardware — **still open.** Blocks P8.2-P8.4.
+6. **New:** Interaction contracts for the Phase 6 port surfaces are unsettled. Closed by G3.5.
