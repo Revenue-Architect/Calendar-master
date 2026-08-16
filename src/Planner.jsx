@@ -154,6 +154,16 @@ import {
   fluidPillStretch,
 } from "./features/motion/fluidGeometry.js";
 import {
+  VIEW_PILL_COMPACT_MAX,
+  VIEW_PILL_ICON,
+  VIEW_PILL_WORD,
+  viewPillTrackWidth,
+  viewPillSlots,
+  viewPillIndicatorBox,
+  viewPillFlipOffset,
+  viewPillLabelClip,
+} from "./features/motion/viewPills.js";
+import {
   deliverReminder,
   dismissReminder,
   getDueReminders,
@@ -614,6 +624,10 @@ function ClockIcon({ size = 13 }) {
 
 function CalendarIcon({ size = 13 }) {
   return <UiIcon size={size}><rect x="2.5" y="3.5" width="11" height="10" rx="1.5" /><path d="M5 2.5v2M11 2.5v2M2.5 6.25h11" /></UiIcon>;
+}
+
+function ListIcon({ size = 13 }) {
+  return <UiIcon size={size}><path d="M3 4.5h10M3 8h10M3 11.5h7" /></UiIcon>;
 }
 
 function BlockIcon({ size = 13 }) {
@@ -1297,6 +1311,7 @@ export default function Planner() {
      filter is neither, so components that mount one ask directly. */
   const reducedMotion = Boolean(preferences?.display.reducedMotion)
     || (typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
+  const compactViewPills = useCompactViewPills();
   const selectViewMode = useCallback((mode, source = "programmatic") => {
     /* Alternating names lets the new surface begin its opacity handoff in the
        same render as the view change. A next-frame class would first paint the
@@ -4301,7 +4316,9 @@ export default function Planner() {
           <div className="nb-month-view-mode flex items-center gap-2 min-w-0">
             {/* Timeline answers "when, and for how long"; agenda answers "what is
                 coming". Same days, same data, two questions. */}
-            <PillNav T={T} ariaLabel="View mode" value={viewMode}
+            <PillNav T={T} ariaLabel="View mode" testId="view-mode" value={viewMode}
+              compact={compactViewPills}
+              icons={{ timeline: CalendarIcon, agenda: ListIcon, actions: CheckIcon }}
               options={[["timeline", "TIMELINE"], ["agenda", "AGENDA"], ["actions", "ACTIONS"]]}
               onPick={(mode, source) => {
                 if (mode === viewMode) return;
@@ -7434,6 +7451,22 @@ function FluidEditActions({ T, editing, dirty, label, onEdit, onRevert, onSave }
 
    Built natively: the reference implementations are Framer components, and a
    published page here cannot load anything off-host anyway. */
+function useCompactViewPills() {
+  const query = `(max-width: ${VIEW_PILL_COMPACT_MAX}px)`;
+  const [compact, setCompact] = useState(() => (
+    typeof window !== "undefined" && Boolean(window.matchMedia?.(query).matches)
+  ));
+  useEffect(() => {
+    const mq = window.matchMedia?.(query);
+    if (!mq) return undefined;
+    const sync = (event) => setCompact(event.matches);
+    setCompact(mq.matches);
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, [query]);
+  return compact;
+}
+
 function useLiquidPill(wrapRef, deps) {
   const [box, setBox] = useState(null);
   const [stretch, setStretch] = useState(1);
@@ -7597,29 +7630,80 @@ function LiquidFill({ T, on, radius = 999 }) {
   );
 }
 
-function PillNav({ T, value, options, onPick, ariaLabel, surface = "transparent", className = "", style = {} }) {
+function PillNav({ T, value, options, onPick, ariaLabel, surface = "transparent",
+                   className = "", style = {}, compact = false, icons = null, testId = null }) {
   const wrapRef = useRef(null);
-  const { box, stretch, settled } = useLiquidPill(wrapRef, [value, options.length]);
-  /* No goo here, deliberately. A trailing droplet was tried and removed: it can
-     only be mounted once the pill is already moving, which means mounting it at
-     the position it was supposed to be travelling *from* — so it flickered at
-     the destination instead of lagging behind. And switching `filter` on for the
-     duration of a transition re-rasterises the element at both ends: a snap in,
-     a snap out, on every press. One shape sliding cleanly beats two shapes and a
-     filter that pops. */
+  const { box, stretch, settled } = useLiquidPill(wrapRef, [value, options.length, compact]);
+  const activeIndex = Math.max(0, options.findIndex(([key]) => key === value));
+  const slots = compact ? viewPillSlots({ count: options.length, activeIndex }) : null;
+
+  /* FLIP, with the measure pass removed. Compact slot geometry is a pure
+     function of the active index, so both the old and the new left edge are
+     known without touching the DOM — which is the whole reason the plate can no
+     longer drift from the tab it belongs to. */
+  const previousIndex = useRef(activeIndex);
+  const [flip, setFlip] = useState(null);
+  const [instant, setInstant] = useState(false);
+  useLayoutEffect(() => {
+    const from = previousIndex.current;
+    previousIndex.current = activeIndex;
+    if (!compact || from === activeIndex || instant) return undefined;
+    setFlip(options.map((_, index) => viewPillFlipOffset({
+      count: options.length, fromIndex: from, toIndex: activeIndex, index,
+    })));
+    const frame = window.requestAnimationFrame(() => setFlip(null));
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeIndex, compact, instant, options.length]);
+
+  const indicatorBox = compact
+    ? viewPillIndicatorBox({ count: options.length, activeIndex, height: box?.height ?? 25 })
+    : box;
 
   return (
-    <div ref={wrapRef} role="tablist" aria-label={ariaLabel} className={`relative flex ${className}`}
-      style={{ background: surface, borderRadius: 999, ...style }}>
-      <LiquidPillIndicator T={T} box={box} stretch={stretch} settled={settled} />
-      {options.map(([key, label]) => {
+    <div ref={wrapRef} role="tablist" aria-label={ariaLabel} data-test={testId}
+      data-motion={instant ? "instant" : "travel"} data-compact={compact ? "icon" : "label"}
+      className={`relative flex ${className}`}
+      style={{ background: surface, borderRadius: 999, width: compact ? viewPillTrackWidth({ count: options.length }) : undefined, ...style }}>
+      <LiquidPillIndicator T={T} box={indicatorBox} stretch={compact ? 1 : stretch} settled={compact ? !flip : settled} />
+      {options.map(([key, label], index) => {
         const on = key === value;
+        const Icon = compact ? icons?.[key] : null;
         return (
-          <button key={String(key)} role="tab" aria-selected={on} data-active={on ? "true" : "false"}
+          <button key={String(key)} role="tab" aria-selected={on} aria-label={label}
+            data-test={testId ? `${testId}-${key}` : undefined}
+            data-active={on ? "true" : "false"}
+            data-compact={compact && !on ? "icon" : "label"}
             onClick={(event) => onPick(key, event.detail === 0 ? "keyboard" : "pointer")}
-          className={`nb-tap nb-hover-choice ${on ? "is-selected" : ""} relative px-3 py-1 nb-label`}
-            style={{ color: on ? T.on : T.dim, borderRadius: 999, zIndex: 1, transition: "color 260ms ease" }}>
-            {label}
+            className={`nb-tap nb-hover-choice ${on ? "is-selected" : ""} relative ${compact ? "py-1" : "px-3 py-1"} nb-label`}
+            style={{
+              color: on ? T.on : T.dim,
+              borderRadius: 999,
+              zIndex: 1,
+              ...(compact ? {
+                width: slots[index].width,
+                display: "grid",
+                gridTemplateColumns: `${VIEW_PILL_ICON}px ${VIEW_PILL_WORD}px`,
+                alignItems: "center",
+                justifyItems: "center",
+                transform: flip ? `translate3d(${flip[index]}px,0,0)` : "none",
+                transition: flip || instant ? "none" : "transform 200ms cubic-bezier(.23,1,.32,1), color 260ms ease",
+              } : {
+                transition: "color 260ms ease",
+              }),
+            }}>
+            {Icon ? <Icon size={13} /> : null}
+            <span data-test={testId ? `${testId}-label` : undefined}
+              style={{
+                whiteSpace: "nowrap",
+                ...(compact ? {
+                  justifySelf: "start",
+                  clipPath: viewPillLabelClip(on),
+                  opacity: on ? 1 : 0,
+                  transition: instant ? "none" : "clip-path 200ms cubic-bezier(.23,1,.32,1), opacity 160ms ease 40ms",
+                } : null),
+              }}>
+              {label}
+            </span>
           </button>
         );
       })}
