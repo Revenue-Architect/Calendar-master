@@ -7915,7 +7915,7 @@ function GooeySearch({ T, surface, reduced, onOpen }) {
           data-test="search-control"
           aria-label="Search, or run a command"
           aria-keyshortcuts="Meta+K Control+K"
-          className="nb-tap relative flex items-center justify-center gap-1.5 h-8 overflow-hidden"
+          className="nb-tap relative flex items-center justify-center h-8 overflow-hidden"
           style={{
             width: expanded ? 104 : 32,
             borderRadius: 999,
@@ -7924,10 +7924,22 @@ function GooeySearch({ T, surface, reduced, onOpen }) {
              transition: reduced ? "none" : "width 300ms cubic-bezier(.23,1,.32,1), background 180ms ease",
           }}>
           <SearchIcon />
+          {/* Collapsed, the shortcut takes no room at all — not zero opacity in a
+              space it still occupies. At full width it needed 37px inside a 32px
+              button, so `justify-center` was centring 37px of content in a 32px
+              box and the magnifier sat a couple of pixels left of true. The gap
+              moved onto the label for the same reason: a flex `gap` is charged
+              between items whatever their size, so a zero-width label still
+              pushed the icon off centre by the gap alone. Both collapse now, and
+              both animate, so the expansion is unchanged. */}
           <span style={{
             fontFamily: MONO, color: T.dimText,
             opacity: expanded ? 1 : 0,
-            transition: reduced ? "none" : "opacity 180ms ease 120ms",
+            maxWidth: expanded ? 48 : 0,
+            marginLeft: expanded ? 6 : 0,
+            overflow: "hidden",
+            transition: reduced ? "none"
+              : "opacity 180ms ease 120ms, max-width 300ms cubic-bezier(.23,1,.32,1), margin-left 300ms cubic-bezier(.23,1,.32,1)",
           }} className="nb-data whitespace-nowrap">⌘K</span>
         </button>
       </div>
@@ -8038,6 +8050,21 @@ function PillNav({ T, value, options, onPick, onArm = null, ariaLabel, surface =
                 gridTemplateColumns: `${VIEW_PILL_ICON}px ${VIEW_PILL_WORD}px`,
                 alignItems: "center",
                 justifyItems: "center",
+                /* Contain the word's own overflow rather than leaving it to an
+                   ancestor. The grid reserves a full 84px word column inside a
+                   30px inactive button on purpose — clip-path is what hides it —
+                   but layout width is not hidden by paint, so each inactive tab
+                   spilled ~54px upward. Measured at 390px, `.nb-month-navigator`
+                   reported 447px of content in a 390px box. Nothing broke,
+                   because `.nb-timeline-chrome` happens to clip; that is luck
+                   several levels away from the cause, and it would stop being
+                   true the moment a row between them stopped clipping.
+                   `clip`, not `hidden`: hidden makes the button a scroll
+                   container, which moved its measured width by 0.3px — enough to
+                   push the plate-alignment guard past its 1px tolerance, and that
+                   guard exists for a real past bug. Clipping is all that was
+                   wanted; a scroll container was never part of it. */
+                overflow: "clip",
                 transform: flip ? `translate3d(${flip[index]}px,0,0)` : "none",
                 /* 380ms on the gentlest curve the system owns.
                    Duration was never the reason this felt snappy — --motion-enter
