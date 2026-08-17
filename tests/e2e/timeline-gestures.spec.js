@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { seedPlanner, settledState } from "./helpers.js";
+import { seedPlanner, settledState, storedState } from "./helpers.js";
 import { createBlankPlannerState } from "../../src/platform/persistence/plannerStateImport.js";
 import { createEvent } from "../../src/domains/calendar/index.js";
 import { keyOf } from "../../src/shared/time/dateKey.js";
@@ -114,6 +114,36 @@ test.describe("moving an event on the timeline", () => {
 
     const still = (await settledState(page, (s) => s.events.length === 1)).events[0].timing;
     expect(still.startLocal).toBe(`${today}T10:00`);
+  });
+  test("opening an event detaches it from the pointer so a later click cannot reschedule it", async ({ page }) => {
+    await seedPlanner(page, seeded());
+    await card(page).scrollIntoViewIfNeeded();
+    const box = await card(page).boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.up();
+    await expect(page.getByTestId("sheet")).toBeVisible();
+    const before = (await storedState(page)).events[0].timing;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + HOUR_PX * 3, { steps: 12 });
+    await page.getByTestId("sheet").click({ position: { x: 24, y: 24 } });
+    const after = (await storedState(page)).events[0].timing;
+    expect(after, "a click inside the open event must not write a new time").toEqual(before);
+  });
+
+  test("a lift that never moved still opens the event instead of leaving a live drag", async ({ page }) => {
+    await seedPlanner(page, seeded());
+    await card(page).scrollIntoViewIfNeeded();
+    const box = await card(page).boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.waitForTimeout(360);
+    await page.mouse.up();
+    await expect(page.getByTestId("sheet")).toBeVisible();
+    const before = (await storedState(page)).events[0].timing;
+    await page.mouse.move(box.x + box.width / 2, box.y + HOUR_PX * 3, { steps: 10 });
+    await page.mouse.click(20, 20);
+    const after = (await storedState(page)).events[0].timing;
+    expect(after.startLocal, "releasing an unmoved lift must not leave a drag that writes later").toBe(before.startLocal);
   });
 });
 

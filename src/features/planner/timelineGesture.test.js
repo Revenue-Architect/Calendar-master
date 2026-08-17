@@ -13,6 +13,7 @@ import {
   liftDelayForTimelineTarget,
   minimumFor,
   movedEnoughToCancelHold,
+  pointerButtonsHeld,
   proposeGesture,
   proposeMove,
   proposeResizeEnd,
@@ -33,6 +34,12 @@ test("a nonsense step falls back rather than dividing by zero", () => {
   assert.equal(snapMinute(603, 0), 605);
   assert.equal(snapMinute(603, -5), 605);
   assert.equal(snapMinute(603, Number.NaN), 605);
+});
+
+test("a mouse drag is dead once the buttons are up", () => {
+  assert.equal(pointerButtonsHeld({ pointerType: "mouse", buttons: 1 }), true);
+  assert.equal(pointerButtonsHeld({ pointerType: "mouse", buttons: 0 }), false);
+  assert.equal(pointerButtonsHeld({ pointerType: "touch", buttons: 0 }), true);
 });
 
 test("a press that has not travelled is still a press", () => {

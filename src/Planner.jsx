@@ -102,6 +102,7 @@ import {
   isResizable,
   liftDelayForTimelineTarget,
   movedEnoughToCancelHold,
+  pointerButtonsHeld,
   proposeGesture,
   shouldCommitActionSwipe,
   timelineTouchIntent,
@@ -170,6 +171,7 @@ import {
   viewPillSlotWidth,
   viewPillLabelSide,
 } from "./features/motion/viewPills.js";
+import { navPageFit } from "./features/motion/navPageFit.js";
 import {
   deliverReminder,
   dismissReminder,
@@ -1005,6 +1007,7 @@ export default function Planner() {
   const ribbonWindowStartRef = useRef(ribbonInitialWindowStart);
   const ribbonScrollLockRef = useRef(false);
   const navToggleRef = useRef(null);
+  const navShellRef = useRef(null);
   const navFirstItemRef = useRef(null);
   const navCloseTimer = useRef(null);
   const navPhaseRef = useRef(navPhase);
@@ -1534,6 +1537,19 @@ export default function Planner() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [closeNavigation, navPhase]);
   useEffect(() => () => window.clearTimeout(navCloseTimer.current), []);
+  useLayoutEffect(() => {
+    const apply = () => {
+      const shell = navShellRef.current;
+      if (!shell) return;
+      const fit = navPageFit({ viewportWidth: window.innerWidth, viewportHeight: window.innerHeight });
+      shell.style.setProperty("--nav-page-x", `${fit.x}px`);
+      shell.style.setProperty("--nav-page-y", `${fit.y}px`);
+      shell.style.setProperty("--nav-page-scale", String(fit.scale));
+    };
+    apply();
+    window.addEventListener("resize", apply);
+    return () => window.removeEventListener("resize", apply);
+  }, [ready]);
 
   /* The theme lives in state, so the page around the app has to follow it: the body
      (otherwise overscroll shows a mismatched strip), the browser chrome on mobile,
@@ -3033,7 +3049,11 @@ export default function Planner() {
   const gestureEndedAt = useRef(0);
   const clickFollowsGesture = () => Date.now() - gestureEndedAt.current < 350 || clickFollowsCancelledArm(interactionRef.current);
 
-  const applyMove = (x, y) => {
+  const applyMove = (x, y, event) => {
+    if (event && !pointerButtonsHeld(event)) {
+      abortGesture();
+      return;
+    }
     const g = gestureRef.current;
     if (!g) return;
     const overDay = hitAttr(x, y, "data-day");
@@ -3153,6 +3173,10 @@ export default function Planner() {
     gestureEndedAt.current = Date.now();
     const key = dateKeyRef.current;
     if (g.mode === "move") {
+      if (!g.overDay && !gestureChangedAnything(
+        { start: g.was?.start ?? g.start, duration: g.was?.dur ?? g.dur },
+        { start: g.start, duration: g.dur },
+      )) return;
       if (g.overDay && g.overDay !== key) moveToDay("event", g.id, g.overDay);
       else {
         beep("drop"); buzz(8);
@@ -3299,7 +3323,23 @@ export default function Planner() {
   const canvasUp = (e) => {
     if (e.pointerType === "touch") return;
     disarmHold();
-    if (gestureRef.current) return;
+    if (gestureRef.current) {
+      const live = gestureRef.current;
+      const moved = gestureChangedAnything(
+        { start: live.was?.start ?? live.start, duration: live.was?.dur ?? live.dur },
+        { start: live.start, duration: live.dur },
+      );
+      if (!moved) {
+        abortGesture();
+        tappedRef.current = false;
+        e.stopPropagation();
+        beep("click");
+        setInspect({ kind: "event", id: ev.id });
+        return;
+      }
+      finishGesture(e.clientX, e.clientY);
+      return;
+    }
     if (tappedRef.current) {
       tappedRef.current = false;
       beep("click");
@@ -3327,7 +3367,23 @@ export default function Planner() {
       return;
     }
     disarmHold();
-    if (gestureRef.current) return;
+    if (gestureRef.current) {
+      const live = gestureRef.current;
+      const moved = gestureChangedAnything(
+        { start: live.was?.start ?? live.start, duration: live.was?.dur ?? live.dur },
+        { start: live.start, duration: live.dur },
+      );
+      if (!moved) {
+        abortGesture();
+        tappedRef.current = false;
+        e.stopPropagation();
+        beep("click");
+        setInspect({ kind: "event", id: ev.id });
+        return;
+      }
+      finishGesture(e.clientX, e.clientY);
+      return;
+    }
     if (tappedRef.current) { tappedRef.current = false; e.stopPropagation(); beep("click"); setInspect({ kind: "event", id: ev.id }); }
   };
   const taskDown = (e, task) => {
@@ -3637,7 +3693,7 @@ export default function Planner() {
   /* mouse / pen tracking, plus touch tracking for drags that begin outside the stream */
   useEffect(() => {
     if (!gesture) return;
-    const move = (e) => applyRef.current(e.clientX, e.clientY);
+    const move = (e) => applyRef.current(e.clientX, e.clientY, e);
     const up = (e) => finishRef.current(e.clientX, e.clientY);
     const tmove = (e) => {
       if (!gestureRef.current) return;
@@ -3679,6 +3735,13 @@ export default function Planner() {
   const [alertShown, alertLeaving] = usePresence(alertToast);
   const [levelShown, levelLeaving] = usePresence(levelFlash);
   const [pendingImportShown] = usePresence(pendingImport, 320);
+
+  useEffect(() => {
+    if (!inspect) return undefined;
+    const live = gestureRef.current;
+    if (live && live.mode !== "draft") abortGesture();
+    return undefined;
+  }, [inspect]);
 
   if (!ready || !db) {
     return (
@@ -4021,7 +4084,7 @@ export default function Planner() {
   const actionsLayout = viewMode === "actions" ? "nb-actions-full" : (actionsOpen ? "nb-actions-open" : "nb-actions-closed");
 
   return (
-    <div data-test="nav-shell" data-nav-state={navPhase} className="nb-nav-shell" style={{ fontFamily: DISPLAY }}>
+    <div ref={navShellRef} data-test="nav-shell" data-nav-state={navPhase} className="nb-nav-shell" style={{ fontFamily: DISPLAY }}>
       <NavigationShell
         phase={navPhase}
         firstItemRef={navFirstItemRef}
@@ -4076,7 +4139,14 @@ export default function Planner() {
              page and incidental rather than structural, 88% of the column stays
              on screen, and the 86px of symmetric margin is what makes the
              recession legible as a deliberate one. */
-          --nav-page-scale:.80;
+          --nav-margin-top:18px;
+          --nav-margin-right:22px;
+          --nav-margin-bottom:18px;
+          --nav-page-x:calc(var(--nav-width) + var(--nav-gap));
+          --nav-page-y:var(--nav-margin-top);
+          /* Fit the recessed card inside the remaining shell. Sliding a
+             full-width page to the right was what clipped the Actions column. */
+          --nav-page-scale:min(calc((100vw - var(--nav-width) - var(--nav-gap) - var(--nav-margin-right)) / 100vw), calc((100dvh - var(--nav-margin-top) - var(--nav-margin-bottom)) / 100dvh));
           --nav-page-radius:18px;
           /* The app's own dark-ground elevation, not a hand-rolled shadow.
              This was 0 18px 48px rgb(0 0 0 / .28) — a black shadow cast by a
@@ -4121,10 +4191,10 @@ export default function Planner() {
            clipped anyway, and nothing inside is ever re-measured. */
         .nb-app-surface{
           position:absolute;inset:0;z-index:2;height:auto;overflow:clip;overflow-anchor:none;transform:translate3d(0,0,0) scale(1);
-          transform-origin:left center;border-radius:0;box-shadow:none;
+          transform-origin:top left;border-radius:0;box-shadow:none;
           transition:transform var(--nav-page-duration) var(--nav-ease),border-radius var(--nav-page-duration) var(--nav-ease),box-shadow var(--nav-page-duration) var(--nav-ease);
         }
-        .nb-app-surface-open{transform:translate3d(calc(var(--nav-width) + var(--nav-gap)),0,0) scale(var(--nav-page-scale));border-radius:var(--nav-page-radius);box-shadow:var(--nav-page-shadow)}
+        .nb-app-surface-open{transform:translate3d(var(--nav-page-x),var(--nav-page-y),0) scale(var(--nav-page-scale));border-radius:var(--nav-page-radius);box-shadow:var(--nav-page-shadow)}
         .nb-navigation{position:absolute;z-index:1;inset:0 auto 0 0;width:var(--nav-width);padding:22px 18px;color:#f2f0ea;display:flex;flex-direction:column;overflow:auto}
         .nb-navigation[aria-hidden="true"]{visibility:hidden;pointer-events:none}
         .nb-nav-brand,.nb-nav-item,.nb-nav-membership{opacity:0;transform:translate3d(-10px,0,0);transition:opacity var(--nav-content-duration) var(--nav-ease),transform var(--nav-content-duration) var(--nav-ease)}
@@ -7134,7 +7204,7 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
 
   useEffect(() => {
     if (!dragging) return undefined;
-    const move = (e) => { e.preventDefault(); updateDrag(e.clientX, e.clientY); };
+    const move = (e) => { if (!pointerButtonsHeld(e)) { dragRef.current = null; setDrag(null); return; } e.preventDefault(); updateDrag(e.clientX, e.clientY); };
     const up = () => endDrag();
     const cancel = () => {
       dragRef.current = null;
@@ -7215,7 +7285,23 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
   const pointerUp = (e, event, day) => {
     if (e.pointerType === "touch") return;
     disarm();
-    if (dragRef.current) return;
+    if (dragRef.current) {
+      const live = dragRef.current;
+      const moved = gestureChangedAnything(
+        { start: live.fromStart, duration: live.dur, date: live.fromDate },
+        { start: live.start, duration: live.dur, date: live.date },
+      );
+      if (!moved) {
+        dragRef.current = null;
+        setDrag(null);
+        tapRef.current = false;
+        e.stopPropagation();
+        onOpenEvent(event.id, day);
+        return;
+      }
+      endDrag();
+      return;
+    }
     if (tapRef.current) { tapRef.current = false; e.stopPropagation(); onOpenEvent(event.id, day); }
   };
 

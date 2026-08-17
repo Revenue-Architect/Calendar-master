@@ -49,6 +49,14 @@ export function minimumFor(kind) {
 }
 
 /** Has this press travelled far enough to stop being a press? */
+/** A mouse/pen drag is only live while a button is actually down. Touch keeps its own end/cancel path. */
+export function pointerButtonsHeld(event) {
+  if (!event) return false;
+  if (event.pointerType === "touch") return true;
+  if (typeof event.buttons === "number") return event.buttons > 0;
+  return true;
+}
+
 export function movedEnoughToCancelHold(origin, point, threshold = HOLD_CANCEL_PX) {
   if (!origin || !point) return false;
   return Math.hypot(finite(point.x) - finite(origin.x), finite(point.y) - finite(origin.y)) > threshold;

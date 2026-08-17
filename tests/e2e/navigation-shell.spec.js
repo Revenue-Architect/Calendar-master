@@ -59,6 +59,37 @@ test.describe("the floating navigation shell", () => {
     await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
   });
 
+  test("desktop nav keeps the page as a recessed card instead of clipping the right edge", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await openPlanner(page);
+    const surface = page.getByTestId("app-surface");
+    const before = await surface.boundingBox();
+    await page.getByTestId("nav-toggle").click();
+    await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "open");
+    await expect(surface).toHaveClass(/nb-app-surface-open/);
+    await page.waitForTimeout(380);
+    const measured = await surface.evaluate((node) => {
+      const box = node.getBoundingClientRect();
+      const style = getComputedStyle(node);
+      return {
+        left: box.left,
+        right: box.right,
+        top: box.top,
+        bottom: box.bottom,
+        width: box.width,
+        height: box.height,
+        radius: style.borderTopLeftRadius,
+      };
+    });
+    expect(before).not.toBeNull();
+    expect(measured.left, "the recessed page must sit to the right of the drawer").toBeGreaterThan(240);
+    expect(measured.right, "the recessed page must keep a right margin instead of running off-screen").toBeLessThan(1280 - 12);
+    expect(measured.top, "the recessed page must keep a top margin").toBeGreaterThan(8);
+    expect(measured.bottom, "the recessed page must keep a bottom margin").toBeLessThan(900 - 8);
+    expect(measured.width, "the recessed card must stay fully on screen").toBeLessThan(before.width - 40);
+    expect(measured.radius).not.toBe("0px");
+  });
+
   test("mobile morphs the calendar without reflowing its layout", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 601 });
     await openPlanner(page);
