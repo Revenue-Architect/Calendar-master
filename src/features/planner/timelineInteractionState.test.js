@@ -122,15 +122,22 @@ test("a scroll session expires after end instead of remaining sticky", async () 
   assert.equal(session.isActive(), false);
 });
 
-test("timelineChromeIntent restores on any upward gesture, at any depth", () => {
-  /* The bug: restore required arriving near the top, so this returned "none". */
-  assert.equal(timelineChromeIntent({ previousScrollTop: 900, nextScrollTop: 700 }), "restore");
-  assert.equal(timelineChromeIntent({ previousScrollTop: 120, nextScrollTop: 100 }), "restore");
+test("timelineChromeIntent restores only at the top of the timeline", () => {
+  /* Midnight is the moment the day heading is wanted back. */
+  assert.equal(timelineChromeIntent({ previousScrollTop: 200, nextScrollTop: 0 }), "restore");
+  assert.equal(timelineChromeIntent({ previousScrollTop: 200, nextScrollTop: 20 }), "restore");
+});
+
+test("timelineChromeIntent stays collapsed while scrolling up mid-timeline", () => {
+  /* The header must not reappear over 3pm just because the finger moved up. */
+  assert.equal(timelineChromeIntent({ previousScrollTop: 900, nextScrollTop: 700 }), "none");
+  assert.equal(timelineChromeIntent({ previousScrollTop: 120, nextScrollTop: 100 }), "none");
 });
 
 test("timelineChromeIntent collapses only past the trigger, moving away", () => {
   assert.equal(timelineChromeIntent({ previousScrollTop: 0, nextScrollTop: 40 }), "collapse");
-  assert.equal(timelineChromeIntent({ previousScrollTop: 0, nextScrollTop: 10 }), "none");
+  /* Ten pixels down is still the top of the day, so the heading stays. */
+  assert.equal(timelineChromeIntent({ previousScrollTop: 0, nextScrollTop: 10 }), "restore");
 });
 
 test("timelineChromeIntent ignores sub-pixel jitter in both directions", () => {

@@ -247,15 +247,21 @@ export function createScrollSession({ timeoutMs = 180 } = {}) {
  * move it, so neither state could be driven from an e2e harness. Pure input in,
  * verdict out, is testable.
  *
- * Restore is intent-based, not position-based. The previous rule required
- * scrolling back within max(48, hourHeight) — 68px at the default scale — while
- * collapse fired at 24px, so an upward scroll from any real depth did nothing
- * and the chrome read as gone for good. Collapsing headers return on the
- * gesture, not on arriving somewhere.
+ * Restore is positional and deliberately so: the chrome comes back when the
+ * timeline is back at its own top — midnight — and not before. An earlier pass
+ * restored on any upward gesture, which is the right rule for a web page whose
+ * header is incidental, and the wrong one here. This header is the day's
+ * identity; returning it mid-scroll means it appears while you are still reading
+ * 3pm, which is noise. Arriving at the top is the moment it is wanted again.
+ *
+ * Collapse and restore share one threshold, so the two are exact inverses and
+ * there is no band where neither fires. What made the original feel broken was
+ * never the threshold — it was the manual latch in the caller, and a restore
+ * line at max(48, hourHeight) that sat far below where collapse armed.
  */
 export function timelineChromeIntent({ previousScrollTop, nextScrollTop, triggerPx = 24 }) {
-  if (nextScrollTop < previousScrollTop - 1) return "restore";
-  if (nextScrollTop > previousScrollTop + 1 && nextScrollTop >= triggerPx) return "collapse";
+  if (nextScrollTop <= triggerPx) return "restore";
+  if (nextScrollTop > previousScrollTop + 1 && nextScrollTop > triggerPx) return "collapse";
   return "none";
 }
 
