@@ -45,7 +45,7 @@ test.describe("resilience, accessibility, and quality gates", () => {
     await page.getByTestId("new-entry").click();
     const actionComposer = page.getByTestId("composer");
     await actionComposer.getByRole("tab", { name: "ACTION", exact: true }).click();
-    await actionComposer.getByRole("button", { name: "MORE OPTIONS", exact: true }).click();
+    await actionComposer.getByRole("button", { name: /more options/i }).click();
     const actionFields = actionComposer.locator('input[type="date"], input[type="time"]');
     const actionLabels = await actionFields.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("aria-label")));
     expect(actionLabels).toEqual(expect.arrayContaining(["Action date", "Action time", "Due date"]));

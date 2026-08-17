@@ -48,7 +48,7 @@ Confirmed:
 Undecided:
 
 - When, if ever, the reserved 10% collaboration path becomes real product.
-- Whether the adaptive OS skins ship as one Expo client or remain a web app plus wrappers until that decision is made.
+- Adaptive OS skins are scheduled as a native shell (Expo / platform nav). Until that ships, this Vite app remains the web client and must not invent iOS chrome.
 
 ## Brand Commitments
 

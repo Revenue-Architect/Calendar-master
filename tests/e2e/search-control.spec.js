@@ -27,13 +27,14 @@ test.describe("the search control", () => {
 
   test("expanding does not move the controls beside it", async ({ page }) => {
     await openPlanner(page);
-    const neighbour = page.getByTestId("hud-notes");
-    const before = (await neighbour.boundingBox()).x;
-
+    const wrap = page.locator(".nb-search-wrap");
+    await expect(wrap).toBeVisible();
+    const before = await wrap.evaluate((node) => node.getBoundingClientRect().width);
     await control(page).hover();
     await page.waitForTimeout(500);
-    const after = (await neighbour.boundingBox()).x;
-    expect(Math.round(after), "hovering search shoved the header sideways").toBe(Math.round(before));
+    const after = await wrap.evaluate((node) => node.getBoundingClientRect().width);
+    expect(after, "the reserved search wrap must not grow").toBe(before);
+    expect(before).toBeGreaterThanOrEqual(104);
   });
 
   test("opens the palette immediately, without waiting for the animation", async ({ page }) => {

@@ -79,6 +79,7 @@
   --motion-enter: cubic-bezier(.23, 1, .32, 1);
   --motion-settle: cubic-bezier(.2, .8, .25, 1);
   --motion-lane: cubic-bezier(.22, .61, .36, 1);
+  --now-red: #C43A56;
   --press-in: 90ms;
   --press-out: 260ms;
 }

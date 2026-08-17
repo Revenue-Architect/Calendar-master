@@ -336,7 +336,7 @@ const MORPH_FADE = 0.3;
    a limit — past this the page keeps moving, just less of it. */
 const SWIPE_SOFT_LIMIT = 140;
 const SNAP = 5;
-const NOW_RED = "#C43A56";
+const NOW_RED = "var(--now-red, #C43A56)";
 const ALERT_CHOICES = [0, 5, 15, 30, 60];
 const DAY_LETTERS = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
 
@@ -4151,11 +4151,11 @@ export default function Planner() {
           .nb-hud-left{gap:.35rem}
           .nb-hud-left .w-14{width:36px}
           .nb-hud-actions{gap:0}
-          .nb-search-wrap{width:32px!important}
+          .nb-search-wrap{width:104px}
           
           .nb-hud-settings{display:none}
         }
-        .nb-main{padding-bottom:var(--sheet-pad);transition:padding-bottom 260ms var(--motion-settle)}
+        .nb-main{padding-bottom:var(--sheet-pad)}
         @media(min-width:1024px){
           .nb-main{padding-bottom:2rem}
           .nb-main.nb-main-day-timeline{padding-bottom:.75rem}
@@ -4581,9 +4581,10 @@ export default function Planner() {
            the measured height was interpolating correctly. Both directions use
            the shell's established no-overshoot ease so a button tap, a scroll,
            and a reversal all retarget the same transition. */
-        .nb-app-surface>[data-test="timeline-chrome"].nb-timeline-chrome{min-height:0;overflow:hidden;flex:0 0 auto;opacity:1;transform:none;transition:height 300ms var(--nav-ease)}
+        .nb-app-surface>[data-test="timeline-chrome"].nb-timeline-chrome{min-height:0;overflow:hidden;flex:0 0 auto;display:grid;grid-template-rows:1fr;opacity:1;transform:none;transition:grid-template-rows 300ms var(--nav-ease)}
+        .nb-app-surface>[data-test="timeline-chrome"].nb-timeline-chrome.is-collapsed{grid-template-rows:0fr}
         .nb-timeline-chrome-inner{min-height:0;transform:translate3d(0,0,0);opacity:1;transition:transform 300ms var(--nav-ease),opacity 240ms var(--nav-ease)}
-        .nb-day-heading{transition:padding 300ms var(--nav-ease),background-color 180ms ease,border-color 180ms ease}
+        .nb-day-heading{transition:background-color 180ms ease,border-color 180ms ease}
         .nb-day-heading .nb-display{transition:font-size 300ms var(--nav-ease),line-height 300ms var(--nav-ease)}
         .nb-timeline-chrome.is-collapsed{pointer-events:none}
         .nb-timeline-chrome.is-collapsed .nb-timeline-chrome-inner{opacity:0;transform:translate3d(0,-10px,0)}
@@ -4595,25 +4596,25 @@ export default function Planner() {
         .nb-day-heading.is-focused{padding-top:.45rem;padding-bottom:.45rem;border-bottom:1px solid ${T.line}}
         .nb-day-heading.is-focused .nb-display{font-size:2rem;line-height:2rem}
 
-        @media(prefers-reduced-motion:reduce){*{animation-name:none!important;animation-duration:1ms!important;animation-iteration-count:1!important;transition-duration:1ms!important;scroll-behavior:auto!important}
+        @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.nb-fluid,.nb-view-track,.nb-app-surface,.nb-msheet,.nb-timeline-chrome,.nb-timeline-chrome-inner,.nb-morph-source-label,.nb-up,.nb-list-enter{animation:none!important;transform:none!important}.nb-fluid,.nb-msheet,.nb-timeline-chrome-inner,.nb-morph-source-label{transition:opacity 160ms ease!important}.nb-view-track.is-sliding,.nb-app-surface{transition:none!important}
           .nb-app-surface,.nb-nav-brand,.nb-nav-item,.nb-nav-membership{transition-duration:1ms!important}
           button:active,[role="button"]:active,a[href]:active,[data-event-id]:active,[data-task-chip]:active{scale:1!important}}
-        ${preferences?.display.reducedMotion ? `*{animation-name:none!important;animation-duration:1ms!important;animation-iteration-count:1!important;transition-duration:1ms!important;scroll-behavior:auto!important}
+        ${preferences?.display.reducedMotion ? `.nb-fluid,.nb-view-track,.nb-app-surface,.nb-msheet,.nb-timeline-chrome,.nb-timeline-chrome-inner,.nb-morph-source-label{animation:none!important;transform:none!important}.nb-fluid,.nb-msheet,.nb-timeline-chrome-inner,.nb-morph-source-label{transition:opacity 160ms ease!important}.nb-view-track.is-sliding,.nb-app-surface{transition:none!important}
           button:active,[role="button"]:active,a[href]:active,[data-event-id]:active,[data-task-chip]:active{scale:1!important}` : ""}
       `}</style>
 
       <div data-test="timeline-chrome" data-collapsed={String(timelineViewFocused)}
         className={`nb-timeline-chrome ${timelineViewFocused ? "is-collapsed" : ""}`}
-        style={{ height: timelineViewFocused ? 0 : (timelineChromeHeight == null ? "auto" : timelineChromeHeight) }}>
+        >
       <div ref={attachTimelineChromeInner} className="nb-timeline-chrome-inner">
       {/* ══ HUD ══ */}
-      <header style={{ background: T.bg, borderBottom: `1px solid ${T.line}`, color: T.text }} className="nb-hud sticky top-0 z-30 px-3 sm:px-5 py-2 flex items-center justify-between gap-3">
+      <header style={{ background: T.bg, borderBottom: `1px solid ${T.line}`, color: T.text, paddingTop: "max(0.5rem, env(safe-area-inset-top))", paddingLeft: "max(0.75rem, env(safe-area-inset-left))", paddingRight: "max(0.75rem, env(safe-area-inset-right))" }} className="nb-hud sticky top-0 z-30 px-3 sm:px-5 py-2 flex items-center justify-between gap-3">
         <div className="nb-hud-left flex items-center gap-2 min-w-0">
           <button ref={navToggleRef} data-test="nav-toggle" type="button" aria-label="Toggle primary navigation" aria-controls="planner-navigation" aria-expanded={navOpen}
             onClick={() => { beep("click"); navOpen ? closeNavigation() : openNavigation(); }} className="nb-shell-control nb-tap nb-hover-icon w-8 h-8 flex items-center justify-center" title="Navigation"><MenuIcon /></button>
           <div className="flex items-baseline gap-2 min-w-0">
           {level != null && <>
-            <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label">LVL</span>
+            <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label">Level</span>
             <span style={{ fontFamily: MONO }} className="text-sm font-bold">{level}</span>
             <div style={{ background: T.faint }} className="w-14 h-1 mx-1"><div style={{ background: T.accent, width: `${levelPct}%` }} className="h-full" /></div>
           </>}
@@ -4847,7 +4848,7 @@ export default function Planner() {
           <div data-test="missed-reminders" className="nb-up flex items-center gap-3 px-3 py-2"
             style={{ background: surface, borderRadius: CARD_R, boxShadow: `inset 0 0 0 1px ${T.line}` }}>
             <span style={{ color: T.dimText }} className="shrink-0"><BellIcon size={13} /></span>
-            <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label shrink-0">WHILE YOU WERE AWAY</span>
+            <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label shrink-0">While you were away</span>
             <span className="nb-body truncate flex-1">
               {missedReport.length === 1
                 ? missedReport[0].title
@@ -4880,7 +4881,7 @@ export default function Planner() {
         <div className="px-3 sm:px-5 pb-3">
           <div data-test="backup-nudge" className="nb-up flex items-center gap-3 px-3 py-2"
             style={{ background: surface, color: T.text, borderRadius: CARD_R, boxShadow: `inset 0 0 0 1px ${T.line}` }}>
-            <span style={{ fontFamily: MONO, color: T.accentText }} className="nb-label shrink-0">BACK UP</span>
+            <span style={{ fontFamily: MONO, color: T.accentText }} className="nb-label shrink-0">Back up</span>
             <span className="nb-body truncate flex-1">This notebook only exists on this device.</span>
             <button data-test="backup-nudge-save" onClick={() => { beep("click"); exportJson(); }}
               style={{ fontFamily: MONO, color: T.accentText }} className="nb-tap nb-hover-control text-xs font-bold tracking-widest shrink-0 underline">SAVE A COPY</button>
@@ -4895,7 +4896,7 @@ export default function Planner() {
         <div className="px-3 sm:px-5 pb-3">
           <div data-test="gesture-hint" className="nb-up flex flex-col gap-2 px-3 py-2 sm:flex-row sm:items-center sm:gap-x-3"
             style={{ background: surface, color: T.text, borderRadius: CARD_R, boxShadow: `inset 0 0 0 1px ${T.line}` }}>
-            <span style={{ fontFamily: MONO, color: T.accentText }} className="nb-label shrink-0">GESTURES</span>
+            <span style={{ fontFamily: MONO, color: T.accentText }} className="nb-label shrink-0">Gestures</span>
             {/* This hint only ever shows on the Timeline at day zoom, so it
                 describes the Timeline's own axis. */}
             <span className="nb-body min-w-0 flex-1">Hold a slot to create · swipe an Action right to complete · swipe the day left or right.</span>
@@ -5324,7 +5325,7 @@ export default function Planner() {
           and left mounted it sits over the view it duplicates. */}
       {viewMode !== "actions" && (
       <div className="nb-msheet lg:hidden fixed inset-x-0 bottom-0 z-40 flex flex-col"
-         style={{ height: "76vh", background: T.card, borderTop: `1px solid ${T.line}`, transform: sheet ? "translateY(0)" : "translateY(calc(100% - 52px))", transition: "transform 360ms cubic-bezier(.23,1,.32,1)" }}>
+         style={{ height: "76vh", background: T.card, borderTop: `1px solid ${T.line}`, transform: sheet ? "translateY(0)" : "translateY(calc(100% - 52px))", transition: "transform 360ms cubic-bezier(.23,1,.32,1)", paddingBottom: "env(safe-area-inset-bottom)" }}>
         <div className="flex items-center gap-3 px-3 shrink-0" style={{ height: 52 }}>
           <button onClick={() => { beep("tick"); setSheet(!sheet); }} className="nb-tap nb-hover-control flex-1 flex items-center gap-2 text-left" aria-label="Toggle actions">
             <span style={{ background: T.faint }} className="w-8 h-0.5" />
@@ -8005,7 +8006,11 @@ function GooeyFilter({ id, blur = 5 }) {
 function GooeySearch({ T, surface, reduced, onOpen }) {
   const [open, setOpen] = useState(false);
   const filterId = useRef(`goo-search-${Math.random().toString(36).slice(2, 9)}`).current;
-  const expanded = open && !reduced;
+  const coarse = typeof window !== "undefined" && Boolean(
+    window.matchMedia?.("(pointer: coarse)").matches
+    || window.matchMedia?.("(max-width: 639.98px)").matches
+  );
+  const expanded = coarse || (open && !reduced);
 
   return (
     /* The expanded width is reserved at rest and the control is right-aligned
@@ -8062,7 +8067,7 @@ function GooeySearch({ T, surface, reduced, onOpen }) {
             overflow: "hidden",
             transition: reduced ? "none"
               : "opacity 180ms ease 120ms, max-width 300ms cubic-bezier(.23,1,.32,1), margin-left 300ms cubic-bezier(.23,1,.32,1)",
-          }} className="nb-data whitespace-nowrap">⌘K</span>
+          }} className="nb-data whitespace-nowrap">{coarse ? "SEARCH" : "⌘K"}</span>
         </button>
       </div>
     </div>
@@ -9086,16 +9091,17 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick, weekStart 
 
       <button onClick={() => { onTick(); setMore(!more); }}
         style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap w-full py-3 nb-data">
-        {more ? "FEWER OPTIONS" : "MORE OPTIONS"}
+        {more ? "Fewer options" : "More options"}
       </button>
 
       <div data-more-panel style={{
-        maxHeight: more ? 1600 : 0,
+        display: "grid",
+        gridTemplateRows: more ? "1fr" : "0fr",
         opacity: more ? 1 : 0,
         overflow: "hidden",
-        transition: "max-height 380ms cubic-bezier(.2,.8,.25,1), opacity 240ms ease",
+        transition: "grid-template-rows 300ms var(--motion-lane), opacity 200ms ease",
       }}>
-        <div className="flex flex-col gap-2 pb-1">
+        <div className="flex flex-col gap-2 pb-1 min-h-0 overflow-hidden">
           {kind === "event" && allDay && (
             <div className="flex items-center gap-2 px-3 py-2.5" style={{ background: surface, borderRadius: CARD_R }}>
               <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label shrink-0">THROUGH</span>

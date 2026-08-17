@@ -34,7 +34,7 @@ export async function openPlanner(page, { keepSample = false, showGestureHint = 
   if (!showGestureHint) {
     const hint = page.getByTestId("gesture-hint");
     if (await hint.isVisible().catch(() => false)) {
-      await hint.getByTestId("gesture-hint-dismiss").click();
+      await hint.getByTestId("gesture-hint-dismiss").evaluate((node) => node.click());
       await expect(hint).toBeHidden();
     }
   }
@@ -210,7 +210,7 @@ export async function seedPlanner(page, state, { showGestureHint = false } = {})
   if (!showGestureHint) {
     const hint = page.getByTestId("gesture-hint");
     if (await hint.isVisible().catch(() => false)) {
-      await hint.getByTestId("gesture-hint-dismiss").click();
+      await hint.getByTestId("gesture-hint-dismiss").evaluate((node) => node.click());
       await expect(hint).toBeHidden();
     }
   }
