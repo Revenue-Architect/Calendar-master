@@ -272,6 +272,38 @@ test.describe("the notch morph", () => {
     await expect(sheet).toHaveCount(0, { timeout: 3000 });
   });
 
+  test("the form leaves before the sheet finishes folding", async ({ page }) => {
+    await openPlanner(page);
+    await page.getByTestId("new-entry").click();
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).toHaveAttribute("data-morph-stage", "open");
+
+    await page.keyboard.press("Escape");
+    await expect(sheet).toHaveAttribute("data-fluid-origin", "notch");
+
+    const mid = await sheet.evaluate((node) => {
+      const fold = node.getAnimations().find((animation) => animation.animationName === "nbnotchout");
+      const computedDelay = parseFloat(getComputedStyle(node).animationDelay) || 0;
+      const duration = Number(fold?.effect?.getTiming().duration || 0);
+      const delay = Number(fold?.effect?.getTiming().delay || 0) || computedDelay * 1000;
+      if (fold) {
+        fold.pause();
+        fold.currentTime = delay + duration * 0.15;
+      }
+      const groups = [...node.querySelectorAll(".nb-notch-cascade > *, .nb-notch-body > :first-child")]
+        .map((el) => Number(getComputedStyle(el).opacity));
+      return {
+        body: groups.length ? Math.max(...groups) : Number(getComputedStyle(node.querySelector(".nb-notch-body")).opacity),
+        label: Number(getComputedStyle(node.querySelector('[data-test="morph-source-label"]')).opacity),
+        foldDelay: delay,
+      };
+    });
+
+    expect(mid.body, "form groups must be gone while the clip is still folding").toBeLessThan(0.2);
+    expect(mid.label, "NEW returns as the visible material of the fold").toBeGreaterThan(0.8);
+    expect(mid.foldDelay, "the fold waits the lead so the form can leave first").toBeGreaterThan(0);
+  });
+
   test("a sheet opened from the keyboard arrives on its own terms", async ({ page }) => {
     await openPlanner(page);
     /* The notch is the signature of "make something new" from a create button,

@@ -4431,20 +4431,32 @@ export default function Planner() {
         .nb-morph-source-label{position:absolute;inset:0;z-index:8;display:flex;align-items:center;justify-content:center;pointer-events:none;font-size:.75rem;font-weight:700;letter-spacing:.1em;opacity:1;animation:nbnotchlabelout var(--nb-morph-dur,320ms) cubic-bezier(.23,1,.32,1) both;transition:opacity 100ms cubic-bezier(.23,1,.32,1);will-change:opacity}
         @keyframes nbnotchlabelout{0%,55%{opacity:1}78%,100%{opacity:0}}
         .nb-fluid[data-fluid-origin="notch"][data-morph-stage="reveal"] .nb-morph-source-label,.nb-fluid[data-fluid-origin="notch"][data-morph-stage="content"] .nb-morph-source-label,.nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-morph-source-label{opacity:0}
-        /* The close runs the container on the same duration as the open — the
-           reference makes both 20 frames. The order still inverts, because the
-           body's exit transition below is far shorter than the container's: the
-           content is gone well before the shape finishes folding, which is what
-           stops the collapse reading as the sheet being deleted. It is done that
-           way rather than by delaying the container, because the reverse path in
-           requestClose owns the unmount clock and a delay here would outlive it. */
-        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"]:not([data-fluid-reverse="true"]){animation:nbnotchout var(--nb-morph-dur,260ms) cubic-bezier(.4,0,.3,1) forwards}
+        /* Close spends the existing lead *inside* MORPH_MS: the form leaves for
+           --nb-morph-lead, then the lime object folds for the rest. Adding a
+           233ms lead on top of 480 would fail the fortieth-time test. In-flight
+           reverse (data-fluid-reverse) does not take this delay — the form is
+           mid-arrival and leaves with the shape. Unmount stays at MORPH_MS. */
+        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"]:not([data-fluid-reverse="true"]){
+          animation:nbnotchout calc(var(--nb-morph-dur) * (1 - 0.35)) cubic-bezier(.4,0,.3,1) forwards;
+          animation-delay:var(--nb-morph-lead);
+        }
         @keyframes nbnotchout{
           0%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px round 24px)}
           100%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round 999px)}
         }
-        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-morph-source-label{animation:none;opacity:1;transition-delay:130ms}
-        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-notch-body{animation:none;opacity:0;transform:translateY(-4px);pointer-events:none;transition-duration:80ms}
+        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-notch-body,
+        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-notch-cascade>*,
+        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-notch-body>:first-child{
+          animation:none;
+          opacity:0;
+          pointer-events:none;
+          transition:opacity var(--nb-morph-lead,168ms) cubic-bezier(.4,0,.3,1);
+        }
+        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-morph-source-label{
+          animation:none;
+          opacity:1;
+          transition:opacity var(--nb-morph-lead,168ms) cubic-bezier(.4,0,.3,1);
+        }
         @media(min-width:640px){.nb-fluid{transform-origin:center;border-radius:24px}}
         /* The blur is set once and never animated. A changing blur radius throws
            away the compositor's cached backdrop every frame and re-blurs the whole
@@ -8290,20 +8302,22 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
        animation from its rendered position. Restarting a separate exit keyframe
        at a full-size sheet was the subtle snap behind the old close regression. */
     if (!reduced && morphRef.current === "notch" && panel) {
-      const entry = panel.getAnimations().find((animation) => (
-        animation.animationName === "nbnotchin" || animation.effect?.target === panel
-      ));
+      /* Reverse only while the entry clip is still running. A settled sheet used
+         to take this path too — any animation whose target was the panel counted
+         — so nbnotchout never ran and the form could not leave before the fold. */
+      const entry = panel.getAnimations().find((animation) => animation.animationName === "nbnotchin");
       const duration = Number(entry?.effect?.getTiming().duration);
       const currentTime = Number(entry?.currentTime);
-      const boundedTime = Number.isFinite(duration) && duration > 0 && Number.isFinite(currentTime)
-        ? Math.max(0, Math.min(duration, currentTime))
-        : null;
+      const inFlight = Boolean(entry)
+        && Number.isFinite(duration) && duration > 0
+        && Number.isFinite(currentTime) && currentTime < duration;
+      const boundedTime = inFlight ? Math.max(0, Math.min(duration, currentTime)) : null;
       const style = window.getComputedStyle(panel);
       const x = panel.style.getPropertyValue("--fluid-x");
       const y = panel.style.getPropertyValue("--fluid-y");
       const insetX = panel.style.getPropertyValue("--fluid-inset-x");
       const insetY = panel.style.getPropertyValue("--fluid-inset-y");
-      if (x && y && insetX && insetY && typeof panel.animate === "function") {
+      if (inFlight && x && y && insetX && insetY && typeof panel.animate === "function") {
         panel.dataset.fluidReverse = "true";
         /* Freeze exactly what is on screen before removing the CSS animation,
            then let WAAPI fold those compositor properties back to the trigger. */
