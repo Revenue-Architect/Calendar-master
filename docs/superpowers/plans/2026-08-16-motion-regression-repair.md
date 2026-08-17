@@ -127,3 +127,41 @@ The delay comes from `useLiquidPill`: `setSettled(false)` renders the indicator 
 - [ ] Page travel is a full pane width, and the outgoing view travels with the incoming.
 - [ ] Plate and page start on the same frame and finish on the same frame.
 - [ ] The whole suite green at 264, plus the new gesture-isolation tests.
+
+---
+
+## Addendum — 2026-08-17: the elastic-pill experiment
+
+**Outcome: reverted. The measurement was favourable; the implementation was not finishable safely.**
+
+The compact pills reserve their space and reveal a word by clipping it, so the pill box never changes size. The reference being matched grows each pill's width and lets the browser push its siblings aside. `view-pills.spec.js` forbade animating width outright, citing a measured failure recorded in `viewPills.js:1-8`.
+
+### What the measurement said
+
+A/B at 6× CPU throttle, three runs each, same harness, same machine:
+
+| Version | p95 | worst | width states observed |
+|---|---|---|---|
+| Fixed slots + FLIP + clip *(shipped)* | ~133ms | ~167ms | **2** — the box never resizes |
+| Elastic width, no FLIP | **~100ms** | **~133ms** | 6–7 — genuinely animating |
+| Idle baseline | 16.8ms | — | — |
+
+**The ban was aimed at the wrong cost.** Elastic width measured *cheaper* than the mechanism built to avoid it, because the FLIP needs two extra React renders of a nine-thousand-line component per switch, and that outweighs laying out three buttons. The layout stays contained either way: the three slot widths always total 174px, so the track never resizes and no ancestor is dirtied.
+
+### Why it was reverted anyway
+
+The plate has no honest way to follow an elastic pill.
+
+- **Computed geometry** is wrong the moment widths stop being fixed — real boxes are 13 and 97, not 30 and 114, so the plate misses by 17px.
+- **Measured geometry** is worse: `offsetWidth` returns the *used* value, and in the layout effect the transition has not started, so it reports the pre-transition layout and the plate settles a full word-width (84px) behind. That is precisely the drift this component was rebuilt to eliminate.
+- **Dropping the plate** and letting each pill wear its own accent — what the reference does — resolves both, and the suite went green. But the rendered result was wrong: the active pill expanded to most of the tray with no visible word and the siblings collapsed to slivers. The suite passed only because its assertions had been rewritten around the new architecture, which is the failure mode this repair plan exists to name.
+
+### If picked up again
+
+Three things are now known and need not be rediscovered:
+
+1. The width animation is affordable here; the FLIP was the expensive half.
+2. Any elastic version must resolve plate geometry first, before touching layout. The plate is the constraint, not the width.
+3. The reference's answer is to have no travelling plate at all. Adopting that is a deliberate trade of this app's liquid-pill idiom for the reference's look, and should be decided rather than arrived at by whichever approach made the tests pass.
+
+What shipped instead, and remains: the filled tray (`35b1623`), direction-aware label squeeze and 260ms timing (`8dfe6a2`). Those closed the structural half of the gap without touching the plate.
