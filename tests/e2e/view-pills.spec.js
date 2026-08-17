@@ -142,4 +142,29 @@ test("reduced motion applies the end state with no travel", async ({ page }) => 
   expect(width, "reduced motion lands the active tab on the word slot").toBeGreaterThan(100);
   expect((await actions.getByTestId("view-mode-label").boundingBox()).width).toBeGreaterThan(20);
 });
+test("the page slide and the compact pill share a curve", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openPlanner(page);
+  await page.getByTestId("view-mode-actions").click();
+  const curves = await page.evaluate(() => {
+    const probe = document.createElement("div");
+    probe.style.transitionTimingFunction = "var(--motion-lane)";
+    document.documentElement.appendChild(probe);
+    const lane = getComputedStyle(probe).transitionTimingFunction;
+    probe.remove();
+    const firstCurve = (value) => {
+      const match = String(value).match(/cubic-bezier\([^)]+\)/);
+      return match ? match[0] : String(value).split(",")[0].trim();
+    };
+    const track = document.querySelector(".nb-view-track");
+    const tab = document.querySelector('[data-test="view-mode-actions"]');
+    return {
+      track: firstCurve(getComputedStyle(track).transitionTimingFunction),
+      tab: firstCurve(getComputedStyle(tab).transitionTimingFunction),
+      lane: firstCurve(lane),
+    };
+  });
+  expect(curves.track, "the pane must not lunge on --motion-enter").toBe(curves.tab);
+  expect(curves.track).toBe(curves.lane);
+});
 

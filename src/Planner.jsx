@@ -4323,7 +4323,7 @@ export default function Planner() {
            container — the timeline inside owns the only scrolling here. */
         .nb-main>section{overflow-x:clip}
         .nb-view-track{display:flex;flex:1 1 auto;min-height:0;min-width:0}
-        .nb-view-track.is-sliding{transition:transform ${VIEW_SLIDE_MS}ms var(--motion-enter);will-change:transform}
+        .nb-view-track.is-sliding{transition:transform ${VIEW_SLIDE_MS}ms var(--motion-lane);will-change:transform}
         .nb-view-pane{flex:0 0 100%;min-width:0;min-height:0;display:flex;flex-direction:column}
         /* Reduced motion keeps the handoff but not the journey: the pane it lands
            on is the same one, arrived at without travel. */
