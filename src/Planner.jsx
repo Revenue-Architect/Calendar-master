@@ -5608,7 +5608,7 @@ export default function Planner() {
                     editing form; these four carry one bounded value each and were
                     spending a whole row on it. See rowSpan: the split is a min-width
                     floor, so a pair becomes two rows when the content stops fitting. */}
-                <div className="flex flex-wrap" style={{ borderBottom: `1px solid ${T.line}` }}>
+                <div className="flex flex-wrap gap-2" style={{ borderBottom: `1px solid ${T.line}` }}>
                   <InlineChoiceRow T={T} icon={<BellIcon size={13} />} span="half"
                     open={inspectField === "reminder"}
                     onToggle={() => openInspectField(inspectField === "reminder" ? null : "reminder")}
@@ -5643,7 +5643,7 @@ export default function Planner() {
                 {/* Category moved up from below the list row to partner the reward:
                     both are one bounded value, and leaving it stranded seven rows down
                     was the last full-width row that did not need to be one. */}
-                <div className="flex flex-wrap" style={{ borderBottom: `1px solid ${T.line}` }}>
+                <div className="flex flex-wrap gap-2" style={{ borderBottom: `1px solid ${T.line}` }}>
                   <InlineChoiceRow T={T} icon={<UiIcon size={13}><path d="m8 2.5 1.2 3.2 3.3 1.1-3.3 1.2L8 11.5l-1.2-3.5-3.3-1.2 3.3-1.1L8 2.5Z" /></UiIcon>} span="half"
                     open={inspectField === "reward"}
                     onToggle={() => openInspectField(inspectField === "reward" ? null : "reward")}
@@ -7583,9 +7583,9 @@ function InlineAdd({ T, surface, onAdd }) {
   );
 }
 
-function Pill({ T, surface, icon, label, tint = null }) {
+function Pill({ T, surface, icon, label, tint = null, span = "full" }) {
   return (
-    <div className="flex items-center gap-3 px-3 py-2.5" style={{ background: tint ? `${tint}22` : surface, borderRadius: CARD_R }}>
+    <div className="flex items-center gap-3 px-3 py-2.5" style={{ background: tint ? `${tint}22` : surface, borderRadius: CARD_R, ...rowSpan(span) }}>
       <span style={{ color: tint || T.dim }} className="text-sm shrink-0 w-4 text-center">{icon}</span>
       <span className="flex-1 text-sm truncate" style={{ color: tint || T.text }}>{label}</span>
     </div>
@@ -7666,6 +7666,11 @@ function InlineText({ T, value, onCommit, placeholder = "Untitled", multiline = 
  * An open choice row always takes the full width. Its options are wrapping chips and
  * half a band shreds them into three lines. Only one row is ever open — `inspectField`
  * holds a single field — so the partner simply drops below for as long as it lasts. */
+/* Measured against the longest label a paired field currently produces — the
+   reminder row's "When it starts, 10:30 AM" — at 390px, the narrowest width the
+   editors are built for. Re-measure if a longer option is added or the labels are
+   translated: the failure is silent, because the label span carries Tailwind's
+   `truncate` and a pair that should have split will quietly ellipsise instead. */
 const ROW_HALF_MIN = 168;
 function rowSpan(span, open = false) {
   if (span !== "half" || open) return { flexBasis: "100%", flexGrow: 1, minWidth: 0 };
