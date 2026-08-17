@@ -272,6 +272,11 @@ const RIBBON_FALLBACK_CELL_WIDTH = 80;
 const RIBBON_RENDER_BUFFER_DAYS = 18;
 const RIBBON_RENDER_WINDOW_DAYS = 56;
 const TIMELINE_FOCUS_TRIGGER_PX = 24;
+/* How long the load-in fade will wait for a frame before giving up and simply
+   showing the content. Long enough that a healthy page always animates on the
+   first rAF instead of snapping, short enough that a frame-starved one is never
+   left blank for a visible beat. */
+const REVEAL_FALLBACK_MS = 120;
 /* A short phone window can leave less vertical room than a three-hour card at
    the preferred scale. Forty-four pixels still gives an hour a real touch-sized
    row; below that, density starts making the timeline less usable than scrolling. */
@@ -1257,7 +1262,27 @@ export default function Planner() {
     return () => clearTimeout(timer);
   }, [ready]);
 
-  useEffect(() => { if (ready) { const r = requestAnimationFrame(() => setMounted(true)); return () => cancelAnimationFrame(r); } }, [ready]);
+  /* The load-in fade is an enhancement. It must never be the thing that decides
+     whether content is visible, and for a while it was: `mounted` gates the
+     opacity of every ribbon cell, every month cell and the now-line, and it was
+     set from a single `requestAnimationFrame`. rAF is a paint callback, not a
+     timer — a document that never composites, such as a tab restored in the
+     background, never runs it. Loading the app unpainted therefore left the week
+     header ribbon blank with no way back.
+     Nobody is watching an unpainted page, so there is no beat worth staging
+     there; reveal at once and let it be already-arrived when it is first shown.
+     The timer covers the other case, a visible page starved of frames, where the
+     fade is merely late rather than absent. */
+  useEffect(() => {
+    if (!ready) return;
+    if (document.visibilityState === "hidden") {
+      setMounted(true);
+      return;
+    }
+    const frame = requestAnimationFrame(() => setMounted(true));
+    const safety = setTimeout(() => setMounted(true), REVEAL_FALLBACK_MS);
+    return () => { cancelAnimationFrame(frame); clearTimeout(safety); };
+  }, [ready]);
 
   useEffect(() => {
     if (!ready || !db || saveBlocked) return;
