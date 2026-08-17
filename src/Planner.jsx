@@ -4581,8 +4581,7 @@ export default function Planner() {
            the measured height was interpolating correctly. Both directions use
            the shell's established no-overshoot ease so a button tap, a scroll,
            and a reversal all retarget the same transition. */
-        .nb-app-surface>[data-test="timeline-chrome"].nb-timeline-chrome{min-height:0;overflow:hidden;flex:0 0 auto;display:grid;grid-template-rows:1fr;opacity:1;transform:none;transition:grid-template-rows 300ms var(--nav-ease)}
-        .nb-app-surface>[data-test="timeline-chrome"].nb-timeline-chrome.is-collapsed{grid-template-rows:0fr}
+        .nb-app-surface>[data-test="timeline-chrome"].nb-timeline-chrome{min-height:0;overflow:hidden;flex:0 0 auto;opacity:1;transform:none;transition:height 300ms var(--nav-ease)}
         .nb-timeline-chrome-inner{min-height:0;transform:translate3d(0,0,0);opacity:1;transition:transform 300ms var(--nav-ease),opacity 240ms var(--nav-ease)}
         .nb-day-heading{transition:background-color 180ms ease,border-color 180ms ease}
         .nb-day-heading .nb-display{transition:font-size 300ms var(--nav-ease),line-height 300ms var(--nav-ease)}
@@ -4605,7 +4604,7 @@ export default function Planner() {
 
       <div data-test="timeline-chrome" data-collapsed={String(timelineViewFocused)}
         className={`nb-timeline-chrome ${timelineViewFocused ? "is-collapsed" : ""}`}
-        >
+        style={{ height: timelineViewFocused ? 0 : (timelineChromeHeight == null ? "auto" : timelineChromeHeight) }}>
       <div ref={attachTimelineChromeInner} className="nb-timeline-chrome-inner">
       {/* ══ HUD ══ */}
       <header style={{ background: T.bg, borderBottom: `1px solid ${T.line}`, color: T.text, paddingTop: "max(0.5rem, env(safe-area-inset-top))", paddingLeft: "max(0.75rem, env(safe-area-inset-left))", paddingRight: "max(0.75rem, env(safe-area-inset-right))" }} className="nb-hud sticky top-0 z-30 px-3 sm:px-5 py-2 flex items-center justify-between gap-3">
