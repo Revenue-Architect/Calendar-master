@@ -27,7 +27,7 @@ test.describe("the search control", () => {
 
   test("expanding does not move the controls beside it", async ({ page }) => {
     await openPlanner(page);
-    const neighbour = page.getByRole("button", { name: "NOTES" });
+    const neighbour = page.getByTestId("hud-notes");
     const before = (await neighbour.boundingBox()).x;
 
     await control(page).hover();

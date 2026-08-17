@@ -261,7 +261,7 @@ const CAT_COLOR = {
   RITUAL: "#9B6FD4",
 };
 const catColor = (cat) => CAT_COLOR[cat] || "#8A8A96";
-const CARD_R = 10;
+const CARD_R = 14;
 const HOUR_H = 68;
 /* The ribbon is a rolling window, not a date limit. Keeping roughly two years
    mounted gives the person room to browse without making the DOM grow forever;
@@ -4152,7 +4152,7 @@ export default function Planner() {
           .nb-hud-left .w-14{width:36px}
           .nb-hud-actions{gap:0}
           .nb-search-wrap{width:32px!important}
-          .nb-hud-notes{display:none}
+          
           .nb-hud-settings{display:none}
         }
         .nb-main{padding-bottom:var(--sheet-pad);transition:padding-bottom 260ms var(--motion-settle)}
@@ -4622,14 +4622,29 @@ export default function Planner() {
         </div>
         <div className="nb-hud-actions flex items-center gap-1 shrink-0">
           <button onClick={() => { jumpTo(todayKey); setMonthCursor(new Date()); }} style={{ fontFamily: MONO, color: T.dim }} className="nb-hud-today nb-tap nb-hover-control px-2 py-1 text-xs tracking-widest">TODAY</button>
-          <button onClick={() => { beep("click"); setNotebook("all"); }} style={{ fontFamily: MONO, color: T.dim }} className="nb-hud-notes nb-tap nb-hover-control px-2 py-1 text-xs tracking-widest">NOTES</button>
+          <button data-test="hud-notes" onClick={() => {
+            beep("click");
+            const phone = typeof window !== "undefined" && Boolean(window.matchMedia?.("(max-width: 639.98px)").matches);
+            if (phone) {
+              const daily = getDailyNote(db.notes, dateKey);
+              setNoteEdit(daily || { kind: "daily", date: dateKey, blocks: [] });
+            } else {
+              setNotebook("all");
+            }
+          }} style={{ fontFamily: MONO, color: T.dim }} className="nb-hud-notes nb-tap nb-hover-control px-2 py-1 text-xs tracking-widest">
+            <span className="sm:hidden">WRITE</span><span className="hidden sm:inline">NOTES</span>
+          </button>
           <GooeySearch T={T} surface={surface} reduced={reducedMotion}
             onOpen={() => { beep("click"); setSearchQuery(""); setSearch(true); }} />
           <button onClick={() => { beep("click"); setSettings(true); }} style={{ color: T.dim }} className="nb-hud-settings nb-tap nb-hover-icon w-8 h-8 flex items-center justify-center" aria-label="Settings"><MoreIcon /></button>
           <button data-test="new-entry" data-morph-source="new-entry" tabIndex={composer?.morphSource?.id === "new-entry" ? -1 : undefined}
-            onClick={() => { beep("click"); setComposer({ kind: "event", start: startSlot(nowMin), dur: 60, notch: true, morphSource: { id: "new-entry", label: "NEW" } }); }}
+            onClick={() => { beep("click"); setComposer({ kind: "event", start: startSlot(nowMin), dur: 60, notch: true, morphSource: { id: "new-entry", label: "EVENT" } }); }}
             style={{ background: T.accent, color: T.on, fontFamily: MONO, visibility: composer?.morphSource?.id === "new-entry" ? "hidden" : undefined }}
-            className="nb-tap nb-liquid nb-hover-control px-2 py-1.5 text-xs font-bold tracking-widest">NEW</button>
+            className="nb-tap nb-liquid nb-hover-control px-2 py-1.5 text-xs font-bold tracking-widest">EVENT</button>
+          <button data-test="hud-new-action" data-morph-source="hud-new-action" tabIndex={composer?.morphSource?.id === "hud-new-action" ? -1 : undefined}
+            onClick={() => { beep("click"); setComposer({ kind: "task", notch: true, morphSource: { id: "hud-new-action", label: "ACTION" } }); }}
+            style={{ background: T.accent, color: T.on, fontFamily: MONO, visibility: composer?.morphSource?.id === "hud-new-action" ? "hidden" : undefined }}
+            className="nb-tap nb-liquid nb-hover-control px-2 py-1.5 text-xs font-bold tracking-widest">ACTION</button>
         </div>
       </header>
 
@@ -4876,7 +4891,7 @@ export default function Planner() {
         </div>
       )}
 
-      {gestureHintVisible && !firstRun && viewMode === "timeline" && zoom === "day" && (
+      {gestureHintVisible && !firstRun && viewMode === "timeline" && zoom === "day" && !(missedReport && missedReport.length) && !askForBackup && (
         <div className="px-3 sm:px-5 pb-3">
           <div data-test="gesture-hint" className="nb-up flex flex-col gap-2 px-3 py-2 sm:flex-row sm:items-center sm:gap-x-3"
             style={{ background: surface, color: T.text, borderRadius: CARD_R, boxShadow: `inset 0 0 0 1px ${T.line}` }}>

@@ -223,7 +223,7 @@ test.describe("the notch morph", () => {
 
     const sheet = page.getByTestId("sheet");
     await expect(sheet).toHaveAttribute("data-morph-source", "new-entry");
-    await expect(sheet.getByTestId("morph-source-label")).toHaveText("NEW");
+    await expect(sheet.getByTestId("morph-source-label")).toHaveText("EVENT");
     await expect(sheet.getByTestId("notch-surface")).toHaveCount(0);
     await expect(trigger).toHaveCSS("visibility", "hidden");
 

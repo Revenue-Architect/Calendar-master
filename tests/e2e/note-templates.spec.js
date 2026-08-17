@@ -10,7 +10,7 @@ import { openPlanner, settledState } from "./helpers.js";
 
 async function newNote(page) {
   await openPlanner(page);
-  await page.getByRole("button", { name: "NOTES" }).click();
+  await page.getByTestId("hud-notes").click();
   await page.getByTestId("sheet").getByRole("button", { name: "+ NEW NOTE" }).click();
   await expect(page.getByTestId("note-templates")).toBeVisible();
 }
@@ -70,7 +70,7 @@ test.describe("starting a note from a template", () => {
     await page.getByTestId("sheet").getByRole("button", { name: "SAVE" }).click();
     await expect(page.getByTestId("sheet")).toHaveCount(0, { timeout: 3000 });
 
-    await page.getByRole("button", { name: "NOTES" }).click();
+    await page.getByTestId("hud-notes").click();
     await page.getByTestId("sheet").getByText("Written already").first().click();
     await expect(page.getByTestId("sheet")).toBeVisible();
     await expect(page.getByTestId("note-templates")).toHaveCount(0);
@@ -84,7 +84,7 @@ test.describe("starting a note from a template", () => {
     await sheet.getByRole("button", { name: "SAVE" }).click();
     await expect(sheet).toBeHidden();
 
-    await page.getByRole("button", { name: "NOTES" }).click();
+    await page.getByTestId("hud-notes").click();
     const row = page.getByTestId("sheet").locator(".nb-list-enter").first();
     await expect(row).toBeVisible();
     const motion = await row.evaluate((node) => {
