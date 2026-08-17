@@ -7,22 +7,20 @@ const visibleLabel = (page) => page.getByTestId("hud-notes").evaluate((node) => 
 });
 
 test.describe("the HUD create story", () => {
-  test("desktop keeps two equal create verbs, and NOTES stays labelled", async ({ page }) => {
+  test("NEW opens one composer that can become an event or an action", async ({ page }) => {
     await openPlanner(page);
-    const event = page.getByTestId("new-entry");
-    const action = page.getByTestId("hud-new-action");
-    await expect(event).toHaveText("EVENT");
-    await expect(action).toHaveText("ACTION");
+    const create = page.getByTestId("new-entry");
+    await expect(create).toHaveText("NEW");
+    await expect(page.getByTestId("hud-new-action")).toHaveCount(0);
     await expect(page.getByTestId("hud-notes")).toBeVisible();
     expect(await visibleLabel(page)).toBe("NOTES");
 
-    await event.click();
-    await expect(page.getByTestId("composer")).toHaveAttribute("data-composer-kind", "event");
-    await page.keyboard.press("Escape");
-    await expect(page.getByTestId("sheet")).toHaveCount(0, { timeout: 3000 });
-
-    await action.click();
-    await expect(page.getByTestId("composer")).toHaveAttribute("data-composer-kind", "task");
+    await create.click();
+    const composer = page.getByTestId("composer");
+    await expect(composer).toHaveAttribute("data-composer-kind", "event");
+    await composer.getByRole("tab", { name: "ACTION", exact: true }).click();
+    await expect(composer).toHaveAttribute("data-composer-kind", "task");
+    await expect(composer.getByPlaceholder("What gets finished?")).toBeVisible();
   });
 
   test("a phone keeps WRITE as the path to today's note", async ({ page }) => {

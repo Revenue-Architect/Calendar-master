@@ -4459,8 +4459,7 @@ export default function Planner() {
            reverse (data-fluid-reverse) does not take this delay — the form is
            mid-arrival and leaves with the shape. Unmount stays at MORPH_MS. */
         .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"]:not([data-fluid-reverse="true"]){
-          animation:nbnotchout calc(var(--nb-morph-dur) * (1 - 0.35)) cubic-bezier(.4,0,.3,1) forwards;
-          animation-delay:var(--nb-morph-lead);
+          animation:nbnotchout 240ms cubic-bezier(.4,0,.3,1) forwards;
         }
         @keyframes nbnotchout{
           0%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px round 24px)}
@@ -4472,13 +4471,16 @@ export default function Planner() {
           animation:none;
           opacity:0;
           pointer-events:none;
-          transition:opacity var(--nb-morph-lead,168ms) cubic-bezier(.4,0,.3,1);
+          transition:opacity 80ms cubic-bezier(.4,0,.3,1);
         }
         .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-morph-source-label{
           animation:none;
           opacity:1;
-          transition:opacity var(--nb-morph-lead,168ms) cubic-bezier(.4,0,.3,1);
+          transition:opacity 80ms cubic-bezier(.4,0,.3,1);
         }
+                .nb-composer-ask{animation:nbask 180ms cubic-bezier(.23,1,.32,1)}
+        @keyframes nbask{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+        @media(prefers-reduced-motion:reduce){.nb-composer-ask{animation:none}}
         @media(min-width:640px){.nb-fluid{transform-origin:center;border-radius:24px}}
         /* The blur is set once and never animated. A changing blur radius throws
            away the compositor's cached backdrop every frame and re-blurs the whole
@@ -4638,13 +4640,9 @@ export default function Planner() {
             onOpen={() => { beep("click"); setSearchQuery(""); setSearch(true); }} />
           <button onClick={() => { beep("click"); setSettings(true); }} style={{ color: T.dim }} className="nb-hud-settings nb-tap nb-hover-icon w-8 h-8 flex items-center justify-center" aria-label="Settings"><MoreIcon /></button>
           <button data-test="new-entry" data-morph-source="new-entry" tabIndex={composer?.morphSource?.id === "new-entry" ? -1 : undefined}
-            onClick={() => { beep("click"); setComposer({ kind: "event", start: startSlot(nowMin), dur: 60, notch: true, morphSource: { id: "new-entry", label: "EVENT" } }); }}
+            onClick={() => { beep("click"); setComposer({ kind: "event", start: startSlot(nowMin), dur: 60, notch: true, morphSource: { id: "new-entry", label: "NEW" } }); }}
             style={{ background: T.accent, color: T.on, fontFamily: MONO, visibility: composer?.morphSource?.id === "new-entry" ? "hidden" : undefined }}
-            className="nb-tap nb-liquid nb-hover-control px-2 py-1.5 text-xs font-bold tracking-widest">EVENT</button>
-          <button data-test="hud-new-action" data-morph-source="hud-new-action" tabIndex={composer?.morphSource?.id === "hud-new-action" ? -1 : undefined}
-            onClick={() => { beep("click"); setComposer({ kind: "task", notch: true, morphSource: { id: "hud-new-action", label: "ACTION" } }); }}
-            style={{ background: T.accent, color: T.on, fontFamily: MONO, visibility: composer?.morphSource?.id === "hud-new-action" ? "hidden" : undefined }}
-            className="nb-tap nb-liquid nb-hover-control px-2 py-1.5 text-xs font-bold tracking-widest">ACTION</button>
+            className="nb-tap nb-liquid nb-hover-control px-2 py-1.5 text-xs font-bold tracking-widest">NEW</button>
         </div>
       </header>
 
@@ -5575,7 +5573,7 @@ export default function Planner() {
                     they are read. §4.7 keeps the repeat rule behind its own gesture. */}
                 <DetailRow T={T} icon={<CalendarIcon />} divider>
                   {detailEditing && inspectField === "planning" ? (
-                    <div className="flex flex-col gap-2">
+                    <div className="flex flex-col gap-3">
                       <PillNav T={T} ariaLabel="Action planning state"
                         value={inspectDraft.planned.date ? "day" : "inbox"}
                         options={[["day", "ON A DAY"], ["inbox", "INBOX"]]}
@@ -5765,7 +5763,7 @@ export default function Planner() {
           )}
 
           {/* Two figures the app can actually answer, rather than borrowed metrics. */}
-          <div className="flex gap-2 pb-4">
+          <div className="flex gap-2 pb-5 mt-1">
             <div className="flex-1 text-center py-3" style={{ background: surface, borderRadius: CARD_R }}>
               <span className="block text-2xl font-semibold tracking-tight">
                 {inspect.kind === "event" ? (inspectDraft.allDay ? "—" : dur(inspectDraft.dur)) : `+${inspectDraft.reward}`}
@@ -5792,7 +5790,7 @@ export default function Planner() {
               the ones whose content has no fixed length keep the full width — see
               rowSpan for why the split is a min-width floor rather than a
               breakpoint. */}
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 pt-1">
             <InlineChoice T={T} surface={surface} icon="◑" tint={catColor(inspectDraft.cat)} span="half"
               open={inspectField === "category"}
               onToggle={() => openInspectField(inspectField === "category" ? null : "category")}
@@ -5909,7 +5907,7 @@ export default function Planner() {
           <p style={{ fontFamily: SERIF, color: T.dimText }} className="nb-voice mt-1 mb-4">
             The saved {inspect?.kind === "event" ? "event" : "action"} will stay as it was.
           </p>
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-3">
             <button onClick={() => { beep("click"); setDiscardAsk(false); }}
               style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="nb-tap nb-liquid nb-hover-control py-3 text-xs font-bold tracking-widest">KEEP EDITING</button>
             <button onClick={() => {
@@ -5933,7 +5931,7 @@ export default function Planner() {
               ? `Waiting on ${reason.blockers.map((b) => b.title).join(", ")}.`
               : `${reason.remaining} step${reason.remaining === 1 ? "" : "s"} still open.`)).join(" ")}
           </p>
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-3">
             <button onClick={() => completeTask(confirmComplete.id, true)}
               style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="nb-tap nb-liquid nb-hover-control py-3 text-xs font-bold tracking-widest">COMPLETE ANYWAY</button>
             <button onClick={() => { beep("click"); setConfirmComplete(null); }}
@@ -5949,7 +5947,7 @@ export default function Planner() {
             There's a sample week loaded so you can see how everything behaves. Keep it
             to explore, or clear it and make the notebook yours.
           </p>
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-3">
             <button onClick={() => { beep("commit"); setFirstRun(false); }}
               style={{ fontFamily: MONO, background: T.accent, color: T.on, borderRadius: CARD_R }} className="nb-tap py-3 text-xs font-bold tracking-widest">EXPLORE THE SAMPLE</button>
             <button onClick={() => {
@@ -6057,7 +6055,7 @@ export default function Planner() {
         <Sheet T={T} title="REPEATING ITEM" closeSignal={sheetCloseSignals.scopeAsk} onClose={() => { beep("click"); setScopeAsk(null); }}>
           <h2 className="text-xl font-bold tracking-tight">This repeats</h2>
           <p style={{ fontFamily: SERIF, color: T.dimText }} className="nb-voice mt-1 mb-4">Change this one day, or every day it appears?</p>
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-3">
             <button onClick={() => (scopeAsk.action === "delete" ? doDelete(scopeAsk.kind, scopeAsk.id, "one") : commitSave(scopeAsk.payload, "one"))}
               style={{ fontFamily: MONO, border: `1px solid ${T.line}` }} className="nb-tap py-3 nb-label">THIS DAY ONLY</button>
             {scopeAsk.kind === "event" && canonicalOccurrenceIdentity(scopeAsk.id || scopeAsk.payload?.id) && (
@@ -6244,7 +6242,7 @@ export default function Planner() {
                 </div>
               )}
             </Reveal>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2 pt-1">
               <button onClick={exportIcs} style={{ fontFamily: MONO, border: `1px solid ${T.line}` }} className="nb-tap px-3 py-2 nb-data">EXPORT .ICS</button>
               <button onClick={exportJson} style={{ fontFamily: MONO, border: `1px solid ${T.line}` }} className="nb-tap px-3 py-2 nb-data">EXPORT .JSON</button>
               <label style={{ fontFamily: MONO, border: `1px solid ${T.line}` }} className="nb-tap px-3 py-2 nb-data cursor-pointer">
@@ -6503,7 +6501,7 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
         </button>
       )}
 
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-3">
         {open.map((t) => (
           <TaskCard key={t.id} T={T} t={t} beep={beep} buzz={buzz} target={gesture && gesture.overTask === t.id} todayKey={todayKey} blockers={blockersFor(t)} subtasks={subtasksFor(t)} onPromoteSub={onPromoteSub} clock={clock} selection={selection} onToggleSelect={onToggleSelect} onStartSelect={onStartSelect}
             onComplete={onComplete} onReopen={onReopen} onDefer={onDefer} onInspect={onInspect} onToggleSub={onToggleSub} onAddSub={onAddSub} onRemoveSub={onRemoveSub} onDragStart={onDragStart} onUnschedule={onUnschedule} listEnterIndex={revealIndex(t)} />
@@ -8356,7 +8354,7 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
       window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
       || (panel && window.getComputedStyle(panel).animationName === "none")
     );
-    let closeDuration = morphRef.current === "notch" ? MORPH_MS : 300;
+    let closeDuration = morphRef.current === "notch" ? 240 : 240;
     /* If someone dismisses while the source is still opening, reverse the same
        animation from its rendered position. Restarting a separate exit keyframe
        at a full-size sheet was the subtle snap behind the old close regression. */
@@ -9035,7 +9033,7 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick, weekStart 
           surface={surface} className="mb-1 p-1 w-full [&>button]:flex-1 [&>button]:py-1.5" />
       )}
 
-      <div className={`${kind === "event" ? "text-center" : ""} pt-3 pb-4`}>
+      <div key={kind} className={`nb-composer-ask ${kind === "event" ? "text-center" : ""} pt-3 pb-5`}>
         <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
           placeholder={kind === "event" ? "What's happening?" : "What gets finished?"}
           style={{ background: "transparent", border: "none" }}
@@ -9047,7 +9045,7 @@ function Composer({ T, initial, dateLabel, dateKey, onSubmit, onTick, weekStart 
 
       {/* Only what the entry cannot exist without. Everything else waits behind
           "More options", so adding a thing is one decision and refining it is another. */}
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-3">
         {kind === "event" ? (
           <>
             <Chips T={T} surface={surface} value={allDay ? "all" : "timed"} onChange={(v) => { onTick(); setAllDay(v === "all"); }}

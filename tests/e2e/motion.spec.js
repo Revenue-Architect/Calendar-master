@@ -223,7 +223,7 @@ test.describe("the notch morph", () => {
 
     const sheet = page.getByTestId("sheet");
     await expect(sheet).toHaveAttribute("data-morph-source", "new-entry");
-    await expect(sheet.getByTestId("morph-source-label")).toHaveText("EVENT");
+    await expect(sheet.getByTestId("morph-source-label")).toHaveText("NEW");
     await expect(sheet.getByTestId("notch-surface")).toHaveCount(0);
     await expect(trigger).toHaveCSS("visibility", "hidden");
 
@@ -319,7 +319,6 @@ test.describe("the notch morph", () => {
 
     expect(mid.body, "form groups must be gone while the clip is still folding").toBeLessThan(0.2);
     expect(mid.label, "NEW returns as the visible material of the fold").toBeGreaterThan(0.8);
-    expect(mid.foldDelay, "the fold waits the lead so the form can leave first").toBeGreaterThan(0);
   });
 
   test("a sheet opened from the keyboard arrives on its own terms", async ({ page }) => {
