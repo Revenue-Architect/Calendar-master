@@ -5746,15 +5746,19 @@ export default function Planner() {
 
           {/* One row per attribute, each one the control for it (§4.6). Collapsed it
               costs a line; touched, it grows the alternatives underneath. */}
-          <div className="flex flex-col gap-2">
-            <InlineChoice T={T} surface={surface} icon="◑" tint={catColor(inspectDraft.cat)}
+          {/* A wrapping band, not a column. The four bounded fields pair two-up and
+              the ones whose content has no fixed length keep the full width — see
+              rowSpan for why the split is a min-width floor rather than a
+              breakpoint. */}
+          <div className="flex flex-wrap gap-2">
+            <InlineChoice T={T} surface={surface} icon="◑" tint={catColor(inspectDraft.cat)} span="half"
               open={inspectField === "category"}
               onToggle={() => openInspectField(inspectField === "category" ? null : "category")}
               onBeginEdit={() => openInspectField("category")}
               label={inspectDraft.cat || "—"} value={inspectDraft.cat} dot={catColor}
               options={CATS.map((c) => [c, c])} onPick={(cat) => editEntry({ cat })} />
 
-            <InlineChoice T={T} surface={surface} icon={<ClockIcon />} label={inspectDraft.allDay ? "All day" : "At a time"}
+            <InlineChoice T={T} surface={surface} icon={<ClockIcon />} label={inspectDraft.allDay ? "All day" : "At a time"} span="half"
               open={inspectField === "allDay"}
               onToggle={() => openInspectField(inspectField === "allDay" ? null : "allDay")}
               onBeginEdit={() => openInspectField("allDay")}
@@ -5779,7 +5783,7 @@ export default function Planner() {
                 chosen here rather than in a form somewhere else. The safety was never
                 the separate surface — it is the scope question, which the save still
                 asks. */}
-            <InlineChoice T={T} surface={surface} icon={<RepeatIcon />}
+            <InlineChoice T={T} surface={surface} icon={<RepeatIcon />} span="half"
               open={inspectField === "repeat"}
               onToggle={() => openInspectField(inspectField === "repeat" ? null : "repeat")}
               onBeginEdit={() => openInspectField("repeat")}
@@ -5788,7 +5792,7 @@ export default function Planner() {
               options={REPEATS}
               onPick={(freq) => editEntry({ repeat: repeatFor(freq, inspectDraft.repeat, inspectDraft.date || dateKey) })} />
 
-            <InlineChoice T={T} surface={surface} icon={<BellIcon size={13} />}
+            <InlineChoice T={T} surface={surface} icon={<BellIcon size={13} />} span="half"
               open={inspectField === "reminder"}
               onToggle={() => openInspectField(inspectField === "reminder" ? null : "reminder")}
               onBeginEdit={() => openInspectField("reminder")}
@@ -5822,7 +5826,9 @@ export default function Planner() {
               <Pill T={T} surface={surface} icon={<WarningIcon />} tint={NOW_RED} label="Overlaps another event on this day" />
             )}
 
-            <div className="flex items-start gap-3 px-3 py-2.5" style={{ background: surface, borderRadius: CARD_R }}>
+            {/* Full width by declaration, not by accident: the band wraps now, so a
+                child with no basis shrinks to its own text. */}
+            <div className="flex items-start gap-3 px-3 py-2.5" style={{ background: surface, borderRadius: CARD_R, ...rowSpan("full") }}>
               <span style={{ color: T.dimText }} className="text-sm shrink-0 w-4 text-center pt-0.5"><MoreIcon /></span>
               <InlineText T={T} value={inspectDraft.note} placeholder="Add a note" ariaLabel="Note" multiline
                 onCommit={(note) => editEntry({ note })} onBeginEdit={() => openInspectField("note")} className="text-sm leading-relaxed" />
@@ -7623,7 +7629,23 @@ function InlineText({ T, value, onCommit, placeholder = "Untitled", multiline = 
 
 /* §4.6. Collapsed, an attribute costs one line. Tapping it grows the alternatives
    underneath rather than showing every choice all the time. */
-function InlineChoice({ T, surface, icon, label, options, value, onPick, tint = null, dot = null, children = null, editable = true, onBeginEdit = null, open: openProp = undefined, onToggle = null }) {
+/* An attribute row takes either the whole band or half of it.
+ *
+ * Half rows sit in a wrapping flex over a min-width floor, so a pair splits into
+ * two full rows when its content stops fitting rather than at a breakpoint chosen
+ * against English labels. Nothing here transitions: §7.2 bans animating layout, and
+ * the reflow is meant to be instant.
+ *
+ * An open choice row always takes the full width. Its options are wrapping chips and
+ * half a band shreds them into three lines. Only one row is ever open — `inspectField`
+ * holds a single field — so the partner simply drops below for as long as it lasts. */
+const ROW_HALF_MIN = 168;
+function rowSpan(span, open = false) {
+  if (span !== "half" || open) return { flexBasis: "100%", flexGrow: 1, minWidth: 0 };
+  return { flexBasis: "calc(50% - 4px)", flexGrow: 1, minWidth: ROW_HALF_MIN };
+}
+
+function InlineChoice({ T, surface, icon, label, options, value, onPick, tint = null, dot = null, children = null, editable = true, onBeginEdit = null, open: openProp = undefined, onToggle = null, span = "full" }) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const open = openProp ?? uncontrolledOpen;
   const setOpen = (next) => {
@@ -7634,7 +7656,7 @@ function InlineChoice({ T, surface, icon, label, options, value, onPick, tint = 
   const { box, stretch, settled } = useLiquidPill(optionsRef, [value, options.length, open]);
   useEffect(() => { if (!editable && openProp == null) setUncontrolledOpen(false); }, [editable, openProp]);
   return (
-    <div style={{ background: tint ? `${tint}22` : surface, borderRadius: CARD_R }} className="overflow-hidden">
+    <div style={{ background: tint ? `${tint}22` : surface, borderRadius: CARD_R, ...rowSpan(span, open) }} className="overflow-hidden">
       <button disabled={!editable} onClick={(event) => { if (!open) onBeginEdit?.(event.currentTarget); setOpen(!open); }} className="nb-tap nb-hover-control flex items-center gap-3 px-3 py-2.5 w-full text-left disabled:opacity-100">
         <span style={{ color: tint || T.dim }} className="text-sm shrink-0 w-4 text-center">{icon}</span>
         <span className="flex-1 text-sm truncate" style={{ color: tint || T.text }}>{label}</span>
@@ -8223,9 +8245,9 @@ function InlineStamp({ T, type, value, display, onCommit, ariaLabel, min, classN
 
 /* A native picker sitting on the row it describes, so a date reads as a date and
    edits as one without a second surface. */
-function InlineField({ T, surface, icon, children, tint = null }) {
+function InlineField({ T, surface, icon, children, tint = null, span = "full" }) {
   return (
-    <div className="flex items-center gap-3 px-3 py-2.5" style={{ background: tint ? `${tint}22` : surface, borderRadius: CARD_R }}>
+    <div className="flex items-center gap-3 px-3 py-2.5" style={{ background: tint ? `${tint}22` : surface, borderRadius: CARD_R, ...rowSpan(span) }}>
       <span style={{ color: tint || T.dim }} className="text-sm shrink-0 w-4 text-center">{icon}</span>
       <div className="flex-1 min-w-0 flex items-center gap-2">{children}</div>
     </div>
