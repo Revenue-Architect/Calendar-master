@@ -902,13 +902,26 @@ export default function Planner() {
   const timelineChromeInnerRef = useRef(null);
   const timelineChromeObserverRef = useRef(null);
   const [timelineChromeHeight, setTimelineChromeHeight] = useState(null);
+  /* Scroll bookkeeping resets on a day turn because the stream really is a new
+     node — the page wrapper is keyed on the turn, so the old session, the old
+     scroll top and the old auto-position flag all belong to an element that no
+     longer exists. */
   useEffect(() => {
     timelineUserScrollRef.current = false;
     timelineScrollSessionRef.current?.expire?.();
     timelineAutoPositionRef.current = false;
+  }, [dateKey, viewMode, zoom]);
+  /* Focus does not reset on a day turn, only when the surface itself changes.
+     Resetting it on dateKey meant every swipe through the days forced the heading
+     back open, so moving along the day axis kept interrupting itself — collapse,
+     swipe, pop open, collapse again. Stepping between days is travel within one
+     surface; the chrome should hold whatever state the reader put it in and let
+     the scroll rule decide, which it will the moment the new day lands at its
+     top. Changing view or zoom is a different surface and does start clean. */
+  useEffect(() => {
     setTimelineFocused(false);
     setTimelineFocusSource(null);
-  }, [dateKey, viewMode, zoom]);
+  }, [viewMode, zoom]);
   const attachTimelineChromeInner = useCallback((inner) => {
     timelineChromeObserverRef.current?.disconnect();
     timelineChromeObserverRef.current = null;
