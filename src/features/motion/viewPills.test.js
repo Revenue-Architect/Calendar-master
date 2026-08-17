@@ -3,7 +3,19 @@ import test from "node:test";
 import {
   VIEW_PILL_COMPACT_MAX, VIEW_PILL_ICON, VIEW_PILL_WORD, VIEW_PILL_GAP,
   viewPillTrackWidth, viewPillSlots, viewPillIndicatorBox, viewPillFlipOffset, viewPillLabelClip,
+  viewPillSlotWidth,
 } from "./viewPills.js";
+
+test("a compact tab only ever occupies a reserved slot", () => {
+  assert.equal(viewPillSlotWidth(true), VIEW_PILL_ICON + VIEW_PILL_WORD);
+  assert.equal(viewPillSlotWidth(false), VIEW_PILL_ICON);
+  const slots = viewPillSlots({ activeIndex: 1 });
+  assert.deepEqual(slots.map((slot) => slot.width), [
+    viewPillSlotWidth(false),
+    viewPillSlotWidth(true),
+    viewPillSlotWidth(false),
+  ]);
+});
 
 test("reserves one word plus three icon slots so WEEK is not crushed", () => {
   assert.equal(viewPillTrackWidth(), VIEW_PILL_ICON * 3 + VIEW_PILL_GAP * 2 + VIEW_PILL_WORD);

@@ -165,6 +165,7 @@ import {
   viewPillIndicatorBox,
   viewPillFlipOffset,
   viewPillLabelClip,
+  viewPillSlotWidth,
   viewPillLabelSide,
 } from "./features/motion/viewPills.js";
 import {
@@ -8044,14 +8045,6 @@ function PillNav({ T, value, options, onPick, onArm = null, ariaLabel, surface =
   const wrapRef = useRef(null);
   const { box, stretch, settled } = useLiquidPill(wrapRef, [value, options.length, compact]);
   const activeIndex = Math.max(0, options.findIndex(([key]) => key === value));
-  const slots = compact ? viewPillSlots({ count: options.length, activeIndex }) : null;
-
-  /* FLIP, with the measure pass removed. Compact slot geometry is a pure
-     function of the active index, so both the old and the new left edge are
-     known without touching the DOM — which is the whole reason the plate can no
-     longer drift from the tab it belongs to. */
-  const previousIndex = useRef(activeIndex);
-  const [flip, setFlip] = useState(null);
   const [instant, setInstant] = useState(false);
   const reduced = typeof window !== "undefined"
     && Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
@@ -8060,27 +8053,13 @@ function PillNav({ T, value, options, onPick, onArm = null, ariaLabel, surface =
     setInstant(source === "keyboard" || reduced);
     onPick(key, source);
   };
-  useLayoutEffect(() => {
-    const from = previousIndex.current;
-    previousIndex.current = activeIndex;
-    if (!compact || from === activeIndex || instant) return undefined;
-    setFlip(options.map((_, index) => viewPillFlipOffset({
-      count: options.length, fromIndex: from, toIndex: activeIndex, index,
-    })));
-    const frame = window.requestAnimationFrame(() => setFlip(null));
-    return () => window.cancelAnimationFrame(frame);
-  }, [activeIndex, compact, instant, options.length]);
-
-  const indicatorBox = compact
-    ? viewPillIndicatorBox({ count: options.length, activeIndex, height: box?.height ?? 25 })
-    : box;
 
   return (
     <div ref={wrapRef} role="tablist" aria-label={ariaLabel} data-test={testId}
       data-motion={instant ? "instant" : "travel"} data-compact={compact ? "icon" : "label"}
       className={`relative flex ${className}`}
       style={{ background: surface, borderRadius: 999, width: compact ? viewPillTrackWidth({ count: options.length }) : undefined, ...style }}>
-      <LiquidPillIndicator T={T} box={indicatorBox} stretch={compact ? 1 : stretch} settled={compact ? !flip : settled} />
+      {!compact && <LiquidPillIndicator T={T} box={box} stretch={stretch} settled={settled} />}
       {options.map(([key, label], index) => {
         const on = key === value;
         const Icon = compact ? icons?.[key] : null;
@@ -8097,7 +8076,8 @@ function PillNav({ T, value, options, onPick, onArm = null, ariaLabel, surface =
               borderRadius: 999,
               zIndex: 1,
               ...(compact ? {
-                width: slots[index].width,
+                width: viewPillSlotWidth(on),
+                background: on ? T.accent : "transparent",
                 display: "grid",
                 gridTemplateColumns: `${VIEW_PILL_ICON}px ${VIEW_PILL_WORD}px`,
                 alignItems: "center",
@@ -8117,18 +8097,12 @@ function PillNav({ T, value, options, onPick, onArm = null, ariaLabel, surface =
                    guard exists for a real past bug. Clipping is all that was
                    wanted; a scroll container was never part of it. */
                 overflow: "clip",
-                transform: flip ? `translate3d(${flip[index]}px,0,0)` : "none",
-                /* 380ms on the gentlest curve the system owns.
-                   Duration was never the reason this felt snappy — --motion-enter
-                   is a hard ease-out that reaches roughly four fifths of the
-                   distance in the first quarter of its time, so the pill lunges
-                   and then crawls, and lengthening it only stretches the crawl.
-                   --motion-lane is about half that at the same point, which is
-                   what turns a lunge into travel. 380ms sits in the band this
-                   app's own reference point wants: index.css pitches it at
-                   Moleskine Timepage, and that is premium-archetype motion —
-                   350-600ms, no overshoot, evenly paced. */
-                transition: flip || instant ? "none" : "transform 260ms var(--motion-lane), color 200ms ease",
+                transform: "none",
+                /* Reserved-slot width only. Both end states are known before the
+                   frame (30 / 114), so this is not the measured 0→auto spring
+                   that left the plate 84px behind. The active tab wears the
+                   accent; there is no separate plate to chase. */
+                transition: instant ? "none" : "width 260ms var(--motion-lane), background-color 200ms ease, color 200ms ease",
               } : {
                 transition: "color 260ms ease",
               }),

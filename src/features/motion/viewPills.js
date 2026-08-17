@@ -28,6 +28,13 @@ const defaults = ({
   count = 3,
 } = {}) => ({ icon, gap, word, count });
 
+export function viewPillSlotWidth(active, {
+  icon = VIEW_PILL_ICON,
+  word = VIEW_PILL_WORD,
+} = {}) {
+  return icon + (active ? word : 0);
+}
+
 export function viewPillTrackWidth(options) {
   const { icon, gap, word, count } = defaults(options);
   return icon * count + gap * Math.max(0, count - 1) + word;

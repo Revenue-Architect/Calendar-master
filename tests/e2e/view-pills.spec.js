@@ -16,27 +16,29 @@ test.describe("the compact view switcher", () => {
     expect((await actions.boundingBox()).width,
       "inactive ACTIONS is an icon, not a third word").toBeLessThan(56);
 
-    /* The regression this file exists for. The accent plate is the active
-       sibling; if it is ever measured mid-transition it lands on a neighbour and
-       stays there. Assert alignment, not the mechanism. */
-    const aligned = async () => page.getByTestId("view-mode").evaluate((list) => {
-      const plate = list.querySelector('[data-test="pill-indicator"]').getBoundingClientRect();
-      const active = list.querySelector('[aria-selected="true"]').getBoundingClientRect();
-      return { dLeft: Math.abs(plate.left - active.left), dWidth: Math.abs(plate.width - active.width) };
-    });
-    let drift = await aligned();
-    expect(drift.dLeft, "plate must start on the active tab").toBeLessThanOrEqual(1);
-    expect(drift.dWidth).toBeLessThanOrEqual(1);
+    const paint = async (tab) => tab.evaluate((node) => ({
+      width: node.getBoundingClientRect().width,
+      fill: getComputedStyle(node).backgroundColor,
+      indicator: node.parentElement.querySelector('[data-test="pill-indicator"]'),
+    }));
+
+    const timelinePaint = await paint(timeline);
+    const actionsPaint = await paint(actions);
+    expect(timelinePaint.width, "active TIMELINE occupies the word slot").toBeGreaterThan(100);
+    expect(actionsPaint.width, "inactive ACTIONS occupies the icon slot").toBeLessThan(40);
+    expect(timelinePaint.indicator, "compact mode has no travelling plate").toBeNull();
+
+    const accent = await page.getByTestId("new-entry").evaluate((node) => getComputedStyle(node).backgroundColor);
+    expect(timelinePaint.fill, "the active tab is the accent surface").toBe(accent);
+    expect(actionsPaint.fill, "an inactive tab is not the accent").not.toBe(accent);
 
     await actions.click();
     await expect(actions).toHaveAttribute("aria-selected", "true");
     await page.waitForTimeout(400);
-    drift = await aligned();
-    expect(drift.dLeft, "plate must settle on the newly active tab").toBeLessThanOrEqual(1);
-    expect(drift.dWidth, "plate must be the width of the newly active tab").toBeLessThanOrEqual(1);
-
-    expect((await actions.getByTestId("view-mode-label").boundingBox()).width).toBeGreaterThan(20);
-    expect((await timeline.boundingBox()).width).toBeLessThan(56);
+    const after = await paint(actions);
+    expect(after.width).toBeGreaterThan(100);
+    expect(after.fill).toBe(accent);
+    expect((await timeline.evaluate((node) => node.getBoundingClientRect().width))).toBeLessThan(40);
   });
 
   test("the reserved track leaves the month navigator its lane", async ({ page }) => {
@@ -79,6 +81,24 @@ test.describe("the compact view switcher", () => {
     expect(props).not.toContain("grid-template-columns");
     expect(props).not.toContain("width");
   });
+
+  test("the active compact tab grows along the reserved slot, not in one frame", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openPlanner(page);
+    const actions = page.getByTestId("view-mode-actions");
+    await actions.click();
+    const width = await actions.evaluate((node) => {
+      const tween = node.getAnimations().find((animation) => animation.transitionProperty === "width")
+        || node.getAnimations().find((animation) => animation.playState === "running");
+      if (!tween?.effect) return node.getBoundingClientRect().width;
+      tween.pause();
+      const duration = Number(tween.effect.getTiming().duration || 0);
+      if (duration > 0) tween.currentTime = duration * 0.4;
+      return node.getBoundingClientRect().width;
+    });
+    expect(width, "mid-flight the tab is between the icon slot and the word slot").toBeGreaterThan(40);
+    expect(width).toBeLessThan(100);
+  });
 });
 
 test("desktop keeps three words and a travelling plate", async ({ page }) => {
@@ -115,12 +135,11 @@ test("reduced motion applies the end state with no travel", async ({ page }) => 
   const actions = page.getByTestId("view-mode-actions");
   await expect(actions).toHaveAttribute("aria-selected", "true");
   await expect(page.getByTestId("view-mode")).toHaveAttribute("data-motion", "instant");
-  const drift = await page.getByTestId("view-mode").evaluate((list) => {
-    const plate = list.querySelector('[data-test="pill-indicator"]').getBoundingClientRect();
-    const active = list.querySelector('[aria-selected="true"]').getBoundingClientRect();
-    return Math.abs(plate.left - active.left);
+  const width = await page.getByTestId("view-mode").evaluate((list) => {
+    const active = list.querySelector('[aria-selected="true"]');
+    return active.getBoundingClientRect().width;
   });
-  expect(drift, "reduced motion still lands the plate on the active tab").toBeLessThanOrEqual(1);
+  expect(width, "reduced motion lands the active tab on the word slot").toBeGreaterThan(100);
   expect((await actions.getByTestId("view-mode-label").boundingBox()).width).toBeGreaterThan(20);
 });
 
