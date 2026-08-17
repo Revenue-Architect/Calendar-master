@@ -43,6 +43,9 @@ are too detailed for the repository README.
   defines the NEW-to-composer material morph and compact TIMELINE / AGENDA / ACTIONS
   expanding-sibling motion. Implementation plan:
   [`superpowers/plans/2026-08-15-shared-layout-motion.md`](superpowers/plans/2026-08-15-shared-layout-motion.md).
+- [`superpowers/plans/2026-08-17-framer-fidelity-motion.md`](superpowers/plans/2026-08-17-framer-fidelity-motion.md)
+  closes the remaining gap to the Framer reference look (composer close lead,
+  active compact pill wearing the accent, view-slide curve) without Framer.
 
 ## Quality reports
 
