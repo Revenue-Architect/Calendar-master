@@ -115,6 +115,8 @@ import {
   createIdleInteraction,
   createScrollSession,
   timelineChromeIntent,
+  rubberBand,
+  shouldCommitSwipe,
   restoreCancelledInteraction,
   resolveShortEventEdge,
 } from "./features/planner/timelineInteractionState.js";
@@ -309,6 +311,9 @@ const VIEW_SLIDE_MS = 300;
 const MORPH_LEAD = 0.35;
 const MORPH_STEP = 0.2;
 const MORPH_FADE = 0.5;
+/* Where a drag stops following the finger one-for-one and starts resisting. Not
+   a limit — past this the page keeps moving, just less of it. */
+const SWIPE_SOFT_LIMIT = 140;
 const SNAP = 5;
 const NOW_RED = "#C43A56";
 const ALERT_CHOICES = [0, 5, 15, 30, 60];
@@ -1988,7 +1993,7 @@ export default function Planner() {
   const onSwipeStart = (e) => {
     if (e.touches.length !== 1 || gestureRef.current) return;
     if (e.target instanceof Element && e.target.closest("[data-owns-swipe]")) return;
-    swipeRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, dx: 0, live: false };
+    swipeRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, dx: 0, live: false, at: Date.now() };
   };
   const onSwipeMove = (e) => {
     const s = swipeRef.current;
@@ -1999,7 +2004,7 @@ export default function Planner() {
       /* The committed distance is kept on the ref as well as in state: the end
          handler must decide from the last position actually seen, not from a state
          value that may not have flushed. */
-      s.dx = Math.max(-140, Math.min(140, dx));
+      s.dx = rubberBand(dx, SWIPE_SOFT_LIMIT);
       setSwipe(s.dx);
     }
   };
@@ -2019,7 +2024,10 @@ export default function Planner() {
   const onSwipeEnd = () => {
     const s = swipeRef.current;
     swipeRef.current = null;
-    if (s && s.live && Math.abs(s.dx) > 64) {
+    /* Distance or velocity, whichever the hand offered. A flick that covers half
+       the threshold in a fifth of the time is a deliberate turn; requiring the
+       full 64px meant confident gestures were silently dropped. */
+    if (s && s.live && shouldCommitSwipe({ delta: s.dx, elapsedMs: Date.now() - s.at, distanceThreshold: 64 })) {
       /* Drop the drag offset in the same commit as the turn and without a
          transition. Springing the page back while the turn animation plays
          animates two transforms against each other on nested elements, which is
@@ -6512,17 +6520,22 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], subtasks 
   const fire = () => { setBurst(uid()); setTimeout(() => setBurst(null), 640); onComplete(t.id); };
   useEffect(() => () => cancelAnimationFrame(raf.current), []);
 
-  const onDown = (e) => { sw.current = { x: e.clientX, y: e.clientY, live: false }; };
+  const onDown = (e) => { sw.current = { x: e.clientX, y: e.clientY, live: false, at: Date.now() }; };
   const onMove = (e) => {
     if (!sw.current) return;
     const ddx = e.clientX - sw.current.x, ddy = e.clientY - sw.current.y;
     if (!sw.current.live && Math.abs(ddx) > 12 && Math.abs(ddx) > Math.abs(ddy)) { sw.current.live = true; stopHold(false); }
-    if (sw.current.live) setDx(Math.max(-140, Math.min(140, ddx)));
+    if (sw.current.live) setDx(rubberBand(ddx, SWIPE_SOFT_LIMIT));
   };
   const onUp = () => {
     if (sw.current && sw.current.live) {
-      if (dx > 96 && t.status !== "completed") fire();
-      else if (dx < -96) onDefer(t.id, 1);
+      /* A flick completes as readily as a full drag, and both directions share
+         one judgement so completing and deferring stay the same gesture family. */
+      const committed = shouldCommitSwipe({
+        delta: dx, elapsedMs: Date.now() - sw.current.at, distanceThreshold: 96,
+      });
+      if (committed && dx > 0 && t.status !== "completed") fire();
+      else if (committed && dx < 0) onDefer(t.id, 1);
     }
     sw.current = null;
     setDx(0);

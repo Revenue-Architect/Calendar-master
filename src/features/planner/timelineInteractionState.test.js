@@ -14,6 +14,8 @@ import {
   createIdleInteraction,
   createScrollSession,
   timelineChromeIntent,
+  rubberBand,
+  shouldCommitSwipe,
   finishCommittedInteraction,
   interactionOwnerAllows,
   resolveShortEventEdge,
@@ -134,4 +136,33 @@ test("timelineChromeIntent collapses only past the trigger, moving away", () => 
 test("timelineChromeIntent ignores sub-pixel jitter in both directions", () => {
   assert.equal(timelineChromeIntent({ previousScrollTop: 500, nextScrollTop: 500 }), "none");
   assert.equal(timelineChromeIntent({ previousScrollTop: 500, nextScrollTop: 500.5 }), "none");
+});
+
+test("rubberBand passes small drags through untouched", () => {
+  assert.equal(rubberBand(80, 140), 80);
+  assert.equal(rubberBand(-80, 140), -80);
+});
+
+test("rubberBand resists past the limit instead of stopping dead", () => {
+  /* The clamp returned exactly 140 for every value beyond it. */
+  const at200 = rubberBand(200, 140);
+  assert.ok(at200 > 140, "must keep moving past the soft limit");
+  assert.ok(at200 < 200, "but must move less than the finger");
+  assert.ok(rubberBand(400, 140) > at200, "and must never stop increasing");
+});
+
+test("rubberBand is symmetric", () => {
+  assert.equal(rubberBand(-300, 140), -rubberBand(300, 140));
+});
+
+test("shouldCommitSwipe accepts a fast flick that never reaches the distance", () => {
+  assert.equal(shouldCommitSwipe({ delta: 50, elapsedMs: 120, distanceThreshold: 64 }), true);
+});
+
+test("shouldCommitSwipe still rejects a slow short drag", () => {
+  assert.equal(shouldCommitSwipe({ delta: 50, elapsedMs: 900, distanceThreshold: 64 }), false);
+});
+
+test("shouldCommitSwipe still accepts distance regardless of speed", () => {
+  assert.equal(shouldCommitSwipe({ delta: 90, elapsedMs: 4000, distanceThreshold: 64 }), true);
 });

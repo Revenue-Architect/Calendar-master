@@ -258,3 +258,31 @@ export function timelineChromeIntent({ previousScrollTop, nextScrollTop, trigger
   if (nextScrollTop > previousScrollTop + 1 && nextScrollTop >= triggerPx) return "collapse";
   return "none";
 }
+
+/* Past the soft limit a drag keeps moving, just less and less of it.
+ *
+ * The clamp this replaces stopped the page dead at 140px. Nothing physical stops
+ * like that, and the dead zone reads as the gesture having broken rather than
+ * having reached its end. Excess travel is scaled so the edge is felt as
+ * resistance instead of a wall.
+ */
+export function rubberBand(delta, softLimit, resistance = 0.32) {
+  const magnitude = Math.abs(delta);
+  if (magnitude <= softLimit) return delta;
+  const excess = magnitude - softLimit;
+  return Math.sign(delta) * (softLimit + excess * resistance);
+}
+
+/* Whether a swipe has earned its commit.
+ *
+ * Distance alone was the only test, so a confident flick that covered 50px was
+ * silently ignored while a slow drag of 65px succeeded — the opposite of what
+ * the hand expects. Velocity is measured in pixels per millisecond; 0.11 is the
+ * threshold Sonner uses for the same judgement, and a flick clears it easily
+ * while a deliberate slow drag never does.
+ */
+export function shouldCommitSwipe({ delta, elapsedMs, distanceThreshold, velocityThreshold = 0.11 }) {
+  if (Math.abs(delta) >= distanceThreshold) return true;
+  if (!elapsedMs || elapsedMs <= 0) return false;
+  return Math.abs(delta) / elapsedMs > velocityThreshold;
+}
