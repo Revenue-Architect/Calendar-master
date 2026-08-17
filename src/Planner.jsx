@@ -3972,7 +3972,13 @@ export default function Planner() {
         if (viewMode === "actions") return;
         startGesture({ mode: "task", kind: "task", id, x, y }); setSheet(false); buzz(6); beep("lift");
       }}
-      onAddTask={() => { beep("click"); setComposer({ kind: "task" }); }}
+      hidingAdd={composer?.morphSource?.id === "actions-add"}
+      onAddTask={(source) => {
+        beep("click");
+        setComposer(source?.id
+          ? { kind: "task", notch: true, morphSource: source }
+          : { kind: "task", morph: "none" });
+      }}
       onCollapse={viewMode === "actions" ? null : () => setActionsOpen(false)}
       onEditNote={(n) => { beep("click"); setNoteEdit(n || { kind: "daily", date: dateKey, blocks: [] }); }}
       onToggleNoteCheck={toggleNoteCheck}
@@ -6275,7 +6281,7 @@ function NavigationShell({ phase, firstItemRef, onTimeline, onActions, onSetup, 
 
 /* ═══════════════════════ ACTIONS ═══════════════════════ */
 
-function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, onOpenDeadline, overdue, deadlines, showOverdue, todayKey, gesture, blockersFor, subtasksFor, onPromoteSub, smartView, viewCounts, onSmartView, lists, onManageLists, clock = "12", selection, onToggleSelect, onStartSelect, onCancelSelect, onBulk, onPullOverdue, beep, buzz, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onAddTask, onEditNote, onUnschedule, onJump, onCollapse = null }) {
+function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, onOpenDeadline, overdue, deadlines, showOverdue, todayKey, gesture, blockersFor, subtasksFor, onPromoteSub, smartView, viewCounts, onSmartView, lists, onManageLists, clock = "12", selection, onToggleSelect, onStartSelect, onCancelSelect, onBulk, onPullOverdue, beep, buzz, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onAddTask, onEditNote, onUnschedule, onJump, onCollapse = null, hidingAdd = false }) {
   const [overdueReviewOpen, setOverdueReviewOpen] = useState(false);
   const smartViewRef = useRef(smartView);
   const smartViewRevealTimer = useRef(null);
@@ -6331,7 +6337,13 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
         <div className="flex items-center gap-3">
           <button onClick={() => (selection ? onCancelSelect() : onStartSelect(null))} style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-hover-control nb-label">SELECT</button>
           <button onClick={onManageLists} style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-hover-control nb-label">LISTS</button>
-          <button onClick={onAddTask} style={{ fontFamily: MONO, color: T.accentText }} className="nb-tap nb-hover-control nb-data">+ ADD</button>
+          <button
+            data-test="actions-add"
+            data-morph-source="actions-add"
+            tabIndex={hidingAdd ? -1 : undefined}
+            onClick={() => onAddTask({ id: "actions-add", label: "+ ADD" })}
+            style={{ fontFamily: MONO, color: T.accentText, visibility: hidingAdd ? "hidden" : undefined }}
+            className="nb-tap nb-hover-control nb-data">+ ADD</button>
           {onCollapse && (
             <button data-test="actions-collapse" onClick={onCollapse} style={{ fontFamily: MONO, color: T.dimText }}
               className="nb-tap nb-hover-control nb-data" aria-label="Collapse Actions column">COLLAPSE ›</button>

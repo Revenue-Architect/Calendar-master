@@ -357,6 +357,37 @@ test.describe("the notch morph", () => {
     await expect(page.getByTestId("composer")).toBeHidden();
     await expect(page.getByText("Morphed into being").first()).toBeVisible();
   });
+
+  test("desktop + ADD grows the task composer out of itself", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await openPlanner(page);
+    const add = page.getByTestId("actions-column").getByTestId("actions-add");
+    await expect(add).toBeVisible();
+    await add.click();
+
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).toHaveAttribute("data-fluid-origin", "notch");
+    await expect(sheet).toHaveAttribute("data-morph-source", "actions-add");
+    await expect(sheet.getByTestId("morph-source-label")).toHaveText("+ ADD");
+    await expect(page.getByTestId("composer")).toHaveAttribute("data-composer-kind", "task");
+    await expect(add).toHaveCSS("visibility", "hidden");
+
+    await page.keyboard.press("Escape");
+    await expect(sheet).toHaveCount(0, { timeout: 3000 });
+    await expect(add).toHaveCSS("visibility", "visible");
+  });
+
+  test("the empty Actions panel does not borrow a morph", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await openPlanner(page);
+    const empty = page.getByRole("button", { name: /Nothing claimed for this day/ }).first();
+    await expect(empty).toBeVisible();
+    await empty.click();
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).toBeVisible();
+    await expect(sheet).toHaveAttribute("data-fluid-origin", "none");
+    await expect(sheet.getByTestId("morph-source-label")).toHaveCount(0);
+  });
 });
 
 test.describe("sheet exits", () => {
