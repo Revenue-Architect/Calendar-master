@@ -3088,9 +3088,12 @@ export default function Planner() {
     }
     const previousScrollTop = timelineScrollTopRef.current;
     timelineScrollTopRef.current = nextScrollTop;
-    const timelineView = viewMode === "timeline" && (zoom === "day" || zoom === "week");
-    const mobileTimeline = window.matchMedia?.("(max-width:1023px)").matches && timelineView;
-    if (!mobileTimeline) return;
+    /* Focus mode is one piece of navigation, so it reads the same at every width.
+       This was gated to `(max-width:1023px)`, which left a desktop window
+       scrolling its hours away under a header it had stopped needing — and in week
+       view that header is a second copy of the day names the grid already prints
+       across its own columns, so it was the most redundant strip on the screen. */
+    if (!(viewMode === "timeline" && (zoom === "day" || zoom === "week"))) return;
     /* The verdict is a pure function so it can be tested; see
        timelineChromeIntent for why restore is intent-based rather than
        position-based, and what the previous asymmetry cost. */
