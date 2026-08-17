@@ -740,7 +740,16 @@ test.describe("the actions column", () => {
 
     await plan.click();
     await review.getByTestId("overdue-plan-one").first().click();
-    await expect.poll(async () => (await storedState(page)).tasks.find((task) => task.id === "task-overdue-one").planned.date).toBe(today);
+    const when = page.getByTestId("plan-when");
+    await expect(when).toBeVisible();
+    await expect(when.getByRole("button", { name: "TODAY", exact: true })).toBeVisible();
+    await expect(when.getByRole("button", { name: "TOMORROW", exact: true })).toBeVisible();
+    await expect(when.getByRole("button", { name: "NEXT WEEK", exact: true })).toBeVisible();
+    await expect(when.getByLabel("Pick a day")).toBeVisible();
+    expect((await storedState(page)).tasks.find((task) => task.id === "task-overdue-one").planned.date).toBe(yesterday);
+    await when.getByRole("button", { name: "TOMORROW", exact: true }).click();
+    await expect(when).toHaveCount(0);
+    await expect.poll(async () => (await storedState(page)).tasks.find((task) => task.id === "task-overdue-one").planned.date).toBe(addDaysToKey(today, 1));
     await expect.poll(async () => (await storedState(page)).tasks.find((task) => task.id === "task-overdue-two").planned.date).toBe(yesterday);
 
     await review.getByTestId("overdue-plan-all").click();

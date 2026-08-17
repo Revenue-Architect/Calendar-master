@@ -28,18 +28,18 @@ export function pullableOverdue(overdue, todayKey) {
 }
 
 /**
- * Plan every pullable overdue entry onto today.
+ * Plan pullable overdue entries onto an explicit day.
  *
  * @param {object} state     planner state
  * @param {Array}  overdue   the overdue read, unfiltered
- * @param {string} todayKey
+ * @param {string} dateKey
  * @param {object} options
  * @param {Function} options.makeId  id factory for detached tasks and exceptions
  * @returns {{ state: object, planned: number }}
  */
-export function planOverdueForToday(state, overdue, todayKey, { makeId } = {}) {
+export function planOverdueForDate(state, overdue, dateKey, { makeId } = {}) {
   if (typeof makeId !== "function") throw new TypeError("makeId is required");
-  const entries = pullableOverdue(overdue, todayKey);
+  const entries = pullableOverdue(overdue, dateKey);
   if (!entries.length) return { state, planned: 0 };
 
   let staged = state;
@@ -53,7 +53,7 @@ export function planOverdueForToday(state, overdue, todayKey, { makeId } = {}) {
       staged = {
         ...staged,
         tasks: planTask(staged.tasks, entry.id, {
-          date: todayKey,
+          date: dateKey,
           startMinute: entry.planned.startMinute ?? null,
           estimateMinutes: entry.planned.estimateMinutes ?? null,
         }).tasks,
@@ -80,7 +80,7 @@ export function planOverdueForToday(state, overdue, todayKey, { makeId } = {}) {
     staged = {
       ...staged,
       tasks: planTask(staged.tasks, detachedId, {
-        date: todayKey,
+        date: dateKey,
         startMinute: detached.planned.startMinute ?? null,
         estimateMinutes: detached.planned.estimateMinutes ?? null,
       }).tasks,
@@ -88,4 +88,8 @@ export function planOverdueForToday(state, overdue, todayKey, { makeId } = {}) {
   }
 
   return { state: staged, planned: entries.length };
+}
+
+export function planOverdueForToday(state, overdue, todayKey, options) {
+  return planOverdueForDate(state, overdue, todayKey, options);
 }

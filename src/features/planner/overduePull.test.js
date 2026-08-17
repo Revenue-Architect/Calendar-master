@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { planOverdueForToday, pullableOverdue } from "./overduePull.js";
+import { planOverdueForDate, planOverdueForToday, pullableOverdue } from "./overduePull.js";
 import {
   getOverdueForToday,
   normalizeTaskInput,
@@ -161,4 +161,14 @@ test("planning is deterministic given the same ids", () => {
     return planOverdueForToday(before, [occurrence], TODAY, { makeId: () => `fixed-${++n}` }).state;
   };
   assert.deepEqual(build(), build());
+});
+
+test("planning can land on a chosen day, not only today", () => {
+  const before = state([task({
+    id: "a", deadline: { date: YESTERDAY }, planned: { date: YESTERDAY, startMinute: 540 },
+  })]);
+  const { state: after, planned } = planOverdueForDate(before, before.tasks, "2026-08-18", { makeId });
+  assert.equal(planned, 1);
+  assert.equal(byId(after, "a").planned.date, "2026-08-18");
+  assert.equal(byId(after, "a").deadline.date, YESTERDAY);
 });

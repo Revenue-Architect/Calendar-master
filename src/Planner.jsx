@@ -85,7 +85,8 @@ import {
 import { QUICK_ADD_SYNTAX, describeQuickAdd, parseQuickAdd, quickAddToEntry } from "./features/planner/quickAdd.js";
 import { matchCommands } from "./features/planner/commandPalette.js";
 import { getDayTasksWithCarry } from "./features/planner/carryForward.js";
-import { planOverdueForToday, pullableOverdue } from "./features/planner/overduePull.js";
+import { planOverdueForDate, pullableOverdue } from "./features/planner/overduePull.js";
+import { planWhenOptions } from "./features/planner/planWhen.js";
 import { AUTO_COMPLETE_DELAY_MS, autoCompleteStillValid, togglesLastOpenStep } from "./features/planner/autoComplete.js";
 import { recordBackupDismissed, recordBackupTaken, shouldPromptBackup } from "./features/planner/backupReminder.js";
 import { normalizeMeetingLink } from "./features/planner/meetingLink.js";
@@ -881,6 +882,7 @@ export default function Planner() {
   }, []);
   const [backupRecord, setBackupRecord] = useState(null);
   const [scopeAsk, setScopeAsk] = useState(null);
+  const [planAsk, setPlanAsk] = useState(null);
   const [reward, setReward] = useState(null);
   const [levelFlash, setLevelFlash] = useState(null);
   const [undo, setUndo] = useState(null);
@@ -2103,7 +2105,7 @@ export default function Planner() {
          was still up. */
       if (inspect || composer || settings || noteEdit || noteHistory || notebook || scopeAsk
         || firstRun || confirmComplete || dependencyPicker || listPicker || pendingImport || peekDay
-        || shortcuts) return;
+        || shortcuts || planAsk) return;
       if (e.key === "/" || (e.key === "k" && (e.metaKey || e.ctrlKey))) { e.preventDefault(); setSearchQuery(""); setSearch(true); return; }
       if (search) return;
       /* The shortcuts have to be discoverable from the keyboard they belong to. */
@@ -2141,7 +2143,7 @@ export default function Planner() {
     /* `zoom` is in here because the handler closes over `zoomIn`/`zoomOut`, which
        read it — without it, `[` and `]` would step from whatever zoom the page
        had when the listener was last attached. */
-  }, [dateKey, inspect, composer, settings, noteEdit, noteHistory, notebook, search, scopeAsk, goDay, todayKey, nowMin, dayTasks, undo, firstRun, confirmComplete, dependencyPicker, listPicker, pendingImport, peekDay, shortcuts, viewMode, zoom]);
+  }, [dateKey, inspect, composer, settings, noteEdit, noteHistory, notebook, search, scopeAsk, goDay, todayKey, nowMin, dayTasks, undo, firstRun, confirmComplete, dependencyPicker, listPicker, pendingImport, peekDay, shortcuts, planAsk, viewMode, zoom]);
 
   /* ─── writes (series-aware) ─── */
   const flash = (label, payload) => {
@@ -2373,15 +2375,15 @@ export default function Planner() {
      that moves it, both live in features/planner/overduePull.js so they can be
      asserted without a render — including the awkward case, a missed occurrence
      of an accumulating series, whose id is not a row any command can find. */
-  const pullOverdue = (ids = null) => {
-    const candidates = pullableOverdue(overdue, todayKey);
+  const pullOverdue = (ids = null, dateKey = todayKey) => {
+    const candidates = pullableOverdue(overdue, dateKey);
     const selected = ids == null ? null : new Set(ids);
     const entries = selected ? candidates.filter((entry) => selected.has(entry.id)) : candidates;
     if (!entries.length) return;
     beep("schedule");
     const before = structuredClone(db);
-    mutate((d) => planOverdueForToday(d, entries, todayKey, { makeId: uid }).state);
-    flash(`${entries.length} planned for today`, { type: "restore-planner-state", snapshot: { state: before } });
+    mutate((d) => planOverdueForDate(d, entries, dateKey, { makeId: uid }).state);
+    flash(`${entries.length} planned for ${plannedLabel(dateKey, todayKey).toLowerCase()}`, { type: "restore-planner-state", snapshot: { state: before } });
   };
   const duplicateEvent = (id) => {
     const e = dayEvents.find((x) => x.id === id);
@@ -3981,7 +3983,7 @@ export default function Planner() {
       onStartSelect={(id) => { beep("lift"); buzz(8); setSelection(new Set(id ? [id] : [])); }}
       onCancelSelect={() => { beep("click"); setSelection(null); }}
       onBulk={runBulk} overdue={overdue} deadlines={deadlines} showOverdue={isToday}
-      todayKey={todayKey} gesture={gesture} onPullOverdue={pullOverdue} beep={beep} buzz={buzz}
+      todayKey={todayKey} gesture={gesture} onPullOverdue={pullOverdue} onAskPlan={(ids) => { beep("click"); setPlanAsk({ ids }); }} beep={beep} buzz={buzz}
       onComplete={completeTask} onReopen={reopenTask} onDefer={deferTask}
       onInspect={(id) => setInspect({ kind: "task", id })} onToggleSub={toggleSub} onAddSub={addSub} onRemoveSub={removeSub}
       onDragStart={(id, x, y) => {
@@ -5924,6 +5926,34 @@ export default function Planner() {
 
       {/* §15.4/§7.4. Blocking is advisory: name what is in the way and let the user
           decide, rather than silently completing or flatly refusing. */}
+      {planAsk && (
+        <Sheet T={T} onClose={() => { beep("click"); setPlanAsk(null); }} title="PLAN">
+          <div data-test="plan-when">
+            <h2 className="text-xl font-bold tracking-tight">When should this land?</h2>
+            <p style={{ fontFamily: SERIF, color: T.dimText }} className="nb-voice mt-1 mb-4">
+              Today is one option. The plan stays a choice until you pick it.
+            </p>
+            <div className="flex flex-col gap-3">
+              {planWhenOptions(todayKey, { weekStart }).map((option) => option.id === "custom" ? (
+                <label key={option.id} style={{ fontFamily: MONO, border: `1px solid ${T.line}` }} className="nb-tap relative py-3 text-center text-xs font-bold tracking-widest">
+                  {option.label}
+                  <input type="date" aria-label="Pick a day" className="absolute inset-0 cursor-pointer opacity-0"
+                    onChange={(e) => {
+                      if (!e.target.value) return;
+                      pullOverdue(planAsk.ids, e.target.value);
+                      setPlanAsk(null);
+                    }} />
+                </label>
+              ) : (
+                <button key={option.id} onClick={() => { pullOverdue(planAsk.ids, option.date); setPlanAsk(null); }}
+                  style={{ fontFamily: MONO, background: option.id === "today" ? T.accent : "transparent", color: option.id === "today" ? T.on : T.text, border: option.id === "today" ? "none" : `1px solid ${T.line}` }}
+                  className="nb-tap nb-liquid nb-hover-control py-3 text-xs font-bold tracking-widest">{option.label}</button>
+              ))}
+            </div>
+          </div>
+        </Sheet>
+      )}
+
       {confirmComplete && (
         <Sheet T={T} onClose={() => { beep("click"); setConfirmComplete(null); }} title="Still blocked">
           <p style={{ fontFamily: SERIF, color: T.dimText }} className="nb-voice mt-1 mb-3">
@@ -6328,7 +6358,7 @@ function NavigationShell({ phase, firstItemRef, onTimeline, onActions, onSetup, 
 
 /* ═══════════════════════ ACTIONS ═══════════════════════ */
 
-function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, onOpenDeadline, overdue, deadlines, showOverdue, todayKey, gesture, blockersFor, subtasksFor, onPromoteSub, smartView, viewCounts, onSmartView, lists, onManageLists, clock = "12", selection, onToggleSelect, onStartSelect, onCancelSelect, onBulk, onPullOverdue, beep, buzz, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onAddTask, onEditNote, onUnschedule, onJump, onCollapse = null, hidingAdd = false }) {
+function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, onOpenDeadline, overdue, deadlines, showOverdue, todayKey, gesture, blockersFor, subtasksFor, onPromoteSub, smartView, viewCounts, onSmartView, lists, onManageLists, clock = "12", selection, onToggleSelect, onStartSelect, onCancelSelect, onBulk, onPullOverdue, onAskPlan, beep, buzz, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onAddTask, onEditNote, onUnschedule, onJump, onCollapse = null, hidingAdd = false }) {
   const [overdueReviewOpen, setOverdueReviewOpen] = useState(false);
   const smartViewRef = useRef(smartView);
   const smartViewRevealTimer = useRef(null);
@@ -6463,7 +6493,7 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
                         DUE {t.deadline?.date || "—"} · WAS {t.planned?.date ? `${plannedLabel(t.planned.date, todayKey)}${t.planned.startMinute != null ? ` ${fmtTime(t.planned.startMinute, clock)}` : ""}` : "UNPLANNED"}{t.planned?.estimateMinutes ? ` · ${dur(t.planned.estimateMinutes)}` : ""}
                       </span>
                     </button>
-                    <button data-test="overdue-plan-one" onClick={() => onPullOverdue([t.id])} style={{ fontFamily: MONO, color: T.accentText, border: `1px solid ${T.line}`, borderRadius: 999 }} className="nb-tap nb-hover-choice shrink-0 px-2 py-1 nb-label">PLAN</button>
+                    <button data-test="overdue-plan-one" onClick={() => onAskPlan([t.id])} style={{ fontFamily: MONO, color: T.accentText, border: `1px solid ${T.line}`, borderRadius: 999 }} className="nb-tap nb-hover-choice shrink-0 px-2 py-1 nb-label">PLAN</button>
                   </div>
                 ))}
               </div>
