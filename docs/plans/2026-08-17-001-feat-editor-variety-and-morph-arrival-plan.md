@@ -483,6 +483,30 @@ at 390 with a two-alert event, since it is the worst case in the band.
 
 **Dependencies:** U4, U5 (so both editors adopt one rhythm rather than two readings of it).
 
+**Bigger than this plan first assumed — read before starting.** Three things surfaced
+while U5 was being built:
+
+1. **The icon changes sides.** `DetailRow` (`7535`) renders `{children}` first and the
+   icon last, so Action rows are icon-*right*. `InlineChoice`/`InlineField` are
+   icon-*left*. Folding one into the other moves every icon in the Actions sheet across
+   the row — a visible change to that surface's language, not a refactor nobody notices.
+   Decide it deliberately; icon-left is the majority and matches the Event editor.
+2. **There are nine rows, not six**, and several are conditional: planning, reminder, due,
+   reward, the waiting follow-up (`5629`), a dependency-add row (`5635`), a choice row at
+   `5642`, a `#` row (`5649`), and one row per blocker (`5653`). The pairing rule has to
+   survive rows appearing and disappearing, which is the same problem THROUGH posed in U5
+   and was solved there by keeping the conditional row full width.
+3. **The group is one card with hairlines**, not N cards (`5543`). Giving each row its own
+   fill is what makes it match the Event band, but it also drops the "these are one block
+   of governing rules" reading the current grouping carries. That grouping is deliberate —
+   the comment at `5541-5542` says so. Preserve it by keeping the rows in their own
+   wrapping band with a heading, rather than scattering them into the sheet.
+
+Recommended split: land the pairing first with the rows still in their grouped card
+(Planning|Due, Reminder|Reward as a two-up inside the group, dividers dropped only between
+paired rows), and treat the full primitive merge as its own change. That gets the user the
+rhythm without moving every icon in the same commit.
+
 **Files:**
 - `src/Planner.jsx` — the action band around `5556-5658`
 - `tests/e2e/actions.spec.js`, `tests/e2e/planning.spec.js`
