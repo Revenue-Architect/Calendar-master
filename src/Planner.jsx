@@ -5603,43 +5603,62 @@ export default function Planner() {
                     </button>
                   )}
                 </DetailRow>
-                <InlineChoiceRow T={T} icon={<BellIcon size={13} />} divider
-                  open={inspectField === "reminder"}
-                  onToggle={() => openInspectField(inspectField === "reminder" ? null : "reminder")}
-                  onBeginEdit={() => openInspectField("reminder")}
-                  label={(inspectDraft.reminders ?? []).length
-                    ? (inspectDraft.reminders[0].offsetMinutes === 0
-                      ? `When it starts${inspectDraft.planned.startMinute != null ? `, ${tm(inspectDraft.planned.startMinute)}` : ""}`
-                      : `${dur(inspectDraft.reminders[0].offsetMinutes)} before`)
-                    : "No reminder"}
-                  value={(inspectDraft.reminders ?? [])[0]?.offsetMinutes ?? "off"}
-                  options={[["off", "OFF"], [0, "AT TIME"], [15, "15M"], [60, "1H"]]}
-                  onPick={(value) => editEntry({ reminders: value === "off" ? [] : [{
-                    id: (inspectDraft.reminders ?? [])[0]?.id || uid(), anchor: "planned", offsetMinutes: value,
-                  }] })} />
-                <DetailRow T={T} icon={<ClockIcon />} divider>
-                  <div className="flex items-center gap-2">
-                    <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label shrink-0">DUE</span>
-                    <InlineStamp T={T} dark={dark} type="date" ariaLabel="Deadline"
-                      value={inspectDraft.deadline.date || ""} onCommit={(v) => editEntry({ due: v })}
-                      display={inspectDraft.deadline.date ? fmtDay(inspectDraft.deadline.date) : "No deadline"}
-                      onBeginEdit={() => openInspectField("due")}
-                      style={{ color: inspectDraft.deadline.date && inspectDraft.deadline.date < todayKey ? NOW_RED : T.text }}
-                      className="text-sm" />
-                    {inspectDraft.deadline.date && (
-                      <button onClick={() => editEntry({ due: "" })} style={{ color: T.dimText }} className="nb-tap text-xs px-1" aria-label="Clear deadline"><CloseIcon /></button>
-                    )}
-                  </div>
-                </DetailRow>
+                {/* Paired inside the group rather than each on its own line. Planning
+                    above keeps the full width because it carries two lines and opens an
+                    editing form; these four carry one bounded value each and were
+                    spending a whole row on it. See rowSpan: the split is a min-width
+                    floor, so a pair becomes two rows when the content stops fitting. */}
+                <div className="flex flex-wrap" style={{ borderBottom: `1px solid ${T.line}` }}>
+                  <InlineChoiceRow T={T} icon={<BellIcon size={13} />} span="half"
+                    open={inspectField === "reminder"}
+                    onToggle={() => openInspectField(inspectField === "reminder" ? null : "reminder")}
+                    onBeginEdit={() => openInspectField("reminder")}
+                    label={(inspectDraft.reminders ?? []).length
+                      ? (inspectDraft.reminders[0].offsetMinutes === 0
+                        ? `When it starts${inspectDraft.planned.startMinute != null ? `, ${tm(inspectDraft.planned.startMinute)}` : ""}`
+                        : `${dur(inspectDraft.reminders[0].offsetMinutes)} before`)
+                      : "No reminder"}
+                    value={(inspectDraft.reminders ?? [])[0]?.offsetMinutes ?? "off"}
+                    options={[["off", "OFF"], [0, "AT TIME"], [15, "15M"], [60, "1H"]]}
+                    onPick={(value) => editEntry({ reminders: value === "off" ? [] : [{
+                      id: (inspectDraft.reminders ?? [])[0]?.id || uid(), anchor: "planned", offsetMinutes: value,
+                    }] })} />
+                  <DetailRow T={T} icon={<ClockIcon />} span="half">
+                    <div className="flex items-center gap-2">
+                      <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label shrink-0">DUE</span>
+                      <InlineStamp T={T} dark={dark} type="date" ariaLabel="Deadline"
+                        value={inspectDraft.deadline.date || ""} onCommit={(v) => editEntry({ due: v })}
+                        display={inspectDraft.deadline.date ? fmtDay(inspectDraft.deadline.date) : "No deadline"}
+                        onBeginEdit={() => openInspectField("due")}
+                        style={{ color: inspectDraft.deadline.date && inspectDraft.deadline.date < todayKey ? NOW_RED : T.text }}
+                        className="text-sm" />
+                      {inspectDraft.deadline.date && (
+                        <button onClick={() => editEntry({ due: "" })} style={{ color: T.dimText }} className="nb-tap text-xs px-1" aria-label="Clear deadline"><CloseIcon /></button>
+                      )}
+                    </div>
+                  </DetailRow>
+                </div>
                 {/* §8.2. The label names the attribute; it does not repeat the value
                     the selected chip already carries. */}
-                 <InlineChoiceRow T={T} icon={<UiIcon size={13}><path d="m8 2.5 1.2 3.2 3.3 1.1-3.3 1.2L8 11.5l-1.2-3.5-3.3-1.2 3.3-1.1L8 2.5Z" /></UiIcon>} divider
-                  open={inspectField === "reward"}
-                  onToggle={() => openInspectField(inspectField === "reward" ? null : "reward")}
-                  onBeginEdit={() => openInspectField("reward")}
-                  label={`Worth ${inspectDraft.reward}`}
-                  value={inspectDraft.reward} options={[20, 30, 40, 60].map((xp) => [xp, String(xp)])}
-                  onPick={(xp) => editEntry({ xp })} />
+                {/* Category moved up from below the list row to partner the reward:
+                    both are one bounded value, and leaving it stranded seven rows down
+                    was the last full-width row that did not need to be one. */}
+                <div className="flex flex-wrap" style={{ borderBottom: `1px solid ${T.line}` }}>
+                  <InlineChoiceRow T={T} icon={<UiIcon size={13}><path d="m8 2.5 1.2 3.2 3.3 1.1-3.3 1.2L8 11.5l-1.2-3.5-3.3-1.2 3.3-1.1L8 2.5Z" /></UiIcon>} span="half"
+                    open={inspectField === "reward"}
+                    onToggle={() => openInspectField(inspectField === "reward" ? null : "reward")}
+                    onBeginEdit={() => openInspectField("reward")}
+                    label={`Worth ${inspectDraft.reward}`}
+                    value={inspectDraft.reward} options={[20, 30, 40, 60].map((xp) => [xp, String(xp)])}
+                    onPick={(xp) => editEntry({ xp })} />
+                  <InlineChoiceRow T={T} icon={<UiIcon size={13}><path d="M8 2.5a5.5 5.5 0 1 0 0 11V2.5Z" /><circle cx="8" cy="8" r="5.5" /></UiIcon>} span="half"
+                    open={inspectField === "category"}
+                    onToggle={() => openInspectField(inspectField === "category" ? null : "category")}
+                    onBeginEdit={() => openInspectField("category")}
+                    label={inspectDraft.category} dot={catColor}
+                    value={inspectDraft.category} options={CATS.map((c) => [c, c])}
+                    onPick={(cat) => editEntry({ cat })} />
+                </div>
                 {inspectDraft.status === "waiting" && (
                    <DetailRow T={T} icon={<ClockIcon />} divider={inspectDependsOn.length > 0}>
                     <span className="block text-sm">{inspectDraft.followUpDate ? `Follow up ${fmtDay(inspectDraft.followUpDate)}` : "Waiting, no follow-up date"}</span>
@@ -5654,13 +5673,6 @@ export default function Planner() {
                     <span style={{ color: T.dimText }} className="block text-xs mt-0.5">Tap to move to another list</span>
                   </button>
                 </DetailRow>
-                 <InlineChoiceRow T={T} icon={<UiIcon size={13}><path d="M8 2.5a5.5 5.5 0 1 0 0 11V2.5Z" /><circle cx="8" cy="8" r="5.5" /></UiIcon>} divider
-                  open={inspectField === "category"}
-                  onToggle={() => openInspectField(inspectField === "category" ? null : "category")}
-                  onBeginEdit={() => openInspectField("category")}
-                  label={inspectDraft.category} dot={catColor}
-                  value={inspectDraft.category} options={CATS.map((c) => [c, c])}
-                  onPick={(cat) => editEntry({ cat })} />
                 <DetailRow T={T} icon="#" divider={inspectDependsOn.length > 0}>
                   <TagField T={T} tags={inspectDraft.tags} onBeginEdit={() => openInspectField("tags")} onChange={(tags) => editEntry({ tags })} />
                 </DetailRow>
@@ -7547,9 +7559,9 @@ function Reveal({ open, children }) {
   );
 }
 
-function DetailRow({ T, icon, children, divider = false }) {
+function DetailRow({ T, icon, children, divider = false, span = "full" }) {
   return (
-    <div className="flex items-center gap-3 px-3 py-3" style={{ borderBottom: divider ? `1px solid ${T.line}` : "none" }}>
+    <div className="flex items-center gap-3 px-3 py-3" style={{ borderBottom: divider ? `1px solid ${T.line}` : "none", ...rowSpan(span) }}>
       <div className="flex-1 min-w-0">{children}</div>
       <span style={{ color: T.dimText }} className="text-sm shrink-0">{icon}</span>
     </div>
@@ -8189,7 +8201,7 @@ function PillNav({ T, value, options, onPick, onArm = null, ariaLabel, surface =
 /* §4.4/§4.6. The same expansion inside the task's grouped rules card, which reads as
    one block of rules with its icons on the right — so the choices cannot bring their
    own surface without breaking the group. */
-function InlineChoiceRow({ T, icon, label, sub, options, value, onPick, dot = null, divider = false, editable = true, onBeginEdit = null, open: openProp = undefined, onToggle = null }) {
+function InlineChoiceRow({ T, icon, label, sub, options, value, onPick, dot = null, divider = false, editable = true, onBeginEdit = null, open: openProp = undefined, onToggle = null, span = "full" }) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const open = openProp ?? uncontrolledOpen;
   const setOpen = (next) => {
@@ -8200,7 +8212,7 @@ function InlineChoiceRow({ T, icon, label, sub, options, value, onPick, dot = nu
   const { box, stretch, settled } = useLiquidPill(optionsRef, [value, options.length, open]);
   useEffect(() => { if (!editable && openProp == null) setUncontrolledOpen(false); }, [editable, openProp]);
   return (
-    <div style={{ borderBottom: divider ? `1px solid ${T.line}` : "none" }}>
+    <div style={{ borderBottom: divider ? `1px solid ${T.line}` : "none", ...rowSpan(span, open) }}>
       <button disabled={!editable} onClick={(event) => { if (!open) onBeginEdit?.(event.currentTarget); setOpen(!open); }} className="nb-tap nb-hover-control flex items-center gap-3 px-3 py-3 w-full text-left disabled:opacity-100">
         <span className="flex-1 min-w-0">
           <span className="flex items-center gap-2">
