@@ -85,6 +85,7 @@ import {
 import { QUICK_ADD_SYNTAX, describeQuickAdd, parseQuickAdd, quickAddToEntry } from "./features/planner/quickAdd.js";
 import { matchCommands } from "./features/planner/commandPalette.js";
 import { getDayTasksWithCarry } from "./features/planner/carryForward.js";
+import { rowSpan } from "./features/planner/editorRowSpan.js";
 import { planOverdueForDate, pullableOverdue } from "./features/planner/overduePull.js";
 import { planWhenOptions } from "./features/planner/planWhen.js";
 import { AUTO_COMPLETE_DELAY_MS, autoCompleteStillValid, togglesLastOpenStep } from "./features/planner/autoComplete.js";
@@ -5623,7 +5624,7 @@ export default function Planner() {
                     editing form; these four carry one bounded value each and were
                     spending a whole row on it. See rowSpan: the split is a min-width
                     floor, so a pair becomes two rows when the content stops fitting. */}
-                <div className="flex flex-wrap gap-2" style={{ borderBottom: `1px solid ${T.line}` }}>
+                <div data-test="row-pair" className="flex flex-wrap gap-2" style={{ borderBottom: `1px solid ${T.line}` }}>
                   <InlineChoiceRow T={T} icon={<BellIcon size={13} />} span="half"
                     open={inspectField === "reminder"}
                     onToggle={() => openInspectField(inspectField === "reminder" ? null : "reminder")}
@@ -5658,7 +5659,7 @@ export default function Planner() {
                 {/* Category moved up from below the list row to partner the reward:
                     both are one bounded value, and leaving it stranded seven rows down
                     was the last full-width row that did not need to be one. */}
-                <div className="flex flex-wrap gap-2" style={{ borderBottom: `1px solid ${T.line}` }}>
+                <div data-test="row-pair" className="flex flex-wrap gap-2" style={{ borderBottom: `1px solid ${T.line}` }}>
                   <InlineChoiceRow T={T} icon={<UiIcon size={13}><path d="m8 2.5 1.2 3.2 3.3 1.1-3.3 1.2L8 11.5l-1.2-3.5-3.3-1.2 3.3-1.1L8 2.5Z" /></UiIcon>} span="half"
                     open={inspectField === "reward"}
                     onToggle={() => openInspectField(inspectField === "reward" ? null : "reward")}
@@ -5792,7 +5793,7 @@ export default function Planner() {
               the ones whose content has no fixed length keep the full width — see
               rowSpan for why the split is a min-width floor rather than a
               breakpoint. */}
-          <div className="flex flex-wrap gap-2 pt-1">
+          <div data-test="attribute-band" className="flex flex-wrap gap-2 pt-1">
             <InlineChoice T={T} surface={surface} icon="◑" tint={catColor(inspectDraft.cat)} span="half"
               open={inspectField === "category"}
               onToggle={() => openInspectField(inspectField === "category" ? null : "category")}
@@ -7699,27 +7700,6 @@ function InlineText({ T, value, onCommit, placeholder = "Untitled", multiline = 
 
 /* §4.6. Collapsed, an attribute costs one line. Tapping it grows the alternatives
    underneath rather than showing every choice all the time. */
-/* An attribute row takes either the whole band or half of it.
- *
- * Half rows sit in a wrapping flex over a min-width floor, so a pair splits into
- * two full rows when its content stops fitting rather than at a breakpoint chosen
- * against English labels. Nothing here transitions: §7.2 bans animating layout, and
- * the reflow is meant to be instant.
- *
- * An open choice row always takes the full width. Its options are wrapping chips and
- * half a band shreds them into three lines. Only one row is ever open — `inspectField`
- * holds a single field — so the partner simply drops below for as long as it lasts. */
-/* Measured against the longest label a paired field currently produces — the
-   reminder row's "When it starts, 10:30 AM" — at 390px, the narrowest width the
-   editors are built for. Re-measure if a longer option is added or the labels are
-   translated: the failure is silent, because the label span carries Tailwind's
-   `truncate` and a pair that should have split will quietly ellipsise instead. */
-const ROW_HALF_MIN = 168;
-function rowSpan(span, open = false) {
-  if (span !== "half" || open) return { flexBasis: "100%", flexGrow: 1, minWidth: 0 };
-  return { flexBasis: "calc(50% - 4px)", flexGrow: 1, minWidth: ROW_HALF_MIN };
-}
-
 function InlineChoice({ T, surface, icon, label, options, value, onPick, tint = null, dot = null, children = null, editable = true, onBeginEdit = null, open: openProp = undefined, onToggle = null, span = "full" }) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const open = openProp ?? uncontrolledOpen;
