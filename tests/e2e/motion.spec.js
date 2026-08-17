@@ -234,9 +234,18 @@ test.describe("the notch morph", () => {
     const transitions = await sheet.evaluate((node) => {
       const groups = node.getAnimations({ subtree: true })
         .filter((animation) => animation.animationName === "nbnotchgroupin");
+      /* Read the shape's own duration rather than hardcoding it, so the bound below
+         still means "inside the shape" if MORPH_MS is ever retuned. */
+      const morphMs = parseFloat(getComputedStyle(node).getPropertyValue("--nb-morph-dur"));
+      const arrivals = groups.map((animation) => {
+        const timing = animation.effect.getTiming();
+        return Math.round(Number(timing.delay) + Number(timing.duration));
+      });
       return {
         panel: getComputedStyle(node).transitionProperty,
+        morphMs,
         groupCount: groups.length,
+        lastArrival: arrivals.length ? Math.max(...arrivals) : null,
         groupDelays: groups.map((animation) => Math.round(Number(animation.effect.getTiming().delay))).sort((a, b) => a - b),
         groupProps: [...new Set(groups.flatMap((animation) => (
           animation.effect.getKeyframes().flatMap((frame) => Object.keys(frame))
@@ -249,8 +258,17 @@ test.describe("the notch morph", () => {
     for (const property of ["width", "height", "top", "left", "margin", "padding"]) {
       expect(transitions.groupProps, `content groups must not animate ${property}`).not.toContain(property);
     }
+    /* The bound this suite never had. The cascade used to finish at 1176ms against a
+       480ms shape, so content kept arriving long after the sheet had settled and the
+       whole gesture read as a fade laid over a morph. Nothing caught it, because every
+       assertion here described the stagger's shape and none described its end. */
+    expect(transitions.lastArrival,
+      "content must finish arriving inside the shape it belongs to").toBeLessThanOrEqual(transitions.morphMs);
     const [first, second] = transitions.groupDelays;
-    expect(second - first, "each group must wait a beat behind the one before it").toBeGreaterThan(50);
+    /* Loosened from 50ms deliberately, not incidentally: the step shrank to ~19ms when
+       the tail was cut. What still has to be true is that the groups are staggered at
+       all, not that they are slow. */
+    expect(second - first, "each group must wait a beat behind the one before it").toBeGreaterThan(8);
 
     await page.keyboard.press("Escape");
     await expect(sheet).toHaveCount(0, { timeout: 3000 });
