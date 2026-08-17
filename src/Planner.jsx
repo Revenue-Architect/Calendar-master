@@ -4567,6 +4567,13 @@ export default function Planner() {
           <div className="nb-month-view-mode flex items-center gap-2 min-w-0">
             {/* Timeline answers "when, and for how long"; agenda answers "what is
                 coming". Same days, same data, two questions. */}
+            {/* A filled bezel, not a bare outline. The reference reads as three
+                objects sharing one tray; with only a hairline the pills float on
+                the page and the tray is merely implied. Card behind, faint on the
+                inactive pills, accent on the active one gives three legible steps
+                instead of two. No padding on the tray: compact slot geometry is
+                computed from zero, so insetting it would offset every pill from
+                its own plate. */}
             <PillNav T={T} ariaLabel="View mode" testId="view-mode" value={viewMode}
               onArm={armSlide}
               compact={compactViewPills}
@@ -4577,7 +4584,7 @@ export default function Planner() {
                 beep("tick");
                 selectViewMode(mode, source);
               }}
-              className="shrink-0" style={{ border: `1px solid ${T.line}` }} />
+              className="shrink-0" style={{ background: T.card, border: `1px solid ${T.line}` }} />
           </div>
           {zoom === "month" ? (
             <div className="nb-month-controls flex items-center justify-end gap-2">
