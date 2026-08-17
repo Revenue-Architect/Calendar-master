@@ -114,6 +114,7 @@ import {
   clickFollowsCancelledArm,
   createIdleInteraction,
   createScrollSession,
+  timelineChromeIntent,
   restoreCancelledInteraction,
   resolveShortEventEdge,
 } from "./features/planner/timelineInteractionState.js";
@@ -162,6 +163,7 @@ import {
   viewPillIndicatorBox,
   viewPillFlipOffset,
   viewPillLabelClip,
+  viewPillLabelSide,
 } from "./features/motion/viewPills.js";
 import {
   deliverReminder,
@@ -3027,25 +3029,33 @@ export default function Planner() {
        without a person scrolling it. Focus mode must respond to intent, not to
        those layout corrections; the touch/wheel listeners below mark the first
        real scroll gesture. */
-    if (timelineFocusSource === "manual" || !timelineScrollSessionRef.current?.isActive?.()) {
+    /* A manual toggle sets focus for now, not forever. This used to short-circuit
+       on `timelineFocusSource === "manual"`, which latched: once the control had
+       been pressed, no later scroll could ever restore the chrome again, and the
+       ribbon stayed collapsed until a view change or reload reset the source.
+       Deliberate intent still wins over layout noise — the session check below is
+       what distinguishes a real gesture from a resize or an anchor correction —
+       but a real gesture is always allowed to take the wheel back. */
+    if (!timelineScrollSessionRef.current?.isActive?.()) {
       timelineScrollTopRef.current = nextScrollTop;
       return;
     }
     const previousScrollTop = timelineScrollTopRef.current;
-    const movingTowardMidnight = nextScrollTop < previousScrollTop - 1;
-    const movingAwayFromMidnight = nextScrollTop > previousScrollTop + 1;
     timelineScrollTopRef.current = nextScrollTop;
     const timelineView = viewMode === "timeline" && (zoom === "day" || zoom === "week");
     const mobileTimeline = window.matchMedia?.("(max-width:1023px)").matches && timelineView;
     if (!mobileTimeline) return;
-    if (nextScrollTop <= Math.max(48, dayHourHeight) && movingTowardMidnight) {
-      setTimelineFocused(false);
-      setTimelineFocusSource("auto");
-    }
-    if (movingAwayFromMidnight && nextScrollTop >= TIMELINE_FOCUS_TRIGGER_PX) {
-      setTimelineFocused(true);
-      setTimelineFocusSource("auto");
-    }
+    /* The verdict is a pure function so it can be tested; see
+       timelineChromeIntent for why restore is intent-based rather than
+       position-based, and what the previous asymmetry cost. */
+    const intent = timelineChromeIntent({
+      previousScrollTop,
+      nextScrollTop,
+      triggerPx: TIMELINE_FOCUS_TRIGGER_PX,
+    });
+    if (intent === "none") return;
+    setTimelineFocused(intent === "collapse");
+    setTimelineFocusSource("auto");
   }, [dayHourHeight, viewMode, zoom, timelineFocusSource]);
 
   const abortGesture = () => {
@@ -7915,7 +7925,7 @@ function LiquidPillIndicator({ T, box, stretch, settled = true, z = 0 }) {
       transformOrigin: "center",
       /* Same duration and same curve as the siblings, so the plate and the tabs
          it travels between are one gesture rather than two overlapping ones. */
-      transition: settled ? "transform 380ms var(--motion-lane)" : "none",
+      transition: settled ? "transform 260ms var(--motion-lane)" : "none",
       willChange: "transform",
       pointerEvents: "none",
     }} />
@@ -8006,7 +8016,7 @@ function PillNav({ T, value, options, onPick, onArm = null, ariaLabel, surface =
                    app's own reference point wants: index.css pitches it at
                    Moleskine Timepage, and that is premium-archetype motion —
                    350-600ms, no overshoot, evenly paced. */
-                transition: flip || instant ? "none" : "transform 380ms var(--motion-lane), color 260ms ease",
+                transition: flip || instant ? "none" : "transform 260ms var(--motion-lane), color 200ms ease",
               } : {
                 transition: "color 260ms ease",
               }),
@@ -8033,7 +8043,7 @@ function PillNav({ T, value, options, onPick, onArm = null, ariaLabel, surface =
                 whiteSpace: "nowrap",
                 ...(compact ? {
                   justifySelf: "start",
-                  clipPath: viewPillLabelClip(on),
+                  clipPath: viewPillLabelClip(on, viewPillLabelSide(index, activeIndex)),
                   opacity: on ? 1 : 0,
                   /* The outgoing word leaves before the incoming one arrives, and
                      both are slower than the pill they sit in. In the reference the
@@ -8041,7 +8051,7 @@ function PillNav({ T, value, options, onPick, onArm = null, ariaLabel, surface =
                      reads as the word being squeezed out rather than switched off,
                      which is only possible if the fade outlasts the first third of
                      the travel. */
-                  transition: instant ? "none" : "clip-path 380ms var(--motion-lane), opacity 240ms ease 60ms",
+                  transition: instant ? "none" : "clip-path 260ms var(--motion-lane), opacity 170ms ease 40ms",
                 } : null),
               }}>
               {label}

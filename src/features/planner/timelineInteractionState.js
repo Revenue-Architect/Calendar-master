@@ -237,3 +237,24 @@ export function createScrollSession({ timeoutMs = 180 } = {}) {
     },
   };
 }
+
+/* Whether a scroll gesture should collapse the day chrome, restore it, or leave
+ * it alone.
+ *
+ * Extracted as a pure decision because the two bugs it replaces were both
+ * invisible from the outside and unreachable from a browser test: the stream
+ * auto-positions to the current hour on open, and synthetic wheel input does not
+ * move it, so neither state could be driven from an e2e harness. Pure input in,
+ * verdict out, is testable.
+ *
+ * Restore is intent-based, not position-based. The previous rule required
+ * scrolling back within max(48, hourHeight) — 68px at the default scale — while
+ * collapse fired at 24px, so an upward scroll from any real depth did nothing
+ * and the chrome read as gone for good. Collapsing headers return on the
+ * gesture, not on arriving somewhere.
+ */
+export function timelineChromeIntent({ previousScrollTop, nextScrollTop, triggerPx = 24 }) {
+  if (nextScrollTop < previousScrollTop - 1) return "restore";
+  if (nextScrollTop > previousScrollTop + 1 && nextScrollTop >= triggerPx) return "collapse";
+  return "none";
+}

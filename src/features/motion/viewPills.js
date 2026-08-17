@@ -78,6 +78,28 @@ export function viewPillFlipOffset({
   return from.left - to.left;
 }
 
-export function viewPillLabelClip(active) {
-  return active ? "inset(0 0 0 0)" : "inset(0 100% 0 0)";
+/* Which edge a word is squeezed from depends on which side of the active tab it
+ * sits on, because the thing doing the squeezing is the tab that just grew.
+ *
+ * A tab to the LEFT of the active one is being pushed left, so the pressure
+ * comes from its right: inset(0 100% 0 0) eats it from the right edge inward.
+ * A tab to the RIGHT is being pushed right, so the pressure comes from its
+ * left: inset(0 0 0 100%) eats it from the left edge inward.
+ *
+ * The first pass clipped from the right in both cases. Forwards that reads
+ * correctly by accident — the growing tab really is to the right. Backwards it
+ * inverts: the word collapses away from the very thing pushing it, which is
+ * what made Actions → Timeline feel wrong while Timeline → Actions looked fine.
+ *
+ * The active tab needs no special case. It transitions out of whichever
+ * direction-correct collapsed state it was already in, so it opens from the
+ * side it is growing from. */
+export function viewPillLabelClip(active, position = "left") {
+  if (active) return "inset(0 0 0 0)";
+  return position === "right" ? "inset(0 0 0 100%)" : "inset(0 100% 0 0)";
+}
+
+/** Where tab `index` sits relative to the active tab. */
+export function viewPillLabelSide(index, activeIndex) {
+  return index > activeIndex ? "right" : "left";
 }

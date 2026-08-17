@@ -13,6 +13,7 @@ import {
   commitInteraction,
   createIdleInteraction,
   createScrollSession,
+  timelineChromeIntent,
   finishCommittedInteraction,
   interactionOwnerAllows,
   resolveShortEventEdge,
@@ -117,4 +118,20 @@ test("a scroll session expires after end instead of remaining sticky", async () 
   assert.equal(session.isActive(), true);
   await new Promise((resolve) => setTimeout(resolve, 30));
   assert.equal(session.isActive(), false);
+});
+
+test("timelineChromeIntent restores on any upward gesture, at any depth", () => {
+  /* The bug: restore required arriving near the top, so this returned "none". */
+  assert.equal(timelineChromeIntent({ previousScrollTop: 900, nextScrollTop: 700 }), "restore");
+  assert.equal(timelineChromeIntent({ previousScrollTop: 120, nextScrollTop: 100 }), "restore");
+});
+
+test("timelineChromeIntent collapses only past the trigger, moving away", () => {
+  assert.equal(timelineChromeIntent({ previousScrollTop: 0, nextScrollTop: 40 }), "collapse");
+  assert.equal(timelineChromeIntent({ previousScrollTop: 0, nextScrollTop: 10 }), "none");
+});
+
+test("timelineChromeIntent ignores sub-pixel jitter in both directions", () => {
+  assert.equal(timelineChromeIntent({ previousScrollTop: 500, nextScrollTop: 500 }), "none");
+  assert.equal(timelineChromeIntent({ previousScrollTop: 500, nextScrollTop: 500.5 }), "none");
 });
