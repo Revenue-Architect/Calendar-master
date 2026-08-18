@@ -1500,11 +1500,11 @@ export default function Planner() {
   useEffect(() => () => window.clearTimeout(slideTimer.current), []);
   const tm = (m) => fmtTime(m, clock);
 
-  const navOpen = navPhase === "opening" || navPhase === "open";
+  const navOpen = navPhase === "open";
   const openNavigation = useCallback(() => {
     window.clearTimeout(navCloseTimer.current);
-    navPhaseRef.current = "opening";
-    setNavPhase("opening");
+    navPhaseRef.current = "open";
+    setNavPhase("open");
   }, []);
   const finishNavigationClose = useCallback(() => {
     if (navPhaseRef.current !== "closing") return;
@@ -1520,7 +1520,7 @@ export default function Planner() {
     window.clearTimeout(navCloseTimer.current);
     /* transitionend is the clock. This is only a safety net for a browser that
        cancels the transition (for example during a visibility change). */
-    navCloseTimer.current = window.setTimeout(finishNavigationClose, reducedMotion ? 50 : 500);
+    navCloseTimer.current = window.setTimeout(finishNavigationClose, reducedMotion ? 50 : 700);
   }, [finishNavigationClose, reducedMotion]);
   const finishNavigationOnSurfaceTransition = useCallback((event) => {
     if (event.target !== event.currentTarget) return;
@@ -1528,11 +1528,8 @@ export default function Planner() {
     finishNavigationClose();
   }, [finishNavigationClose]);
   useEffect(() => {
-    if (navPhase !== "opening") return undefined;
-    const frame = requestAnimationFrame(() => {
-      setNavPhase("open");
-      navFirstItemRef.current?.focus({ preventScroll: true });
-    });
+    if (navPhase !== "open") return undefined;
+    const frame = requestAnimationFrame(() => navFirstItemRef.current?.focus({ preventScroll: true }));
     return () => cancelAnimationFrame(frame);
   }, [navPhase]);
   useEffect(() => {
@@ -1552,6 +1549,7 @@ export default function Planner() {
       if (!shell) return;
       const fit = navPageFit({ viewportWidth: window.innerWidth, viewportHeight: window.innerHeight });
       shell.style.setProperty("--nav-page-x", `${fit.travelX}px`);
+      shell.style.setProperty("--nav-page-y", `${fit.travelY}px`);
       shell.style.setProperty("--nav-clip-top", `${fit.clipTop}px`);
       shell.style.setProperty("--nav-clip-right", `${fit.clipRight}px`);
       shell.style.setProperty("--nav-clip-bottom", `${fit.clipBottom}px`);
@@ -4142,37 +4140,26 @@ export default function Planner() {
         .nb-nav-shell{
           --nav-width:304px;
           --nav-gap:18px;
-          /* Chosen by looking at it, against .92, .88 and .84. Larger values
-             keep the page taller but push more of the Actions column past the
-             right edge — .92 loses 43% of it and leaves only a 34px margin, so
-             the page reads as a window too small for its contents rather than a
-             card set back. At .80 the overhang is 66px, five per cent of the
-             page and incidental rather than structural, 88% of the column stays
-             on screen, and the 86px of symmetric margin is what makes the
-             recession legible as a deliberate one. */
-          --nav-margin-top:8px;
+          /* The frame you see is travel plus cut. The cut is the only part
+             that reaches the HUD, so it stays under the header's own 8px of
+             padding and the hamburger never loses its top. */
+          --nav-headroom:4px;
+          --nav-margin-top:16px;
           --nav-margin-right:22px;
-          --nav-margin-bottom:8px;
+          --nav-margin-bottom:16px;
           --nav-page-x:calc(var(--nav-width) + var(--nav-gap));
-          --nav-clip-top:var(--nav-margin-top);
+          --nav-page-y:calc(var(--nav-margin-top) - var(--nav-headroom));
+          --nav-clip-top:var(--nav-headroom);
           --nav-clip-right:var(--nav-margin-right);
-          --nav-clip-bottom:var(--nav-margin-bottom);
+          --nav-clip-bottom:calc(var(--nav-margin-bottom) + var(--nav-page-y));
           --nav-page-radius:22px;
-          /* The app's own dark-ground elevation, not a hand-rolled shadow.
-             This was 0 18px 48px rgb(0 0 0 / .28) — a black shadow cast by a
-             #0A0A0C page onto a #17181B shell, which is a 1.11 contrast ratio
-             with nothing between the two surfaces to separate them. index.css
-             already says why that cannot work: a shadow legible on cream is
-             invisible on obsidian, which is what --e2 and --sheen are for, and
-             the sheen in particular exists so a surface "catches light from
-             above and reads as an object rather than a rectangle of a different
-             colour". That is exactly this problem, and it matters more now the
-             page is smaller — the recession only reads if the page reads as a
-             discrete object rather than as content that shrank. */
-          --nav-page-shadow:var(--e2), var(--sheen);
-          --nav-page-duration:480ms;
+          /* No shadow: the clip cuts at the card's own edge, so an outer
+             drop shadow lands outside the visible shape and the inset sheen
+             lands under the cut. It painted the whole app every frame to
+             draw nothing. */
+          --nav-page-duration:520ms;
           --nav-content-duration:260ms;
-          --nav-item-stagger:28ms;
+          --nav-item-stagger:30ms;
           /* Deliberate ease-out, not a spring: every property lands once and
              stays there. Keeping the curve below 1 avoids the bounce that made
              the first pass feel disconnected from the shell. */
@@ -4185,16 +4172,15 @@ export default function Planner() {
            reflows. Mobile keeps its own rail clip. */
         .nb-app-surface{
           position:absolute;inset:0;z-index:2;height:auto;overflow:clip;overflow-anchor:none;transform:translate3d(0,0,0);clip-path:inset(0 0 0 0 round 0);
-          transform-origin:left center;border-radius:0;box-shadow:none;
-          transition:transform var(--nav-page-duration) var(--nav-ease),clip-path var(--nav-page-duration) var(--nav-ease),border-radius var(--nav-page-duration) var(--nav-ease),box-shadow var(--nav-page-duration) var(--nav-ease);
+          transform-origin:left center;box-shadow:none;
+          transition:transform var(--nav-page-duration) var(--nav-ease),clip-path var(--nav-page-duration) var(--nav-ease);
         }
-        .nb-app-surface-open{transform:translate3d(var(--nav-page-x),0,0);clip-path:inset(var(--nav-clip-top) var(--nav-clip-right) var(--nav-clip-bottom) 0 round var(--nav-page-radius));border-radius:var(--nav-page-radius);box-shadow:var(--nav-page-shadow)}
-        .nb-navigation{position:absolute;z-index:1;inset:0 auto 0 0;width:var(--nav-width);padding:22px 18px;color:#f2f0ea;display:flex;flex-direction:column;overflow:auto;transform:translate3d(-100%,0,0);transition:transform var(--nav-page-duration) var(--nav-ease)}
-        .nb-nav-shell[data-nav-state="open"] .nb-navigation,.nb-nav-shell[data-nav-state="closing"] .nb-navigation{transform:translate3d(0,0,0)}
+        .nb-app-surface-open{transform:translate3d(var(--nav-page-x),var(--nav-page-y),0);clip-path:inset(var(--nav-clip-top) var(--nav-clip-right) var(--nav-clip-bottom) 0 round var(--nav-page-radius))}
+        .nb-navigation{position:absolute;z-index:1;inset:0 auto 0 0;width:var(--nav-width);padding:22px 18px;color:#f2f0ea;display:flex;flex-direction:column;overflow:auto;transform:translate3d(-36%,0,0);transition:transform var(--nav-page-duration) var(--nav-ease)}
+        .nb-nav-shell:not([data-nav-state="closed"]) .nb-navigation{transform:translate3d(0,0,0)}
         .nb-navigation[aria-hidden="true"]{pointer-events:none}
-        .nb-nav-brand,.nb-nav-item,.nb-nav-membership{opacity:0;transform:translate3d(-10px,0,0);transition:opacity var(--nav-content-duration) var(--nav-ease),transform var(--nav-content-duration) var(--nav-ease)}
-        .nb-nav-shell[data-nav-state="open"] .nb-nav-brand,.nb-nav-shell[data-nav-state="open"] .nb-nav-item,.nb-nav-shell[data-nav-state="open"] .nb-nav-membership{opacity:1;transform:translate3d(0,0,0);transition-delay:calc(var(--nav-index, 0) * var(--nav-item-stagger))}
-        .nb-nav-shell[data-nav-state="closing"] .nb-nav-brand,.nb-nav-shell[data-nav-state="closing"] .nb-nav-item,.nb-nav-shell[data-nav-state="closing"] .nb-nav-membership{transition-delay:0ms}
+        .nb-nav-shell .nb-nav-brand,.nb-nav-shell .nb-nav-item,.nb-nav-shell .nb-nav-membership{opacity:0;transform:translate3d(-14px,0,0);transition:opacity 260ms var(--nav-ease),transform 260ms var(--nav-ease),background-color 160ms ease,color 160ms ease}
+        .nb-nav-shell:not([data-nav-state="closed"]) .nb-nav-brand,.nb-nav-shell:not([data-nav-state="closed"]) .nb-nav-item,.nb-nav-shell:not([data-nav-state="closed"]) .nb-nav-membership{opacity:1;transform:translate3d(0,0,0);transition-delay:calc(var(--nav-index, 0) * var(--nav-item-stagger))}
         .nb-nav-item{font-family:${MONO};font-size:15px;letter-spacing:.1em;text-align:left;padding:13px 12px;border-radius:10px;color:#c8c7c0}
         .nb-nav-item:hover,.nb-nav-item:focus-visible{background:#2a2b2f;color:#fff;outline:none}
         .nb-nav-membership{margin-top:auto;padding:15px 12px;border:1px solid #37383d;border-radius:12px;color:#aaa9a2}
@@ -4208,7 +4194,7 @@ export default function Planner() {
              Animating width from the viewport to 40px made its complete layout
              reflow on every frame; clip-path reveals a narrowing left slice and
              transform carries that stable slice to the right edge instead. */
-          .nb-app-surface{inset:0 auto auto 0;width:100%;height:100%;clip-path:inset(0 0 0 0 round 0);transition:transform var(--nav-page-duration) var(--nav-ease),clip-path var(--nav-page-duration) var(--nav-ease),box-shadow var(--nav-page-duration) var(--nav-ease)}
+          .nb-app-surface{inset:0 auto auto 0;width:100%;height:100%;clip-path:inset(0 0 0 0 round 0);transition:transform var(--nav-page-duration) var(--nav-ease),clip-path var(--nav-page-duration) var(--nav-ease)}
           .nb-app-surface-open{inset:0 auto auto 0;width:100%;height:100%;transform:translate3d(calc(100% - 49px),0,0);clip-path:inset(14px calc(100% - 44px) 14px 0 round 16px);border-radius:16px;box-shadow:none}
           .nb-app-surface>*:not(.nb-mobile-calendar-return){opacity:1;transition:opacity 150ms ease}
           .nb-app-surface-open>*:not(.nb-mobile-calendar-return){opacity:0;pointer-events:none}

@@ -1,60 +1,73 @@
 /* Fit the open navigation page as a recessed card with even black borders.
  *
- * The page keeps its full layout. It travels on X and a clip eats a matching
- * frame, so top/right/bottom stay similar without leftover-height gutters and
- * without reflowing the planner on every frame. */
+ * The page keeps its full layout: it travels on transform and a clip eats the
+ * frame, so nothing reflows. The catch is that the clip is measured from the
+ * element, not the viewport — translating the page moves the cut with it. So a
+ * thick top border cannot come from the cut alone without slicing into the
+ * HUD, which is where the hamburger lives, 8px from the page's own top edge.
+ *
+ * Splitting it fixes both at once. The border you see is travel plus cut; the
+ * clearance the hamburger gets is the cut alone. Keeping the cut shallow and
+ * paying the rest in travel gives a 16px frame that still clears the button.
+ */
+
+const HEADROOM = 4;
 
 export function navPageFit({
   viewportWidth,
   viewportHeight,
   navWidth = 304,
   gap = 18,
-  marginTop = 8,
+  marginTop = 16,
   marginRight = 22,
-  marginBottom = 8,
+  marginBottom = 16,
+  headroom = HEADROOM,
 } = {}) {
   const left = navWidth + gap;
-  const fallback = {
-    x: left,
-    y: 0,
-    scale: 1,
-    top: marginTop,
-    right: marginRight,
-    bottom: marginBottom,
-    left,
+  const clipTop = Math.min(headroom, marginTop);
+  const travelY = marginTop - clipTop;
+  const fit = {
     travelX: left,
-    clipTop: marginTop,
+    travelY,
+    clipTop,
     clipRight: marginRight + left,
-    clipBottom: marginBottom,
+    clipBottom: marginBottom + travelY,
     radius: 22,
+    /* what the eye actually reads, once travel and cut are combined */
+    frameTop: travelY + clipTop,
+    frameRight: marginRight,
+    frameBottom: marginBottom,
+    frameLeft: left,
   };
   const width = Number(viewportWidth);
   const height = Number(viewportHeight);
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
-    return fallback;
+    return fit;
   }
-  return {
-    ...fallback,
-    left: Math.min(left, Math.max(0, width - marginRight - 1)),
-    travelX: Math.min(left, Math.max(0, width - marginRight - 1)),
-  };
+  const travelX = Math.min(left, Math.max(0, width - marginRight - 1));
+  return { ...fit, travelX, clipRight: marginRight + travelX, frameLeft: travelX };
 }
 
 export function navDrawerMotion(phase = "closed") {
-  const settled = phase === "open" || phase === "closing";
+  /* The drawer is always mounted, so it already has a resting transform to
+     travel from. Gating it on "open" alone put it one frame behind the page;
+     under a stalled frame that reads as the left rail sitting still and then
+     snapping. Everything that is not closed is travelling. */
+  const travelling = phase !== "closed";
   return {
-    transform: settled ? "translate3d(0%, 0px, 0)" : "translate3d(-100%, 0px, 0)",
-    itemOpacity: phase === "open" ? 1 : 0,
-    itemDelayMs: phase === "open" ? 28 : 0,
+    transform: travelling ? "translate3d(0%, 0px, 0)" : "translate3d(-36%, 0px, 0)",
+    itemOpacity: travelling ? 1 : 0,
+    itemDelayMs: travelling ? 30 : 0,
   };
 }
 
 export function navPageMotion({
   open = false,
   travelX = 322,
-  clipTop = 8,
+  travelY = 12,
+  clipTop = 4,
   clipRight = 344,
-  clipBottom = 8,
+  clipBottom = 28,
   radius = 22,
 } = {}) {
   if (!open) {
@@ -64,9 +77,9 @@ export function navPageMotion({
     };
   }
   return {
-    transform: `translate3d(${travelX}px, 0px, 0)`,
+    transform: `translate3d(${travelX}px, ${travelY}px, 0)`,
     clipPath: `inset(${clipTop}px ${clipRight}px ${clipBottom}px 0px round ${radius}px)`,
-    durationMs: 480,
+    durationMs: 520,
     easing: "cubic-bezier(.22,.61,.36,1)",
   };
 }
