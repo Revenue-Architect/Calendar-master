@@ -8632,6 +8632,8 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
      so the keyboard cannot drive the sheet's height. See the measure effect. */
   const viewportCap = useRef(0);
   const viewportWidth = useRef(0);
+  const heightMeasureFrame = useRef(null);
+  const lastSheetHeight = useRef(null);
   useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
   useEffect(() => { beforeCloseRef.current = beforeClose; }, [beforeClose]);
   const requestClose = useCallback(() => {
@@ -8707,49 +8709,101 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
        or a window drag, which should re-cap, from a keyboard, which must not. */
     if (!viewportCap.current) viewportCap.current = window.innerHeight;
     if (!viewportWidth.current) viewportWidth.current = window.innerWidth;
-    const measure = () => {
-      const next = Math.min(content.scrollHeight, Math.round(viewportCap.current * .88));
-      setSheetHeight(next);
-      /* A notch sheet is mid-morph for its opening animation; letting height
-         transition underneath it animates the same box on two curves at once. */
-      if (morphRef.current === "notch" && !openedRef.current) return;
-      window.requestAnimationFrame(() => setHeightReady(true));
+    /* Establish the final resting box before first paint, but do not animate its
+       height yet. The panel's entry animation can then stay entirely on compositor
+       properties instead of relaying out sticky/overflow descendants mid-flight. */
+    const next = Math.min(content.scrollHeight, Math.round(viewportCap.current * .88));
+    lastSheetHeight.current = next;
+    setSheetHeight(next);
+    return () => {
+      window.cancelAnimationFrame(heightMeasureFrame.current);
+      heightMeasureFrame.current = null;
     };
-    const onResize = () => {
-      if (window.innerWidth === viewportWidth.current) return;
-      viewportWidth.current = window.innerWidth;
-      viewportCap.current = window.innerHeight;
-      measure();
-    };
-    measure();
-    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
-    observer?.observe(content);
-    window.addEventListener("resize", onResize);
-    return () => { observer?.disconnect(); window.removeEventListener("resize", onResize); };
   }, [morph]);
   const guardedClose = useCallback(() => {
     if (Date.now() - openedAt.current < 350) return;
     requestClose();
   }, [requestClose]);
   useEffect(() => {
-    if (morph !== "notch") { openedRef.current = true; return undefined; }
     const panel = dialogRef.current;
     if (!panel) return undefined;
+    let heightReadyFrame = null;
+    const finishEntry = () => {
+      if (closingRef.current || openedRef.current) return;
+      openedRef.current = true;
+      /* Content can settle while the observer is intentionally disconnected
+         (fonts and composer branches are common). Absorb that final geometry with
+         transitions still off, then arm interpolation on the following frame.
+         Otherwise the first observer record becomes a delayed second bounce. */
+      const content = contentRef.current;
+      if (content?.isConnected) {
+        const next = Math.min(content.scrollHeight, Math.round(viewportCap.current * .88));
+        if (lastSheetHeight.current !== next) {
+          lastSheetHeight.current = next;
+          setSheetHeight(next);
+        }
+      }
+      heightReadyFrame = window.requestAnimationFrame(() => {
+        heightReadyFrame = null;
+        if (!closingRef.current) setHeightReady(true);
+      });
+    };
     const done = (event) => {
       /* Only the panel's own entry animation, not one bubbling from inside it. */
       if (event.target !== panel || closingRef.current) return;
-      openedRef.current = true;
-      setHeightReady(true);
+      if (!["nbfluid", "nbfluidorigin", "nbnotchin"].includes(event.animationName)) return;
+      finishEntry();
     };
     panel.addEventListener("animationend", done);
-    /* A belt for the case the animation never fires — a hidden tab, or reduced
-       motion stripping it — so the sheet can never be left unable to resize. */
-    const fallback = window.setTimeout(() => { openedRef.current = true; setHeightReady(true); }, 600);
+    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+      || window.getComputedStyle(panel).animationName === "none";
+    /* A no-motion sheet can interpolate later changes immediately. All other sheet
+       kinds—not only notch sheets—wait for their entry animation to finish. */
+    const readyFrame = reduced ? window.requestAnimationFrame(finishEntry) : null;
+    /* A belt for a backgrounded tab or cancelled CSS animation. */
+    const fallback = reduced ? null : window.setTimeout(finishEntry, MORPH_MS + 120);
     return () => {
       panel.removeEventListener("animationend", done);
       window.clearTimeout(fallback);
+      window.cancelAnimationFrame(readyFrame);
+      window.cancelAnimationFrame(heightReadyFrame);
     };
   }, [morph]);
+  useLayoutEffect(() => {
+    if (!heightReady) return undefined;
+    const content = contentRef.current;
+    if (!content) return undefined;
+    /* ResizeObserver can emit several records while an editor unfolds. Collapse
+       those records into one read/write per frame and skip identical targets, so
+       React never restarts the same height transition or creates an observer loop. */
+    const scheduleMeasure = () => {
+      if (closingRef.current || heightMeasureFrame.current != null) return;
+      heightMeasureFrame.current = window.requestAnimationFrame(() => {
+        heightMeasureFrame.current = null;
+        if (closingRef.current || !content.isConnected) return;
+        const next = Math.min(content.scrollHeight, Math.round(viewportCap.current * .88));
+        if (lastSheetHeight.current === next) return;
+        lastSheetHeight.current = next;
+        setSheetHeight(next);
+      });
+    };
+    const onResize = () => {
+      if (window.innerWidth === viewportWidth.current) return;
+      viewportWidth.current = window.innerWidth;
+      viewportCap.current = window.innerHeight;
+      scheduleMeasure();
+    };
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(scheduleMeasure) : null;
+    observer?.observe(content);
+    window.addEventListener("resize", onResize);
+    scheduleMeasure();
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", onResize);
+      window.cancelAnimationFrame(heightMeasureFrame.current);
+      heightMeasureFrame.current = null;
+    };
+  }, [heightReady]);
   useEffect(() => {
     if (morph !== "notch" || !morphSurface) {
       setMorphStage("open");
