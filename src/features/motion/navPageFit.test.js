@@ -46,11 +46,14 @@ test("the open page travels on X instead of shrinking its layout box", () => {
   assert.equal(open.durationMs, 520);
 });
 
-test("the drawer travels on the same beat as the page, not a frame later", () => {
+test("only the open phase reveals the drawer and labels", () => {
   assert.equal(navDrawerMotion("closed").transform, "translate3d(-36%, 0px, 0)");
-  assert.equal(navDrawerMotion("opening").transform, "translate3d(0%, 0px, 0)");
+  assert.equal(navDrawerMotion("opening").transform, "translate3d(-36%, 0px, 0)");
   assert.equal(navDrawerMotion("open").transform, "translate3d(0%, 0px, 0)");
-  assert.equal(navDrawerMotion("closing").transform, "translate3d(0%, 0px, 0)");
+  assert.equal(navDrawerMotion("closing").transform, "translate3d(-36%, 0px, 0)");
+  assert.equal(navDrawerMotion("closing").itemOpacity, 0);
+  assert.equal(navDrawerMotion("closing").itemDelayMs, 0);
+  assert.equal(navDrawerMotion("closing").itemDurationMs, navPageMotion({ open: true }).durationMs);
 });
 
 test("open labels stagger in instead of arriving as one slab", () => {
@@ -60,6 +63,7 @@ test("open labels stagger in instead of arriving as one slab", () => {
   assert.equal(closed.itemDelayMs, 0);
   assert.equal(open.itemOpacity, 1);
   assert.equal(open.itemDelayMs, 30);
+  assert.equal(open.itemDurationMs, 260);
   /* eight slots, so the last label has to land before the card settles */
-  assert.ok(open.itemDelayMs * 7 + 260 < navPageMotion({ open: true }).durationMs + 40);
+  assert.ok(open.itemDelayMs * 7 + open.itemDurationMs < navPageMotion({ open: true }).durationMs + 40);
 });

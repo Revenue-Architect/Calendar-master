@@ -1,6 +1,18 @@
 import { expect, test } from "@playwright/test";
 import { openPlanner } from "./helpers.js";
 
+function expectMonotonic(samples, key, direction, message) {
+  const values = samples.map((sample) => sample[key]);
+  for (let index = 1; index < values.length; index += 1) {
+    const delta = values[index] - values[index - 1];
+    if (direction === "down") {
+      expect(delta, `${message}: ${values.join(", ")}`).toBeLessThanOrEqual(1);
+    } else {
+      expect(delta, `${message}: ${values.join(", ")}`).toBeGreaterThanOrEqual(-1);
+    }
+  }
+}
+
 test.describe("the floating navigation shell", () => {
   test("drawer starts off-screen and labels stagger in", async ({ page }) => {
     await openPlanner(page);
@@ -181,7 +193,112 @@ test.describe("the floating navigation shell", () => {
     expect(pressed.transform).toBe("none");
   });
 
-  test("closing completes from the surface transition", async ({ page }) => {
+  test("surface, drawer and labels reverse together on desktop and mobile", async ({ page }) => {
+    for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 601 }]) {
+      await page.setViewportSize(viewport);
+      await openPlanner(page);
+      await page.getByTestId("nav-toggle").click();
+      await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "open");
+      await page.waitForTimeout(560);
+
+      const motion = await page.evaluate(async () => {
+        const shell = document.querySelector('[data-test="nav-shell"]');
+        const surface = document.querySelector('[data-test="app-surface"]');
+        const drawer = document.querySelector("#planner-navigation");
+        const label = drawer.querySelector(".nb-nav-item");
+        const toggle = document.querySelector('[data-test="nav-toggle"]');
+        const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+        const x = (node) => new DOMMatrixReadOnly(getComputedStyle(node).transform).m41;
+        const sample = () => ({
+          phase: shell.dataset.navState,
+          surfaceX: x(surface),
+          drawerX: x(drawer),
+          labelOpacity: Number.parseFloat(getComputedStyle(label).opacity),
+        });
+        const frames = async (count) => {
+          const samples = [];
+          for (let index = 0; index < count; index += 1) {
+            await frame();
+            samples.push(sample());
+          }
+          return samples;
+        };
+
+        const busyUntil = performance.now() + 24;
+        while (performance.now() < busyUntil) Math.sqrt(performance.now());
+        const pressedAt = performance.now();
+        toggle.click();
+        const committedAt = performance.now();
+        const closing = await frames(8);
+        toggle.click();
+        const reopening = await frames(34);
+        return { commitMs: committedAt - pressedAt, closing, reopening, final: sample() };
+      });
+
+      expect(motion.commitMs, `${viewport.width}px press-to-phase commit`).toBeLessThan(50);
+      expect(motion.closing.every((sample) => sample.phase === "closing")).toBe(true);
+      expectMonotonic(motion.closing, "surfaceX", "down", `${viewport.width}px surface close`);
+      expectMonotonic(motion.closing, "drawerX", "down", `${viewport.width}px drawer close`);
+      expectMonotonic(motion.closing, "labelOpacity", "down", `${viewport.width}px label close`);
+      expect(motion.closing[0].surfaceX - motion.closing.at(-1).surfaceX).toBeGreaterThan(8);
+      expect(motion.closing[0].drawerX - motion.closing.at(-1).drawerX).toBeGreaterThan(2);
+      expect(motion.closing[0].labelOpacity - motion.closing.at(-1).labelOpacity).toBeGreaterThan(0.05);
+
+      expect(motion.reopening.every((sample) => sample.phase === "open")).toBe(true);
+      expectMonotonic(motion.reopening, "surfaceX", "up", `${viewport.width}px surface reopen`);
+      expectMonotonic(motion.reopening, "drawerX", "up", `${viewport.width}px drawer reopen`);
+      expectMonotonic(motion.reopening, "labelOpacity", "up", `${viewport.width}px label reopen`);
+      expect(Math.abs(motion.reopening[0].surfaceX - motion.closing.at(-1).surfaceX)).toBeLessThan(35);
+      expect(Math.abs(motion.reopening[0].drawerX - motion.closing.at(-1).drawerX)).toBeLessThan(12);
+      expect(motion.final.phase).toBe("open");
+    }
+  });
+
+  test("an interrupted close ignores stale completion and settles every channel", async ({ page }) => {
+    await openPlanner(page);
+    const shell = page.getByTestId("nav-shell");
+    const surface = page.getByTestId("app-surface");
+    const trigger = page.getByTestId("nav-toggle");
+
+    await trigger.click();
+    await page.waitForTimeout(560);
+    await trigger.evaluate((node) => node.click());
+    await page.waitForTimeout(90);
+    await trigger.evaluate((node) => node.click());
+    await page.waitForTimeout(35);
+    await trigger.evaluate((node) => node.click());
+    await expect(shell).toHaveAttribute("data-nav-state", "closing");
+
+    await surface.dispatchEvent("transitionend", { propertyName: "transform" });
+    await expect(shell).toHaveAttribute("data-nav-state", "closing");
+    await expect(shell).toHaveAttribute("data-nav-state", "closed");
+
+    await expect.poll(() => page.evaluate(() => {
+      const nodes = [
+        document.querySelector('[data-test="app-surface"]'),
+        document.querySelector("#planner-navigation"),
+        ...document.querySelectorAll(".nb-nav-brand,.nb-nav-item,.nb-nav-membership"),
+      ];
+      return nodes.flatMap((node) => node.getAnimations()).filter((animation) => animation.playState === "running").length;
+    })).toBe(0);
+
+    const settled = await page.evaluate(async () => {
+      const surfaceNode = document.querySelector('[data-test="app-surface"]');
+      const drawer = document.querySelector("#planner-navigation");
+      const label = drawer.querySelector(".nb-nav-item");
+      const read = () => ({
+        surface: getComputedStyle(surfaceNode).transform,
+        drawer: getComputedStyle(drawer).transform,
+        opacity: getComputedStyle(label).opacity,
+      });
+      const before = read();
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      return { before, after: read() };
+    });
+    expect(settled.after).toEqual(settled.before);
+  });
+
+  test("closing completes from the surface transition", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 601 });
     await openPlanner(page);
 
@@ -192,11 +309,10 @@ test.describe("the floating navigation shell", () => {
     await page.getByTestId("mobile-calendar-return").click();
     await expect(shell).toHaveAttribute("data-nav-state", "closing");
 
-    /* CSS owns the actual duration. The old 320ms JavaScript timer ended a
-       340ms surface transition early and could also hide reverse-staggered nav
-       items mid-flight. Completing from transitionend keeps those clocks one. */
-    await surface.dispatchEvent("transitionend", { propertyName: "transform" });
-    expect(await shell.getAttribute("data-nav-state")).toBe("closed");
+    /* CSS owns the actual duration. The shell must not report closed until the
+       surface, drawer and labels have reached their shared concealed target. */
+    await expect(shell).toHaveAttribute("data-nav-state", "closed");
+    await expect(surface).not.toHaveClass(/nb-app-surface-open/);
   });
 
   test("reduced motion retains navigation semantics without staged movement", async ({ page }) => {
@@ -206,5 +322,8 @@ test.describe("the floating navigation shell", () => {
 
     await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "open");
     await expect(page.getByRole("navigation", { name: "Primary navigation" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
+    await expect(page.getByTestId("nav-toggle")).toBeFocused();
   });
 });

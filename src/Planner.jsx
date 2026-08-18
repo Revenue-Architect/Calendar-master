@@ -968,10 +968,6 @@ export default function Planner() {
     observer.observe(inner);
     timelineChromeObserverRef.current = observer;
   }, []);
-  /* The shell has explicit phases so the dark application frame is stable before
-     the page moves, and so close can reverse cleanly instead of unmounting the
-     navigation underneath its exit transition. */
-  const [navPhase, setNavPhase] = useState("closed");
   const [actionsOpen, setActionsOpen] = useState(() => {
     try {
       const stored = window.localStorage.getItem("nbmp:ui:actionsOpen");
@@ -1014,12 +1010,6 @@ export default function Planner() {
   const ribbonPositionedRef = useRef(false);
   const ribbonWindowStartRef = useRef(ribbonInitialWindowStart);
   const ribbonScrollLockRef = useRef(false);
-  const navToggleRef = useRef(null);
-  const navShellRef = useRef(null);
-  const navFirstItemRef = useRef(null);
-  const navCloseTimer = useRef(null);
-  const navPhaseRef = useRef(navPhase);
-  navPhaseRef.current = navPhase;
   /* The timeline's touch gestures are delegated to the stream element rather than
      bound per card, so the effect that installs them has to know when that element
      is *replaced* — and it is, routinely: the page wrapper is keyed on the day
@@ -1499,66 +1489,6 @@ export default function Planner() {
   }, [reducedMotion, viewMode]);
   useEffect(() => () => window.clearTimeout(slideTimer.current), []);
   const tm = (m) => fmtTime(m, clock);
-
-  const navOpen = navPhase === "open";
-  const openNavigation = useCallback(() => {
-    window.clearTimeout(navCloseTimer.current);
-    navPhaseRef.current = "open";
-    setNavPhase("open");
-  }, []);
-  const finishNavigationClose = useCallback(() => {
-    if (navPhaseRef.current !== "closing") return;
-    window.clearTimeout(navCloseTimer.current);
-    navPhaseRef.current = "closed";
-    setNavPhase("closed");
-    requestAnimationFrame(() => navToggleRef.current?.focus({ preventScroll: true }));
-  }, []);
-  const closeNavigation = useCallback(() => {
-    if (navPhaseRef.current === "closed" || navPhaseRef.current === "closing") return;
-    navPhaseRef.current = "closing";
-    setNavPhase("closing");
-    window.clearTimeout(navCloseTimer.current);
-    /* transitionend is the clock. This is only a safety net for a browser that
-       cancels the transition (for example during a visibility change). */
-    navCloseTimer.current = window.setTimeout(finishNavigationClose, reducedMotion ? 50 : 700);
-  }, [finishNavigationClose, reducedMotion]);
-  const finishNavigationOnSurfaceTransition = useCallback((event) => {
-    if (event.target !== event.currentTarget) return;
-    if (event.propertyName && !["transform", "clip-path"].includes(event.propertyName)) return;
-    finishNavigationClose();
-  }, [finishNavigationClose]);
-  useEffect(() => {
-    if (navPhase !== "open") return undefined;
-    const frame = requestAnimationFrame(() => navFirstItemRef.current?.focus({ preventScroll: true }));
-    return () => cancelAnimationFrame(frame);
-  }, [navPhase]);
-  useEffect(() => {
-    const onKeyDown = (event) => {
-      if (event.key === "Escape" && navPhase !== "closed") {
-        event.preventDefault();
-        closeNavigation();
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [closeNavigation, navPhase]);
-  useEffect(() => () => window.clearTimeout(navCloseTimer.current), []);
-  useLayoutEffect(() => {
-    const apply = () => {
-      const shell = navShellRef.current;
-      if (!shell) return;
-      const fit = navPageFit({ viewportWidth: window.innerWidth, viewportHeight: window.innerHeight });
-      shell.style.setProperty("--nav-page-x", `${fit.travelX}px`);
-      shell.style.setProperty("--nav-page-y", `${fit.travelY}px`);
-      shell.style.setProperty("--nav-clip-top", `${fit.clipTop}px`);
-      shell.style.setProperty("--nav-clip-right", `${fit.clipRight}px`);
-      shell.style.setProperty("--nav-clip-bottom", `${fit.clipBottom}px`);
-      shell.style.setProperty("--nav-page-radius", `${fit.radius}px`);
-    };
-    apply();
-    window.addEventListener("resize", apply);
-    return () => window.removeEventListener("resize", apply);
-  }, [ready]);
 
   /* The theme lives in state, so the page around the app has to follow it: the body
      (otherwise overscroll shows a mismatched strip), the browser chrome on mobile,
@@ -4093,26 +4023,17 @@ export default function Planner() {
   const actionsLayout = viewMode === "actions" ? "nb-actions-full" : (actionsOpen ? "nb-actions-open" : "nb-actions-closed");
 
   return (
-    <div ref={navShellRef} data-test="nav-shell" data-nav-state={navPhase} className="nb-nav-shell" style={{ fontFamily: DISPLAY }}>
-      <NavigationShell
-        phase={navPhase}
-        firstItemRef={navFirstItemRef}
-        onTimeline={() => { beep("tick"); selectViewMode("timeline"); closeNavigation(); }}
-        onActions={() => { beep("tick"); selectViewMode("actions"); closeNavigation(); }}
-        onSetup={() => { beep("click"); setSettings(true); closeNavigation(); }}
-        onNotes={() => { beep("click"); setNotebook("all"); closeNavigation(); }}
-        onShortcuts={() => { beep("click"); setShortcuts(true); closeNavigation(); }}
-        onToday={() => { jumpTo(todayKey); setMonthCursor(new Date()); closeNavigation(); }}
-      />
-      <div data-test="app-surface" className={`nb-root nb-app-surface ${navOpen ? "nb-app-surface-open" : ""} flex flex-col`}
-        onTransitionEnd={finishNavigationOnSurfaceTransition}
-        onPointerDown={(event) => {
-          if (!navOpen || event.target.closest("[data-test='nav-toggle'], [data-test='mobile-calendar-return']")) return;
-          event.preventDefault();
-          closeNavigation();
-        }}
-        style={{ background: T.bg, color: T.text, fontFamily: DISPLAY }}>
-      <button data-test="mobile-calendar-return" type="button" aria-label="Return to calendar" onClick={closeNavigation} className="nb-mobile-calendar-return">CALENDAR</button>
+    <NavigationFrame
+      reducedMotion={reducedMotion}
+      shellStyle={{ fontFamily: DISPLAY }}
+      surfaceStyle={{ background: T.bg, color: T.text, fontFamily: DISPLAY }}
+      onTimeline={() => { beep("tick"); selectViewMode("timeline"); }}
+      onActions={() => { beep("tick"); selectViewMode("actions"); }}
+      onSetup={() => { beep("click"); setSettings(true); }}
+      onNotes={() => { beep("click"); setNotebook("all"); }}
+      onShortcuts={() => { beep("click"); setShortcuts(true); }}
+      onToday={() => { jumpTo(todayKey); setMonthCursor(new Date()); }}
+    >
       <style>{`
         /* A touch browser zooms the whole viewport when it focuses a field whose
            text is under 16px, and every sheet here autofocuses one. Standalone
@@ -4177,10 +4098,10 @@ export default function Planner() {
         }
         .nb-app-surface-open{transform:translate3d(var(--nav-page-x),var(--nav-page-y),0);clip-path:inset(var(--nav-clip-top) var(--nav-clip-right) var(--nav-clip-bottom) 0 round var(--nav-page-radius))}
         .nb-navigation{position:absolute;z-index:1;inset:0 auto 0 0;width:var(--nav-width);padding:22px 18px;color:#f2f0ea;display:flex;flex-direction:column;overflow:auto;transform:translate3d(-36%,0,0);transition:transform var(--nav-page-duration) var(--nav-ease)}
-        .nb-nav-shell:not([data-nav-state="closed"]) .nb-navigation{transform:translate3d(0,0,0)}
+        .nb-nav-shell[data-nav-state="open"] .nb-navigation{transform:translate3d(0,0,0)}
         .nb-navigation[aria-hidden="true"]{pointer-events:none}
-        .nb-nav-shell .nb-nav-brand,.nb-nav-shell .nb-nav-item,.nb-nav-shell .nb-nav-membership{opacity:0;transform:translate3d(-14px,0,0);transition:opacity 260ms var(--nav-ease),transform 260ms var(--nav-ease),background-color 160ms ease,color 160ms ease}
-        .nb-nav-shell:not([data-nav-state="closed"]) .nb-nav-brand,.nb-nav-shell:not([data-nav-state="closed"]) .nb-nav-item,.nb-nav-shell:not([data-nav-state="closed"]) .nb-nav-membership{opacity:1;transform:translate3d(0,0,0);transition-delay:calc(var(--nav-index, 0) * var(--nav-item-stagger))}
+        .nb-nav-shell .nb-nav-brand,.nb-nav-shell .nb-nav-item,.nb-nav-shell .nb-nav-membership{opacity:0;transform:translate3d(-14px,0,0);transition:opacity var(--nav-page-duration) var(--nav-ease),transform var(--nav-page-duration) var(--nav-ease),background-color 160ms ease,color 160ms ease}
+        .nb-nav-shell[data-nav-state="open"] .nb-nav-brand,.nb-nav-shell[data-nav-state="open"] .nb-nav-item,.nb-nav-shell[data-nav-state="open"] .nb-nav-membership{opacity:1;transform:translate3d(0,0,0);transition-duration:var(--nav-content-duration),var(--nav-content-duration),160ms,160ms;transition-delay:calc(var(--nav-index, 0) * var(--nav-item-stagger)),calc(var(--nav-index, 0) * var(--nav-item-stagger)),0ms,0ms}
         .nb-nav-item{font-family:${MONO};font-size:15px;letter-spacing:.1em;text-align:left;padding:13px 12px;border-radius:10px;color:#c8c7c0}
         .nb-nav-item:hover,.nb-nav-item:focus-visible{background:#2a2b2f;color:#fff;outline:none}
         .nb-nav-membership{margin-top:auto;padding:15px 12px;border:1px solid #37383d;border-radius:12px;color:#aaa9a2}
@@ -4749,10 +4670,9 @@ export default function Planner() {
         .nb-day-heading.is-focused{padding-top:.45rem;padding-bottom:.45rem;border-bottom:1px solid ${T.line}}
         .nb-day-heading.is-focused .nb-display{font-size:2rem;line-height:2rem}
 
-        @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.nb-fluid,.nb-view-track,.nb-app-surface,.nb-msheet,.nb-timeline-chrome,.nb-timeline-chrome-inner,.nb-morph-source-label,.nb-up,.nb-list-enter{animation:none!important;transform:none!important}.nb-fluid,.nb-msheet,.nb-timeline-chrome-inner,.nb-morph-source-label{transition:opacity 160ms ease!important}.nb-view-track.is-sliding,.nb-app-surface{transition:none!important}
-          .nb-app-surface,.nb-nav-brand,.nb-nav-item,.nb-nav-membership{transition-duration:1ms!important}
+        @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.nb-fluid,.nb-view-track,.nb-msheet,.nb-timeline-chrome,.nb-timeline-chrome-inner,.nb-morph-source-label,.nb-up,.nb-list-enter{animation:none!important;transform:none!important}.nb-fluid,.nb-msheet,.nb-timeline-chrome-inner,.nb-morph-source-label{transition:opacity 160ms ease!important}.nb-view-track.is-sliding,.nb-app-surface,.nb-navigation,.nb-nav-brand,.nb-nav-item,.nb-nav-membership{transition:none!important}
           button:active,[role="button"]:active,a[href]:active,[data-event-id]:active,[data-task-chip]:active{scale:1!important}}
-        ${preferences?.display.reducedMotion ? `.nb-fluid,.nb-view-track,.nb-app-surface,.nb-msheet,.nb-timeline-chrome,.nb-timeline-chrome-inner,.nb-morph-source-label{animation:none!important;transform:none!important}.nb-fluid,.nb-msheet,.nb-timeline-chrome-inner,.nb-morph-source-label{transition:opacity 160ms ease!important}.nb-view-track.is-sliding,.nb-app-surface{transition:none!important}
+        ${preferences?.display.reducedMotion ? `.nb-fluid,.nb-view-track,.nb-msheet,.nb-timeline-chrome,.nb-timeline-chrome-inner,.nb-morph-source-label{animation:none!important;transform:none!important}.nb-fluid,.nb-msheet,.nb-timeline-chrome-inner,.nb-morph-source-label{transition:opacity 160ms ease!important}.nb-view-track.is-sliding,.nb-app-surface,.nb-navigation,.nb-nav-brand,.nb-nav-item,.nb-nav-membership{transition:none!important}
           button:active,[role="button"]:active,a[href]:active,[data-event-id]:active,[data-task-chip]:active{scale:1!important}` : ""}
       `}</style>
 
@@ -4763,8 +4683,7 @@ export default function Planner() {
       {/* ══ HUD ══ */}
       <header style={{ background: T.bg, borderBottom: `1px solid ${T.line}`, color: T.text, paddingTop: "max(0.5rem, env(safe-area-inset-top))", paddingLeft: "max(0.75rem, env(safe-area-inset-left))", paddingRight: "max(0.75rem, env(safe-area-inset-right))" }} className="nb-hud sticky top-0 z-30 px-3 sm:px-5 py-2 flex items-center justify-between gap-3">
         <div className="nb-hud-left flex items-center gap-2 min-w-0">
-          <button ref={navToggleRef} data-test="nav-toggle" type="button" aria-label="Toggle primary navigation" aria-controls="planner-navigation" aria-expanded={navOpen}
-            onClick={() => { beep("click"); navOpen ? closeNavigation() : openNavigation(); }} className="nb-shell-control nb-tap nb-hover-icon w-8 h-8 flex items-center justify-center" title="Navigation"><MenuIcon /></button>
+          <NavigationToggle onPress={() => beep("click")} />
           <div className="flex items-baseline gap-2 min-w-0">
           {level != null && <>
             <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label">Level</span>
@@ -6469,8 +6388,193 @@ export default function Planner() {
           <button onClick={() => { beep("click"); setSettings(false); }} style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="nb-tap nb-liquid w-full py-3 mt-5 text-xs font-bold tracking-widest">DONE</button>
         </Sheet>
       )}
-    </div>
-    </div>
+    </NavigationFrame>
+  );
+}
+
+const NavigationContext = React.createContext(null);
+
+function NavigationFrame({
+  reducedMotion,
+  shellStyle,
+  surfaceStyle,
+  children,
+  onTimeline,
+  onActions,
+  onSetup,
+  onNotes,
+  onShortcuts,
+  onToday,
+}) {
+  /* Phase ownership stays at the lightweight frame boundary. Toggling the menu
+     updates the shell, surface and one context consumer without reconciling the
+     planner tree or remounting any planner content. */
+  const [phase, setPhase] = useState("closed");
+  const phaseRef = useRef(phase);
+  const shellRef = useRef(null);
+  const toggleRef = useRef(null);
+  const firstItemRef = useRef(null);
+  const closeTimerRef = useRef(null);
+  const motionRunRef = useRef(0);
+  phaseRef.current = phase;
+
+  const restoreToggleFocus = useCallback((run) => {
+    requestAnimationFrame(() => {
+      if (motionRunRef.current !== run || phaseRef.current === "open") return;
+      toggleRef.current?.focus({ preventScroll: true });
+    });
+  }, []);
+
+  const finishClose = useCallback((run) => {
+    if (motionRunRef.current !== run || phaseRef.current !== "closing") return;
+    window.clearTimeout(closeTimerRef.current);
+    phaseRef.current = "closed";
+    setPhase("closed");
+  }, []);
+
+  const openNavigation = useCallback(() => {
+    if (phaseRef.current === "open") return;
+    motionRunRef.current += 1;
+    window.clearTimeout(closeTimerRef.current);
+    phaseRef.current = "open";
+    setPhase("open");
+  }, []);
+
+  const closeNavigation = useCallback(() => {
+    if (phaseRef.current === "closed" || phaseRef.current === "closing") return;
+    const run = motionRunRef.current + 1;
+    motionRunRef.current = run;
+    window.clearTimeout(closeTimerRef.current);
+    restoreToggleFocus(run);
+    if (reducedMotion) {
+      phaseRef.current = "closed";
+      setPhase("closed");
+      return;
+    }
+    phaseRef.current = "closing";
+    setPhase("closing");
+    /* transitionend owns normal completion. The run-scoped fallback only covers
+       browsers that cancel transitions during visibility or lifecycle changes. */
+    closeTimerRef.current = window.setTimeout(() => finishClose(run), 700);
+  }, [finishClose, reducedMotion, restoreToggleFocus]);
+
+  const toggleNavigation = useCallback(() => {
+    if (phaseRef.current === "open") closeNavigation();
+    else openNavigation();
+  }, [closeNavigation, openNavigation]);
+
+  const finishOnSurfaceTransition = useCallback((event) => {
+    if (event.target !== event.currentTarget || event.propertyName !== "transform") return;
+    /* An interrupted transition may deliver completion after a newer command.
+       Only accept the event once the current surface has actually reached the
+       closed transform; otherwise the active close keeps running. */
+    let transform;
+    try {
+      transform = new DOMMatrixReadOnly(getComputedStyle(event.currentTarget).transform);
+    } catch {
+      return;
+    }
+    if (Math.abs(transform.m41) > 0.5 || Math.abs(transform.m42) > 0.5) return;
+    finishClose(motionRunRef.current);
+  }, [finishClose]);
+
+  useEffect(() => {
+    if (phase !== "open") return undefined;
+    const frame = requestAnimationFrame(() => firstItemRef.current?.focus({ preventScroll: true }));
+    return () => cancelAnimationFrame(frame);
+  }, [phase]);
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (event.key !== "Escape" || phaseRef.current === "closed") return;
+      event.preventDefault();
+      closeNavigation();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [closeNavigation]);
+
+  useEffect(() => () => window.clearTimeout(closeTimerRef.current), []);
+
+  useLayoutEffect(() => {
+    const apply = () => {
+      const shell = shellRef.current;
+      if (!shell) return;
+      const fit = navPageFit({ viewportWidth: window.innerWidth, viewportHeight: window.innerHeight });
+      shell.style.setProperty("--nav-page-x", `${fit.travelX}px`);
+      shell.style.setProperty("--nav-page-y", `${fit.travelY}px`);
+      shell.style.setProperty("--nav-clip-top", `${fit.clipTop}px`);
+      shell.style.setProperty("--nav-clip-right", `${fit.clipRight}px`);
+      shell.style.setProperty("--nav-clip-bottom", `${fit.clipBottom}px`);
+      shell.style.setProperty("--nav-page-radius", `${fit.radius}px`);
+    };
+    apply();
+    window.addEventListener("resize", apply);
+    return () => window.removeEventListener("resize", apply);
+  }, []);
+
+  const navOpen = phase === "open";
+  const contextValue = useMemo(() => ({
+    navOpen,
+    toggleNavigation,
+    toggleRef,
+  }), [navOpen, toggleNavigation]);
+  const closeAfter = useCallback((action) => {
+    action();
+    closeNavigation();
+  }, [closeNavigation]);
+
+  return (
+    <NavigationContext.Provider value={contextValue}>
+      <div ref={shellRef} data-test="nav-shell" data-nav-state={phase} className="nb-nav-shell" style={shellStyle}>
+        <NavigationShell
+          phase={phase}
+          firstItemRef={firstItemRef}
+          onTimeline={() => closeAfter(onTimeline)}
+          onActions={() => closeAfter(onActions)}
+          onSetup={() => closeAfter(onSetup)}
+          onNotes={() => closeAfter(onNotes)}
+          onShortcuts={() => closeAfter(onShortcuts)}
+          onToday={() => closeAfter(onToday)}
+        />
+        <div
+          data-test="app-surface"
+          className={`nb-root nb-app-surface ${navOpen ? "nb-app-surface-open" : ""} flex flex-col`}
+          onTransitionEnd={finishOnSurfaceTransition}
+          onPointerDown={(event) => {
+            if (!navOpen || event.target.closest("[data-test='nav-toggle'], [data-test='mobile-calendar-return']")) return;
+            event.preventDefault();
+            closeNavigation();
+          }}
+          style={surfaceStyle}
+        >
+          <button data-test="mobile-calendar-return" type="button" aria-label="Return to calendar" onClick={closeNavigation} className="nb-mobile-calendar-return">CALENDAR</button>
+          {children}
+        </div>
+      </div>
+    </NavigationContext.Provider>
+  );
+}
+
+function NavigationToggle({ onPress }) {
+  const navigation = React.useContext(NavigationContext);
+  return (
+    <button
+      ref={navigation.toggleRef}
+      data-test="nav-toggle"
+      type="button"
+      aria-label="Toggle primary navigation"
+      aria-controls="planner-navigation"
+      aria-expanded={navigation.navOpen}
+      onClick={() => {
+        onPress();
+        navigation.toggleNavigation();
+      }}
+      className="nb-shell-control nb-tap nb-hover-icon w-8 h-8 flex items-center justify-center"
+      title="Navigation"
+    >
+      <MenuIcon />
+    </button>
   );
 }
 
@@ -6485,9 +6589,9 @@ function NavigationShell({ phase, firstItemRef, onTimeline, onActions, onSetup, 
     ["Shortcuts", onShortcuts],
     ["Today", onToday],
   ];
-  const hidden = phase === "closed";
+  const hidden = phase !== "open";
   return (
-    <aside id="planner-navigation" role="navigation" aria-label="Primary navigation" aria-hidden={hidden} className="nb-navigation">
+    <aside id="planner-navigation" role="navigation" aria-label="Primary navigation" aria-hidden={hidden} inert={hidden} className="nb-navigation">
       <div className="nb-nav-brand mb-7" style={{ "--nav-index": 0 }}>
         <p className="text-xs tracking-[.18em]" style={{ fontFamily: MONO, color: "#8f908b" }}>CALENDAR MASTER</p>
         <p className="text-2xl font-semibold tracking-tight mt-1">Your day, in view.</p>

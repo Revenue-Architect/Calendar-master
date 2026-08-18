@@ -50,14 +50,15 @@ export function navPageFit({
 
 export function navDrawerMotion(phase = "closed") {
   /* The drawer is always mounted, so it already has a resting transform to
-     travel from. Gating it on "open" alone put it one frame behind the page;
-     under a stalled frame that reads as the left rail sitting still and then
-     snapping. Everything that is not closed is travelling. */
-  const travelling = phase !== "closed";
+     travel from. Only the open phase is revealed: closing and closed share the
+     same target, so an interrupted close reverses from the current compositor
+     position instead of revealing a second hidden transition. */
+  const revealed = phase === "open";
   return {
-    transform: travelling ? "translate3d(0%, 0px, 0)" : "translate3d(-36%, 0px, 0)",
-    itemOpacity: travelling ? 1 : 0,
-    itemDelayMs: travelling ? 30 : 0,
+    transform: revealed ? "translate3d(0%, 0px, 0)" : "translate3d(-36%, 0px, 0)",
+    itemOpacity: revealed ? 1 : 0,
+    itemDelayMs: revealed ? 30 : 0,
+    itemDurationMs: revealed ? 260 : 520,
   };
 }
 
