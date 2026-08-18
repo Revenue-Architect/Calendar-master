@@ -4538,10 +4538,46 @@ export default function Planner() {
            This used to be React state on three setTimeouts, which meant a paused frame
            showed whatever the wall clock had reached rather than what the clip was
            doing — the paint and the shape were two different animations wearing one
-           name. nbnotchin keeps its own easing; the wash keeps a gentler one. */
-        @keyframes nbnotchwash{0%,55%{background-color:var(--morph-accent)}100%{background-color:var(--morph-card)}}
+           name. nbnotchin keeps its own easing; the wash keeps a gentler one.
+           The wash used to hold accent to 55% and finish at 100%, which put it
+           squarely on top of the content cascade: watched paused at half way, the
+           whole form was rendered part-opaque over a solid lime slab, chips reading
+           lime-on-lime, and only afterwards did the surface turn dark underneath
+           already-visible content. That is a colour flash, not a material carry. The
+           surface now finishes becoming the card before the first group arrives, so
+           content lands on the sheet rather than on the button. */
+        @keyframes nbnotchwash{0%,16%{background-color:var(--morph-accent)}46%,100%{background-color:var(--morph-card)}}
+        /* The wall clock has the last word on the resting paint.
+           A CSS animation in the running state outranks the inline background whether
+           or not its clock is advancing, so an animation that stalls — a backgrounded
+           tab, a device that drops it, a cancel mid-flight — pins the sheet to its 0%
+           keyframe, which is the trigger's accent, and nothing recovers it: the right
+           colour is sitting in the style attribute being outranked. Shipped once and
+           reverted, as a composer stuck solid red.
+           The stage machine runs on setTimeout and was observed reaching "open" on a
+           page whose animation clock never moved at all, so it is the thing that can
+           be trusted to end this. An important author declaration is the only kind
+           that beats an animation, which is exactly why it is used here and nowhere
+           else. At MORPH_MS the morph is over by definition: this is a no-op when the
+           animation ran and a repair when it did not. Content gets the same guarantee
+           for the same reason — a stalled cascade leaves the form clipped away, and a
+           stalled clip leaves the whole sheet invisible at the button's size.
+           Not transform, deliberately: that is the one of these a drag can legitimately
+           own at rest, and pinning it would cost a gesture to insure against a stall. */
+        .nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"]{background-color:var(--morph-card)!important;clip-path:none!important}
+        .nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-notch-cascade>*,
+        .nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-notch-body>:first-child{clip-path:none!important}
+        /* Same corner defect the editor had, in the keyframe that fix never reached.
+           Interpolating NEW's pill radius straight to the sheet's 24px keeps it near
+           999px while the window is already hundreds of pixels wide, and a 999px
+           corner on a 336px box is a circle: a quarter of the way in, the composer
+           was a lime disc blooming mid-screen with no relationship to the button it
+           came from. The window keeps the button's own corner for the first fifth,
+           while it is still small enough to read as that button, then becomes
+           card-cornered for the rest of the travel. */
         @keyframes nbnotchin{
           0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round var(--fluid-radius, 999px))}
+          22%{clip-path:inset(calc(var(--fluid-inset-y) * .5) calc(var(--fluid-inset-x) * .5) round 24px)}
           100%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px round 24px)}
         }
         /* The sheet assembles itself rather than appearing.
@@ -4564,20 +4600,28 @@ export default function Planner() {
         .nb-fluid[data-fluid-origin="notch"] .nb-notch-body>:first-child,
         .nb-fluid[data-fluid-origin="notch"] .nb-notch-cascade>*,
         .nb-fluid[data-fluid-origin="notch"] .nb-notch-body>:last-child:not(:has(.nb-notch-cascade)){
-          animation:nbnotchgroupin var(--nb-morph-fade) cubic-bezier(.22,.85,.28,1) both;
+          animation:nbnotchgroupin var(--nb-morph-fade) cubic-bezier(.22,.85,.28,1) backwards;
           animation-delay:calc(var(--nb-morph-lead) + var(--nb-stage,0) * var(--nb-morph-step));
-          will-change:transform,opacity;
+          will-change:clip-path;
         }
-        /* Opacity only, and deliberately so on both counts.
-           The reference animates nothing but opacity on its content groups, and
-           a transformed descendant extends its scroller's overflow: the 10px
-           rise this replaced was measured into scrollHeight, so the sheet was
-           sized ten pixels taller than its content and the morph's clip no
-           longer matched the button it grew from. The stagger is what carries
-           the arrival; the rise was never doing the work. */
-        @keyframes nbnotchgroupin{from{opacity:0}to{opacity:1}}
+        /* Each group is uncovered, not faded in. This was the last fade left on the
+           composer and the one the eye actually catches, because eight of them finish
+           together against a surface that is still settling.
+           Still not a transform: a transformed descendant extends its scroller's
+           overflow, and the 10px rise this replaced was measured into scrollHeight,
+           which sized the sheet taller than its content and broke the clip's match to
+           the button. clip-path has no layout effect at all, so the wipe buys the
+           material feeling without reopening that bug. The stagger and its delays are
+           untouched; content still waits for the shape to have somewhere to land.
+           Fill mode is backwards rather than both so the clip is applied through the
+           delay and then released entirely -- a group left permanently clipped to its
+           own box would cut off anything it later opens. */
+        @keyframes nbnotchgroupin{from{clip-path:inset(-14px -14px 100% -14px)}to{clip-path:inset(-14px -14px -14px -14px)}}
         .nb-morph-source-label{position:absolute;inset:0;z-index:8;display:flex;align-items:center;justify-content:center;pointer-events:none;font-size:.75rem;font-weight:700;letter-spacing:.1em;opacity:1;animation:nbnotchlabelout var(--nb-morph-dur,320ms) cubic-bezier(.23,1,.32,1) both;transition:opacity 100ms cubic-bezier(.23,1,.32,1);will-change:opacity}
-        @keyframes nbnotchlabelout{0%,55%{opacity:1}78%,100%{opacity:0}}
+        /* The label is the button's own word, so it leaves with the button's own
+           colour. Holding it to 55% left "NEW" floating in the middle of a sheet
+           that had already grown past it; it now goes with the wash. */
+        @keyframes nbnotchlabelout{0%,16%{opacity:1}38%,100%{opacity:0}}
         .nb-fluid[data-fluid-origin="notch"][data-morph-stage="reveal"] .nb-morph-source-label,.nb-fluid[data-fluid-origin="notch"][data-morph-stage="content"] .nb-morph-source-label,.nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-morph-source-label{opacity:0}
         /* Close spends the existing lead *inside* MORPH_MS: the form leaves for
            --nb-morph-lead, then the lime object folds for the rest. Adding a
