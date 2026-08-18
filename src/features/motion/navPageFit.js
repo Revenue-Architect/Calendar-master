@@ -40,6 +40,15 @@ export function navPageFit({
   };
 }
 
+export function navDrawerMotion(phase = "closed") {
+  const settled = phase === "open" || phase === "closing";
+  return {
+    transform: settled ? "translate3d(0%, 0px, 0)" : "translate3d(-100%, 0px, 0)",
+    itemOpacity: phase === "open" ? 1 : 0,
+    itemDelayMs: phase === "open" ? 28 : 0,
+  };
+}
+
 export function navPageMotion({
   open = false,
   travelX = 322,

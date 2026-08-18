@@ -4190,9 +4190,11 @@ export default function Planner() {
         }
         .nb-app-surface-open{transform:translate3d(var(--nav-page-x),0,0);clip-path:inset(var(--nav-clip-top) var(--nav-clip-right) var(--nav-clip-bottom) 0 round var(--nav-page-radius));border-radius:var(--nav-page-radius);box-shadow:var(--nav-page-shadow)}
         .nb-navigation{position:absolute;z-index:1;inset:0 auto 0 0;width:var(--nav-width);padding:22px 18px;color:#f2f0ea;display:flex;flex-direction:column;overflow:auto;transform:translate3d(-100%,0,0);transition:transform var(--nav-page-duration) var(--nav-ease)}
-        .nb-nav-shell[data-nav-state="open"] .nb-navigation,.nb-nav-shell[data-nav-state="opening"] .nb-navigation,.nb-nav-shell[data-nav-state="closing"] .nb-navigation{transform:translate3d(0,0,0)}
+        .nb-nav-shell[data-nav-state="open"] .nb-navigation,.nb-nav-shell[data-nav-state="closing"] .nb-navigation{transform:translate3d(0,0,0)}
         .nb-navigation[aria-hidden="true"]{pointer-events:none}
-        .nb-nav-brand,.nb-nav-item,.nb-nav-membership{opacity:1;transform:none}
+        .nb-nav-brand,.nb-nav-item,.nb-nav-membership{opacity:0;transform:translate3d(-10px,0,0);transition:opacity var(--nav-content-duration) var(--nav-ease),transform var(--nav-content-duration) var(--nav-ease)}
+        .nb-nav-shell[data-nav-state="open"] .nb-nav-brand,.nb-nav-shell[data-nav-state="open"] .nb-nav-item,.nb-nav-shell[data-nav-state="open"] .nb-nav-membership{opacity:1;transform:translate3d(0,0,0);transition-delay:calc(var(--nav-index, 0) * var(--nav-item-stagger))}
+        .nb-nav-shell[data-nav-state="closing"] .nb-nav-brand,.nb-nav-shell[data-nav-state="closing"] .nb-nav-item,.nb-nav-shell[data-nav-state="closing"] .nb-nav-membership{transition-delay:0ms}
         .nb-nav-item{font-family:${MONO};font-size:15px;letter-spacing:.1em;text-align:left;padding:13px 12px;border-radius:10px;color:#c8c7c0}
         .nb-nav-item:hover,.nb-nav-item:focus-visible{background:#2a2b2f;color:#fff;outline:none}
         .nb-nav-membership{margin-top:auto;padding:15px 12px;border:1px solid #37383d;border-radius:12px;color:#aaa9a2}

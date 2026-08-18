@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { navPageFit, navPageMotion } from "./navPageFit.js";
+import { navPageFit, navPageMotion, navDrawerMotion } from "./navPageFit.js";
 
 test("the recessed page keeps every edge on a desktop viewport", () => {
   const fit = navPageFit({ viewportWidth: 1280, viewportHeight: 900 });
@@ -40,4 +40,20 @@ test("the open page travels on X instead of shrinking its layout box", () => {
   assert.equal(open.transform, "translate3d(322px, 0px, 0)");
   assert.equal(open.clipPath, "inset(8px 344px 8px 0px round 22px)");
   assert.equal(open.durationMs, 480);
+});
+
+test("the drawer stays off-screen while opening so it can travel in", () => {
+  assert.equal(navDrawerMotion("closed").transform, "translate3d(-100%, 0px, 0)");
+  assert.equal(navDrawerMotion("opening").transform, "translate3d(-100%, 0px, 0)");
+  assert.equal(navDrawerMotion("open").transform, "translate3d(0%, 0px, 0)");
+  assert.equal(navDrawerMotion("closing").transform, "translate3d(0%, 0px, 0)");
+});
+
+test("open labels stagger in instead of arriving as one slab", () => {
+  const closed = navDrawerMotion("closed");
+  const open = navDrawerMotion("open");
+  assert.equal(closed.itemOpacity, 0);
+  assert.equal(closed.itemDelayMs, 0);
+  assert.equal(open.itemOpacity, 1);
+  assert.equal(open.itemDelayMs, 28);
 });
