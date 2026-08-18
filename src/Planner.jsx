@@ -463,8 +463,12 @@ if (typeof window !== "undefined") {
       ? event.target.closest("button,[role='button'],summary,label,[data-event-id],[data-task-chip]")
       : null;
     const rect = el?.getBoundingClientRect();
+    /* The corner travels with the rect. A pill and a card are the same geometry
+       problem with different radii, and using one number for both is what turned
+       a card's reveal into an ellipse. */
+    const radius = el ? window.getComputedStyle(el).borderTopLeftRadius : null;
     lastFluidTriggerRect = rect && rect.width > 0 && rect.height > 0
-      ? { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
+      ? { left: rect.left, top: rect.top, width: rect.width, height: rect.height, radius }
       : null;
     lastFluidTriggerAt = el ? Date.now() : 0;
   }, true);
@@ -479,6 +483,10 @@ function recentFluidTriggerRect() {
   if (!lastFluidTriggerRect) return null;
   if (Date.now() - lastFluidTriggerAt > FLUID_TRIGGER_MAX_AGE_MS) return null;
   return lastFluidTriggerRect;
+}
+/** The pressed control's own corner radius, for the shape the reveal starts from. */
+function recentFluidTriggerRadius() {
+  return recentFluidTriggerRect()?.radius ?? null;
 }
 const splitId = (id) => { const i = String(id).indexOf("@"); return i === -1 ? { base: id, date: null } : { base: id.slice(0, i), date: id.slice(i + 1) }; };
 /* "STARTS" reads in the largest unit that still says something useful — days for
@@ -4480,8 +4488,19 @@ export default function Planner() {
            features/motion/fluidGeometry.js for why that is the whole fix. */
         .nb-fluid[data-fluid-origin="none"]{animation:none;transform:none;clip-path:none}
         .nb-fluid[data-fluid-origin="trigger"]{animation-name:nbfluidorigin;animation-timing-function:cubic-bezier(.22,.85,.28,1);transform-origin:center}
+        /* The corner has to stop being a pill early, or the whole reveal reads as a
+           hole rather than a card.
+           Interpolating the trigger's radius straight to the sheet's kept it near
+           999px for most of the run, and a 999px corner on a window that is already
+           several hundred pixels wide is an ellipse. Watched frame by frame, what the
+           eye saw was a soft circular portal opening onto a finished sheet — which is
+           exactly the "appears out of nowhere" this was supposed to fix. The window
+           keeps the trigger's own corner for the first fifth, by which point it is
+           still small enough to read as that control, then becomes card-cornered for
+           the rest of the travel. */
         @keyframes nbfluidorigin{
-          0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round 999px)}
+          0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round var(--fluid-radius, 999px))}
+          22%{clip-path:inset(calc(var(--fluid-inset-y) * .48) calc(var(--fluid-inset-x) * .48) round 24px)}
           100%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px round 24px)}
         }
         /* The clip is the transition. Fading the body independently made the
@@ -4497,7 +4516,7 @@ export default function Planner() {
            describe the same path. Same distance, same clip, reversed. */
         @keyframes nbfluidoriginout{
           0%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px round 24px)}
-          100%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round 999px)}
+          100%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round var(--fluid-radius, 999px))}
         }
         .nb-fluid.nb-fluid-closing[data-fluid-origin="trigger"] .nb-notch-body{animation:none;opacity:1}
         /* The notch is the sheet itself taking on the trigger's material and
@@ -4522,7 +4541,7 @@ export default function Planner() {
            name. nbnotchin keeps its own easing; the wash keeps a gentler one. */
         @keyframes nbnotchwash{0%,55%{background-color:var(--morph-accent)}100%{background-color:var(--morph-card)}}
         @keyframes nbnotchin{
-          0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round 999px)}
+          0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round var(--fluid-radius, 999px))}
           100%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px round 24px)}
         }
         /* The sheet assembles itself rather than appearing.
@@ -4570,7 +4589,7 @@ export default function Planner() {
         }
         @keyframes nbnotchout{
           0%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px round 24px)}
-          100%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round 999px)}
+          100%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round var(--fluid-radius, 999px))}
         }
         .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-notch-body,
         .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-notch-cascade>*,
@@ -5254,8 +5273,14 @@ export default function Planner() {
                        over 51px, so a smaller card must remain one line rather than
                        making the range appear underneath the title. */
                     const hasRoomForLinkedTime = !joinUrl || h >= 52;
+                    /* The card hides while the editor is wearing it. The sheet grows out
+                       of this card's rect, so leaving the card in place put two copies of
+                       one thing on screen at once and the morph read as a panel arriving
+                       over the card rather than the card becoming the panel. NEW has
+                       always done this with its own trigger; the editor never did, which
+                       is most of why it felt disconnected. */
                     return (
-                      <div key={e.id} data-event-id={e.id} className={`nb-timeline-lane absolute ${held ? "nb-timeline-lane-active" : "nb-hover-tile"}`} style={{ top: top + 2, height: h, left: `${(e.lane / e.cols) * 100}%`, width: `calc(${100 / e.cols}% - 6px)`, zIndex: held ? 20 : 1, opacity: held && gesture.overDay ? 0.35 : 1, pointerEvents: "auto" }}>
+                      <div key={e.id} data-event-id={e.id} className={`nb-timeline-lane absolute ${held ? "nb-timeline-lane-active" : "nb-hover-tile"}`} style={{ visibility: inspect?.kind === "event" && inspect.id === e.id ? "hidden" : undefined, top: top + 2, height: h, left: `${(e.lane / e.cols) * 100}%`, width: `calc(${100 / e.cols}% - 6px)`, zIndex: held ? 20 : 1, opacity: held && gesture.overDay ? 0.35 : 1, pointerEvents: "auto" }}>
                         <div role="button" tabIndex={0} aria-label={e.title}
                           onPointerDown={(ev) => eventDown(ev, e)} onPointerUp={(ev) => eventUp(ev, e)}
                           onKeyDown={(ev) => {
@@ -8529,7 +8554,7 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
           from,
           {
             transform: `translate(${x}, ${y})`,
-            clipPath: `inset(${insetY} ${insetX} round 999px)`,
+            clipPath: `inset(${insetY} ${insetX} round var(--fluid-radius, 999px))`,
           },
         ], {
           duration: boundedTime == null ? MORPH_MS : (boundedTime / duration) * MORPH_MS,
@@ -8692,6 +8717,16 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
          fluidGeometry.js. */
       panel.style.setProperty("--fluid-inset-x", `${geometry.insetX}px`);
       panel.style.setProperty("--fluid-inset-y", `${geometry.insetY}px`);
+      /* The corner the reveal starts from is the trigger's own corner.
+         It used to be a flat 999px, which is right for a pill — the NEW button is
+         one — and badly wrong for anything wide and low. On a full-width event card
+         a 999px radius makes the intermediate clip an enormous ellipse, so what the
+         eye actually sees is a soft circular hole opening in the middle of the screen
+         with a finished sheet behind it. That reads as a portal, not as the card
+         being pulled out, which is the whole reason the morph did not feel connected.
+         Reading the real radius makes a card open as a card and a pill as a pill. */
+      const triggerRadius = Number.parseFloat(recentFluidTriggerRadius()) || 999;
+      panel.style.setProperty("--fluid-radius", `${triggerRadius}px`);
     }
     const frame = window.requestAnimationFrame(() => {
       focusDialogOnOpen(dialogRef.current);
