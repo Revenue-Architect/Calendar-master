@@ -92,8 +92,8 @@ test.describe("the floating navigation shell", () => {
     expect(before).not.toBeNull();
     expect(measured.left, "the recessed page must sit to the right of the drawer").toBeGreaterThan(240);
     expect(measured.right, "the recessed page must keep a right margin instead of running off-screen").toBeLessThan(1280 - 12);
-    expect(measured.top, "the recessed page must keep a top margin").toBeGreaterThan(8);
-    expect(measured.bottom, "the recessed page must keep a bottom margin").toBeLessThan(900 - 8);
+    expect(measured.top, "the recessed page must keep a top margin").toBeGreaterThan(6);
+    expect(measured.bottom, "the recessed page must keep a bottom margin").toBeLessThan(900 - 6);
     expect(measured.width, "the recessed card must stay fully on screen").toBeLessThan(before.width - 40);
     expect(measured.radius).not.toBe("0px");
     const topGap = measured.top;
@@ -104,6 +104,15 @@ test.describe("the floating navigation shell", () => {
     expect(measured.transform, "the page must travel on X, not reflow").toMatch(/matrix|translate/);
     expect(measured.clipPath, "even borders come from a clip, not leftover height").not.toBe("none");
     expect(Math.round(measured.layoutWidth), "layout width stays full so glyphs do not reflow").toBe(1280);
+    const toggle = page.getByTestId("nav-toggle");
+    const toggleBox = await toggle.evaluate((node) => {
+      const box = node.getBoundingClientRect();
+      return { top: box.top, bottom: box.bottom, left: box.left };
+    });
+    expect(toggleBox.top, "the hamburger must stay inside the recessed card").toBeGreaterThanOrEqual(measured.top - 1);
+    expect(toggleBox.left, "the hamburger must stay on the recessed page").toBeGreaterThan(measured.left);
+    const duration = await surface.evaluate((node) => Number.parseFloat(getComputedStyle(node).transitionDuration) * 1000);
+    expect(duration, "the settle must not be snappy").toBeGreaterThanOrEqual(450);
   });
 
   test("mobile morphs the calendar without reflowing its layout", async ({ page }) => {

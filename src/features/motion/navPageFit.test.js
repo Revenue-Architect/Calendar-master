@@ -6,7 +6,8 @@ test("the recessed page keeps every edge on a desktop viewport", () => {
   const fit = navPageFit({ viewportWidth: 1280, viewportHeight: 900 });
   const motion = navPageMotion({ open: true, ...fit });
   assert.ok(fit.travelX >= 304, "it must clear the drawer");
-  assert.ok(fit.clipTop >= 18, "it must keep a top margin");
+  assert.ok(fit.clipTop >= 6, "it must keep a top margin");
+  assert.ok(fit.clipTop <= 10, "the top clip must not eat the hamburger");
   assert.match(motion.transform, /translate3d\(/);
   assert.match(motion.clipPath, /inset\(/);
 });
@@ -29,13 +30,14 @@ test("the open page travels on X instead of shrinking its layout box", () => {
   const open = navPageMotion({
     open: true,
     travelX: 322,
-    clipTop: 18,
+    clipTop: 8,
     clipRight: 344,
-    clipBottom: 18,
+    clipBottom: 8,
     radius: 22,
   });
   assert.equal(closed.transform, "translate3d(0px, 0px, 0)");
   assert.equal(closed.clipPath, "inset(0px 0px 0px 0px round 0px)");
   assert.equal(open.transform, "translate3d(322px, 0px, 0)");
-  assert.equal(open.clipPath, "inset(18px 344px 18px 0px round 22px)");
+  assert.equal(open.clipPath, "inset(8px 344px 8px 0px round 22px)");
+  assert.equal(open.durationMs, 480);
 });

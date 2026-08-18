@@ -4150,9 +4150,9 @@ export default function Planner() {
              page and incidental rather than structural, 88% of the column stays
              on screen, and the 86px of symmetric margin is what makes the
              recession legible as a deliberate one. */
-          --nav-margin-top:18px;
+          --nav-margin-top:8px;
           --nav-margin-right:22px;
-          --nav-margin-bottom:18px;
+          --nav-margin-bottom:8px;
           --nav-page-x:calc(var(--nav-width) + var(--nav-gap));
           --nav-clip-top:var(--nav-margin-top);
           --nav-clip-right:var(--nav-margin-right);
@@ -4170,13 +4170,13 @@ export default function Planner() {
              page is smaller — the recession only reads if the page reads as a
              discrete object rather than as content that shrank. */
           --nav-page-shadow:var(--e2), var(--sheen);
-          --nav-page-duration:360ms;
+          --nav-page-duration:480ms;
           --nav-content-duration:260ms;
           --nav-item-stagger:28ms;
           /* Deliberate ease-out, not a spring: every property lands once and
              stays there. Keeping the curve below 1 avoids the bounce that made
              the first pass feel disconnected from the shell. */
-          --nav-ease:cubic-bezier(.16,1,.3,1);
+          --nav-ease:cubic-bezier(.22,.61,.36,1);
           position:relative;height:100dvh;overflow:clip;overflow-anchor:none;background:#17181b;
         }
         .nb-root{height:100%;overflow:clip;overflow-anchor:none}

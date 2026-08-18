@@ -9,9 +9,9 @@ export function navPageFit({
   viewportHeight,
   navWidth = 304,
   gap = 18,
-  marginTop = 18,
+  marginTop = 8,
   marginRight = 22,
-  marginBottom = 18,
+  marginBottom = 8,
 } = {}) {
   const left = navWidth + gap;
   const fallback = {
@@ -43,9 +43,9 @@ export function navPageFit({
 export function navPageMotion({
   open = false,
   travelX = 322,
-  clipTop = 18,
+  clipTop = 8,
   clipRight = 344,
-  clipBottom = 18,
+  clipBottom = 8,
   radius = 22,
 } = {}) {
   if (!open) {
@@ -57,5 +57,7 @@ export function navPageMotion({
   return {
     transform: `translate3d(${travelX}px, 0px, 0)`,
     clipPath: `inset(${clipTop}px ${clipRight}px ${clipBottom}px 0px round ${radius}px)`,
+    durationMs: 480,
+    easing: "cubic-bezier(.22,.61,.36,1)",
   };
 }
