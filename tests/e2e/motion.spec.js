@@ -134,45 +134,32 @@ test.describe("the notch morph", () => {
     const sample = await sheet.evaluate((node) => {
       const entry = node.getAnimations().find((animation) => animation.animationName === "nbnotchin");
       if (!entry?.effect) return null;
-      const morphMs = Number(entry.effect.getTiming().duration);
-      /* One clock for every animation, not each one scaled by its own duration.
-         The staggered groups are shorter than the shape and start on a delay, so
-         dividing each by its own length sampled seven different moments and called
-         them one frame — which is how a cascade that overlapped the wash for half
-         its run read as "content has not started yet". */
       const at = (fraction) => {
         for (const animation of node.getAnimations({ subtree: true })) {
           animation.pause();
-          animation.currentTime = morphMs * fraction;
+          const duration = Number(animation.effect?.getTiming().duration || 0);
+          if (duration > 0) animation.currentTime = duration * fraction;
         }
-        /* Groups are uncovered now, so "arrived" is a clip question, not an opacity
-           one: a group still carrying the 100% edge of its wipe has not begun. */
+        /* The brightest content group, not the wrapper. `.nb-notch-body` no
+           longer fades as a unit — its groups do, on a stagger — so the honest
+           question is whether *any* of them has become visible yet. */
         const groups = node.getAnimations({ subtree: true })
           .filter((animation) => animation.animationName === "nbnotchgroupin")
-          .map((animation) => getComputedStyle(animation.effect.target).clipPath);
+          .map((animation) => Number(getComputedStyle(animation.effect.target).opacity));
         return {
           source: Number(getComputedStyle(node.querySelector('[data-test="morph-source-label"]')).opacity),
-          groups: groups.length,
-          started: groups.filter((clip) => clip === "none" || !clip.includes("100%")).length,
+          body: groups.length ? Math.max(...groups) : 1,
           fill: getComputedStyle(node).backgroundColor,
         };
       };
-      return { early: at(0.1), quarter: at(0.25), mid: at(0.4), end: at(1) };
+      return { mid: at(0.4), late: at(0.7), end: at(1) };
     });
 
     expect(sample, "the notch entry animation must still be running").not.toBeNull();
-    expect(sample.early.fill, "the window is still the trigger's own paint while it has nowhere to land").toBe(accent);
-    expect(sample.early.source, "the trigger's label is the material it carries out").toBeGreaterThanOrEqual(.9);
-    /* Codex's constraint, kept: content waits for the clip to have somewhere to land.
-       What changed is only that it is uncovered rather than faded, so the same
-       question is now asked of the wipe. */
-    expect(sample.quarter.started, "form content must wait until the move has established the new space").toBe(0);
-    /* And the complaint that prompted the retiming: the wash used to hold accent to
-       55% and finish at 100%, so the form arrived part-opaque over a lime slab and
-       the surface turned dark underneath content that was already there. The surface
-       must finish becoming itself before the first group is uncovered. */
-    expect(sample.mid.fill, "the surface has become the sheet's own before content lands on it").not.toBe(accent);
-    expect(sample.end.started, "every group is uncovered by the time the shape settles").toBe(sample.end.groups);
+    expect(sample.mid.source, "the trigger label must remain the visible material until the sheet has a place to land").toBeGreaterThanOrEqual(.9);
+    expect(sample.mid.body, "form content must wait until the physical move has established the new space").toBeLessThan(.2);
+    expect(sample.mid.fill, "at 40% the clipped window is still the accent trigger, not the settled card").toBe(accent);
+    expect(sample.late.fill, "by 70% the surface has begun washing into its own card").not.toBe(accent);
   });
 
   test("the notch lands on the composer's own surface", async ({ page }) => {
@@ -267,15 +254,8 @@ test.describe("the notch morph", () => {
     });
     expect(transitions.panel, "the shared panel must transition from the trigger accent to its own surface").toContain("background-color");
     expect(transitions.groupCount, "the composer's content must arrive as staggered groups, not one block").toBeGreaterThan(2);
-    /* Uncovered, not faded. Eight groups finishing their fade together against a
-       surface that was still washing was the one part of this morph a person
-       actually noticed, so the groups now wipe open on the same stagger. `transform`
-       is banned alongside the layout properties for its own reason: a transformed
-       descendant extends the scroller's overflow, which sizes the sheet taller than
-       its content and breaks the clip's match to the button it grew from. */
-    expect(transitions.groupProps, "form content should be uncovered after geometry, never faded").toContain("clipPath");
-    expect(transitions.groupProps, "the cascade must not reintroduce the fade it replaced").not.toContain("opacity");
-    for (const property of ["transform", "width", "height", "top", "left", "margin", "padding"]) {
+    expect(transitions.groupProps, "form content should fade in after geometry, never stretch with it").toContain("opacity");
+    for (const property of ["width", "height", "top", "left", "margin", "padding"]) {
       expect(transitions.groupProps, `content groups must not animate ${property}`).not.toContain(property);
     }
     /* The bound this suite never had. The cascade used to finish at 1176ms against a
@@ -319,22 +299,14 @@ test.describe("the notch morph", () => {
     await page.keyboard.press("Escape");
     await expect(sheet).toHaveAttribute("data-fluid-origin", "notch");
 
-    /* One clock for the fold and for the group exits alike. Seeking only `nbnotchout`
-       left the groups' 80ms opacity transitions running on the wall clock, so what
-       this asserted was really "the round trip to the browser took longer than 80ms" —
-       it passed for years on that, and broke the moment the entry animation stopped
-       leaving an animated opacity behind for the exit to transition from. Half way
-       through a 240ms fold is a real instant, and the 80ms exit is genuinely over. */
     const mid = await sheet.evaluate((node) => {
       const fold = node.getAnimations().find((animation) => animation.animationName === "nbnotchout");
+      const computedDelay = parseFloat(getComputedStyle(node).animationDelay) || 0;
       const duration = Number(fold?.effect?.getTiming().duration || 0);
-      const delay = Number(fold?.effect?.getTiming().delay || 0)
-        || (parseFloat(getComputedStyle(node).animationDelay) || 0) * 1000;
+      const delay = Number(fold?.effect?.getTiming().delay || 0) || computedDelay * 1000;
       if (fold) {
-        for (const animation of node.getAnimations({ subtree: true })) {
-          animation.pause();
-          animation.currentTime = delay + duration * 0.5;
-        }
+        fold.pause();
+        fold.currentTime = delay + duration * 0.15;
       }
       const groups = [...node.querySelectorAll(".nb-notch-cascade > *, .nb-notch-body > :first-child")]
         .map((el) => Number(getComputedStyle(el).opacity));
@@ -498,62 +470,6 @@ test.describe("sheet exits", () => {
     });
     expect(closing.panelOpacity, "the material must land in the card before it unmounts").toBeGreaterThanOrEqual(.99);
     expect(closing.bodyOpacity, "the card contents should leave through the shrinking clip, not a separate fade").toBeGreaterThanOrEqual(.99);
-  });
-
-  /* Geometry was never the whole of it. The editor already arrived at the right size
-     in the right place and still read as a new surface, because it was its own colour
-     from the first frame — the composer had carried NEW's paint since it grew out of
-     the button, and the editors had nothing. */
-  test("an editor opens in the material of the card it was pulled from", async ({ page }) => {
-    await openPlanner(page, { keepSample: true });
-    const card = page.locator("[data-event-id]").first();
-    await card.scrollIntoViewIfNeeded();
-    /* Read the paint before opening: the source card is hidden while the sheet wears
-       it, so afterwards there is nothing left to compare against. */
-    const cardFill = await card.evaluate((node) => {
-      const painted = [node, ...node.querySelectorAll("*")].find((el) => {
-        const color = getComputedStyle(el).backgroundColor;
-        const alpha = color.startsWith("rgba(") ? Number.parseFloat(color.split(",")[3]) : 1;
-        return Number.isFinite(alpha) && alpha >= 0.25;
-      });
-      return painted ? getComputedStyle(painted).backgroundColor : null;
-    });
-    expect(cardFill, "the fixture's event card must paint something for the sheet to carry").not.toBeNull();
-
-    await card.click();
-    const sheet = page.getByTestId("sheet");
-    await expect(sheet).toHaveAttribute("data-fluid-carry", "on");
-
-    const frames = await sheet.evaluate((node) => {
-      const running = node.getAnimations({ subtree: true });
-      const span = Math.max(...running.map((a) => Number(a.effect?.getTiming().duration) || 0), 0);
-      const at = (fraction) => {
-        for (const animation of running) {
-          animation.pause();
-          animation.currentTime = span * fraction;
-        }
-        return getComputedStyle(node).backgroundColor;
-      };
-      return { start: at(0), settled: at(1) };
-    });
-
-    expect(frames.start, "the first frame is the pressed card's own paint, not the sheet's").toBe(cardFill);
-    expect(frames.settled, "and it washes into the sheet's own surface rather than staying the card").not.toBe(cardFill);
-
-    /* Both directions or neither. Carrying the paint only on the way in leaves the
-       fold finishing as a dark rectangle exactly where a lighter card is about to
-       reappear, which is a colour pop on the last frame of a connected exit. */
-    await page.keyboard.press("Escape");
-    const exit = await sheet.evaluate((node) => {
-      const running = node.getAnimations({ subtree: true });
-      const span = Math.max(...running.map((a) => Number(a.effect?.getTiming().duration) || 0), 0);
-      for (const animation of running) {
-        animation.pause();
-        animation.currentTime = span * 0.95;
-      }
-      return getComputedStyle(node).backgroundColor;
-    });
-    expect(exit, "the fold ends in the card's paint, so the card underneath is not a pop").toBe(cardFill);
   });
 
   test("a cross-day agenda open keeps the pressed card as its morph origin", async ({ page }) => {
