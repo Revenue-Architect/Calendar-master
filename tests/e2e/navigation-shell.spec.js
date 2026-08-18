@@ -88,6 +88,11 @@ test.describe("the floating navigation shell", () => {
     expect(measured.bottom, "the recessed page must keep a bottom margin").toBeLessThan(900 - 8);
     expect(measured.width, "the recessed card must stay fully on screen").toBeLessThan(before.width - 40);
     expect(measured.radius).not.toBe("0px");
+    const topGap = measured.top;
+    const rightGap = 1280 - measured.right;
+    const bottomGap = 900 - measured.bottom;
+    expect(Math.abs(bottomGap - topGap), `bottom recess ${bottomGap} vs top ${topGap}`).toBeLessThan(12);
+    expect(Math.abs(rightGap - topGap), `right recess ${rightGap} vs top ${topGap}`).toBeLessThan(16);
   });
 
   test("mobile morphs the calendar without reflowing its layout", async ({ page }) => {

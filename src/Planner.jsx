@@ -1523,7 +1523,8 @@ export default function Planner() {
     navCloseTimer.current = window.setTimeout(finishNavigationClose, reducedMotion ? 50 : 500);
   }, [finishNavigationClose, reducedMotion]);
   const finishNavigationOnSurfaceTransition = useCallback((event) => {
-    if (event.target !== event.currentTarget || (event.propertyName && event.propertyName !== "transform")) return;
+    if (event.target !== event.currentTarget) return;
+    if (event.propertyName && !["transform", "inset", "top", "right", "bottom", "left"].includes(event.propertyName)) return;
     finishNavigationClose();
   }, [finishNavigationClose]);
   useEffect(() => {
@@ -1550,9 +1551,10 @@ export default function Planner() {
       const shell = navShellRef.current;
       if (!shell) return;
       const fit = navPageFit({ viewportWidth: window.innerWidth, viewportHeight: window.innerHeight });
-      shell.style.setProperty("--nav-page-x", `${fit.x}px`);
-      shell.style.setProperty("--nav-page-y", `${fit.y}px`);
-      shell.style.setProperty("--nav-page-scale", String(fit.scale));
+      shell.style.setProperty("--nav-page-left", `${fit.left}px`);
+      shell.style.setProperty("--nav-page-top", `${fit.top}px`);
+      shell.style.setProperty("--nav-page-right", `${fit.right}px`);
+      shell.style.setProperty("--nav-page-bottom", `${fit.bottom}px`);
     };
     apply();
     window.addEventListener("resize", apply);
@@ -4150,11 +4152,10 @@ export default function Planner() {
           --nav-margin-top:18px;
           --nav-margin-right:22px;
           --nav-margin-bottom:18px;
-          --nav-page-x:calc(var(--nav-width) + var(--nav-gap));
-          --nav-page-y:var(--nav-margin-top);
-          /* Fit the recessed card inside the remaining shell. Sliding a
-             full-width page to the right was what clipped the Actions column. */
-          --nav-page-scale:min(calc((100vw - var(--nav-width) - var(--nav-gap) - var(--nav-margin-right)) / 100vw), calc((100dvh - var(--nav-margin-top) - var(--nav-margin-bottom)) / 100dvh));
+          --nav-page-left:calc(var(--nav-width) + var(--nav-gap));
+          --nav-page-top:var(--nav-margin-top);
+          --nav-page-right:var(--nav-margin-right);
+          --nav-page-bottom:var(--nav-margin-bottom);
           --nav-page-radius:18px;
           /* The app's own dark-ground elevation, not a hand-rolled shadow.
              This was 0 18px 48px rgb(0 0 0 / .28) — a black shadow cast by a
@@ -4178,31 +4179,16 @@ export default function Planner() {
           position:relative;height:100dvh;overflow:clip;overflow-anchor:none;background:#17181b;
         }
         .nb-root{height:100%;overflow:clip;overflow-anchor:none}
-        /* The page is pushed aside, not re-measured.
-           This used to animate top, right, bottom, left and width on the element
-           that contains the entire application, which is a full layout pass per
-           frame for the whole tree: measured at 6x CPU throttle it cost a 133ms
-           worst frame and twelve dropped ones against a 16.7ms idle baseline.
-           It was also doing visible harm. Relaying out to 904px tripled the
-           clipping in the Actions tab row — 70px cut when closed, 213px when
-           open — so the frame you cannot interact with was the one being
-           degraded to make room for the drawer.
-           A uniform scale cannot reproduce the old geometry, because insetting
-           18px vertically and 322px horizontally changes the page's aspect
-           ratio; matching it with transform alone would need scaleX .71 against
-           scaleY .92 and every glyph would be squashed. So the shape changes to
-           one that does scale: the page keeps its layout at full width, shrinks
-           evenly about its left edge and slides clear of the nav, letting its
-           right edge run off-screen the way the mobile rail already does. Height
-           lands within a few pixels of where it used to (791 against 795), the
-           part that leaves the viewport is the column edge that was being
-           clipped anyway, and nothing inside is ever re-measured. */
+        /* Recess the page as a card with even black borders. Uniform scale
+           clears the drawer but dumps leftover height into a fat bottom
+           gutter; inset keeps top/right/bottom similar and lets the page
+           reflow instead of clipping. Mobile keeps the rail clip. */
         .nb-app-surface{
-          position:absolute;inset:0;z-index:2;height:auto;overflow:clip;overflow-anchor:none;transform:translate3d(0,0,0) scale(1);
-          transform-origin:top left;border-radius:0;box-shadow:none;
-          transition:transform var(--nav-page-duration) var(--nav-ease),border-radius var(--nav-page-duration) var(--nav-ease),box-shadow var(--nav-page-duration) var(--nav-ease);
+          position:absolute;inset:0;z-index:2;height:auto;overflow:clip;overflow-anchor:none;transform:translate3d(0,0,0);
+          transform-origin:center center;border-radius:0;box-shadow:none;
+          transition:inset var(--nav-page-duration) var(--nav-ease),transform var(--nav-page-duration) var(--nav-ease),border-radius var(--nav-page-duration) var(--nav-ease),box-shadow var(--nav-page-duration) var(--nav-ease);
         }
-        .nb-app-surface-open{transform:translate3d(var(--nav-page-x),var(--nav-page-y),0) scale(var(--nav-page-scale));border-radius:var(--nav-page-radius);box-shadow:var(--nav-page-shadow)}
+        .nb-app-surface-open{inset:var(--nav-page-top) var(--nav-page-right) var(--nav-page-bottom) var(--nav-page-left);transform:translate3d(0,0,0);border-radius:var(--nav-page-radius);box-shadow:var(--nav-page-shadow)}
         .nb-navigation{position:absolute;z-index:1;inset:0 auto 0 0;width:var(--nav-width);padding:22px 18px;color:#f2f0ea;display:flex;flex-direction:column;overflow:auto}
         .nb-navigation[aria-hidden="true"]{visibility:hidden;pointer-events:none}
         .nb-nav-brand,.nb-nav-item,.nb-nav-membership{opacity:0;transform:translate3d(-10px,0,0);transition:opacity var(--nav-content-duration) var(--nav-ease),transform var(--nav-content-duration) var(--nav-ease)}

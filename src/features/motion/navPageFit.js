@@ -1,8 +1,8 @@
-/* Fit the open navigation page as a recessed card inside the remaining shell.
+/* Fit the open navigation page as a recessed card with even black borders.
  *
- * The page must stay transform-only — never width/left/top — but it also must
- * keep every edge on screen. Sliding a full-width surface to the right is what
- * clipped the app into a half-page. */
+ * A uniform scale that clears the drawer leaves leftover height as a fat
+ * bottom gutter. The even frame is an inset: the page is laid out inside
+ * that rectangle, so nothing is clipped and top/right/bottom stay similar. */
 
 export function navPageFit({
   viewportWidth,
@@ -13,17 +13,23 @@ export function navPageFit({
   marginRight = 22,
   marginBottom = 18,
 } = {}) {
+  const left = navWidth + gap;
+  const fallback = {
+    x: left,
+    y: marginTop,
+    scale: 1,
+    top: marginTop,
+    right: marginRight,
+    bottom: marginBottom,
+    left,
+  };
   const width = Number(viewportWidth);
   const height = Number(viewportHeight);
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
-    return { x: navWidth + gap, y: marginTop, scale: 1 };
+    return fallback;
   }
-  const availW = Math.max(0, width - navWidth - gap - marginRight);
-  const availH = Math.max(0, height - marginTop - marginBottom);
-  const scale = Math.min(availW / width, availH / height);
   return {
-    x: navWidth + gap,
-    y: marginTop,
-    scale: Number.isFinite(scale) && scale > 0 ? scale : 1,
+    ...fallback,
+    left: Math.min(left, Math.max(0, width - marginRight - 1)),
   };
 }
