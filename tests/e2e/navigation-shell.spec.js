@@ -71,14 +71,22 @@ test.describe("the floating navigation shell", () => {
     const measured = await surface.evaluate((node) => {
       const box = node.getBoundingClientRect();
       const style = getComputedStyle(node);
+      const clip = style.clipPath || "";
+      const nums = [...clip.matchAll(/(-?\d+(?:\.\d+)?)px/g)].map((m) => Number(m[1]));
+      const top = nums[0] ?? 0;
+      const right = nums[1] ?? 0;
+      const bottom = nums[2] ?? 0;
       return {
         left: box.left,
-        right: box.right,
-        top: box.top,
-        bottom: box.bottom,
-        width: box.width,
-        height: box.height,
+        right: box.right - right,
+        top: box.top + top,
+        bottom: box.bottom - bottom,
+        width: box.width - right,
+        height: box.height - top - bottom,
         radius: style.borderTopLeftRadius,
+        transform: style.transform,
+        clipPath: style.clipPath,
+        layoutWidth: node.offsetWidth,
       };
     });
     expect(before).not.toBeNull();
@@ -93,6 +101,9 @@ test.describe("the floating navigation shell", () => {
     const bottomGap = 900 - measured.bottom;
     expect(Math.abs(bottomGap - topGap), `bottom recess ${bottomGap} vs top ${topGap}`).toBeLessThan(12);
     expect(Math.abs(rightGap - topGap), `right recess ${rightGap} vs top ${topGap}`).toBeLessThan(16);
+    expect(measured.transform, "the page must travel on X, not reflow").toMatch(/matrix|translate/);
+    expect(measured.clipPath, "even borders come from a clip, not leftover height").not.toBe("none");
+    expect(Math.round(measured.layoutWidth), "layout width stays full so glyphs do not reflow").toBe(1280);
   });
 
   test("mobile morphs the calendar without reflowing its layout", async ({ page }) => {

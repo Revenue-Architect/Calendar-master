@@ -1524,7 +1524,7 @@ export default function Planner() {
   }, [finishNavigationClose, reducedMotion]);
   const finishNavigationOnSurfaceTransition = useCallback((event) => {
     if (event.target !== event.currentTarget) return;
-    if (event.propertyName && !["transform", "inset", "top", "right", "bottom", "left"].includes(event.propertyName)) return;
+    if (event.propertyName && !["transform", "clip-path"].includes(event.propertyName)) return;
     finishNavigationClose();
   }, [finishNavigationClose]);
   useEffect(() => {
@@ -1551,10 +1551,11 @@ export default function Planner() {
       const shell = navShellRef.current;
       if (!shell) return;
       const fit = navPageFit({ viewportWidth: window.innerWidth, viewportHeight: window.innerHeight });
-      shell.style.setProperty("--nav-page-left", `${fit.left}px`);
-      shell.style.setProperty("--nav-page-top", `${fit.top}px`);
-      shell.style.setProperty("--nav-page-right", `${fit.right}px`);
-      shell.style.setProperty("--nav-page-bottom", `${fit.bottom}px`);
+      shell.style.setProperty("--nav-page-x", `${fit.travelX}px`);
+      shell.style.setProperty("--nav-clip-top", `${fit.clipTop}px`);
+      shell.style.setProperty("--nav-clip-right", `${fit.clipRight}px`);
+      shell.style.setProperty("--nav-clip-bottom", `${fit.clipBottom}px`);
+      shell.style.setProperty("--nav-page-radius", `${fit.radius}px`);
     };
     apply();
     window.addEventListener("resize", apply);
@@ -4152,11 +4153,11 @@ export default function Planner() {
           --nav-margin-top:18px;
           --nav-margin-right:22px;
           --nav-margin-bottom:18px;
-          --nav-page-left:calc(var(--nav-width) + var(--nav-gap));
-          --nav-page-top:var(--nav-margin-top);
-          --nav-page-right:var(--nav-margin-right);
-          --nav-page-bottom:var(--nav-margin-bottom);
-          --nav-page-radius:18px;
+          --nav-page-x:calc(var(--nav-width) + var(--nav-gap));
+          --nav-clip-top:var(--nav-margin-top);
+          --nav-clip-right:var(--nav-margin-right);
+          --nav-clip-bottom:var(--nav-margin-bottom);
+          --nav-page-radius:22px;
           /* The app's own dark-ground elevation, not a hand-rolled shadow.
              This was 0 18px 48px rgb(0 0 0 / .28) — a black shadow cast by a
              #0A0A0C page onto a #17181B shell, which is a 1.11 contrast ratio
@@ -4169,31 +4170,29 @@ export default function Planner() {
              page is smaller — the recession only reads if the page reads as a
              discrete object rather than as content that shrank. */
           --nav-page-shadow:var(--e2), var(--sheen);
-          --nav-page-duration:340ms;
+          --nav-page-duration:360ms;
           --nav-content-duration:260ms;
           --nav-item-stagger:28ms;
           /* Deliberate ease-out, not a spring: every property lands once and
              stays there. Keeping the curve below 1 avoids the bounce that made
              the first pass feel disconnected from the shell. */
-          --nav-ease:cubic-bezier(.22,.61,.36,1);
+          --nav-ease:cubic-bezier(.16,1,.3,1);
           position:relative;height:100dvh;overflow:clip;overflow-anchor:none;background:#17181b;
         }
         .nb-root{height:100%;overflow:clip;overflow-anchor:none}
-        /* Recess the page as a card with even black borders. Uniform scale
-           clears the drawer but dumps leftover height into a fat bottom
-           gutter; inset keeps top/right/bottom similar and lets the page
-           reflow instead of clipping. Mobile keeps the rail clip. */
+        /* One X-axis: the drawer slides in, the page becomes a card and
+           travels right. Clip eats the even black frame so layout never
+           reflows. Mobile keeps its own rail clip. */
         .nb-app-surface{
-          position:absolute;inset:0;z-index:2;height:auto;overflow:clip;overflow-anchor:none;transform:translate3d(0,0,0);
-          transform-origin:center center;border-radius:0;box-shadow:none;
-          transition:inset var(--nav-page-duration) var(--nav-ease),transform var(--nav-page-duration) var(--nav-ease),border-radius var(--nav-page-duration) var(--nav-ease),box-shadow var(--nav-page-duration) var(--nav-ease);
+          position:absolute;inset:0;z-index:2;height:auto;overflow:clip;overflow-anchor:none;transform:translate3d(0,0,0);clip-path:inset(0 0 0 0 round 0);
+          transform-origin:left center;border-radius:0;box-shadow:none;
+          transition:transform var(--nav-page-duration) var(--nav-ease),clip-path var(--nav-page-duration) var(--nav-ease),border-radius var(--nav-page-duration) var(--nav-ease),box-shadow var(--nav-page-duration) var(--nav-ease);
         }
-        .nb-app-surface-open{inset:var(--nav-page-top) var(--nav-page-right) var(--nav-page-bottom) var(--nav-page-left);transform:translate3d(0,0,0);border-radius:var(--nav-page-radius);box-shadow:var(--nav-page-shadow)}
-        .nb-navigation{position:absolute;z-index:1;inset:0 auto 0 0;width:var(--nav-width);padding:22px 18px;color:#f2f0ea;display:flex;flex-direction:column;overflow:auto}
-        .nb-navigation[aria-hidden="true"]{visibility:hidden;pointer-events:none}
-        .nb-nav-brand,.nb-nav-item,.nb-nav-membership{opacity:0;transform:translate3d(-10px,0,0);transition:opacity var(--nav-content-duration) var(--nav-ease),transform var(--nav-content-duration) var(--nav-ease)}
-        .nb-nav-shell[data-nav-state="open"] .nb-nav-brand,.nb-nav-shell[data-nav-state="open"] .nb-nav-item,.nb-nav-shell[data-nav-state="open"] .nb-nav-membership{opacity:1;transform:translate3d(0,0,0);transition-delay:calc(var(--nav-index, 0) * var(--nav-item-stagger))}
-        .nb-nav-shell[data-nav-state="closing"] .nb-nav-brand,.nb-nav-shell[data-nav-state="closing"] .nb-nav-item,.nb-nav-shell[data-nav-state="closing"] .nb-nav-membership{transition-delay:0ms}
+        .nb-app-surface-open{transform:translate3d(var(--nav-page-x),0,0);clip-path:inset(var(--nav-clip-top) var(--nav-clip-right) var(--nav-clip-bottom) 0 round var(--nav-page-radius));border-radius:var(--nav-page-radius);box-shadow:var(--nav-page-shadow)}
+        .nb-navigation{position:absolute;z-index:1;inset:0 auto 0 0;width:var(--nav-width);padding:22px 18px;color:#f2f0ea;display:flex;flex-direction:column;overflow:auto;transform:translate3d(-100%,0,0);transition:transform var(--nav-page-duration) var(--nav-ease)}
+        .nb-nav-shell[data-nav-state="open"] .nb-navigation,.nb-nav-shell[data-nav-state="opening"] .nb-navigation,.nb-nav-shell[data-nav-state="closing"] .nb-navigation{transform:translate3d(0,0,0)}
+        .nb-navigation[aria-hidden="true"]{pointer-events:none}
+        .nb-nav-brand,.nb-nav-item,.nb-nav-membership{opacity:1;transform:none}
         .nb-nav-item{font-family:${MONO};font-size:15px;letter-spacing:.1em;text-align:left;padding:13px 12px;border-radius:10px;color:#c8c7c0}
         .nb-nav-item:hover,.nb-nav-item:focus-visible{background:#2a2b2f;color:#fff;outline:none}
         .nb-nav-membership{margin-top:auto;padding:15px 12px;border:1px solid #37383d;border-radius:12px;color:#aaa9a2}
