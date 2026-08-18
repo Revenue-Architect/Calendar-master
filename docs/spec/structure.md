@@ -19,6 +19,7 @@ Accepted ADR > approved SPEC > living PRD > `DESIGN.md` > interaction contracts
 | Date, id, validation primitive | `src/shared/` | A domain or a one-off helper at the bottom of Planner |
 | Application use-case, undo, projection, gesture arithmetic | `src/features/<area>/` until a real `src/app/` service exists | New helpers appended to Planner |
 | Visible React surface | `src/features/*/Foo.jsx` for now; later `src/ui/...` once that tree exists | Markup added to the 8k-line Planner composition root |
+| Sheet morph, fluid trigger snapshot, planner stylesheet | `src/features/motion/` (`morphTiming.js`, `fluidTrigger.js`, `plannerStyles.js`, `Sheet.jsx`) | A `<style>` template or `Sheet` function appended to Planner |
 | Host storage adapter | `src/storage.js` | ErrorBoundary or a domain |
 
 Planner remains the composition root: state, wiring, and existing surfaces.
