@@ -455,6 +455,32 @@ const fromHhmm = (s) => { const [h, m] = s.split(":").map(Number); return h * 60
  * The window is short for the same reason: a sheet opens within a frame or two of
  * the press that opened it, so anything later did not come from that press. */
 const FLUID_TRIGGER_MAX_AGE_MS = 900;
+/** A background worth washing from, or null. Anything close to transparent is not:
+ *  the wash would be invisible and the first frame would simply be the wrong
+ *  colour, which is worse than not carrying material at all. */
+function paintedFill(node) {
+  const color = window.getComputedStyle(node).backgroundColor;
+  if (!color) return null;
+  const alpha = color.startsWith("rgba(") ? Number.parseFloat(color.split(",")[3]) : 1;
+  return Number.isFinite(alpha) && alpha >= 0.25 ? color : null;
+}
+/** The paint the user actually pressed, searched from the true pointer target out
+ *  to the control the morph resolved to. Direction matters and both are real: a
+ *  button carries its own fill, while a timeline lane is a transparent positioning
+ *  box *around* the card that carries the colour — searching only upwards from the
+ *  resolved control finds the timeline behind it and washes from the wrong surface. */
+function nearestPaintedFill(from, boundary) {
+  for (let node = from, hops = 0; node && hops < 5; node = node.parentElement, hops += 1) {
+    const painted = paintedFill(node);
+    if (painted) return painted;
+    if (node === boundary) break;
+  }
+  for (const child of boundary?.children || []) {
+    const painted = paintedFill(child);
+    if (painted) return painted;
+  }
+  return null;
+}
 let lastFluidTriggerRect = null;
 let lastFluidTriggerAt = 0;
 if (typeof window !== "undefined") {
@@ -467,8 +493,14 @@ if (typeof window !== "undefined") {
        problem with different radii, and using one number for both is what turned
        a card's reveal into an ellipse. */
     const radius = el ? window.getComputedStyle(el).borderTopLeftRadius : null;
+    /* And so does the paint. A sheet that is its own colour from the first frame is
+       a new object that merely started small; one that begins in the pressed card's
+       own fill and washes into the sheet surface is the same object, opened. The
+       composer has had this since it grew out of NEW — this is what gives the
+       editors the same continuity. */
+    const fill = el ? nearestPaintedFill(event.target instanceof Element ? event.target : el, el) : null;
     lastFluidTriggerRect = rect && rect.width > 0 && rect.height > 0
-      ? { left: rect.left, top: rect.top, width: rect.width, height: rect.height, radius }
+      ? { left: rect.left, top: rect.top, width: rect.width, height: rect.height, radius, fill }
       : null;
     lastFluidTriggerAt = el ? Date.now() : 0;
   }, true);
@@ -487,6 +519,10 @@ function recentFluidTriggerRect() {
 /** The pressed control's own corner radius, for the shape the reveal starts from. */
 function recentFluidTriggerRadius() {
   return recentFluidTriggerRect()?.radius ?? null;
+}
+/** The pressed control's own fill, for the material the reveal starts in. */
+function recentFluidTriggerFill() {
+  return recentFluidTriggerRect()?.fill ?? null;
 }
 const splitId = (id) => { const i = String(id).indexOf("@"); return i === -1 ? { base: id, date: null } : { base: id.slice(0, i), date: id.slice(i + 1) }; };
 /* "STARTS" reads in the largest unit that still says something useful — days for
@@ -4488,6 +4524,15 @@ export default function Planner() {
            features/motion/fluidGeometry.js for why that is the whole fix. */
         .nb-fluid[data-fluid-origin="none"]{animation:none;transform:none;clip-path:none}
         .nb-fluid[data-fluid-origin="trigger"]{animation-name:nbfluidorigin;animation-timing-function:cubic-bezier(.22,.85,.28,1);transform-origin:center}
+        /* The wash is deliberately the composer's own keyframes rather than a second
+           copy: both surfaces are doing the same thing — holding the pressed control's
+           paint until the shape has somewhere to land, then becoming the sheet — and
+           two definitions would drift apart the first time either was tuned. Only the
+           source colour differs, and that arrives per-open in --morph-accent. */
+        .nb-fluid[data-fluid-origin="trigger"][data-fluid-carry="on"]{
+          animation-name:nbfluidorigin,nbnotchwash;
+          animation-timing-function:cubic-bezier(.22,.85,.28,1),cubic-bezier(.4,0,.6,1);
+        }
         /* The corner has to stop being a pill early, or the whole reveal reads as a
            hole rather than a card.
            Interpolating the trigger's radius straight to the sheet's kept it near
@@ -4509,6 +4554,17 @@ export default function Planner() {
         .nb-fluid[data-fluid-origin="trigger"] .nb-notch-body{animation:none;opacity:1}
         .nb-fluid.nb-fluid-closing{animation:nbfluidout 240ms cubic-bezier(.4,0,.4,1) forwards;pointer-events:none}
         .nb-fluid.nb-fluid-closing[data-fluid-origin="trigger"]{animation-name:nbfluidoriginout;animation-duration:300ms}
+        /* And back again. Carrying the card's paint on the way out but not on the way
+           in leaves the fold finishing as a dark rectangle exactly where a lighter
+           card is about to reappear, so the last frame of a connected exit is a colour
+           pop — measured at 31 levels per channel, which is not subtle. The paint
+           returns before the shape does, so the card is already itself underneath by
+           the time the sheet stops covering it. */
+        .nb-fluid.nb-fluid-closing[data-fluid-origin="trigger"][data-fluid-carry="on"]{
+          animation-name:nbfluidoriginout,nbnotchwashback;
+          animation-timing-function:cubic-bezier(.4,0,.4,1),cubic-bezier(.4,0,.6,1);
+        }
+        @keyframes nbnotchwashback{0%{background-color:var(--morph-card)}70%,100%{background-color:var(--morph-accent)}}
         @keyframes nbfluidout{from{transform:translateY(0)}to{transform:translateY(100%)}}
         /* The exit retraces the entry. It used to travel a quarter of the way back
            and stop at scale(.88), so a sheet that flew out of its card drifted
@@ -4538,10 +4594,26 @@ export default function Planner() {
            This used to be React state on three setTimeouts, which meant a paused frame
            showed whatever the wall clock had reached rather than what the clip was
            doing — the paint and the shape were two different animations wearing one
-           name. nbnotchin keeps its own easing; the wash keeps a gentler one. */
-        @keyframes nbnotchwash{0%,55%{background-color:var(--morph-accent)}100%{background-color:var(--morph-card)}}
+           name. nbnotchin keeps its own easing; the wash keeps a gentler one.
+           The wash used to hold accent to 55% and finish at 100%, which put it
+           squarely on top of the content cascade: watched paused at half way, the
+           whole form was rendered part-opaque over a solid lime slab, chips reading
+           lime-on-lime, and only afterwards did the surface turn dark underneath
+           already-visible content. That is a colour flash, not a material carry. The
+           surface now finishes becoming the card before the first group arrives, so
+           content lands on the sheet rather than on the button. */
+        @keyframes nbnotchwash{0%,16%{background-color:var(--morph-accent)}46%,100%{background-color:var(--morph-card)}}
+        /* Same corner defect the editor had, in the keyframe that fix never reached.
+           Interpolating NEW's pill radius straight to the sheet's 24px keeps it near
+           999px while the window is already hundreds of pixels wide, and a 999px
+           corner on a 336px box is a circle: a quarter of the way in, the composer
+           was a lime disc blooming mid-screen with no relationship to the button it
+           came from. The window keeps the button's own corner for the first fifth,
+           while it is still small enough to read as that button, then becomes
+           card-cornered for the rest of the travel. */
         @keyframes nbnotchin{
           0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round var(--fluid-radius, 999px))}
+          22%{clip-path:inset(calc(var(--fluid-inset-y) * .5) calc(var(--fluid-inset-x) * .5) round 24px)}
           100%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px round 24px)}
         }
         /* The sheet assembles itself rather than appearing.
@@ -4564,20 +4636,28 @@ export default function Planner() {
         .nb-fluid[data-fluid-origin="notch"] .nb-notch-body>:first-child,
         .nb-fluid[data-fluid-origin="notch"] .nb-notch-cascade>*,
         .nb-fluid[data-fluid-origin="notch"] .nb-notch-body>:last-child:not(:has(.nb-notch-cascade)){
-          animation:nbnotchgroupin var(--nb-morph-fade) cubic-bezier(.22,.85,.28,1) both;
+          animation:nbnotchgroupin var(--nb-morph-fade) cubic-bezier(.22,.85,.28,1) backwards;
           animation-delay:calc(var(--nb-morph-lead) + var(--nb-stage,0) * var(--nb-morph-step));
-          will-change:transform,opacity;
+          will-change:clip-path;
         }
-        /* Opacity only, and deliberately so on both counts.
-           The reference animates nothing but opacity on its content groups, and
-           a transformed descendant extends its scroller's overflow: the 10px
-           rise this replaced was measured into scrollHeight, so the sheet was
-           sized ten pixels taller than its content and the morph's clip no
-           longer matched the button it grew from. The stagger is what carries
-           the arrival; the rise was never doing the work. */
-        @keyframes nbnotchgroupin{from{opacity:0}to{opacity:1}}
+        /* Each group is uncovered, not faded in. This was the last fade left on the
+           composer and the one the eye actually catches, because eight of them finish
+           together against a surface that is still settling.
+           Still not a transform: a transformed descendant extends its scroller's
+           overflow, and the 10px rise this replaced was measured into scrollHeight,
+           which sized the sheet taller than its content and broke the clip's match to
+           the button. clip-path has no layout effect at all, so the wipe buys the
+           material feeling without reopening that bug. The stagger and its delays are
+           untouched; content still waits for the shape to have somewhere to land.
+           Fill mode is backwards rather than both so the clip is applied through the
+           delay and then released entirely -- a group left permanently clipped to its
+           own box would cut off anything it later opens. */
+        @keyframes nbnotchgroupin{from{clip-path:inset(-14px -14px 100% -14px)}to{clip-path:inset(-14px -14px -14px -14px)}}
         .nb-morph-source-label{position:absolute;inset:0;z-index:8;display:flex;align-items:center;justify-content:center;pointer-events:none;font-size:.75rem;font-weight:700;letter-spacing:.1em;opacity:1;animation:nbnotchlabelout var(--nb-morph-dur,320ms) cubic-bezier(.23,1,.32,1) both;transition:opacity 100ms cubic-bezier(.23,1,.32,1);will-change:opacity}
-        @keyframes nbnotchlabelout{0%,55%{opacity:1}78%,100%{opacity:0}}
+        /* The label is the button's own word, so it leaves with the button's own
+           colour. Holding it to 55% left "NEW" floating in the middle of a sheet
+           that had already grown past it; it now goes with the wash. */
+        @keyframes nbnotchlabelout{0%,16%{opacity:1}38%,100%{opacity:0}}
         .nb-fluid[data-fluid-origin="notch"][data-morph-stage="reveal"] .nb-morph-source-label,.nb-fluid[data-fluid-origin="notch"][data-morph-stage="content"] .nb-morph-source-label,.nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-morph-source-label{opacity:0}
         /* Close spends the existing lead *inside* MORPH_MS: the form leaves for
            --nb-morph-lead, then the lime object folds for the rest. Adding a
@@ -8727,6 +8807,19 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
          Reading the real radius makes a card open as a card and a pill as a pill. */
       const triggerRadius = Number.parseFloat(recentFluidTriggerRadius()) || 999;
       panel.style.setProperty("--fluid-radius", `${triggerRadius}px`);
+      /* Start in the pressed card's own paint and wash into the sheet's, the way the
+         composer already does out of NEW. Geometry alone was not enough: the editor
+         arrived at the right size in the right place and still read as a new surface,
+         because it was its own colour from the first frame. The flag gates the CSS so
+         a trigger with nothing worth carrying keeps the plain reveal — washing from an
+         unset custom property animates from the initial value and flashes. */
+      const triggerFill = morphRef.current === "notch" ? null : recentFluidTriggerFill();
+      if (triggerFill) {
+        panel.style.setProperty("--morph-accent", triggerFill);
+        panel.dataset.fluidCarry = "on";
+      } else {
+        delete panel.dataset.fluidCarry;
+      }
     }
     const frame = window.requestAnimationFrame(() => {
       focusDialogOnOpen(dialogRef.current);
