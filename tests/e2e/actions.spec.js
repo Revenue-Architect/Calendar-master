@@ -647,23 +647,34 @@ test.describe("the actions column", () => {
     });
     expect(motion.grid).toContain("grid-template-columns");
     expect(motion.duration).toContain("0.3s");
-    expect(motion.column).toContain("opacity");
+    /* The column used to interpolate opacity as well. It now travels its own full
+       width behind the ACTIONS rail instead of dissolving in place, so transform is
+       the property carrying the motion and the assertions below read travel rather
+       than fade. What is being pinned is unchanged: the pane interpolates, it does
+       not snap. */
     expect(motion.column).toContain("transform");
 
     await collapse.click();
     await page.waitForTimeout(70);
     const shrinking = (await stream.boundingBox()).width;
-    const fading = await column.evaluate((node) => Number.parseFloat(getComputedStyle(node).opacity));
+    /* Partway through its travel: started moving, not yet gone. */
+    const travelled = await column.evaluate((node) => {
+      const m = new DOMMatrixReadOnly(getComputedStyle(node).transform);
+      return m.m41 / node.getBoundingClientRect().width;
+    });
     expect(shrinking).toBeGreaterThan(narrow);
-    expect(fading).toBeGreaterThan(0);
-    expect(fading).toBeLessThan(1);
+    expect(travelled).toBeGreaterThan(0);
+    expect(travelled).toBeLessThan(1);
     await expect(column).toBeHidden();
     const wide = (await stream.boundingBox()).width;
 
     await restore.click();
     await page.waitForTimeout(70);
     const restoring = (await stream.boundingBox()).width;
-    const returning = await column.evaluate((node) => Number.parseFloat(getComputedStyle(node).opacity));
+    const returning = await column.evaluate((node) => {
+      const m = new DOMMatrixReadOnly(getComputedStyle(node).transform);
+      return m.m41 / node.getBoundingClientRect().width;
+    });
     expect(restoring).toBeLessThan(wide);
     expect(restoring).toBeGreaterThan(narrow);
     expect(returning).toBeGreaterThan(0);

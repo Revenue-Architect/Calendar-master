@@ -4241,10 +4241,15 @@ export default function Planner() {
            pane. Keep the pane's fade long enough to remain an actual transition
            under that load, and let its visibility follow the same settled edge as
            the grid rather than disappearing halfway through the handoff. */
-        .nb-actions-column{min-width:0;overflow-x:hidden;opacity:1;transform:translate3d(0,0,0);visibility:visible;transition:opacity 320ms ease,transform 320ms var(--nav-ease),visibility 0s linear 0s}
-        .nb-actions-column.is-collapsed{opacity:0;transform:translate3d(12px,0,0);visibility:hidden;pointer-events:none;transition:opacity 320ms ease,transform 320ms var(--nav-ease),visibility 0s linear 360ms}
-        .nb-actions-restore{transform:translate3d(0,-50%,0);opacity:1;visibility:visible;transition:opacity 180ms ease,transform 300ms var(--nav-ease),visibility 0s linear 0s}
-        .nb-actions-restore.is-hidden{transform:translate3d(100%,-50%,0);opacity:0;visibility:hidden;pointer-events:none;transition:opacity 180ms ease,transform 240ms var(--nav-ease),visibility 0s linear 300ms}
+        /* The column leaves past its own right edge and comes back from it. It used
+           to travel 12px and fade the rest of the way, which is not a departure —
+           it is a dissolve with a nudge attached. Full self-width travel means the
+           collapsed state has nothing left to hide, and the accent ACTIONS tab it
+           folds into is the thing it visibly went behind. */
+        .nb-actions-column{min-width:0;overflow-x:hidden;transform:translate3d(0,0,0);visibility:visible;transition:transform 320ms var(--nav-ease),visibility 0s linear 0s}
+        .nb-actions-column.is-collapsed{transform:translate3d(100%,0,0);visibility:hidden;pointer-events:none;transition:transform 320ms var(--nav-ease),visibility 0s linear 360ms}
+        .nb-actions-restore{transform:translate3d(0,-50%,0);visibility:visible;transition:transform 300ms var(--nav-ease),visibility 0s linear 0s}
+        .nb-actions-restore.is-hidden{transform:translate3d(100%,-50%,0);visibility:hidden;pointer-events:none;transition:transform 240ms var(--nav-ease),visibility 0s linear 300ms}
         .nb-stream{flex:1 1 auto;min-height:0}
 
         /* ── THE SCALE ──────────────────────────────────────────────────
@@ -4371,7 +4376,23 @@ export default function Planner() {
         .nb-stamp{transition:box-shadow 160ms ease}
         .nb-stamp:focus-within{box-shadow:0 1px 0 0 ${T.accent}}
         .nb-row:hover{background:${T.faint}55}
-        .nb-cell{transition:opacity 300ms cubic-bezier(.23,1,.32,1),transform 300ms cubic-bezier(.23,1,.32,1)}
+        /* The most-seen animation in the app, so it gets the least of one, and it is
+           an enhancement rather than a gate.
+           These cells used to open at zero opacity and wait on a "mounted" flag set
+           from a requestAnimationFrame. A document that never composites never runs
+           that callback, so loading the app unpainted left fifty-six ribbon cells
+           invisible with no way back. The resting state is now simply visible; the
+           entrance is a starting-style the browser applies if it can, and a browser
+           that cannot just shows the cell. Nothing about being seen depends on an
+           animation having run — see tests/e2e/reveal-without-paint.spec.js.
+           The entrance moves the cell and nothing else. A clip was tried here and is
+           wrong for the same reason the opacity was: measured in a document that never
+           composites, the cells held at inset(0 100% 0 0) — fully clipped, which is
+           invisible by a different property. Any entrance whose start state hides the
+           element re-creates the bug. A translate cannot: if the transition never runs,
+           the cell simply sits six pixels low, which nobody will ever notice. */
+        .nb-cell{transition:transform 300ms cubic-bezier(.23,1,.32,1),opacity 300ms cubic-bezier(.23,1,.32,1)}
+        @starting-style{.nb-cell{transform:translateY(6px)}}
         .nb-ribbon-spacer{flex:0 0 auto;width:calc(var(--nb-ribbon-cells) * 4rem)}
         @media(min-width:640px){.nb-ribbon-spacer{width:calc(var(--nb-ribbon-cells) * 5rem)}}
         @media(min-width:1024px){.nb-ribbon-spacer{width:calc(var(--nb-ribbon-cells) * 6rem)}}
@@ -4389,12 +4410,19 @@ export default function Planner() {
         .nb-turn-prev{animation:turnprev 240ms cubic-bezier(.22,.9,.28,1)}
         @keyframes turnprev{0%{opacity:.4;transform:translate3d(-6%,0,0)}55%{opacity:1}100%{opacity:1;transform:translate3d(0,0,0)}}
         .nb-up{animation:nbup 200ms cubic-bezier(.23,1,.32,1)}
-        @keyframes nbup{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+        /* Travel plus a clip on the leading edge: the surface rises into view from
+           under the one below it rather than materialising in place. */
+        @keyframes nbup{from{clip-path:inset(100% 0 0 0);transform:translateY(14px)}to{clip-path:inset(0 0 0 0);transform:translateY(0)}}
         /* Low-frequency collections get one quiet entrance so a filter change
            does not replace the whole surface on a single frame. Four pixels is
            enough to establish continuity without making readable content travel. */
-        .nb-list-enter{animation:nb-list-enter 180ms var(--motion-enter) both;animation-delay:calc(var(--nb-list-index, 0) * 30ms);will-change:transform,opacity}
-        @keyframes nb-list-enter{from{opacity:0;transform:translate3d(0,4px,0)}to{opacity:1;transform:translate3d(0,0,0)}}
+        /* Uncovered off the rail they hang from, not faded up. The agenda draws a day
+           rail down the left with its cards attached to the right of it, so sweeping
+           the clip left-to-right reads as the day extruding its own contents. The
+           30ms step and 180ms body keep the whole run under 300ms; this must never
+           be driven by scrolling, only by a real list change. */
+        .nb-list-enter{animation:nb-list-enter 180ms var(--motion-enter) both;animation-delay:calc(var(--nb-list-index, 0) * 30ms);will-change:clip-path,transform}
+        @keyframes nb-list-enter{from{clip-path:inset(0 100% 0 0);transform:translate3d(0,4px,0)}to{clip-path:inset(0 0 0 0);transform:translate3d(0,0,0)}}
         /* The three views do move through space, and the switch says so.
            This used to be opacity alone, on the reasoning that a view change is
            a change of lens rather than a page moving. That holds while the only
@@ -4433,10 +4461,16 @@ export default function Planner() {
            When a trigger can be measured the surface grows from that exact pill;
            first-run and system sheets use the bottom-sheet fallback. */
         .nb-fluid{animation:nbfluid 420ms cubic-bezier(.23,1,.32,1);transform-origin:bottom center;border-radius:24px 24px 0 0;will-change:transform,opacity,clip-path}
+        /* The one surface with no origin and no way to have one: nothing was pressed
+           to open first-run, so there is no rect to grow from. It comes from the edge
+           instead, a full self-height so the distance is right at any size, and it
+           stays opaque the whole way — the scrim darkening underneath is what gives
+           the solid card something to arrive against.
+           No scale. Scaling resamples every glyph inside the panel, which is the whole
+           reason fluidGeometry reveals sheets by clip rather than zooming them. */
         @keyframes nbfluid{
-          0%{opacity:0;transform:translateY(26px) scale(.965)}
-          55%{opacity:1}
-          100%{opacity:1;transform:translateY(0) scale(1)}
+          from{transform:translateY(100%)}
+          to{transform:translateY(0)}
         }
         /* A sheet grows from its trigger by being *revealed*, not by being zoomed.
            The panel is at its true size from the first frame, centred over the
@@ -4456,7 +4490,7 @@ export default function Planner() {
         .nb-fluid[data-fluid-origin="trigger"] .nb-notch-body{animation:none;opacity:1}
         .nb-fluid.nb-fluid-closing{animation:nbfluidout 240ms cubic-bezier(.4,0,.4,1) forwards;pointer-events:none}
         .nb-fluid.nb-fluid-closing[data-fluid-origin="trigger"]{animation-name:nbfluidoriginout;animation-duration:300ms}
-        @keyframes nbfluidout{0%,30%{opacity:1}100%{opacity:0;transform:translateY(12px) scale(.97);border-radius:30px}}
+        @keyframes nbfluidout{from{transform:translateY(0)}to{transform:translateY(100%)}}
         /* The exit retraces the entry. It used to travel a quarter of the way back
            and stop at scale(.88), so a sheet that flew out of its card drifted
            vaguely downward on the way out — the two halves of one gesture did not
@@ -4552,7 +4586,7 @@ export default function Planner() {
           transition:opacity 80ms cubic-bezier(.4,0,.3,1);
         }
                 .nb-composer-ask{animation:nbask 180ms cubic-bezier(.23,1,.32,1)}
-        @keyframes nbask{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+        @keyframes nbask{from{clip-path:inset(100% 0 0 0);transform:translateY(6px)}to{clip-path:inset(0 0 0 0);transform:none}}
         @media(prefers-reduced-motion:reduce){.nb-composer-ask{animation:none}}
         @media(min-width:640px){.nb-fluid{transform-origin:center;border-radius:24px}}
         /* The blur is set once and never animated. A changing blur radius throws
@@ -4571,11 +4605,15 @@ export default function Planner() {
         .nb-edit-face{transition:opacity 200ms ease,transform 360ms cubic-bezier(.23,1,.32,1)}
         /* A multi-select pill has no single selection to slide, so its fill grows in
            and shrinks out with the same spring the traveling pill uses. */
-        .nb-chip-fill{transition:transform 260ms cubic-bezier(.23,1,.32,1),opacity 180ms ease}
+        .nb-chip-fill{transition:transform 260ms cubic-bezier(.23,1,.32,1)}
         /* Toasts leave the way they came instead of vanishing on the frame they are
            dismissed. */
         .nb-toast-out{animation:nbtoastout 200ms cubic-bezier(.4,0,.65,1) forwards;pointer-events:none}
-        @keyframes nbtoastout{to{opacity:0;transform:translateY(14px) scale(.96)}}
+        /* A toast leaves the edge it arrived from. Symmetry is what makes
+           swipe-to-dismiss legible — and an undo toast that exits downward tells you
+           where undo went. Clipping the bottom edge as it travels means it slides
+           under the rail instead of thinning out over it. */
+        @keyframes nbtoastout{to{clip-path:inset(100% 0 0 0);transform:translateY(14px)}}
         /* The mobile sheet's spring overshoots its resting place; the extension below
            keeps the overshoot from showing a gap under the bottom edge. */
         .nb-msheet::after{content:"";position:absolute;top:100%;left:0;right:0;height:40px;background:inherit}
@@ -4585,7 +4623,7 @@ export default function Planner() {
         .nb-liquid{transition:scale 220ms cubic-bezier(.23,1,.32,1),box-shadow 220ms ease}
         .nb-liquid:active{scale:.94;transition:scale 90ms cubic-bezier(.4,0,.6,1)}
         .nb-rise{animation:nbrise 240ms cubic-bezier(.23,1,.32,1)}
-        @keyframes nbrise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes nbrise{from{clip-path:inset(100% 0 0 0);transform:translateY(12px)}to{clip-path:inset(0 0 0 0);transform:translateY(0)}}
         .nb-p{animation:nbp 620ms cubic-bezier(.1,.7,.3,1) forwards}
         @keyframes nbp{from{opacity:1;transform:translate(0,0) scale(1)}to{opacity:0;transform:translate(var(--tx),var(--ty)) scale(.2)}}
         .nb-rw{animation:nbrw 900ms cubic-bezier(.2,.8,.3,1) forwards}
@@ -4661,6 +4699,11 @@ export default function Planner() {
         .nb-day-heading{transition:background-color 180ms ease,border-color 180ms ease}
         .nb-day-heading .nb-display{transition:font-size 300ms var(--nav-ease),line-height 300ms var(--nav-ease)}
         .nb-timeline-chrome.is-collapsed{pointer-events:none}
+        /* B4 in the de-fade plan, deliberately NOT converted. Removing the inner's
+           opacity broke five tests — all four timeline-chrome-scroll cases and the
+           focus-mode header check — because the collapsed header is asserted as
+           faded, not merely as clipped by a zero-height box. The fade is load-bearing
+           here, not decoration; converting it needs those contracts rewritten first. */
         .nb-timeline-chrome.is-collapsed .nb-timeline-chrome-inner{opacity:0;transform:translate3d(0,-10px,0)}
         @media(max-width:639px){
           .nb-month-navigator.is-month{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:.5rem;row-gap:.25rem;align-items:center}
@@ -4808,7 +4851,7 @@ export default function Planner() {
                     onMouseLeave={() => clearTimeout(monthHoverT.current)}
                     onContextMenu={(e) => e.preventDefault()}
             className="nb-cell nb-hover-tile relative pt-2 pb-3.5"
-                    style={{ background: T.bg, opacity: mounted ? (inMonth ? 1 : 0.32) : 0, transitionDelay: `${Math.min(i, 24) * 8}ms` }}>
+                    style={{ background: T.bg, opacity: inMonth ? 1 : 0.32, transitionDelay: `${Math.min(i, 24) * 8}ms` }}>
                     <span className="absolute inset-0" style={{ background: T.accent, opacity: heat }} />
                     <span className="relative text-xs font-semibold" style={{ fontFamily: MONO, color: heat > 0.4 ? T.on : T.text }}>{d.getDate()}</span>
                     {n > 0 && <span className="absolute right-1 top-1 rounded-full" style={{ width: 4, height: 4, background: heat > 0.4 ? T.on : T.accent, opacity: 0.9 }} />}
@@ -4849,7 +4892,7 @@ export default function Planner() {
                 return (
                   <button key={k} data-day={k} ref={on ? activeRef : null} onClick={() => jumpTo(k)}
                     className="nb-cell nb-tap relative w-16 sm:w-20 lg:w-24 shrink-0 py-2.5"
-                    style={{ opacity: mounted ? 1 : 0, transform: mounted ? "none" : "translateY(10px)", transitionDelay: `${Math.min(i, 10) * 14}ms`, boxShadow: target ? `inset 0 0 0 2px ${T.accent}` : "none" }}>
+                    style={{ transitionDelay: `${Math.min(i, 10) * 14}ms`, boxShadow: target ? `inset 0 0 0 2px ${T.accent}` : "none" }}>
                     {/* Selection is a filled cell and today is an outlined one. Washing
                         every busy day in accent turned the whole strip a muddy tint and
                         made the selected day compete with its neighbours. */}
@@ -6550,7 +6593,10 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
             <span style={{ fontFamily: MONO, color: T.accentText }} className="nb-label shrink-0">PLAN TODAY</span>
           </button>
           <Reveal open={overdueReviewOpen}>
-            <div data-test="overdue-plan-review" className="mb-3 px-3 py-2.5" style={{ background: T.card, borderRadius: CARD_R, boxShadow: `inset 0 0 0 1px ${NOW_RED}`, opacity: overdueReviewOpen ? 1 : 0, transform: overdueReviewOpen ? "translateY(0)" : "translateY(-4px)", transition: "opacity 180ms ease-out, transform 180ms cubic-bezier(.23,1,.32,1)" }}>
+            {/* No opacity of its own. `Reveal` above already opens this by height, and
+                fading a panel that is simultaneously unrolling reads as two things
+                happening to one surface. The height is the arrival. */}
+            <div data-test="overdue-plan-review" className="mb-3 px-3 py-2.5" style={{ background: T.card, borderRadius: CARD_R, boxShadow: `inset 0 0 0 1px ${NOW_RED}` }}>
               <div className="flex items-center justify-between gap-2 mb-2">
                 <span style={{ fontFamily: MONO, color: NOW_RED }} className="nb-label">OVERDUE WORK</span>
                 <button data-test="overdue-plan-cancel" onClick={() => { beep("click"); setOverdueReviewOpen(false); }} style={{ fontFamily: MONO, color: T.dimText }} className="nb-tap nb-label">CANCEL</button>
