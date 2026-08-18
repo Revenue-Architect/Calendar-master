@@ -4119,8 +4119,8 @@ export default function Planner() {
           .nb-app-surface-open{inset:0 auto auto 0;width:100%;height:100%;transform:translate3d(calc(100% - 49px),0,0);clip-path:inset(14px calc(100% - 44px) 14px 0 round 16px);border-radius:16px;box-shadow:none}
           .nb-app-surface>*:not(.nb-mobile-calendar-return){opacity:1;transition:opacity 150ms ease}
           .nb-app-surface-open>*:not(.nb-mobile-calendar-return){opacity:0;pointer-events:none}
-          .nb-mobile-calendar-return{display:flex;position:absolute;z-index:40;inset:14px auto 14px 0;width:44px;align-items:center;justify-content:center;border:0;border-radius:16px;background:${T.accent};color:${T.on};font-family:${MONO};font-size:10px;font-weight:700;letter-spacing:.12em;writing-mode:vertical-rl;transform:rotate(180deg);opacity:0;pointer-events:none;transition:opacity 160ms ease}
-          .nb-app-surface-open .nb-mobile-calendar-return{opacity:1;pointer-events:auto;transition-delay:120ms}
+          .nb-mobile-calendar-return{display:flex;position:absolute;z-index:40;inset:14px auto 14px 0;width:44px;align-items:center;justify-content:center;border:0;border-radius:16px;background:${T.accent};color:${T.on};font-family:${MONO};font-size:10px;font-weight:700;letter-spacing:.12em;writing-mode:vertical-rl;transform:translate3d(-100%,0,0) rotate(180deg);pointer-events:none;transition:transform var(--nav-page-duration) var(--nav-ease)}
+          .nb-app-surface-open .nb-mobile-calendar-return{transform:translate3d(0,0,0) rotate(180deg);pointer-events:auto}
           .nb-navigation{padding:18px 12px}
           .nb-hud{padding:.45rem .65rem;gap:.35rem}
           .nb-hud-left{gap:.35rem}
@@ -4458,7 +4458,12 @@ export default function Planner() {
            stalled clip leaves the whole sheet invisible at the button's size.
            Not transform, deliberately: that is the one of these a drag can legitimately
            own at rest, and pinning it would cost a gesture to insure against a stall. */
-        .nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"]{background-color:var(--morph-card)!important;clip-path:none!important}
+        .nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"]{clip-path:none!important}
+        /* The surface is guaranteed from "reveal" rather than "open": the wash is
+           finished at 46% of the morph (221ms) and reveal fires at 56% (269ms), so
+           there is nothing left for the animation to say about colour by then. The
+           clip is not included here because it legitimately runs to 100%. */
+        .nb-fluid[data-fluid-origin="notch"]:is([data-morph-stage="reveal"],[data-morph-stage="content"],[data-morph-stage="open"]){background-color:var(--morph-card)!important}
         .nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-notch-cascade>*,
         .nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-notch-body>:first-child{clip-path:none!important}
         /* Same corner defect the editor had, in the keyframe that fix never reached.
@@ -4670,9 +4675,9 @@ export default function Planner() {
         .nb-day-heading.is-focused{padding-top:.45rem;padding-bottom:.45rem;border-bottom:1px solid ${T.line}}
         .nb-day-heading.is-focused .nb-display{font-size:2rem;line-height:2rem}
 
-        @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.nb-fluid,.nb-view-track,.nb-msheet,.nb-timeline-chrome,.nb-timeline-chrome-inner,.nb-morph-source-label,.nb-up,.nb-list-enter{animation:none!important;transform:none!important}.nb-fluid,.nb-msheet,.nb-timeline-chrome-inner,.nb-morph-source-label{transition:opacity 160ms ease!important}.nb-view-track.is-sliding,.nb-app-surface,.nb-navigation,.nb-nav-brand,.nb-nav-item,.nb-nav-membership{transition:none!important}
+        @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.nb-fluid,.nb-view-track,.nb-msheet,.nb-timeline-chrome,.nb-timeline-chrome-inner,.nb-morph-source-label,.nb-up,.nb-list-enter{animation:none!important;transform:none!important}.nb-fluid,.nb-msheet,.nb-timeline-chrome-inner,.nb-morph-source-label{transition:opacity 160ms ease!important}.nb-view-track.is-sliding,.nb-app-surface,.nb-mobile-calendar-return,.nb-navigation,.nb-nav-brand,.nb-nav-item,.nb-nav-membership{transition:none!important}
           button:active,[role="button"]:active,a[href]:active,[data-event-id]:active,[data-task-chip]:active{scale:1!important}}
-        ${preferences?.display.reducedMotion ? `.nb-fluid,.nb-view-track,.nb-msheet,.nb-timeline-chrome,.nb-timeline-chrome-inner,.nb-morph-source-label{animation:none!important;transform:none!important}.nb-fluid,.nb-msheet,.nb-timeline-chrome-inner,.nb-morph-source-label{transition:opacity 160ms ease!important}.nb-view-track.is-sliding,.nb-app-surface,.nb-navigation,.nb-nav-brand,.nb-nav-item,.nb-nav-membership{transition:none!important}
+        ${preferences?.display.reducedMotion ? `.nb-fluid,.nb-view-track,.nb-msheet,.nb-timeline-chrome,.nb-timeline-chrome-inner,.nb-morph-source-label{animation:none!important;transform:none!important}.nb-fluid,.nb-msheet,.nb-timeline-chrome-inner,.nb-morph-source-label{transition:opacity 160ms ease!important}.nb-view-track.is-sliding,.nb-app-surface,.nb-mobile-calendar-return,.nb-navigation,.nb-nav-brand,.nb-nav-item,.nb-nav-membership{transition:none!important}
           button:active,[role="button"]:active,a[href]:active,[data-event-id]:active,[data-task-chip]:active{scale:1!important}` : ""}
       `}</style>
 
@@ -8625,6 +8630,15 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
   const [closing, setClosing] = useState(false);
   const [sheetHeight, setSheetHeight] = useState(null);
   const [heightReady, setHeightReady] = useState(false);
+  /* The opening accent is the animation's job, not this state's. nbnotchwash
+     paints var(--morph-accent) at 0% and animations outrank inline styles, so the
+     carry is pixel-identical either way — but painting it from the stage made the
+     sheet's *resting* colour depend on three setTimeouts firing. Where they did
+     not, the sheet stayed a solid accent slab with the right colour sitting unused
+     in the style attribute: the stage-open guarantee never matched, because the
+     stage never got to open. Mobile Chrome throttles timers hard enough for that
+     to be an ordinary device state, which is why it only ever showed on a phone.
+     Mirrored in features/motion/Sheet.jsx, which is not wired up yet. */
   const [morphStage, setMorphStage] = useState(morph === "notch" && morphSurface ? "source" : "open");
   const titleId = useRef(`sheet-title-${Math.random().toString(36).slice(2, 9)}`);
   const closeSignalRef = useRef(closeSignal);
@@ -8928,7 +8942,7 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
     <div className={`nb-scrim ${closing ? "nb-fluid-closing" : ""} fixed inset-0 z-50 flex items-end sm:items-center justify-center`} style={{ background: "rgba(0,0,0,0.72)" }} onClick={guardedClose}>
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId.current} data-test="sheet" data-sheet-title={title || "Details"} data-morph-source={morphSurface?.id} data-morph-stage={morphStage}
         onKeyDown={(event) => trapDialogTab(event, dialogRef.current)} onClick={(e) => e.stopPropagation()}
-        className={`nb-fluid nb-sheet-scroll ${heightReady ? "nb-sheet-h" : ""} ${closing ? "nb-fluid-closing" : ""} relative w-full sm:max-w-md overflow-y-auto nb-s`} style={{ backgroundColor: morph === "notch" && morphSurface && (morphStage === "source" || morphStage === "closing") ? morphSurface.background : T.card, color: T.text, maxHeight: "88svh", height: sheetHeight == null ? "auto" : sheetHeight, "--morph-accent": morph === "notch" && morphSurface ? morphSurface.background : "transparent", "--morph-card": T.card }}>
+        className={`nb-fluid nb-sheet-scroll ${heightReady ? "nb-sheet-h" : ""} ${closing ? "nb-fluid-closing" : ""} relative w-full sm:max-w-md overflow-y-auto nb-s`} style={{ backgroundColor: morph === "notch" && morphSurface && morphStage === "closing" ? morphSurface.background : T.card, color: T.text, maxHeight: "88svh", height: sheetHeight == null ? "auto" : sheetHeight, "--morph-accent": morph === "notch" && morphSurface ? morphSurface.background : "transparent", "--morph-card": T.card }}>
         {morph === "notch" && morphSurface && (
           <div aria-hidden="true" data-test="morph-source-label" className="nb-morph-source-label" style={{
             color: morphSurface.color,

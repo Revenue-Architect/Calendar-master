@@ -330,6 +330,36 @@ test.describe("the notch morph", () => {
     expect(settled.clipped, "a stalled cascade must not leave the form clipped away").toBe(0);
   });
 
+  /* Reported from a phone three times before it was reproduced, because it needs a
+     condition a desktop run never produces: the stage machine's setTimeouts not
+     firing. Mobile Chrome throttles timers hard — a backgrounded app, battery
+     saver, a loaded device — and the sheet's resting colour used to depend on
+     them. Where they stalled, the composer stayed a solid accent slab. Every
+     other probe in this file drives the morph with an explicit currentTime, so
+     all of them ask what frame N looks like and none asked what happens when
+     there is no frame N. Neutralising just those three timers is the whole
+     reproduction; everything else here is real. */
+  test("a stalled stage machine still leaves the composer on its own surface", async ({ page }) => {
+    await openPlanner(page);
+    const trigger = page.getByTestId("new-entry");
+    const accent = await trigger.evaluate((node) => getComputedStyle(node).backgroundColor);
+
+    await page.evaluate(() => {
+      const real = window.setTimeout.bind(window);
+      /* The three stage timers land at 56%, 69% and 100% of a 480ms morph. */
+      window.setTimeout = (fn, ms, ...rest) => (ms >= 250 && ms <= 500 ? 0 : real(fn, ms, ...rest));
+    });
+
+    await trigger.click();
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).toBeVisible();
+    await expect(sheet).toHaveAttribute("data-morph-stage", "source");
+    await page.waitForTimeout(900);
+
+    const fill = await sheet.evaluate((node) => getComputedStyle(node).backgroundColor);
+    expect(fill, "a sheet whose stage never advanced must not be left as an accent slab").not.toBe(accent);
+  });
+
   test("an in-flight composer morph reverses from its current geometry", async ({ page }) => {
     await openPlanner(page);
     await page.getByTestId("new-entry").click();
