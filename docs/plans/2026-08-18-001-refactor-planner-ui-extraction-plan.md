@@ -224,28 +224,28 @@ JavaScript:
 
 | frame | duration | script | style+layout | named invoker |
 | --- | --- | --- | --- | --- |
-| 1 | 86ms | **79ms** | 2ms |  — React's concurrent scheduler |
-| 2 | 91ms | **86ms** | 0ms |  |
+| 1 | 86ms | **79ms** | 2ms | `MessagePort.onmessage` — React's concurrent scheduler |
+| 2 | 91ms | **86ms** | 0ms | `DIV#root.onclick` |
 | 3 | 97ms | 13ms | 78ms | rAF |
 
-Toggling the nav re-renders the whole of . At 9,553 lines with 224
+Toggling the nav re-renders the whole of `Planner()`. At 9,553 lines with 224
 hook calls in one function there are no child component boundaries, so the entire
 render function re-runs for a state change that visually affects a drawer and one
 class. React's scheduler splits it across two frames; both are ~85ms of script.
 
 This is why every CSS lever failed. Measured and rejected, so nobody repeats them:
- on the rail and on the surface,  on both,
+`will-change` on the rail and on the surface, `contain: layout paint` on both,
 the clip-path transition off, the content opacity fade off, the drawer and label
 motion off, **all surface motion off**, resting clip pre-rounded, and no rounded
 corner when open. Every one stayed inside the same 73–127ms band.
 
 **The fix is Phase 5.** Extracting composite surfaces creates the component
-boundaries that  needs; today there is nothing to memoise because
+boundaries that `React.memo` needs; today there is nothing to memoise because
 there are no components. Until then a nav toggle will always pay for re-rendering
 the timeline, the actions panel and everything else that did not change.
 
-A cheaper interim exists — apply the open class imperatively via  so
+A cheaper interim exists — apply the open class imperatively via `navShellRef` so
 the animation starts on the next frame while React's render happens behind it, or
-wrap  in  so the render yields. Both are real changes
+wrap `setPhase` in `startTransition` so the render yields. Both are real changes
 to the composition root in Codex's active area, and the nav e2e probes are
 currently flaking, so neither should be attempted casually.
