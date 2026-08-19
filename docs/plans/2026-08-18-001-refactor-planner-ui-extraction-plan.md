@@ -252,7 +252,48 @@ const loneCR = (text.match(/\r(?!\n)/g) || []).length;   // must be 0
 
 ---
 
-## Phase 4 — leaf presentational components → `features/planner/`
+## Phase 4 — leaf presentational components → `features/planner/` *(complete)*
+
+### Outcome — 8,389 → **7,755**, against a ~7,900 revision of a ~7,400 estimate
+
+Twenty-two of the twenty-three moved. `DurationPicker` did not, and should not: it
+renders `PillNav`, a Phase 5 composite, so it is not a leaf. It goes with Phase 5,
+along with `dur`, the duration formatter only it uses.
+
+Three preparatory commits came first, because the recon said they had to:
+
+| Moved | Why it had to go first |
+| --- | --- |
+| `SERIF` → `design/typography.js` | `QuickAddHint` reads it. Its two companions were already there, so Planner was left holding a comment pointing at the file the *other* two live in |
+| `CARD_R` → `features/planner/constants.js` | `Pill`, `RowWithJoin`, `InlineField` and `InlineChoice` read it |
+| `useLiquidPill` → `features/motion/liquidPill.js` | `Chips`, `InlineChoice`, `InlineChoiceRow` and `LiquidPillIndicator` call it |
+
+After those three, **every remaining leaf had zero Planner-local dependencies.** That
+is the whole value of doing recon before moving: nothing was discovered halfway.
+
+Five modules, not twenty-two files, grouped the way Planner already grouped them:
+
+| Module | Holds | Lines out |
+| --- | --- | --- |
+| `features/planner/rows.jsx` | `Pill`, `Row`, `DetailRow`, `RowWithJoin` | 52 |
+| `features/planner/liquid.jsx` | `LiquidFill`, `LiquidPillIndicator`, `Chips` | 79 |
+| `features/planner/gooey.jsx` | `GooeyFilter`, `GooeySearch` | 105 |
+| `features/planner/fields.jsx` | the eleven `Inline*`/field components, plus `QuickAddHint` | 324 |
+| `features/motion/Reveal.jsx` | `Reveal` | 11 |
+
+`Reveal` went to motion, not planner: it renders no content of its own and exists only
+for the transition, which is the same reason `Sheet.jsx` lives there. No field uses it
+— settings confirmations and the overdue review do.
+
+Every module byte-exact against the commit before it, the largest being `fields.jsx`
+at 18,347 bytes with an identical sha256 either side.
+
+**The CRLF assertion earned itself.** Removing `Chips` — the last function in the file
+— left Planner ending in a lone carriage return. The check caught it; no reviewer
+would have. Any script that removes a file-final block must also strip a trailing
+`\r`, not just normalise `\r\r\n` at block joins.
+
+---
 
 Props in, JSX out, no hooks beyond their own field state: `Pill`, `Chips`, `Row`,
 `RowWithJoin`, `DetailRow`, `InlineField`, `InlineChoice`, `InlineChoiceRow`,

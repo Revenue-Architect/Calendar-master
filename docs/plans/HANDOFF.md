@@ -6,16 +6,32 @@ Read this, then `docs/plans/2026-08-18-001-refactor-planner-ui-extraction-plan.m
 
 ## State
 
-- **`main` clean and pushed.** Phases 2 and 3 are both on it; the
+- **`main` clean and pushed.** Phases 2, 3 and 4 are all on it; the
   `claude/phase-2-…` branch was merged and deleted.
 - **599 unit / 0 fail. 301 browser / 2 fail** — measured, not remembered. See below.
-- `Planner.jsx` is **8,389 lines**, down from 9,616 three sessions ago.
+- `Planner.jsx` is **7,755 lines**, down from 9,616 three sessions ago.
 - Two ratchets in `src/architecture.test.js` enforce that: a line ceiling, and a rule
   that no module under `src/features/` is left unimported. Both must only move down.
 
 ---
 
-## Phases 2 and 3 are done. Do Phase 4 next.
+## Phases 2, 3 and 4 are done. Do Phase 5 next.
+
+**Phase 5 starts with two things Phase 4 handed it deliberately:**
+`DurationPicker`, which is not a leaf because it renders `PillNav`, and `dur`, the
+duration formatter only `DurationPicker` uses. Move `PillNav` first and both follow.
+
+Phase 4's own lesson, worth repeating for the composites: **do the dependency recon
+before moving anything.** Three constants (`SERIF`, `CARD_R`, `useLiquidPill`) had to
+move first, and knowing that up front meant twenty-two components moved without a
+single mid-move discovery. Phase 5's components are far larger and will have more of
+these; find them first.
+
+Group by the concept, not one file per component. Phase 4 put twenty-two components
+into five modules because that is how Planner already grouped them, and a directory of
+twenty-two eight-line files would be worse than the monolith.
+
+
 
 - **Phase 2** — the stylesheet is `features/motion/plannerStyles.js`, as
   `plannerStyles({ T, preferences })`. 9,184 → 8,513.
