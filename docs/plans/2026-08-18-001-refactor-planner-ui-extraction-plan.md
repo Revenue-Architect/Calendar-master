@@ -373,6 +373,44 @@ Smallest blast radius first: `TaskCard` (206), `ActionsPanel` (232), `Composer`
 
 Expected: ~7,400 → ~4,600.
 
+### Recon (done — execute against these numbers)
+
+**`PillNav` already moved** in Phase 4, so the five surfaces that render it are
+unblocked. The remaining seventeen are **1,760 lines**, so the realistic landing is
+**7,625 → ~6,000**, not ~4,600. The ~4,600 figure assumed these components are most
+of what is left in Planner; they are 23% of it. The rest is state and wiring, which
+`structure.md` says stays.
+
+Sizes differ from the estimates above because these include the comments that
+explain them: `WeekGrid` is **574**, `Composer` **284**, `ActionsPanel` **228**,
+`TaskCard` **202**. Everything else is under 70.
+
+**Eighteen blockers, and they group into four clean moves.** Do these first, exactly
+as `SERIF`/`CARD_R`/`useLiquidPill` were done in Phase 4 — after them, most
+composites have nothing left holding them in:
+
+| Group | Names | Suggested home |
+| --- | --- | --- |
+| Time formatting | `fmtTime` (5 users), `fmtDay` (2), `fmtHour`, `pad` (3), `hhmm`, `fromHhmm` | beside `dur` in `shared/time/` |
+| Colour maths | `isDark` (3), `mixHex` (3) | `design/`, next to `contrast.js` |
+| Layout & gesture numbers | `DAY_H`, `HOUR_H`, `LIFT_MS`, `HOLD_MS`, `SWIPE_SOFT_LIMIT` | `features/planner/constants.js`, where `CARD_R` went |
+| Planner helpers | `uid` (2), `startSlot` (2), `orderedIndex`, `plannedLabel`, `noteContextLabel` | decide per name; several may belong in `domains/` |
+
+`fmtTime` alone unblocks five of the seventeen.
+
+**Peer dependencies constrain the grouping.** `TaskCard` renders `PromotedSubtasks`
+and `SubComposer`; `ActionsPanel` renders `NoteBlock` and `TaskCard`. So `TaskCard`
+cannot move before the two it renders, and `ActionsPanel` moves after both. Everything
+else is independent.
+
+Six composites — `NoteBlock`, `CommandPalette`, `ShortcutSheet`, `SubComposer`,
+`PromotedSubtasks`, `EntityNotes`, `NavigationShell`, `FluidEditActions` — have **no**
+Planner-declared blockers at all and could move today.
+
+**Start with `NavigationShell` (37 lines, no blockers).** It is the surface the nav
+stutter lives on, so it is the first place a `React.memo` boundary can be measured
+rather than argued about.
+
 ---
 
 ## Phase 6 — `Planner()`'s own state *(reassess before starting)*
