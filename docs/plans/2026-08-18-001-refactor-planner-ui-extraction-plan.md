@@ -117,15 +117,46 @@ Not static — it interpolates `MORPH_MS`, the theme `T`, and
 export function plannerStyles({ T, preferences }) { return `…`; }
 ```
 
-**Highest-risk-of-typo step in the plan.** A backtick inside a CSS comment terminates
-the template literal and breaks the build — that has happened three times. Worse, a
-stray `*/` can leave keyframes silently unparsed while the build *succeeds*; if an
-animation mysteriously does nothing, enumerate `document.styleSheets` and confirm the
-rule parsed.
+### Recon (done — execute against these numbers)
+
+- The block is **`Planner.jsx` lines 3975–4620, 646 lines**, from `<style>{` to `</style>`.
+- It has **37 interpolations across only 12 roots**: `Array` and `n` (a local inside an
+  `Array.from` callback, stays put), `T` and `preferences` (become parameters), and
+  `MONO`, `MORPH_MS`, `MORPH_LEAD`, `MORPH_STEP`, `MORPH_FADE` (already shared, just
+  import them), leaving exactly three that still live in Planner as one-liners:
+
+  | Constant | Line | Value | Belongs in |
+  | --- | --- | --- | --- |
+  | `VIEW_SLIDE_MS` | 319 | `300` | `features/motion/morphTiming.js` |
+  | `NOW_RED` | 324 | `"var(--now-red, #C43A56)"` | `design/themes.js` (a colour token) |
+  | `DISPLAY` | 375 | `"var(--font-display)"` | `design/typography.js`, beside `MONO` |
+
+So the signature is `plannerStyles({ T, preferences })` with five imports, and the
+three constants move first — exactly the way `MONO` moved during 1.3.
+
+**Move it with a script, not by hand.** The typo warning below assumes retyping; a
+byte-exact programmatic move of lines 3975–4620 has no typo risk at all, and that is
+the difference between this being dangerous and being mechanical.
+
+**Verify by comparing parsed CSS, not by eye.** Before and after, count and hash the
+rules the browser actually parsed:
+
+```js
+[...document.styleSheets].flatMap(s => { try { return [...s.cssRules] } catch { return [] } })
+  .map(r => r.cssText).join("\n").length
+```
+
+Identical length and rule count is the proof the move was faithful. This matters
+because a stray `*/` can leave keyframes unparsed while the build still *succeeds* —
+and because a missing import is invisible to Vite: during 1.3 a dropped `MONO` import
+built cleanly and took out 46 e2e tests at runtime.
+
+A backtick inside a CSS comment terminates the template literal and breaks the build.
+That has happened three times; leave the comments byte-identical and it cannot recur.
 
 Coordinate with Codex before starting — this is their active area.
 
-Expected: Planner ~9,150 → ~8,480.
+Expected: Planner 9,184 → ~8,540.
 
 ---
 
