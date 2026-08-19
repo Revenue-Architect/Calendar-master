@@ -68,12 +68,12 @@ created.
 
 Two executable rules, both allowed to move one direction only:
 
-1. **`Planner.jsx` does not grow.** Ceiling 9,590 (lowered by 1.1). `structure.md` said "do not grow
+1. **`Planner.jsx` does not grow.** Ceiling 9,553 (lowered by 1.1 and 1.2). `structure.md` said "do not grow
    Planner.jsx" and nothing enforced it; had this existed, `9470 → 9470` on a commit
    named "extract Sheet from Planner" would have been a visible non-event and
    `9470 → 9616` a hard failure.
 2. **No module under `src/features/` is left unimported.** Carries an explicit
-   `UNWIRED` allowlist of the three known-dead modules. The list may only shrink;
+   `UNWIRED` allowlist, now down to `Sheet.jsx` alone. The list may only shrink;
    wiring one up and forgetting to remove it from the list also fails.
 
 The second ratchet has already paid for itself: it corrected a hand-written grep
@@ -92,7 +92,7 @@ import → run the guarding spec → lower the ratchet.
 | # | Module | Moves out of Planner | Guarded by |
 | --- | --- | --- | --- |
 | ~~1.1~~ | ~~`morphTiming.js`~~ **done** | 4 constants + 2 stage fractions that were magic numbers | `motion.spec.js` |
-| 1.2 | `fluidTrigger.js` | `recentFluidTriggerRect` + radius/fill helpers | `motion.spec.js` |
+| ~~1.2~~ | ~~`fluidTrigger.js`~~ **done** | state, both accessors, and the pointerdown/keydown listeners | `motion.spec.js` |
 | 1.3 | `Sheet.jsx` | the 370-line `Sheet` | `motion.spec.js`, `editor-rows.spec.js`, `composer.spec.js` |
 
 **1.3 is not a move — it is a merge.** Planner's copy is *newer*: it gained
@@ -101,7 +101,7 @@ file never received. Port that forward into `features/motion/Sheet.jsx` first, v
 the two are equivalent, *then* swap the import and delete Planner's copy. Doing it in
 the other direction silently reverts a fix.
 
-Planner 9,616 → **9,590** after 1.1. Expected ~9,150 when 1.3 lands.
+Planner 9,616 → **9,553** after 1.1 and 1.2. Expected ~9,180 when 1.3 lands.
 
 ---
 

@@ -168,6 +168,11 @@ import {
   MORPH_STEP,
 } from "./features/motion/morphTiming.js";
 import {
+  installFluidTriggerListeners,
+  recentFluidTriggerRadius,
+  recentFluidTriggerRect,
+} from "./features/motion/fluidTrigger.js";
+import {
   VIEW_PILL_COMPACT_MAX,
   VIEW_PILL_ICON,
   VIEW_PILL_WORD,
@@ -416,52 +421,10 @@ const startSlot = (m, s = 15) => Math.min(snapTo(m, s), 1440 - s);
 /* The wire form a native time input speaks, independent of the 12/24 display clock. */
 const hhmm = (m) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
 const fromHhmm = (s) => { const [h, m] = s.split(":").map(Number); return h * 60 + m; };
-/* Sheets morph open from the control that opened them. Focus alone cannot always
-   say which control that was — iOS Safari does not focus a tapped button — so the
-   last pressed trigger is remembered here and consulted when a sheet mounts.
- *
- * The remembered press is only good until the next thing that could open a sheet
- * some other way. A keystroke clears it: a sheet opened by pressing N was not
- * opened by a control, and growing it out of whichever button happens to still
- * hold focus — a view tab, the last thing clicked a second ago — makes it appear
- * to fly out of something unrelated. With nothing remembered the sheet uses its
- * neutral arrival, which is the honest answer to "where did this come from".
- * The window is short for the same reason: a sheet opens within a frame or two of
- * the press that opened it, so anything later did not come from that press. */
-const FLUID_TRIGGER_MAX_AGE_MS = 900;
-let lastFluidTriggerRect = null;
-let lastFluidTriggerAt = 0;
-if (typeof window !== "undefined") {
-  window.addEventListener("pointerdown", (event) => {
-    const el = event.target instanceof Element
-      ? event.target.closest("button,[role='button'],summary,label,[data-event-id],[data-task-chip]")
-      : null;
-    const rect = el?.getBoundingClientRect();
-    /* The corner travels with the rect. A pill and a card are the same geometry
-       problem with different radii, and using one number for both is what turned
-       a card's reveal into an ellipse. */
-    const radius = el ? window.getComputedStyle(el).borderTopLeftRadius : null;
-    lastFluidTriggerRect = rect && rect.width > 0 && rect.height > 0
-      ? { left: rect.left, top: rect.top, width: rect.width, height: rect.height, radius }
-      : null;
-    lastFluidTriggerAt = el ? Date.now() : 0;
-  }, true);
-  window.addEventListener("keydown", () => { lastFluidTriggerRect = null; lastFluidTriggerAt = 0; }, true);
-}
-function recentFluidTriggerRect() {
-  /* Keep a geometry snapshot rather than a DOM node. Navigation can legitimately
-     unmount the pressed card before the delayed inspector mounts; requiring the
-     node to remain connected turned that valid path into a generic fade. A new
-     pointer press replaces the snapshot and keyboard opens clear it, so the short
-     lifetime still prevents an unrelated control from borrowing an old origin. */
-  if (!lastFluidTriggerRect) return null;
-  if (Date.now() - lastFluidTriggerAt > FLUID_TRIGGER_MAX_AGE_MS) return null;
-  return lastFluidTriggerRect;
-}
-/** The pressed control's own corner radius, for the shape the reveal starts from. */
-function recentFluidTriggerRadius() {
-  return recentFluidTriggerRect()?.radius ?? null;
-}
+/* The pressed-trigger snapshot lives in features/motion/fluidTrigger.js, which
+   also owns the listeners that feed it. Installed here because Planner is the
+   composition root and this is a document-level concern, not a component one. */
+installFluidTriggerListeners();
 const splitId = (id) => { const i = String(id).indexOf("@"); return i === -1 ? { base: id, date: null } : { base: id.slice(0, i), date: id.slice(i + 1) }; };
 /* "STARTS" reads in the largest unit that still says something useful — days for
    next week, hours today, minutes when it is imminent, and past tense once gone. */

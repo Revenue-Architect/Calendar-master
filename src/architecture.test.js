@@ -20,7 +20,7 @@ const SRC = fileURLToPath(new URL(".", import.meta.url));
    copied code out and never deleted the original. The file then grew to 9,615
    during a refactor meant to shrink it. A ratchet turns that from something you
    have to notice into something CI notices for you. */
-const PLANNER_CEILING = 9590; // split("\n").length, so one more than `wc -l`
+const PLANNER_CEILING = 9553; // split("\n").length, so one more than `wc -l`
 
 test("Planner.jsx does not grow", () => {
   const lines = readFileSync(join(SRC, "Planner.jsx"), "utf8").split("\n").length;
@@ -42,8 +42,7 @@ test("Planner.jsx does not grow", () => {
    Every name below is a module extracted but never wired up. The list may only
    get shorter. */
 const UNWIRED = new Set([
-  "features/motion/Sheet.jsx",
-  "features/motion/fluidTrigger.js",
+  "features/motion/Sheet.jsx",
 ]);
 
 function sourceFiles(dir) {
