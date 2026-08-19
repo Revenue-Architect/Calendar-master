@@ -310,6 +310,7 @@ import { addMinutesToLocalDateTime, localDateTimeToEpochMinutes } from "./shared
 import { getOffsetCandidates } from "./shared/time/timezone.js";
 import { dur } from "./shared/time/duration.js";
 import { fmtHour, fmtTime, fromHhmm, hhmm, pad } from "./shared/time/clockFormat.js";
+import { snapTo, startSlot } from "./shared/time/snap.js";
 import { NOW_RED, THEMES } from "./design/themes.js";
 import { readable } from "./design/contrast.js";
 
@@ -351,7 +352,6 @@ const REVEAL_FALLBACK_MS = 120;
    the preferred scale. Forty-four pixels still gives an hour a real touch-sized
    row; below that, density starts making the timeline less usable than scrolling. */
 const MIN_DAY_HOUR_H = 44;
-const SNAP = 5;
 
 function ribbonRangeAround(anchorKey) {
   return {
@@ -362,12 +362,6 @@ function ribbonRangeAround(anchorKey) {
 
 /* ═══════════════════════ UTILS ═══════════════════════ */
 
-const snapTo = (m, s = SNAP) => Math.max(0, Math.min(1440, Math.round(m / s) * s));
-/* A start is a minute of the day, and a day has no minute 1440. Snapping "now" at
-   23:53 rounded up to it and built "…T24:00", which the time model rejects — from
-   inside render, so the whole page went blank. A new entry begins in the last slot
-   the day actually has. */
-const startSlot = (m, s = 15) => Math.min(snapTo(m, s), 1440 - s);
 /* The pressed-trigger snapshot lives in features/motion/fluidTrigger.js, which
    also owns the listeners that feed it. Installed here because Planner is the
    composition root and this is a document-level concern, not a component one. */
