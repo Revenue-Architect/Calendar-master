@@ -34,6 +34,12 @@ export const DISPLAY = "var(--font-display)";
    importing the composition root. */
 export const MONO = "var(--font-data)";
 
+/* The written voice — the third of the three the header describes. It stayed in
+   Planner when DISPLAY and MONO came here, which left that file holding a
+   comment pointing at this one for the other two. Named SERIF rather than VOICE
+   because renaming is not a move; the custom property it reads is --font-voice. */
+export const SERIF = "var(--font-voice)";
+
 /** Every step, in the order they appear in the scale. */
 export const TYPE_SCALE = Object.freeze({
   display: { px: 64, weight: 800, tracking: -0.035, family: "data", role: "The day numeral, and nothing else." },

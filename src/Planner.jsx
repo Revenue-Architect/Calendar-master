@@ -202,7 +202,7 @@ import {
 } from "./features/motion/fluidTrigger.js";
 import Sheet from "./features/motion/Sheet.jsx";
 import { plannerStyles } from "./features/motion/plannerStyles.js";
-import { DISPLAY, MONO } from "./design/typography.js";
+import { DISPLAY, MONO, SERIF } from "./design/typography.js";
 import {
   VIEW_PILL_COMPACT_MAX,
   VIEW_PILL_ICON,
@@ -330,10 +330,6 @@ function ribbonRangeAround(anchorKey) {
     endKey: addDaysToKey(anchorKey, RIBBON_RADIUS_DAYS + 1),
   };
 }
-
-/* The written voice. Its two companions, DISPLAY and MONO, live in
-   design/typography.js, which explains the three of them. */
-const SERIF = "var(--font-voice)";
 
 /* ═══════════════════════ UTILS ═══════════════════════ */
 
