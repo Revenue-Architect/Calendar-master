@@ -363,53 +363,74 @@ it belongs in its own commit before any component moves.
 
 ---
 
-## Phase 5 — composite surfaces → `features/planner/`
+## Phase 5 — composite surfaces → `features/planner/` *(in progress)*
 
-Smallest blast radius first: `TaskCard` (206), `ActionsPanel` (232), `Composer`
-(287), `WeekGrid` (587), then `Agenda`, `NoteEditor`, `NoteBlock`, `CommandPalette`,
-`ShortcutSheet`, `NotebookPanel`, `EventScheduleEditor`, `SubComposer`,
-`PromotedSubtasks`, `EntityNotes`, `NoteHistory`, `PillNav`, `NavigationShell`,
-`FluidEditActions`.
+**Landed so far: 7,625 → 7,374.** Three commits, each verified in a browser
+before being committed rather than after.
 
-Expected: ~7,400 → ~4,600.
-
-### Recon (done — execute against these numbers)
-
-**`PillNav` already moved** in Phase 4, so the five surfaces that render it are
-unblocked. The remaining seventeen are **1,760 lines**, so the realistic landing is
-**7,625 → ~6,000**, not ~4,600. The ~4,600 figure assumed these components are most
-of what is left in Planner; they are 23% of it. The rest is state and wiring, which
-`structure.md` says stays.
-
-Sizes differ from the estimates above because these include the comments that
-explain them: `WeekGrid` is **574**, `Composer` **284**, `ActionsPanel` **228**,
-`TaskCard` **202**. Everything else is under 70.
-
-**Eighteen blockers, and they group into four clean moves.** Do these first, exactly
-as `SERIF`/`CARD_R`/`useLiquidPill` were done in Phase 4 — after them, most
-composites have nothing left holding them in:
-
-| Group | Names | Suggested home |
+| Commit | What moved | Lines |
 | --- | --- | --- |
-| Time formatting | `fmtTime` (5 users), `fmtDay` (2), `fmtHour`, `pad` (3), `hhmm`, `fromHhmm` | beside `dur` in `shared/time/` |
-| Colour maths | `isDark` (3), `mixHex` (3) | `design/`, next to `contrast.js` |
-| Layout & gesture numbers | `DAY_H`, `HOUR_H`, `LIFT_MS`, `HOLD_MS`, `SWIPE_SOFT_LIMIT` | `features/planner/constants.js`, where `CARD_R` went |
-| Planner helpers | `uid` (2), `startSlot` (2), `orderedIndex`, `plannedLabel`, `noteContextLabel` | decide per name; several may belong in `domains/` |
+| `refactor(planner)` | the whole navigation cluster → `features/planner/navigation.jsx` | 223 |
+| `refactor(shared)` | the clock formatters → `shared/time/clockFormat.js` | 16 |
+| `refactor(design)` | `mixHex`, `isDark`, `hexToRgb` → `design/colorMix.js` | 14 |
 
-`fmtTime` alone unblocks five of the seventeen.
+### What the first three taught
 
-**Peer dependencies constrain the grouping.** `TaskCard` renders `PromotedSubtasks`
-and `SubComposer`; `ActionsPanel` renders `NoteBlock` and `TaskCard`. So `TaskCard`
-cannot move before the two it renders, and `ActionsPanel` moves after both. Everything
-else is independent.
+**The nav cluster moved as a unit, not as `NavigationShell` alone.** The plan
+named `NavigationShell` (37 lines) as the start. In the file it is one of four
+things that only make sense together — `NavigationContext` has exactly one
+provider and one consumer, both inside the cluster, and Planner renders only
+`NavigationFrame` and `NavigationToggle`. Moving the concept exported two names
+and kept two private; moving the component alone would have split it.
 
-Six composites — `NoteBlock`, `CommandPalette`, `ShortcutSheet`, `SubComposer`,
-`PromotedSubtasks`, `EntityNotes`, `NavigationShell`, `FluidEditActions` — have **no**
-Planner-declared blockers at all and could move today.
+**Recon the whole block, not the component.** Ten Planner-scope names, every one
+of them already an import — so zero blockers and nothing to move first. That is
+worth measuring rather than assuming: it is what made a 223-line move a
+single sitting.
 
-**Start with `NavigationShell` (37 lines, no blockers).** It is the surface the nav
-stutter lives on, so it is the first place a `React.memo` boundary can be measured
-rather than argued about.
+**`fmtDay` does not belong in `shared/time/`,** though this plan grouped it with
+the clock. It formats through the `WD` and `MO` label arrays from
+`features/planner/constants.js`, so putting it in `shared/` points `shared` at
+`features`. It moves with the label arrays or not at all.
+
+**`colorMix.js` deliberately does not merge with `contrast.js`.** `hexToRgb` is
+`parseHex` without the validation, and `isDark` is *not* `luminance()` with a
+threshold — it uses raw sRGB bytes where `luminance` gamma-corrects first, so
+they disagree in the midtones and swapping them would repaint text on some
+themes. Both are edits, not moves. The reasoning is in the module header.
+
+### Recon — remeasured after the two blocker moves
+
+Sixteen composites, **1,723 lines**. The two blocker groups already landed took
+the "could move today" set from seven components to **nine, 307 lines**:
+
+| Blockers | Components |
+| --- | --- |
+| **none** | `SubComposer` (11), `NoteBlock` (26), `EntityNotes` (26), `ShortcutSheet` (28), `EventScheduleEditor` (32), `FluidEditActions` (34), `PromotedSubtasks` (35), `CommandPalette` (57), `Agenda` (58) |
+| one | `NoteHistory` (`fmtDay`), `NotebookPanel` (`noteContextLabel`), `Composer` (`startSlot`) |
+| two | `NoteEditor` (`noteContextLabel`, `uid`) |
+| more | `ActionsPanel`, `TaskCard`, `WeekGrid` — see below |
+
+**Two blocker moves remain, and they clear almost everything:**
+
+| Group | Names | Home | Unblocks |
+| --- | --- | --- | --- |
+| Layout & gesture numbers | `HOUR_H`, `DAY_H`, `HOLD_MS`, `LIFT_MS`, `SWIPE_SOFT_LIMIT` | `features/planner/constants.js` | `WeekGrid`, `TaskCard` |
+| Planner helpers | `uid`, `startSlot` (+ `snapTo`, `SNAP`), `fmtDay`, `plannedLabel`, `orderedIndex`, `noteContextLabel` | decide per name | the remaining seven |
+
+Watch the sub-dependencies — the earlier recon listed only the names the
+composites reference, not what those names themselves need: `startSlot` needs
+`snapTo` which needs `SNAP`; `fmtDay` needs `WD`/`MO`/`pad`; `uid` is
+`createId`. Each is a small extra passenger, but a move that forgets one is
+exactly the failure this project keeps having.
+
+**Peer order is fixed and unchanged.** `TaskCard` renders `PromotedSubtasks` and
+`SubComposer`, so those two go first; `ActionsPanel` renders `NoteBlock` and
+`TaskCard`, so it goes last of the three. Everything else is independent.
+
+**Realistic landing is ~6,000**, not the ~4,600 this plan originally estimated.
+That figure assumed these components are most of what is left in Planner; they
+are 23% of it, and the rest is the state and wiring `structure.md` says stays.
 
 ---
 
