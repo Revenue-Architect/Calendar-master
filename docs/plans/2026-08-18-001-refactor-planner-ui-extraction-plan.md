@@ -1,355 +1,233 @@
 ---
-title: Finish ADR 0001 — extract the UI layer out of Planner.jsx
+title: Finish the extraction out of Planner.jsx
 type: refactor
-status: proposed
+status: active
 date: 2026-08-18
+revised: 2026-08-18 (rewritten against the tree after the motion extraction landed)
 origin: docs/adr/0001-domain-oriented-modular-monolith.md
-graph: graphify-out/graph.json (built from 4ee3222, 1394 nodes / 4587 edges)
 ---
 
-# Finish ADR 0001 — extract the UI layer out of Planner.jsx
+# Finish the extraction out of Planner.jsx
 
-## The short version
+## What changed in this revision
 
-The refactor does not need to be invented. **ADR 0001 is Accepted, its domain half
-is essentially finished, and its `ui/` half has not been started.** This plan
-sequences the remaining half by risk. Nothing here proposes a new architecture.
+The first draft of this plan targeted `src/ui/{primitives,patterns,themes}` straight
+from ADR 0001, and assumed nothing was in flight. Both were wrong:
 
----
+- **`structure.md` prescribes an interim step this plan skipped.** It says visible
+  React surfaces go to `src/features/*/Foo.jsx` **"for now; later `src/ui/...` once
+  that tree exists"**. The first draft quoted that line and then proposed jumping
+  straight to `src/ui/`. The work that actually landed used `src/features/motion/`,
+  which is what the spec asks for. **This plan now targets `src/features/*`.**
+- **An extraction was already underway** and is half-finished. Phases below are
+  reordered to finish it before starting anything new.
 
-## 1. Diagnosis (from the knowledge graph, not from impressions)
+## The finding that reframes everything
 
-### The concentration
-
-| Measure | Value |
-| --- | --- |
-| `src/Planner.jsx` | **9,470 lines** |
-| Next largest file in the repo | 452 lines (`features/planner/quickAdd.js`) |
-| Total `src/` | 27,252 lines across 210 modules |
-| Planner's share of all source | **35%** |
-| Other 209 modules, average | ~85 lines |
-
-One file is 21× the next largest. Every other module in the repo is already small.
-
-### Inside the file
-
-| Region | Lines | Contents |
-| --- | --- | --- |
-| L1–828 | 828 | 55 imports, ~24 icon components, constants, small helpers |
-| L829–6504 | **5,675** | `Planner()` — a single React function |
-| └ L4115–4784 | 670 | the entire motion `<style>` block, *inside* the render return |
-| L6504–9470 | 2,966 | ~40 further React components |
-
-`Planner()` contains **224 hook calls in one function**:
+Three commits titled *"extract X from Planner"* removed **zero** lines from Planner:
 
 ```
-79 useState · 53 useRef · 36 useEffect · 26 useMemo · 25 useCallback · 5 useLayoutEffect
+9470   4ee3222  (before)
+9470   1bbabf7  refactor(motion): extract morph timing, fluid trigger, stylesheet, and Sheet
+9470   7548c11  refactor(motion): extract Sheet from Planner
+...
+9616   HEAD     (now)
 ```
 
-### Graph evidence
+They copied code into new files and never deleted the originals or added the
+imports. Planner has since grown to 9,616 — **net +146 during a refactor meant to
+shrink it.**
 
-- `Planner()` is the top god node at **189 edges** — the next is 90 (`addDaysToKey`).
-- BFS depth 2 from `Planner()` reaches **597 of 1394 nodes (43% of the graph)**.
-- The graph identifies **109 definitions inside `Planner.jsx`**, ~63 of them React
-  components.
-- **Zero import cycles detected** across the whole repo.
+The second half of an extraction — *delete the original, wire the import* — is the
+half that produces the benefit, and it is the half that was skipped.
 
-### What is already healthy — do not touch it
+### Current wiring state
 
-The domain layer is done and well-tested. Against the ADR's target tree:
+| Module | Imported outside its folder? | Planner still has its own | Tests |
+| --- | --- | --- | --- |
+| `features/motion/fluidGeometry.js` | **yes** | — | 5 |
+| `features/motion/viewPills.js` | **yes** | — | 8 |
+| `features/motion/navPageFit.js` | **yes** | — | ✓ |
+| `features/motion/progressGeometry.js` | **yes** | — | ✓ |
+| `features/motion/morphTiming.js` | **no** | `MORPH_MS`, `MORPH_LEAD`, `MORPH_STEP`, `MORPH_FADE` | 3 |
+| `features/motion/fluidTrigger.js` | **no** | `recentFluidTriggerRect` + helpers | 6 |
+| `features/motion/Sheet.jsx` | **no** | 370-line `Sheet`, **drifted 134 lines** | 0 |
 
-```
-OK       app, domains/{calendar,tasks,notes,planner,reminders,gamification,search}
-OK       platform/persistence, shared/time
-MISSING  ui/{primitives,patterns,themes}          ← the entire remaining gap
-MISSING  platform/{notifications,integrations,telemetry}   ← deferred provider work, not in scope
-MISSING  shared/{recurrence,validation,types}     ← content lives elsewhere and works; not in scope
-```
+Nine unit tests currently pass against code the app never runs. That is worse than
+dead code, because it reads as coverage. `Sheet.jsx` is the live hazard: a fix
+applied to it changed nothing until an e2e test caught the mistake.
 
-`src/features/planner/` holds 19 extracted modules and **every single one has a
-paired `.test.js`**. That is the proven pattern. But only **2 of them are `.jsx`**
-(`SegmentedProgress`, `TimelineActionCard`) — the extraction so far has been
-logic-only. **No presentational component has ever been moved out.** That is
-precisely the work remaining.
-
-### The governing instructions already on disk
-
-`docs/spec/structure.md`:
-
-- "Do not grow `Planner.jsx`."
-- "Visible React surface → `src/features/*/Foo.jsx` **for now; later `src/ui/...`
-  once that tree exists**."
-- "Do not put markup in the 8k-line Planner composition root."
-- **"Planner remains the composition root: state, wiring, and existing surfaces."**
-
-That last line is a constraint, not an aspiration: **the plan must not try to
-dissolve `Planner()`.** State and wiring are supposed to live there.
-
-ADR 0001 also **explicitly rejected** a "technical-layer split" into
-`components/hooks/services/utils`. Extraction must stay organised by domain and
-surface, never by mechanism. There must be no `src/hooks/` folder.
-
-### Two facts that make this unusually safe
-
-1. **`Planner.jsx` has exactly one importer** — `src/main.jsx`, a default import.
-   Its public surface is one symbol, so internal restructuring cannot break a caller.
-2. **No import cycles.** Extractions cannot create tangles that are not visible.
+`docs/spec/structure.md:22` already points at `src/features/motion/` as the home for
+the sheet morph, fluid trigger and planner stylesheet — so the spec currently
+describes code that does not run. It also names `plannerStyles.js`, which was never
+created.
 
 ---
 
-## 2. Phase 0 — Build the safety rig first
+## Phase 0 — the ratchets *(done — `src/architecture.test.js`)*
 
-Do not move a single line before this phase is complete.
+Two executable rules, both allowed to move one direction only:
 
-### 0.1 Record the real baseline
+1. **`Planner.jsx` does not grow.** Ceiling 9,616. `structure.md` said "do not grow
+   Planner.jsx" and nothing enforced it; had this existed, `9470 → 9470` on a commit
+   named "extract Sheet from Planner" would have been a visible non-event and
+   `9470 → 9616` a hard failure.
+2. **No module under `src/features/` is left unimported.** Carries an explicit
+   `UNWIRED` allowlist of the three known-dead modules. The list may only shrink;
+   wiring one up and forgetting to remove it from the list also fails.
 
-The suite is **not** all-green, and treating it as green is how a refactor gets
-blamed for pre-existing failures.
+The second ratchet has already paid for itself: it corrected a hand-written grep
+that reported five dead modules when only three are. The grep was line-based and
+these are multi-line imports.
 
-```bash
-npm test && npx playwright test
-```
+**Every phase below ends by lowering a ratchet in the same commit.**
 
-Expected, and verified by stash-comparison on 2026-08-18:
+---
 
-- **583 unit / 0 fail**
-- **292 browser / 4 fail**, and the four are always:
-  - `planning.spec.js:64` — untimed actions, dragged onto the timeline
-  - `timeline-chrome-scroll.spec.js:34` — phone projection
-  - `timeline-chrome-scroll.spec.js:34` — desktop projection
-  - `view-pills.spec.js:145` — page slide / compact pill curve
+## Phase 1 — finish the motion extraction *(in progress)*
 
-### 0.2 Know the two traps that produce false results
+One module per commit, smallest first. Each commit: delete Planner's copy → add the
+import → run the guarding spec → lower the ratchet.
 
-- **`planning.spec.js` has cross-spec localStorage bleed.** In full runs a *fifth*
-  failure appears and rotates (`:30` and `:198` both seen); it passes in isolation.
-  **Never accept a new `planning.spec.js` failure without re-running that file alone.**
-- **Playwright's `reuseExistingServer: !CI`** means a live server on port 4321 makes
-  it skip the build and test a *stale bundle*. Kill 4321 before any full run. A dev
-  server on another port is fine.
+| # | Module | Moves out of Planner | Guarded by |
+| --- | --- | --- | --- |
+| 1.1 | `morphTiming.js` | 4 constants, no logic | `motion.spec.js` |
+| 1.2 | `fluidTrigger.js` | `recentFluidTriggerRect` + radius/fill helpers | `motion.spec.js` |
+| 1.3 | `Sheet.jsx` | the 370-line `Sheet` | `motion.spec.js`, `editor-rows.spec.js`, `composer.spec.js` |
 
-### 0.3 Add the size ratchet — make `structure.md` executable
+**1.3 is not a move — it is a merge.** Planner's copy is *newer*: it gained
+`heightMeasureFrame`, `lastSheetHeight` and first-paint sizing that the extracted
+file never received. Port that forward into `features/motion/Sheet.jsx` first, verify
+the two are equivalent, *then* swap the import and delete Planner's copy. Doing it in
+the other direction silently reverts a fix.
 
-`structure.md` says "do not grow `Planner.jsx`" but nothing enforces it. Add a unit
-test that fails if the file grows:
+Expected: Planner 9,616 → ~9,150.
+
+---
+
+## Phase 2 — the stylesheet → `features/motion/plannerStyles.js`
+
+The `<style>` block is ~670 lines living inside the render return, rebuilt on every
+render. `structure.md` already names this file; it does not exist.
+
+Not static — it interpolates `MORPH_MS`, the theme `T`, and
+`preferences?.display.reducedMotion`. So it extracts as a **function**, not a constant:
 
 ```js
-// src/Planner.size.test.js
-import test from "node:test";
-import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-
-/* structure.md says "do not grow Planner.jsx". This makes that executable.
-   Ratchet only downwards: when an extraction lands, lower CEILING to the new
-   count. Raising it requires deleting this test and arguing for it in review. */
-const CEILING = 9470;
-
-test("Planner.jsx does not grow", () => {
-  const lines = readFileSync(new URL("./Planner.jsx", import.meta.url), "utf8").split("\n").length;
-  assert.ok(lines <= CEILING, `Planner.jsx is ${lines} lines, ceiling is ${CEILING}`);
-});
+export function plannerStyles({ T, preferences }) { return `…`; }
 ```
 
-This is the single highest-value artefact in the plan: it converts a written rule
-into a gate, and it makes every subsequent phase self-verifying.
+**Highest-risk-of-typo step in the plan.** A backtick inside a CSS comment terminates
+the template literal and breaks the build — that has happened three times. Worse, a
+stray `*/` can leave keyframes silently unparsed while the build *succeeds*; if an
+animation mysteriously does nothing, enumerate `document.styleSheets` and confirm the
+rule parsed.
 
-### 0.4 Coordinate with Codex
+Coordinate with Codex before starting — this is their active area.
 
-Codex works in this repo and owns
-`docs/superpowers/plans/2026-08-17-framer-fidelity-motion.md`. **Phase 3 (the motion
-style block) collides with that work directly.** Agree ownership before starting
-Phase 3, or defer Phase 3 until Codex's motion work has landed.
+Expected: Planner ~9,150 → ~8,480.
 
 ---
 
-## 3. The rules that keep this from breaking anything
+## Phase 3 — icons and constants → `features/planner/`
 
-These are non-negotiable and matter more than the sequence.
+- `icons.jsx` — ~24 pure SVG components, no props beyond size/colour, no state.
+- `constants.js` — `CAT_COLOR`, `CATS`, `DAY_LETTERS`, `WD`, `WD1`, `MO`, `REPEATS`,
+  `ALERT_CHOICES`, `SHORTCUTS`, `VIEW_ORDER`.
 
-1. **A move commit moves. It never edits.** Never rename, reformat, "tidy while
-   I'm here", or change a prop signature in the same commit as a relocation. If the
-   diff shows anything but relocated lines plus import/export lines, split it.
-2. **Verify purity mechanically.** After each extraction, the moved text should be
-   identical to the deleted text. Check it, do not eyeball it:
-   ```bash
-   git show HEAD --unified=0 -- src/Planner.jsx | grep '^-' | grep -v '^---' | sed 's/^-//' > /tmp/removed.txt
-   git show HEAD --unified=0 -- src/ui/ | grep '^+' | grep -v '^+++' | sed 's/^+//' > /tmp/added.txt
-   diff <(sed 's/[[:space:]]//g' /tmp/removed.txt) <(sed 's/[[:space:]]//g' /tmp/added.txt)
-   ```
-   Only import lines and the export statement should differ.
-3. **One component per commit** in Phases 2 and 4. Not batches. A 40-component
-   batch that goes red tells you nothing about which one did it.
-4. **Full suite between commits, compared to the Phase 0 baseline** — not to zero.
+Zero behaviour surface. Expected: ~8,480 → ~8,220.
+
+---
+
+## Phase 4 — leaf presentational components → `features/planner/`
+
+Props in, JSX out, no hooks beyond their own field state: `Pill`, `Chips`, `Row`,
+`RowWithJoin`, `DetailRow`, `InlineField`, `InlineChoice`, `InlineChoiceRow`,
+`Inline`, `InlineText`, `InlineNative`, `InlineStamp`, `InlineAdd`, `LabeledNative`,
+`TagField`, `NewListField`, `Reveal`, `LiquidFill`, `LiquidPillIndicator`,
+`GooeyFilter`, `GooeySearch`, `QuickAddHint`, `DurationPicker`.
+
+Start with `Pill` — `editor-rows.spec.js` already covers its geometry via
+`editorRowSpan.js`, so the first one is guarded before it moves.
+
+Expected: ~8,220 → ~7,400.
+
+---
+
+## Phase 5 — composite surfaces → `features/planner/`
+
+Smallest blast radius first: `TaskCard` (206), `ActionsPanel` (232), `Composer`
+(287), `WeekGrid` (587), then `Agenda`, `NoteEditor`, `NoteBlock`, `CommandPalette`,
+`ShortcutSheet`, `NotebookPanel`, `EventScheduleEditor`, `SubComposer`,
+`PromotedSubtasks`, `EntityNotes`, `NoteHistory`, `PillNav`, `NavigationShell`,
+`FluidEditActions`.
+
+Expected: ~7,400 → ~4,600.
+
+---
+
+## Phase 6 — `Planner()`'s own state *(reassess before starting)*
+
+**Recommendation: stop after Phase 5.** `structure.md` says Planner *remains the
+composition root: state, wiring, and existing surfaces*. After Phase 5 it is ~4,600
+lines of exactly that.
+
+If pain justifies it later, the 79 `useState`s group along domain lines — and must be
+extracted **per domain**, never into a `hooks/` bucket, which ADR 0001 explicitly
+rejected. The **view & motion** group is the most self-contained; start there or not
+at all.
+
+---
+
+## Phase 7 — `src/ui/` *(deferred, and possibly never)*
+
+ADR 0001's target tree names `ui/{primitives,patterns,themes}`. `structure.md` makes
+`features/*` the interim home "until `src/ui/` exists". Once Phases 3–5 are done,
+decide whether renaming `features/planner/*` to `ui/*` buys anything beyond ADR
+literalism. It is a pure move with a large diff and no behaviour change — cheap to do
+late, pointless to do early.
+
+`src/design/` (themes, typography, contrast) already does `ui/themes`' job. Leave it.
+
+---
+
+## The rules that keep this from breaking anything
+
+1. **A move commit moves. It never edits.** No renaming, reformatting, or "tidy while
+   I'm here" in the same commit as a relocation.
+2. **Verify purity mechanically** — diff the removed text against the added text;
+   only imports and the export line should differ.
+3. **One module per commit.** A batch that goes red tells you nothing.
+4. **Compare to the real baseline, not to zero.** The suite is not all-green.
 5. **Lower the ratchet in the same commit** as the extraction that earned it.
-6. **Motion surfaces get a visual check, not just a green suite.** The motion work
-   this month produced two regressions that every test passed through. For anything
-   touching `Sheet`, `Composer`, the style block, or the morph: open it in a browser
-   and look before pushing.
+6. **Motion surfaces get looked at, not just measured.** Two regressions this month
+   passed a green suite. For anything touching `Sheet`, `Composer`, the stylesheet or
+   the morph: open it in a browser.
+7. **Kill port 4321 before a full run** — `reuseExistingServer` will otherwise test a
+   stale bundle.
 
-### The build traps specific to this file
+### Test baseline
 
-- **Backticks inside a CSS comment break the build.** The style block is a JS
-  template literal; a backtick in a comment terminates it. This has broken the build
-  **three times**. Phase 3 is where it will happen again.
-- **A stray `*/` from an incomplete comment edit is worse than a build error** — it
-  can leave keyframes silently unparsed while the build *succeeds*. If an animation
-  mysteriously does nothing, enumerate `document.styleSheets` and confirm the rule
-  parsed.
-- **JSX comments inside `return (`** produce a white screen. Comments go above the
-  `return` as ordinary JS comments.
+597 unit / 0 fail. ~297 browser / 2–4 fail, all from a known set:
+`planning.spec.js:64`, `timeline-chrome-scroll.spec.js:34` (both projections), and
+`navigation-shell.spec.js:298`, which is timing-sensitive and flakes roughly one run
+in three. `planning.spec.js` also has cross-spec localStorage bleed — re-run that file
+alone before believing any new failure in it.
 
 ---
 
-## 4. Phases, ordered by ascending risk
+## Known open item, not in scope here
 
-### Phase 1 — Constants and icons → `src/ui/primitives/` *(risk: none)*
+**Mobile nav first-frame cost.** Opening the nav costs ~100ms on the first frame at
+6× CPU throttle (~60ms on later opens), and it is *not* any of the animations:
+measured with the clip transition off, the content fade off, the drawer motion off,
+and with all surface motion off, the cost stays in the same 91–127ms band. React
+render is 2ms. `will-change` on the rail and on the surface both failed to move it,
+as did `contain`. It is the style recalc and repaint triggered by the nav-open state
+change propagating across the whole app subtree — `data-nav-state` lives on
+`.nb-nav-shell`, which wraps both the drawer and the entire app, so every selector
+keyed off it invalidates everything.
 
-Creates the `ui/` tree the ADR calls for.
-
-- `src/ui/primitives/icons.jsx` — the ~24 icon components (`CalendarIcon`,
-  `CheckIcon`, `ChevronIcon`, `ClockIcon`, `CloseIcon`, `BellIcon`, `BlockIcon`,
-  `GripIcon`, `LinkIcon`, `ListIcon`, `LocationIcon`, `MenuIcon`, `MoreIcon`,
-  `PinIcon`, `RepeatIcon`, `SearchIcon`, `WarningIcon`, `ArrowRightIcon`,
-  `ArrowUpIcon`, `ExternalLinkIcon`, `UiIcon`, …). Pure SVG, no props beyond size
-  and colour, no state, no imports from Planner.
-- `src/ui/primitives/constants.js` — `CAT_COLOR`, `CATS`, `DAY_LETTERS`, `WD`,
-  `WD1`, `MO`, `REPEATS`, `ALERT_CHOICES`, `SHORTCUTS`, `VIEW_ORDER`.
-
-**Expected reduction: ~260 lines. Behaviour surface: zero.**
-
-Move `src/design/` under `src/ui/themes/` **only if** you want the ADR tree exactly;
-`design/` already does that job and the move touches 4 files plus their importers
-for no functional gain. Recommended: leave it, and note the alias in `structure.md`.
-
----
-
-### Phase 2 — Leaf presentational components → `src/ui/primitives/` *(risk: low)*
-
-Props in, JSX out. No hooks beyond local `useState` for their own field.
-
-`Pill`, `Chips`, `Row`, `RowWithJoin`, `DetailRow`, `InlineField`, `InlineChoice`,
-`InlineChoiceRow`, `Inline`, `InlineText`, `InlineNative`, `InlineStamp`,
-`InlineAdd`, `LabeledNative`, `TagField`, `NewListField`, `Reveal`, `LiquidFill`,
-`LiquidPillIndicator`, `GooeyFilter`, `GooeySearch`, `QuickAddHint`, `DurationPicker`.
-
-One per commit. `Pill` already has a tested collaborator in
-`features/planner/editorRowSpan.js` — extract `Pill` first and let it prove the
-pattern, since `editor-rows.spec.js` already covers its geometry.
-
-**Expected reduction: ~700–900 lines.**
-
----
-
-### Phase 3 — The motion style block → `src/ui/themes/plannerMotion.js` *(risk: medium — coordinate with Codex)*
-
-670 lines (L4115–4784) currently sit inside the render return, so the whole CSS
-string is rebuilt on every render.
-
-It is **not** static — it interpolates `MORPH_MS`, `MORPH_LEAD`, `MORPH_STEP`,
-`MORPH_FADE`, the theme `T`, and `preferences?.display.reducedMotion`. So it
-extracts as a **function**, not a constant:
-
-```js
-export function plannerMotionCss({ T, preferences }) { return `…`; }
-```
-
-Do this as its own commit, and:
-
-- run the full `motion.spec.js` (36 tests) plus `reveal-without-paint.spec.js`,
-- **look at the composer morph in a browser** — this is the surface that produced
-  two regressions this month that a green suite did not catch,
-- verify the keyframes actually parsed:
-  ```js
-  [...document.styleSheets].flatMap(s=>{try{return[...s.cssRules]}catch{return[]}}).filter(r=>r.name?.startsWith('nb')).length
-  ```
-
-**Expected reduction: ~670 lines, and one render-cost win.**
-
----
-
-### Phase 4 — Composite surfaces → `src/ui/patterns/` *(risk: medium)*
-
-These own local state and take substantial props. Ordered smallest-blast-radius
-first, with the spec that guards each:
-
-| Component | Lines | Guarded by |
-| --- | --- | --- |
-| `TaskCard` | 206 | `actions.spec.js`, `checklist.spec.js` |
-| `ActionsPanel` | 232 | `actions.spec.js` |
-| `Composer` | 287 | `composer.spec.js`, `hud-create.spec.js`, `motion.spec.js` |
-| `Sheet` | 308 | `motion.spec.js`, `editor-rows.spec.js` |
-| `WeekGrid` | 587 | `week-drag.spec.js`, `timeline-*.spec.js` |
-| `Agenda`, `NoteEditor`, `NoteBlock`, `CommandPalette`, `ShortcutSheet`, `NotebookPanel`, `EventScheduleEditor`, `SubComposer`, `PromotedSubtasks`, `EntityNotes`, `NoteHistory`, `PillNav`, `NavigationShell`, `FluidEditActions` | ~1,300 total | various |
-
-`Sheet` and `Composer` carry the morph. Treat them like Phase 3: look, don't just measure.
-
-**Expected reduction: ~2,800 lines.**
-
----
-
-### Phase 5 — `Planner()`'s own state *(risk: high — reassess before starting)*
-
-**Recommendation: stop after Phase 4 and re-evaluate.**
-
-`structure.md` says Planner *remains the composition root: state, wiring, and
-existing surfaces*. After Phases 1–4, Planner.jsx is ~4,000–4,800 lines of exactly
-that, which is what the spec asks for. Phase 5 is optional and is the only phase
-that can change behaviour by accident.
-
-If pain justifies it, the 79 `useState`s group cleanly along domain lines — and
-these must be extracted **per domain**, never into a `hooks/` bucket the ADR rejected:
-
-| Group | State |
-| --- | --- |
-| Boot / persistence | `db`, `recoverySnapshot`, `ready`, `loadingSlow`, `mounted`, `notebookUnreadable`, `saveBlocked` |
-| Time & navigation | `now`, `zoom`, `dateKey`, `ribbonRange`, `ribbonWindowStart`, `monthCursor`, `peekDay` |
-| Sheets & editing | `sheet`, `inspect`, `inspectExitSnapshot`, `composer`, `sheetCloseSignals`, `noteEdit`, `noteHistory`, `detailEditing`, `inspectField`, `discardAsk`, `draft` |
-| View & motion | `turn`, `swipe`, `viewDir`, `slide`, `slideProgress`, `sliding`, `taskSwipe`, `snapping`, `navPhase`, `viewMode`, `viewHandoff` |
-| Timeline | `timelineFocused`, `timelineFocusSource`, `timelineChromeHeight`, `streamNode`, `dayHourHeight` |
-| Feedback | `alertToast`, `reward`, `levelFlash`, `undo`, `undoShown`, `alertShown`, `levelShown` |
-| Reminders | `reminderRecords`, `remindersReady`, `missedReport`, `missedSheet` |
-| Ledgers & prefs | `preferences`, `motivationLedger`, `diagnostics`, the three `*SaveBlocked`, `storageFailures` |
-
-The **View & motion** group is the most cohesive and the most self-contained — start
-there if you start at all. Every one of these is guarded by an existing e2e spec,
-which is the only reason Phase 5 is tractable at all.
-
----
-
-## 5. Expected outcome
-
-| After | `Planner.jsx` | Cumulative risk |
-| --- | --- | --- |
-| today | 9,470 | — |
-| Phase 1 | ~9,200 | none |
-| Phase 2 | ~8,400 | low |
-| Phase 3 | ~7,700 | medium (motion) |
-| Phase 4 | ~4,900 | medium |
-| Phase 5 *(optional)* | ~2,000 | high |
-
-**Phases 1–4 remove ~48% of the file and honour every constraint in `structure.md`
-without touching a single hook.** That is the recommended stopping point.
-
----
-
-## 6. What this plan deliberately does not do
-
-- **Does not move `src/domains/`, `src/shared/`, or `src/platform/`.** They are done
-  and healthy. Churning them buys nothing and risks a lot.
-- **Does not create `src/hooks/`, `src/components/`, or `src/utils/`.** ADR 0001
-  explicitly rejected the technical-layer split.
-- **Does not add `platform/{notifications,integrations,telemetry}`.** Those are for
-  provider work the ADR explicitly deferred; empty folders are not progress.
-- **Does not dissolve `Planner()`.** `structure.md` says it stays the composition root.
-- **Does not renumber, rename, or reorganise the e2e specs.** `structure.md`
-  forbids it, and they are the safety net this entire plan rests on.
-
----
-
-## 7. Open questions for the owner
-
-1. **Codex coordination on Phase 3** — should the motion style block wait until the
-   framer-fidelity work lands, or is that file free?
-2. **`src/design/` → `src/ui/themes/`** — exact ADR compliance, or leave it and note
-   the alias? (Recommendation: leave it.)
-3. **Phase 5** — take it, or stop at Phase 4? (Recommendation: stop, reassess.)
+The plausible fix is to scope that invalidation (move the open-state flag off the
+shared ancestor), which collides with Codex's nav work and with tests that read
+`data-nav-state`. Needs its own plan.
