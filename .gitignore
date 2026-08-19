@@ -19,3 +19,9 @@ dist/
 # the visual review page is generated, not source
 review.html
 contact-sheet/
+
+# Generated knowledge-graph and planning tool output. Rebuilt on demand with
+# `graphify update .`; docs/spec/structure.md rules .planning/ out as a source
+# of truth, and both are megabytes of derived data that would bloat history.
+/graphify-out/
+/.planning/
