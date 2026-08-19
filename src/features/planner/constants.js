@@ -66,8 +66,17 @@ const WD = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 const WD1 = ["S", "M", "T", "W", "T", "F", "S"];
 const MO = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 
+/* The corner every planner surface is cut to. It stayed in Planner through
+   Phase 3 as a layout number rather than vocabulary, which was the right call
+   while Planner was its only reader. Phase 4 changes that: Pill, RowWithJoin,
+   InlineField and InlineChoice all need it, and none of them can leave while it
+   is defined in the file they are leaving. HOUR_H and the RIBBON_* window stay
+   behind — those are timeline geometry, and the timeline is not going anywhere. */
+const CARD_R = 14;
+
 export {
   ALERT_CHOICES,
+  CARD_R,
   CATS,
   CAT_COLOR,
   DAY_LETTERS,

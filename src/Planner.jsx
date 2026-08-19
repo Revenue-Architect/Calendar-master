@@ -177,6 +177,7 @@ import {
 } from "./features/planner/icons.jsx";
 import {
   ALERT_CHOICES,
+  CARD_R,
   CATS,
   DAY_LETTERS,
   MO,
@@ -290,7 +291,6 @@ function repeatFor(freq, current, dateKey) {
   };
 }
 
-const CARD_R = 14;
 const HOUR_H = 68;
 /* The ribbon is a rolling window, not a date limit. Keeping roughly two years
    mounted gives the person room to browse without making the DOM grow forever;
