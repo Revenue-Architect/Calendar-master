@@ -90,3 +90,67 @@ test("every module under src/features is imported by something outside its own f
     `Now wired up: ${fixed.join(", ")}. Remove them from UNWIRED in this file.`,
   );
 });
+
+/* --------------------------------------------------------------- scope ---- */
+
+/* The third failure this project has had of exactly one shape: code moves out of
+   Planner, loses a binding Planner had, and nothing notices. A dropped `MONO`
+   import took out 46 browser tests in Phase 1.3. `parseInline` and `rowSpan`
+   went missing from fields.jsx in Phase 4 and crashed the app on first render,
+   producing 133 failures against a baseline of 2.
+
+   Neither the build nor the unit suite can see it. Vite bundles an undefined
+   identifier without complaint, and no unit test renders Planner. So the check
+   has to be written down.
+
+   It is deliberately narrow: only names Planner itself imports, because those
+   are the ones an extracted component silently loses. A name Planner defines is
+   already covered — moving code that needs it fails obviously. */
+function bindings(text) {
+  const code = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+  const names = new Set();
+  for (const m of code.matchAll(/import\s+([A-Za-z_$][\w$]*)?\s*,?\s*\{([^}]*)\}\s*from|import\s+([A-Za-z_$][\w$]*)\s+from/g)) {
+    if (m[1]) names.add(m[1]);
+    if (m[3]) names.add(m[3]);
+    if (m[2]) for (const p of m[2].split(",")) {
+      const n = p.trim().split(/\s+as\s+/).pop().trim();
+      if (n) names.add(n);
+    }
+  }
+  return { code, imported: names };
+}
+
+test("no module under src/features uses a binding Planner imports without importing it", () => {
+  const planner = readFileSync(join(SRC, "Planner.jsx"), "utf8");
+  const plannerImports = bindings(planner).imported;
+
+  const offenders = [];
+  for (const file of sourceFiles(SRC)) {
+    const rel = relative(SRC, file).replaceAll("\\", "/");
+    if (!rel.startsWith("features/")) continue;
+    const { code, imported } = bindings(readFileSync(file, "utf8"));
+
+    /* Anything the file declares itself, including parameters, shadows an outer
+       name and is not a missing import. Captured roughly on purpose: over-
+       capturing here only ever makes this test quieter, never wrong-in-red. */
+    const local = new Set([
+      ...[...code.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)/g)].map((m) => m[1]),
+      ...[...code.matchAll(/function\s+([A-Za-z_$][\w$]*)/g)].map((m) => m[1]),
+      ...[...code.matchAll(/(?:function[^(]*|\)?\s*=>|\()\s*\(?([^)]*)\)?\s*(?:=>|\{)/g)]
+        .flatMap((m) => (m[1] || "").split(",").map((p) => p.trim().replace(/[{}[\].]/g, "").split(/[:=]/)[0].trim())),
+    ].filter(Boolean));
+
+    const used = new Set([...code.matchAll(/\b([A-Za-z_$][\w$]*)\b/g)].map((m) => m[1]));
+    for (const name of used) {
+      if (plannerImports.has(name) && !imported.has(name) && !local.has(name)) {
+        offenders.push(`${rel} uses ${name}`);
+      }
+    }
+  }
+
+  assert.deepEqual(
+    [...new Set(offenders)], [],
+    "A module uses a name Planner imports but does not import it itself. "
+    + "It will be undefined at runtime while the build stays green.",
+  );
+});
