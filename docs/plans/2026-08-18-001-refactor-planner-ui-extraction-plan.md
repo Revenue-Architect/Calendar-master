@@ -189,13 +189,66 @@ the exact hole that cost 46 e2e tests during 1.3.
 
 ---
 
-## Phase 3 — icons and constants → `features/planner/`
+## Phase 3 — icons and constants → `features/planner/` *(complete)*
 
 - `icons.jsx` — ~24 pure SVG components, no props beyond size/colour, no state.
 - `constants.js` — `CAT_COLOR`, `CATS`, `DAY_LETTERS`, `WD`, `WD1`, `MO`, `REPEATS`,
   `ALERT_CHOICES`, `SHORTCUTS`, `VIEW_ORDER`.
 
 Zero behaviour surface. Expected: 8,513 → ~8,250.
+
+### Outcome — 8,513 → **8,389**, not ~8,250
+
+Two move commits plus one de-duplication. The estimate was optimistic in two ways
+worth carrying into Phase 4's number:
+
+- **There are 21 icons, not ~24 — but they are 106 lines**, because each carries the
+  comment that says why it is drawn rather than typed. Counting components
+  underestimates a block that is mostly prose.
+- **Imports cost lines back.** 158 lines left Planner; 35 returned as two multi-line
+  import blocks, for a net 124. The house style puts long import lists one name per
+  line (see the three-name `taskCompleteUndo` import), so this is not recoverable by
+  reformatting, and Phase 4's ~820-line estimate should expect the same ~20% haircut.
+
+Both moves were byte-exact and verified as such: icons 4,790 bytes and constants
+3,069 bytes across six separate ranges, same sha256 either side.
+
+`catColor` moved with `CAT_COLOR` — one name beyond the list above. It is the only
+reader of that table, so leaving it would have meant importing a colour map into
+Planner to define a one-line accessor over it. `CARD_R`, `HOUR_H`, the `RIBBON_*`
+window, `SNAP`, `HOLD_MS` and `SWIPE_SOFT_LIMIT` stayed: they are Planner's own layout
+and gesture numbers, not vocabulary.
+
+`constants.js` is not the mechanism bucket ADR 0001 rejects. That rejection names
+top-level `components`/`hooks`/`services`/`utils` folders, whose problem is having no
+owner. This file sits inside `features/planner/` and has one.
+
+### A trap this phase found: generated files and CRLF
+
+The working tree is a CRLF checkout. A move script that joins lines with `"\n"` after
+`split("\n")` will emit a **lone `\r`** wherever it adds a blank line, and it happened
+at two different boundaries here. `sed` and `awk` in this Git Bash silently normalise
+CRLF, so the corrupted file *looks* correct in every obvious check.
+
+Assert on the bytes instead, in any script that writes a file:
+
+```js
+const loneCR = (text.match(/\r(?!\n)/g) || []).length;   // must be 0
+```
+
+### Duplicates found, and what was decided
+
+- **`Sheet.jsx`'s own `CloseIcon`** — hand-inlined, same path and attributes.
+  **Removed**; Sheet now imports the shared one. That introduces the first
+  `features/motion` → `features/planner` import, taken deliberately: the alternative
+  was keeping a second copy of a visual primitive in the one file whose header already
+  records what a second copy cost last time.
+- **`DAY_LETTERS` in `eventToIcs.js`** — identical values, **left alone on purpose.**
+  That one is the RFC 5545 `BYDAY` token set; ours is a row of UI labels. They match
+  today by coincidence, they have different reasons to change, and merging them would
+  point `domains/` at `features/` and invert the layering.
+- **`MINUTE_MS = 60_000`** in both `shared/time/localDateTime.js` and `timezone.js` —
+  **left alone.** A third module to share one stable literal costs more than it saves.
 
 ---
 
@@ -211,6 +264,37 @@ Start with `Pill` — `editor-rows.spec.js` already covers its geometry via
 `editorRowSpan.js`, so the first one is guarded before it moves.
 
 Expected: ~8,220 → ~7,400.
+
+### Recon (done — execute against these numbers)
+
+**The 23 components are 515 lines, not ~820.** With import blocks costing lines back
+at the Phase 3 rate, the realistic landing is **8,389 → ~7,900**, not ~7,400. Set the
+ratchet by what actually lands; do not chase the old figure by moving something that
+should stay.
+
+They are not a contiguous block — they run from line 6001 (`Inline`) to 8348
+(`Chips`), interleaved with composites that belong to Phase 5. Five are big enough to
+deserve their own commit: `GooeySearch` (70), `InlineChoice` (56), `InlineText` (54),
+`InlineChoiceRow` (52), `Chips` (41). The other eighteen average 12 lines.
+
+**Four of them are not free-standing. Move these first, or the components cannot go:**
+
+| Blocker | Needed by | Where it should go |
+| --- | --- | --- |
+| `CARD_R` | `Pill`, `RowWithJoin`, `InlineField`, `InlineChoice` | `features/planner/constants.js` — but note 48 uses across Planner |
+| `useLiquidPill` (L7342) | `Chips`, `InlineChoice`, `InlineChoiceRow`, `LiquidPillIndicator` | beside its consumers in `features/planner/`. **Not** a `hooks/` bucket — ADR 0001 rejects that |
+| `SERIF` (L336) | `QuickAddHint` | `design/typography.js`, beside `DISPLAY` and `MONO`. Planner's own comment already says the three belong together |
+| `dur` (L372) | `DurationPicker` | a duration formatter; goes with the component or to `shared/` |
+
+**`DurationPicker` should move in Phase 5, not Phase 4.** It renders `PillNav`, which
+is a Phase 5 composite, so it is not a leaf. Moving it now would either drag `PillNav`
+along early or create a forward dependency on a component still sitting in Planner.
+
+`CARD_R` is the one to think about rather than reflex. It was deliberately left in
+Planner during Phase 3 as a layout number rather than vocabulary, and 48 uses is a
+wide blast radius. Promoting it is still probably right — a card's corner radius is a
+shared design fact, and four leaf components now need it — but it is a decision, and
+it belongs in its own commit before any component moves.
 
 ---
 

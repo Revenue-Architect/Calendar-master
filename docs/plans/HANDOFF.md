@@ -6,23 +6,35 @@ Read this, then `docs/plans/2026-08-18-001-refactor-planner-ui-extraction-plan.m
 
 ## State
 
-- **`main` at `a50ca92`, clean, pushed.** Phase 2 fast-forwarded onto it from
-  `claude/phase-2-nav-stutter-handoff-iczhu9` — that branch is now fully merged and
-  can be deleted.
+- **`main` clean and pushed.** Phases 2 and 3 are both on it; the
+  `claude/phase-2-…` branch was merged and deleted.
 - **599 unit / 0 fail. 301 browser / 2 fail** — measured, not remembered. See below.
-- `Planner.jsx` is **8,513 lines**, down from 9,616 two sessions ago.
+- `Planner.jsx` is **8,389 lines**, down from 9,616 three sessions ago.
 - Two ratchets in `src/architecture.test.js` enforce that: a line ceiling, and a rule
   that no module under `src/features/` is left unimported. Both must only move down.
 
 ---
 
-## Phase 2 is done. Do Phase 3 next.
+## Phases 2 and 3 are done. Do Phase 4 next.
 
-The stylesheet now lives in `features/motion/plannerStyles.js` as
-`plannerStyles({ T, preferences })`, and the three constants it needed went to
-`morphTiming.js`, `themes.js` and `typography.js` first. 9,184 → 8,513.
+- **Phase 2** — the stylesheet is `features/motion/plannerStyles.js`, as
+  `plannerStyles({ T, preferences })`. 9,184 → 8,513.
+- **Phase 3** — 21 icons are `features/planner/icons.jsx`, ten constants are
+  `features/planner/constants.js`. 8,513 → **8,389**, short of the plan's ~8,250:
+  the icons were 106 lines rather than "~24 components", and 35 lines came back as
+  import blocks. **Discount Phase 4's ~820-line estimate by about a fifth** for the
+  same reason.
+- `Sheet.jsx`'s duplicate `CloseIcon` is gone; it imports the shared one now. Two
+  further duplicates were found and deliberately kept — see the plan's Phase 3
+  outcome for why `DAY_LETTERS` and `MINUTE_MS` should stay as they are.
 
-Next: Phase 3 (icons + constants), 4 (leaf components), 5 (composite surfaces).
+**Anything that writes a file here needs a lone-`\r` assertion.** This is a CRLF
+checkout, a `split("\n")`/`join("\n")` move script emits a stray `\r` at every blank
+line it adds, and `sed`/`awk` in this shell normalise CRLF so the damage is invisible
+to the obvious check. It happened twice in one session:
+`(text.match(/\r(?!\n)/g) || []).length` must be `0`.
+
+Next: Phase 4 (leaf components), 5 (composite surfaces).
 **Phase 5 is also the fix for the nav stutter** — see below.
 
 ### The verification order that worked, in cost order
