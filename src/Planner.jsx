@@ -347,11 +347,6 @@ const REVEAL_FALLBACK_MS = 120;
    the preferred scale. Forty-four pixels still gives an hour a real touch-sized
    row; below that, density starts making the timeline less usable than scrolling. */
 const MIN_DAY_HOUR_H = 44;
-/* How close the now marker has to get to an hour before that hour's label steps
-   aside. The marker and a label are each about eighteen pixels tall, so inside
-   this distance they overlap and read as one smudged mark rather than two
-   times — and at that distance the marker *is* the hour, so there is nothing
-   the label was still saying. */
 const DAY_H = HOUR_H * 24;
 const HOLD_MS = 420;
 const LIFT_MS = 300;
