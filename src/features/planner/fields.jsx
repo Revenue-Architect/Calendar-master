@@ -9,9 +9,11 @@
  */
 import React, { useEffect, useRef, useState } from "react";
 
+import { parseInline } from "../../domains/notes/index.js";
 import { MONO, SERIF } from "../../design/typography.js";
 import { useLiquidPill } from "../motion/liquidPill.js";
 import { CARD_R } from "./constants.js";
+import { rowSpan } from "./editorRowSpan.js";
 import { CloseIcon } from "./icons.jsx";
 import { LiquidPillIndicator } from "./liquid.jsx";
 import { QUICK_ADD_SYNTAX } from "./quickAdd.js";
