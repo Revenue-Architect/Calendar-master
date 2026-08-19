@@ -68,7 +68,7 @@ created.
 
 Two executable rules, both allowed to move one direction only:
 
-1. **`Planner.jsx` does not grow.** Ceiling 9,184 (lowered by 1.1, 1.2 and 1.3). `structure.md` said "do not grow
+1. **`Planner.jsx` does not grow.** Ceiling 8,513 (lowered by 1.1, 1.2, 1.3 and both halves of 2). `structure.md` said "do not grow
    Planner.jsx" and nothing enforced it; had this existed, `9470 → 9470` on a commit
    named "extract Sheet from Planner" would have been a visible non-event and
    `9470 → 9616` a hard failure.
@@ -105,7 +105,7 @@ Planner 9,616 → **9,184**. Phase 1 complete; UNWIRED is empty.
 
 ---
 
-## Phase 2 — the stylesheet → `features/motion/plannerStyles.js`
+## Phase 2 — the stylesheet → `features/motion/plannerStyles.js` *(complete)*
 
 The `<style>` block is ~670 lines living inside the render return, rebuilt on every
 render. `structure.md` already names this file; it does not exist.
@@ -158,6 +158,35 @@ Coordinate with Codex before starting — this is their active area.
 
 Expected: Planner 9,184 → ~8,540.
 
+### Outcome
+
+Landed as two commits, the constants first exactly as scoped:
+
+- `VIEW_SLIDE_MS` → `morphTiming.js`, `NOW_RED` → `themes.js`, `DISPLAY` →
+  `typography.js` (which took the three-voices comment with it; `SERIF` stays in
+  Planner). 9,184 → 9,165.
+- The block itself, 646 lines, moved by script. 9,165 → **8,513**, past the estimate
+  because six imports went with it: the four morph beats the stylesheet used, plus
+  `MORPH_STAGE_CONTENT` and `MORPH_STAGE_REVEAL`, which had been dead since 1.3 moved
+  the stage machine into `Sheet.jsx` and left Planner's import behind.
+
+The recon numbers were exact — 646 lines, 37 interpolations, 12 roots, all three
+constants where the plan said. Nothing was discovered mid-move.
+
+Four checks, cheapest first, and the order is worth keeping:
+
+1. The template came out at 51,909 bytes and went in at 51,909 bytes, compared
+   programmatically. That is rule 2 satisfied mechanically rather than by reading.
+2. The module run under `node` against a `Proxy` theme, both reduced-motion branches
+   and with `preferences` absent. No undefined identifier — the 1.3 failure caught in
+   a second, without a browser.
+3. The parsed-CSS comparison the plan asks for: 214 rules / 89,403 characters across
+   every sheet, 160 / 26,906 for this block, identical digests, identical rule lists.
+4. Looked at: desktop, mobile, the open nav, the palette.
+
+Check 2 is the one to add to the recipe. It is the fastest of the four and it closes
+the exact hole that cost 46 e2e tests during 1.3.
+
 ---
 
 ## Phase 3 — icons and constants → `features/planner/`
@@ -166,7 +195,7 @@ Expected: Planner 9,184 → ~8,540.
 - `constants.js` — `CAT_COLOR`, `CATS`, `DAY_LETTERS`, `WD`, `WD1`, `MO`, `REPEATS`,
   `ALERT_CHOICES`, `SHORTCUTS`, `VIEW_ORDER`.
 
-Zero behaviour surface. Expected: ~8,480 → ~8,220.
+Zero behaviour surface. Expected: 8,513 → ~8,250.
 
 ---
 
@@ -239,11 +268,32 @@ late, pointless to do early.
 
 ### Test baseline
 
-597 unit / 0 fail. ~297 browser / 2–4 fail, all from a known set:
-`planning.spec.js:64`, `timeline-chrome-scroll.spec.js:34` (both projections), and
-`navigation-shell.spec.js:298`, which is timing-sensitive and flakes roughly one run
-in three. `planning.spec.js` also has cross-spec localStorage bleed — re-run that file
-alone before believing any new failure in it.
+**599 unit / 0 fail. 301 browser / 2 fail**, measured either side of Phase 2 on the
+same machine rather than remembered:
+
+| Spec | Full run | Alone | Reading |
+| --- | --- | --- | --- |
+| `interaction-feedback.spec.js:41` | fails | — | pre-existing; **not in any earlier list** |
+| `planning.spec.js:64` | fails | fails | pre-existing, long-standing |
+| `planning.spec.js:132` | varies | passes | the localStorage bleed below |
+| `view-pills.spec.js:145` | varies | **fails** | pre-existing, order-sensitive |
+
+`timeline-chrome-scroll.spec.js:34` and `navigation-shell.spec.js:298` — previously
+recorded as five of six known failures — **passed in both full runs.** The older list
+was wrong in both directions, which is the argument for measuring a baseline at the
+start of a session rather than inheriting one.
+
+Two order effects, and they run in opposite directions, so neither "it passed alone"
+nor "it passed in the suite" is on its own evidence of anything:
+
+- **`planning.spec.js` has cross-spec localStorage bleed.** A different case fails in
+  full runs each time and passes alone. Re-run the file alone before believing a new
+  failure in it.
+- **`view-pills.spec.js:145` fails alone and passes in some full-suite orderings.** It
+  samples `transition-timing-function` on `.nb-view-track` while the class that sets
+  it is transiently applied, so it is racing a 340ms window. Confirmed unrelated to
+  Phase 2 by checking it out at the commit before the move, where it fails the same
+  way. Unowned.
 
 ---
 

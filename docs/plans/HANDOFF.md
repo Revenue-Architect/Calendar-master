@@ -1,64 +1,76 @@
-# Handoff — Calendar-master, 18 Aug 2026
+# Handoff — Calendar-master, 19 Aug 2026
 
-Written at the end of a long session. Read this, then
-`docs/plans/2026-08-18-001-refactor-planner-ui-extraction-plan.md`.
+Read this, then `docs/plans/2026-08-18-001-refactor-planner-ui-extraction-plan.md`.
 
 ---
 
 ## State
 
-- `main` at **`f631f77`** (this document's own commit), clean, pushed.
-- **599 unit / 0 fail.** **295 browser / 6 fail** — all six are established, listed below.
-- `Planner.jsx` is **9,184 lines**, down from 9,616 at the start of the session.
+- Branch `claude/phase-2-nav-stutter-handoff-iczhu9` at **`5ae6890`**, clean, pushed.
+  `main` is at `f631f77`; these two commits are not on it yet.
+- **599 unit / 0 fail. 301 browser / 2 fail** — measured, not remembered. See below.
+- `Planner.jsx` is **8,513 lines**, down from 9,616 two sessions ago.
 - Two ratchets in `src/architecture.test.js` enforce that: a line ceiling, and a rule
   that no module under `src/features/` is left unimported. Both must only move down.
 
 ---
 
-## Do this first: Phase 2
+## Phase 2 is done. Do Phase 3 next.
 
-Fully scoped already — the exploration is done, so this is a short job.
+The stylesheet now lives in `features/motion/plannerStyles.js` as
+`plannerStyles({ T, preferences })`, and the three constants it needed went to
+`morphTiming.js`, `themes.js` and `typography.js` first. 9,184 → 8,513.
 
-Move the `<style>` block out of `Planner.jsx` into `features/motion/plannerStyles.js`.
-
-- The block is **lines 3975–4620, 646 lines**, `<style>{` to `</style>`.
-- Signature: `plannerStyles({ T, preferences })`.
-- **Move three one-line constants first** (same pattern as `MONO` in Phase 1.3):
-
-  | Constant | Line | Goes to |
-  | --- | --- | --- |
-  | `VIEW_SLIDE_MS` | 319 | `features/motion/morphTiming.js` |
-  | `NOW_RED` | 324 | `design/themes.js` |
-  | `DISPLAY` | 375 | `design/typography.js`, beside `MONO` |
-
-- Then import `MONO`, `MORPH_MS`, `MORPH_LEAD`, `MORPH_STEP`, `MORPH_FADE` into the new file.
-- **Move it with a script, not by hand.** The plan's old "highest typo risk" warning
-  assumed retyping. A byte-exact programmatic move of a known line range has none.
-- **Verify by comparing parsed CSS**, not by eye:
-  ```js
-  [...document.styleSheets].flatMap(s => { try { return [...s.cssRules] } catch { return [] } })
-    .map(r => r.cssText).join("\n").length
-  ```
-  Same length and rule count before/after is the proof.
-- Coordinate with Codex — `features/motion` is their active area.
-- Expected: 9,184 → ~8,540. Lower the ceiling in the same commit.
-
-After that: Phase 3 (icons + constants), 4 (leaf components), 5 (composite surfaces).
+Next: Phase 3 (icons + constants), 4 (leaf components), 5 (composite surfaces).
 **Phase 5 is also the fix for the nav stutter** — see below.
+
+### The verification order that worked, in cost order
+
+Reuse this for Phases 3–5. The second one is the cheap discovery:
+
+1. **Diff the moved bytes programmatically.** Extract the old text and the new text and
+   compare them in code. 51,909 bytes both sides is a fact; "looks right" is not.
+2. **Run the extracted module under `node` before touching a browser.** A `Proxy`
+   theme records every key it reads and a missing import raises immediately. Seconds,
+   no build. This is the check that would have caught the dropped `MONO` in 1.3, which
+   built cleanly and took out 46 e2e tests.
+3. **Compare parsed CSS**, both digest and rule list:
+   ```js
+   [...document.styleSheets].flatMap(s => { try { return [...s.cssRules] } catch { return [] } })
+     .map(r => r.cssText).join("\n").length
+   ```
+4. **Look at it.** Desktop, mobile, nav open, a sheet.
+
+Two notes for whoever writes the next standalone Playwright script: pass
+`executablePath` from `PLAYWRIGHT_CHROMIUM_EXECUTABLE` (the image's Chromium is a
+build behind what Playwright expects), and call
+`selectors.setTestIdAttribute("data-test")` — outside the config, `getByTestId` looks
+for `data-testid` and silently matches nothing.
 
 ---
 
-## Test baseline — memorise these six
+## Test baseline — measure it, do not inherit it
 
-Do not treat the suite as green, and do not attribute these to your own work:
+**301 browser tests, 2 failures in a full run.** The previous version of this document
+listed six known failures. Four of them do not fail here, and one that does was not on
+the list. Re-measure at the start of a session; the numbers below are from 19 Aug.
 
-| Spec | Note |
-| --- | --- |
-| `planning.spec.js:64` | long-standing |
-| `timeline-chrome-scroll.spec.js:34` ×4 | **degraded from 2 to 4 during recent merges — not mine, unowned** |
-| `navigation-shell.spec.js:298` | timing-sensitive; **went from ~1-in-3 to consistent — also unowned** |
+| Spec | Full run | Alone | Reading |
+| --- | --- | --- | --- |
+| `interaction-feedback.spec.js:41` | fails | — | pre-existing; **was on no earlier list** |
+| `planning.spec.js:64` | fails | fails | long-standing |
+| `planning.spec.js:132` | varies | passes | localStorage bleed |
+| `view-pills.spec.js:145` | varies | **fails** | pre-existing, order-sensitive, unowned |
 
-Both degradations were verified with all my work stashed. Someone should look.
+`timeline-chrome-scroll.spec.js:34` and `navigation-shell.spec.js:298`, previously
+recorded as five of the six and flagged as recently degraded, **passed in both full
+runs.** Whatever that degradation was, it is not visible here.
+
+`view-pills.spec.js:145` is the one worth someone's time: it samples
+`transition-timing-function` on `.nb-view-track` while `.is-sliding` is transiently
+applied, so it races a 340ms window and reads `ease` when it loses. Confirmed
+unrelated to Phase 2 by checking out the commit before the move and watching it fail
+there too.
 
 ### Traps that produce false readings
 
@@ -99,7 +111,9 @@ when open.
 
 A cheaper interim exists and was deliberately not attempted: apply the open class
 imperatively via `navShellRef`, or wrap `setPhase` in `startTransition`. Both touch the
-composition root in Codex's area while the nav probes are flaking.
+composition root in Codex's area. The stated reason for holding off — that the nav
+probes were flaking — no longer holds: `navigation-shell.spec.js` passed clean in both
+full runs on 19 Aug. If Phase 5 stays far off, this is worth reconsidering.
 
 ---
 
@@ -115,18 +129,24 @@ composition root in Codex's area while the nav probes are flaking.
 - **Codex, the Replit Agent, and commits authored as `Revenue-Architect` all land in
   this repo.** Twelve commits appeared mid-session. `git fetch` before assuming your
   push will go through, and check authorship before blaming anyone.
-- Motion in the app lives in **one `<style>` block inside `Planner.jsx`**;
-  `src/index.css` has no animation at all.
+- Motion in the app lives in **one template literal**, now
+  `features/motion/plannerStyles.js` rather than inside `Planner.jsx`;
+  `src/index.css` still has no animation at all. Do not reflow that CSS — it moved
+  byte-exact so the commit reads as a relocation, and a backtick in a CSS comment
+  ends the template literal and breaks the build.
 
 ---
 
-## Working agreements that earned their place today
+## Working agreements that earned their place
 
-- **Look, don't just measure.** Every real defect this session was found by putting a
+- **Look, don't just measure.** Every real defect that session was found by putting a
   paused frame on screen. Measurements twice said a morph was fine while a screenshot
   showed it broken.
-- **Baseline before blaming.** `git stash` and re-run. Three "regressions" were
-  pre-existing.
+- **Baseline before blaming, and measure the baseline yourself.** `git stash`, or check
+  out the commit before yours, and re-run. Every "regression" so far has been
+  pre-existing — including the two that appeared during Phase 2, one of which fails
+  identically on the commit before the move. An inherited list of known failures is
+  not a baseline; the first version of this document got four of six wrong.
 - **Watch every new guard fail** against the behaviour it replaces before trusting it.
 - **Prefer reverting to patching under uncertainty.** One revert-diagnose-reland cycle
   produced a better result than a speculative patch would have.
