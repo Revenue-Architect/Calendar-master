@@ -11,16 +11,7 @@ import { fluidMorphFromRects } from "./fluidGeometry.js";
 import { recentFluidTriggerRadius, recentFluidTriggerRect } from "./fluidTrigger.js";
 import { MONO } from "../../design/typography.js";
 import { MORPH_MS, MORPH_STAGE_CONTENT, MORPH_STAGE_REVEAL } from "./morphTiming.js";
-
-function CloseIcon({ size = 14 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor"
-      strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round"
-      aria-hidden="true" focusable="false" style={{ display: "block", flexShrink: 0, pointerEvents: "none" }}>
-      <path d="m4 4 8 8M12 4 4 12" />
-    </svg>
-  );
-}
+import { CloseIcon } from "../planner/icons.jsx";
 
 /* Kept in step with Planner deliberately: this is the copy that runs.
    Planner's own Sheet was the newer of the two by 134 lines -- it had gained
