@@ -6,8 +6,9 @@ Read this, then `docs/plans/2026-08-18-001-refactor-planner-ui-extraction-plan.m
 
 ## State
 
-- Branch `claude/phase-2-nav-stutter-handoff-iczhu9` at **`5ae6890`**, clean, pushed.
-  `main` is at `f631f77`; these two commits are not on it yet.
+- **`main` at `a50ca92`, clean, pushed.** Phase 2 fast-forwarded onto it from
+  `claude/phase-2-nav-stutter-handoff-iczhu9` — that branch is now fully merged and
+  can be deleted.
 - **599 unit / 0 fail. 301 browser / 2 fail** — measured, not remembered. See below.
 - `Planner.jsx` is **8,513 lines**, down from 9,616 two sessions ago.
 - Two ratchets in `src/architecture.test.js` enforce that: a line ceiling, and a rule
@@ -65,6 +66,15 @@ the list. Re-measure at the start of a session; the numbers below are from 19 Au
 `timeline-chrome-scroll.spec.js:34` and `navigation-shell.spec.js:298`, previously
 recorded as five of the six and flagged as recently degraded, **passed in both full
 runs.** Whatever that degradation was, it is not visible here.
+
+**Re-measured before merging to `main` (third full run): 299 passed, 2 failed —
+`planning.spec.js:64` and `view-pills.spec.js:145`.** Same count as above, but
+`interaction-feedback.spec.js:41` *passed* this time, so treat it as flaky rather than
+consistently failing; `planning.spec.js:132` passed too. Both of the run's failures
+were then reproduced on `f631f77`, the commit before the stylesheet move, failing
+identically — so the move is not responsible for either. The lesson holds twice over:
+only two of these four fail on any given run, and which two varies. Run the suite, do
+not read this table and assume.
 
 `view-pills.spec.js:145` is the one worth someone's time: it samples
 `transition-timing-function` on `.nb-view-track` while `.is-sliding` is transiently
