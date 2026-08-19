@@ -299,6 +299,7 @@ import { addDays, addDaysToKey, diffDays, isDateKey, keyOf, parseKey } from "./s
 import { createId } from "./shared/ids.js";
 import { addMinutesToLocalDateTime, localDateTimeToEpochMinutes } from "./shared/time/localDateTime.js";
 import { getOffsetCandidates } from "./shared/time/timezone.js";
+import { dur } from "./shared/time/duration.js";
 import { NOW_RED, THEMES } from "./design/themes.js";
 import { readable } from "./design/contrast.js";
 
@@ -395,7 +396,6 @@ const isDark = (hex) => {
   const n = parseInt(hex.slice(1), 16);
   return (0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255 < 0.5;
 };
-const dur = (m) => (m >= 60 ? `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ""}` : `${Math.round(m)}m`);
 const snapTo = (m, s = SNAP) => Math.max(0, Math.min(1440, Math.round(m / s) * s));
 /* A start is a minute of the day, and a day has no minute 1440. Snapping "now" at
    23:53 rounded up to it and built "…T24:00", which the time model rejects — from
