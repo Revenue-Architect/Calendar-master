@@ -43,6 +43,11 @@ export const CASCADE_GROUPS = 8;
 export const MORPH_STAGE_REVEAL = 0.56;
 export const MORPH_STAGE_CONTENT = 0.69;
 
+/* Long enough that a full pane width reads as travel rather than a jump, short
+   enough that it never delays the surface you asked for. The day turn next door
+   moves a fraction of this distance in 240ms; a whole width wants a little more. */
+export const VIEW_SLIDE_MS = 300;
+
 export function cascadeSpan(lead = MORPH_LEAD, step = MORPH_STEP, fade = MORPH_FADE, groups = CASCADE_GROUPS) {
   return lead + groups * step + fade;
 }

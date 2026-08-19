@@ -37,3 +37,9 @@ export const THEMES = [
   { id: "cream-red", name: "Cream / Timepage Red", bg: "#F4F1EA", card: "#FFFFFF", line: "#E4DED2", text: "#14141A", dim: "#79736A", faint: "#DED7C9", accent: "#C8221B", on: "#FFFFFF" },
   { id: "cream-blue", name: "Cream / Actions Blue", bg: "#F1F2F4", card: "#FFFFFF", line: "#E1E3E7", text: "#14141A", dim: "#71757C", faint: "#D8DBE0", accent: "#0E7F99", on: "#FFFFFF" },
 ];
+
+/* The one colour that is not a theme's accent: now, late, overlapping, delete.
+   It has to mean the same thing on all fifteen grounds, so it sits outside the
+   list rather than inside each entry. Lifted out of Planner so the stylesheet
+   can use it without importing the composition root. */
+export const NOW_RED = "var(--now-red, #C43A56)";

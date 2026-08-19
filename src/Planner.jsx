@@ -166,6 +166,7 @@ import {
   MORPH_STAGE_CONTENT,
   MORPH_STAGE_REVEAL,
   MORPH_STEP,
+  VIEW_SLIDE_MS,
 } from "./features/motion/morphTiming.js";
 import {
   installFluidTriggerListeners,
@@ -173,7 +174,7 @@ import {
   recentFluidTriggerRect,
 } from "./features/motion/fluidTrigger.js";
 import Sheet from "./features/motion/Sheet.jsx";
-import { MONO } from "./design/typography.js";
+import { DISPLAY, MONO } from "./design/typography.js";
 import {
   VIEW_PILL_COMPACT_MAX,
   VIEW_PILL_ICON,
@@ -239,7 +240,7 @@ import { addDays, addDaysToKey, diffDays, isDateKey, keyOf, parseKey } from "./s
 import { createId } from "./shared/ids.js";
 import { addMinutesToLocalDateTime, localDateTimeToEpochMinutes } from "./shared/time/localDateTime.js";
 import { getOffsetCandidates } from "./shared/time/timezone.js";
-import { THEMES } from "./design/themes.js";
+import { NOW_RED, THEMES } from "./design/themes.js";
 import { readable } from "./design/contrast.js";
 
 /* ═══════════════════════ TOKENS ═══════════════════════ */
@@ -313,15 +314,10 @@ const LIFT_MS = 300;
    knows a view has neighbours, and both the switch animation's direction and
    the swipe's target come from it. */
 const VIEW_ORDER = ["timeline", "agenda", "actions"];
-/* Long enough that a full pane width reads as travel rather than a jump, short
-   enough that it never delays the surface you asked for. The day turn next door
-   moves a fraction of this distance in 240ms; a whole width wants a little more. */
-const VIEW_SLIDE_MS = 300;
 /* Where a drag stops following the finger one-for-one and starts resisting. Not
    a limit — past this the page keeps moving, just less of it. */
 const SWIPE_SOFT_LIMIT = 140;
 const SNAP = 5;
-const NOW_RED = "var(--now-red, #C43A56)";
 const ALERT_CHOICES = [0, 5, 15, 30, 60];
 const DAY_LETTERS = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
 
@@ -356,23 +352,8 @@ const SHORTCUTS = [
   { group: "ELSEWHERE", keys: ["Esc"], does: "Close whatever is open" },
 ];
 
-/* Three voices, and the face is how you know which one is speaking.
- *
- * DISPLAY is what the app says to you — titles, headings, controls, the labels
- * on its own sections. MONO is what it measures: times, durations, counts, the
- * hour rail. VOICE is what was written rather than computed — a note's body, and
- * the app's own asides.
- *
- * Mono stays because a calendar is a table of numbers. "10:00 AM" and "11:30 AM"
- * are the same width, times align down the rail, and durations stack in columns
- * without a single alignment hack. It just stops doing everyone else's job as
- * well: it used to be on 229 elements, including every title and button.
- *
- * The stacks themselves live in index.css as custom properties, so the CSS and
- * the inline styles cannot drift apart. `SANS` is gone — it named Inter, which
- * was never shipped in any build, so the stack silently fell through to the
- * system face for the life of the project. */
-const DISPLAY = "var(--font-display)";
+/* The written voice. Its two companions, DISPLAY and MONO, live in
+   design/typography.js, which explains the three of them. */
 const SERIF = "var(--font-voice)";
 
 /* ═══════════════════════ UTILS ═══════════════════════ */

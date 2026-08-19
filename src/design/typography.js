@@ -12,11 +12,29 @@
  * compares them to this. If they drift, that test fails rather than the design.
  */
 
-/** Every step, in the order they appear in the scale. */
+/* Three voices, and the face is how you know which one is speaking.
+ *
+ * DISPLAY is what the app says to you — titles, headings, controls, the labels
+ * on its own sections. MONO is what it measures: times, durations, counts, the
+ * hour rail. VOICE is what was written rather than computed — a note's body, and
+ * the app's own asides.
+ *
+ * Mono stays because a calendar is a table of numbers. "10:00 AM" and "11:30 AM"
+ * are the same width, times align down the rail, and durations stack in columns
+ * without a single alignment hack. It just stops doing everyone else's job as
+ * well: it used to be on 229 elements, including every title and button.
+ *
+ * The stacks themselves live in index.css as custom properties, so the CSS and
+ * the inline styles cannot drift apart. `SANS` is gone — it named Inter, which
+ * was never shipped in any build, so the stack silently fell through to the
+ * system face for the life of the project. */
+export const DISPLAY = "var(--font-display)";
+
 /* The data face. Lifted out of Planner so the sheet can use it without
    importing the composition root. */
 export const MONO = "var(--font-data)";
 
+/** Every step, in the order they appear in the scale. */
 export const TYPE_SCALE = Object.freeze({
   display: { px: 64, weight: 800, tracking: -0.035, family: "data", role: "The day numeral, and nothing else." },
   title:   { px: 24, weight: 700, tracking: -0.018, family: "display", role: "Sheet titles and view headings." },
