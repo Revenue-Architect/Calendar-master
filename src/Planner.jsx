@@ -175,6 +175,18 @@ import {
   UiIcon,
   WarningIcon,
 } from "./features/planner/icons.jsx";
+import {
+  ALERT_CHOICES,
+  CATS,
+  DAY_LETTERS,
+  MO,
+  REPEATS,
+  SHORTCUTS,
+  VIEW_ORDER,
+  WD,
+  WD1,
+  catColor,
+} from "./features/planner/constants.js";
 import TimelineActionCard from "./features/planner/TimelineActionCard.jsx";
 import { HAPTIC_PATTERNS, triggerDeviceHaptic } from "./features/feedback/haptics.js";
 import {
@@ -263,11 +275,6 @@ import { readable } from "./design/contrast.js";
 
 const GESTURE_HINT_KEY = "nbmp:ui:gestureHintSeen";
 
-/* §4.6/§4.7. The frequencies an entry can be set to from its own detail view. The
-   fuller rule — selected weekdays, an end date, a count — still belongs to the
-   composer, which has the room to explain it. */
-const REPEATS = [["never", "NEVER"], ["daily", "DAILY"], ["weekly", "WEEKLY"], ["monthly", "MONTHLY"], ["yearly", "YEARLY"]];
-
 /* Changing the frequency keeps whatever else the rule already said, so switching
    weekly → monthly and back does not quietly drop an end date. */
 function repeatFor(freq, current, dateKey) {
@@ -283,20 +290,6 @@ function repeatFor(freq, current, dateKey) {
   };
 }
 
-const CATS = ["DEEP WORK", "ADMIN", "BODY", "PEOPLE", "RITUAL"];
-
-/* Category colour is the one hue an event card carries, so it has to read on both a
-   near-black and a cream ground. These sit in the mid-luminance band where that
-   holds, rather than being tinted per theme — a category keeps the same colour
-   wherever you see it, which is what makes the dot scannable. */
-const CAT_COLOR = {
-  "DEEP WORK": "#E0A33E",
-  ADMIN: "#5E8BC7",
-  BODY: "#45A877",
-  PEOPLE: "#D4456B",
-  RITUAL: "#9B6FD4",
-};
-const catColor = (cat) => CAT_COLOR[cat] || "#8A8A96";
 const CARD_R = 14;
 const HOUR_H = 68;
 /* The ribbon is a rolling window, not a date limit. Keeping roughly two years
@@ -326,16 +319,10 @@ const MIN_DAY_HOUR_H = 44;
 const DAY_H = HOUR_H * 24;
 const HOLD_MS = 420;
 const LIFT_MS = 300;
-/* The order the three surfaces lie in, left to right. It is the one place that
-   knows a view has neighbours, and both the switch animation's direction and
-   the swipe's target come from it. */
-const VIEW_ORDER = ["timeline", "agenda", "actions"];
 /* Where a drag stops following the finger one-for-one and starts resisting. Not
    a limit — past this the page keeps moving, just less of it. */
 const SWIPE_SOFT_LIMIT = 140;
 const SNAP = 5;
-const ALERT_CHOICES = [0, 5, 15, 30, 60];
-const DAY_LETTERS = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
 
 function ribbonRangeAround(anchorKey) {
   return {
@@ -344,30 +331,6 @@ function ribbonRangeAround(anchorKey) {
   };
 }
 
-/* Every shortcut the keydown handler implements, in one list, because a shortcut
-   nobody can find is a shortcut nobody has. The cheat sheet renders this rather
-   than a second hand-written copy, so the two cannot drift apart. */
-const SHORTCUTS = [
-  { group: "MOVING", keys: ["←", "→"], does: "Previous / next day" },
-  { group: "MOVING", keys: ["T"], does: "Jump to today" },
-  { group: "MOVING", keys: ["F"], does: "Focus timeline" },
-  { group: "MOVING", keys: ["["], does: "Zoom out — day, week, month" },
-  { group: "MOVING", keys: ["]"], does: "Zoom in" },
-  { group: "MAKING", keys: ["N"], does: "New event" },
-  { group: "MAKING", keys: ["A"], does: "New action" },
-  { group: "MAKING", keys: ["⌘K", "/"], does: "Search, run a command, or type to create" },
-  { group: "ACTIONS", keys: ["C"], does: "Complete the first open action" },
-  { group: "ACTIONS", keys: ["D"], does: "Defer the first open action by a day" },
-  { group: "GESTURES", keys: ["HOLD"], does: "Hold an empty slot to create" },
-  { group: "GESTURES", keys: ["DRAG"], does: "Hold and drag an event or action to move it" },
-  { group: "GESTURES", keys: ["EDGE"], does: "Drag an event edge to resize it" },
-  { group: "GESTURES", keys: ["SWIPE →"], does: "Swipe a scheduled action right to complete it" },
-  { group: "GESTURES", keys: ["SCROLL"], does: "Scroll the timeline without creating" },
-  { group: "ELSEWHERE", keys: ["⌘Z"], does: "Undo the last change" },
-  { group: "ELSEWHERE", keys: ["?"], does: "This list" },
-  { group: "ELSEWHERE", keys: ["Esc"], does: "Close whatever is open" },
-];
-
 /* The written voice. Its two companions, DISPLAY and MONO, live in
    design/typography.js, which explains the three of them. */
 const SERIF = "var(--font-voice)";
@@ -375,9 +338,6 @@ const SERIF = "var(--font-voice)";
 /* ═══════════════════════ UTILS ═══════════════════════ */
 
 const pad = (n) => String(n).padStart(2, "0");
-const WD = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
-const WD1 = ["S", "M", "T", "W", "T", "F", "S"];
-const MO = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 /* The clock is a display choice, never a stored one — minutes since midnight stay
    the single representation, so switching format can never move an event. */
 const h12 = (h) => (h % 12 === 0 ? 12 : h % 12);
