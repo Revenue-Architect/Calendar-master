@@ -101,11 +101,7 @@ test("every module under src/features is imported by something outside its own f
 
    Neither the build nor the unit suite can see it. Vite bundles an undefined
    identifier without complaint, and no unit test renders Planner. So the check
-   has to be written down.
-
-   It is deliberately narrow: only names Planner itself imports, because those
-   are the ones an extracted component silently loses. A name Planner defines is
-   already covered — moving code that needs it fails obviously. */
+   has to be written down. */
 function bindings(text) {
   const code = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
   const names = new Set();
@@ -122,13 +118,12 @@ function bindings(text) {
 
 test("no module under src/features uses a Planner binding without importing it", () => {
   const planner = readFileSync(join(SRC, "Planner.jsx"), "utf8");
-  /* Both halves of Planner's module scope. An extracted component loses a name
-     Planner imported and a name Planner declared in exactly the same silent way,
-     so both belong here. */
+  /* Both halves of Planner's module scope. A component that moves out loses a
+     name Planner imported and a name Planner declared in the same silent way. */
   const plannerScope = new Set([
     ...bindings(planner).imported,
-    ...[...planner.matchAll(/^(?:const|let|var)s+([A-Za-z_$][w$]*)/gm)].map((m) => m[1]),
-    ...[...planner.matchAll(/^functions+([A-Za-z_$][w$]*)/gm)].map((m) => m[1]),
+    ...[...planner.matchAll(/^(?:const|let|var)\s+([A-Za-z_$][\w$]*)/gm)].map((m) => m[1]),
+    ...[...planner.matchAll(/^function\s+([A-Za-z_$][\w$]*)/gm)].map((m) => m[1]),
   ]);
 
   const offenders = [];
@@ -137,9 +132,8 @@ test("no module under src/features uses a Planner binding without importing it",
     if (!rel.startsWith("features/")) continue;
     const { code, imported } = bindings(readFileSync(file, "utf8"));
 
-    /* Anything the file declares itself, including parameters, shadows an outer
-       name and is not a missing import. Captured roughly on purpose: over-
-       capturing here only ever makes this test quieter, never wrong-in-red. */
+    /* Anything the file declares itself, parameters included, shadows an outer
+       name and is not a missing import. Captured roughly on purpose. */
     const local = new Set([
       ...[...code.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)/g)].map((m) => m[1]),
       ...[...code.matchAll(/function\s+([A-Za-z_$][\w$]*)/g)].map((m) => m[1]),
@@ -147,7 +141,17 @@ test("no module under src/features uses a Planner binding without importing it",
         .flatMap((m) => (m[1] || "").split(",").map((p) => p.trim().replace(/[{}[\].]/g, "").split(/[:=]/)[0].trim())),
     ].filter(Boolean));
 
-    const used = new Set([...code.matchAll(/\b([A-Za-z_$][\w$]*)\b/g)].map((m) => m[1]));
+    /* Only free identifiers count. A name is not a reference to an outer binding
+       when it is a property (`item.dur`), an object key (`dur:`), or part of a
+       hyphenated string such as the CSS custom property `--nb-morph-dur` inside
+       a template literal. All three produced false positives on modules that
+       were entirely correct. */
+    const used = new Set();
+    for (const m of code.matchAll(/(^|[^.\w$-])([A-Za-z_$][\w$]*)(:)?/g)) {
+      if (m[3] === ":") continue;
+      used.add(m[2]);
+    }
+
     for (const name of used) {
       if (plannerScope.has(name) && !imported.has(name) && !local.has(name)) {
         offenders.push(`${rel} uses ${name}`);
@@ -157,7 +161,7 @@ test("no module under src/features uses a Planner binding without importing it",
 
   assert.deepEqual(
     [...new Set(offenders)], [],
-    "A module uses a name Planner imports but does not import it itself. "
+    "A module uses a name from Planner's module scope but does not import it. "
     + "It will be undefined at runtime while the build stays green.",
   );
 });
