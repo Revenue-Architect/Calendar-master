@@ -10,12 +10,14 @@
 import React, { useEffect, useRef, useState } from "react";
 
 import { parseInline } from "../../domains/notes/index.js";
+import { dur } from "../../shared/time/duration.js";
 import { MONO, SERIF } from "../../design/typography.js";
 import { useLiquidPill } from "../motion/liquidPill.js";
 import { CARD_R } from "./constants.js";
 import { rowSpan } from "./editorRowSpan.js";
 import { CloseIcon } from "./icons.jsx";
 import { LiquidPillIndicator } from "./liquid.jsx";
+import PillNav from "./PillNav.jsx";
 import { QUICK_ADD_SYNTAX } from "./quickAdd.js";
 
 /* §3.5. Marks are stored as the punctuation people typed, so a note stays legible
@@ -356,7 +358,27 @@ function QuickAddHint({ T }) {
   );
 }
 
+function DurationPicker({ T, label, value, onPick, allowNone = true }) {
+  const standards = [15, 30, 45, 60, 90, 120];
+  const choices = value && !standards.includes(value)
+    ? [...standards, value].sort((a, b) => a - b)
+    : standards;
+  const options = [
+    ...(allowNone ? [[null, "NONE"]] : []),
+    ...choices.map((minutes) => [minutes, dur(minutes).toUpperCase()]),
+  ];
+  return (
+    <div>
+      <span style={{ fontFamily: MONO, color: T.dimText }} className="block nb-data mb-1">{label}</span>
+      <PillNav T={T} ariaLabel={label} value={value ?? null} options={options} onPick={onPick}
+        className="w-full [&>button]:flex-1 [&>button]:px-1.5 [&>button]:py-1.5"
+        style={{ border: `1px solid ${T.line}` }} />
+    </div>
+  );
+}
+
 export {
+  DurationPicker,
   Inline,
   InlineAdd,
   InlineChoice,
