@@ -363,87 +363,120 @@ it belongs in its own commit before any component moves.
 
 ---
 
-## Phase 5 — composite surfaces → `features/planner/` *(in progress)*
+## Phase 5 — composite surfaces → `features/planner/` *(complete)*
 
-**Landed so far: 7,625 → 7,374.** Three commits, each verified in a browser
-before being committed rather than after.
+**7,625 → 5,571.** Eighteen commits. Every React component is out of
+`Planner.jsx`; what remains is the composition root `structure.md` describes —
+`Planner()` itself, four hooks (`useEdgeFade`, `useSynth`, `usePresence`,
+`useCompactViewPills`) and five helpers.
 
-| Commit | What moved | Lines |
+The estimate in the first draft of this plan was ~4,600 and the remeasured one
+was ~6,000. The real landing beat both, because the nav cluster (223 lines) and
+two comment repairs were not in either count.
+
+### What moved
+
+| Module | Contents | Lines |
 | --- | --- | --- |
-| `refactor(planner)` | the whole navigation cluster → `features/planner/navigation.jsx` | 223 |
-| `refactor(shared)` | the clock formatters → `shared/time/clockFormat.js` | 16 |
-| `refactor(design)` | `mixHex`, `isDark`, `hexToRgb` → `design/colorMix.js` | 14 |
+| `features/planner/navigation.jsx` | the whole nav cluster | 223 |
+| `features/planner/WeekGrid.jsx` | `WeekGrid` | 578 |
+| `features/planner/Composer.jsx` | `Composer` | 284 |
+| `features/planner/ActionsPanel.jsx` | `ActionsPanel` | 229 |
+| `features/planner/notes.jsx` | five notebook surfaces + 2 helpers | 207 |
+| `features/planner/TaskCard.jsx` | `TaskCard` | 203 |
+| `features/planner/commandSurfaces.jsx` | `CommandPalette`, `ShortcutSheet` | 96 |
+| `features/planner/detailEditor.jsx` | `EventScheduleEditor`, `FluidEditActions` | 68 |
+| `features/planner/Agenda.jsx` | `Agenda` | 59 |
+| `features/planner/subtasks.jsx` | `PromotedSubtasks`, `SubComposer` | 51 |
 
-### What the first three taught
+And the four blocker groups that had to go first:
 
-**The nav cluster moved as a unit, not as `NavigationShell` alone.** The plan
-named `NavigationShell` (37 lines) as the start. In the file it is one of four
-things that only make sense together — `NavigationContext` has exactly one
-provider and one consumer, both inside the cluster, and Planner renders only
-`NavigationFrame` and `NavigationToggle`. Moving the concept exported two names
-and kept two private; moving the component alone would have split it.
-
-**Recon the whole block, not the component.** Ten Planner-scope names, every one
-of them already an import — so zero blockers and nothing to move first. That is
-worth measuring rather than assuming: it is what made a 223-line move a
-single sitting.
-
-**`fmtDay` does not belong in `shared/time/`,** though this plan grouped it with
-the clock. It formats through the `WD` and `MO` label arrays from
-`features/planner/constants.js`, so putting it in `shared/` points `shared` at
-`features`. It moves with the label arrays or not at all.
-
-**`colorMix.js` deliberately does not merge with `contrast.js`.** `hexToRgb` is
-`parseHex` without the validation, and `isDark` is *not* `luminance()` with a
-threshold — it uses raw sRGB bytes where `luminance` gamma-corrects first, so
-they disagree in the midtones and swapping them would repaint text on some
-themes. Both are edits, not moves. The reasoning is in the module header.
-
-### Recon — remeasured after the two blocker moves
-
-Sixteen composites, **1,723 lines**. The two blocker groups already landed took
-the "could move today" set from seven components to **nine, 307 lines**:
-
-| Blockers | Components |
+| Module | Contents |
 | --- | --- |
-| **none** | `SubComposer` (11), `NoteBlock` (26), `EntityNotes` (26), `ShortcutSheet` (28), `EventScheduleEditor` (32), `FluidEditActions` (34), `PromotedSubtasks` (35), `CommandPalette` (57), `Agenda` (58) |
-| one | `NoteHistory` (`fmtDay`), `NotebookPanel` (`noteContextLabel`), `Composer` (`startSlot`) |
-| two | `NoteEditor` (`noteContextLabel`, `uid`) |
-| more | `ActionsPanel`, `TaskCard`, `WeekGrid` — see below |
+| `shared/time/clockFormat.js` | `pad`, `h12`, `meridiem`, `fmtTime`, `fmtHour`, `hhmm`, `fromHhmm` |
+| `shared/time/snap.js` | `SNAP`, `snapTo`, `startSlot` |
+| `design/colorMix.js` | `hexToRgb`, `mixHex`, `isDark` |
+| `features/planner/dateLabels.js` | `fmtDay`, `plannedLabel` |
+| `features/planner/constants.js` | `HOUR_H`, `DAY_H`, `HOLD_MS`, `LIFT_MS`, `SWIPE_SOFT_LIMIT` |
+| `shared/ids.js` | `uid` |
 
-**Two blocker moves remain, and they clear almost everything:**
+### What this phase learned
 
-| Group | Names | Home | Unblocks |
-| --- | --- | --- | --- |
-| Layout & gesture numbers | `HOUR_H`, `DAY_H`, `HOLD_MS`, `LIFT_MS`, `SWIPE_SOFT_LIMIT` | `features/planner/constants.js` | `WeekGrid`, `TaskCard` |
-| Planner helpers | `uid`, `startSlot` (+ `snapTo`, `SNAP`), `fmtDay`, `plannedLabel`, `orderedIndex`, `noteContextLabel` | decide per name | the remaining seven |
+**Do the blockers first, and it stops being interesting.** `WeekGrid` is the
+largest component in the app and it moved in one cut with no discoveries,
+because six of its ten imports had already been relocated. The blocker work is
+the phase; the composites are the easy part that follows.
 
-Watch the sub-dependencies — the earlier recon listed only the names the
-composites reference, not what those names themselves need: `startSlot` needs
-`snapTo` which needs `SNAP`; `fmtDay` needs `WD`/`MO`/`pad`; `uid` is
-`createId`. Each is a small extra passenger, but a move that forgets one is
-exactly the failure this project keeps having.
+**Recon what the blockers themselves need.** The plan's list named what the
+composites reference, not what those names in turn require. `startSlot` needs
+`snapTo` needs `SNAP`; `fmtDay` needs `WD`, `MO` and `pad`; `uid` is `createId`.
 
-**Peer order is fixed and unchanged.** `TaskCard` renders `PromotedSubtasks` and
-`SubComposer`, so those two go first; `ActionsPanel` renders `NoteBlock` and
-`TaskCard`, so it goes last of the three. Everything else is independent.
+**Derive imports; never write them from memory — and check the export *form*.**
+Three of the modules that moved are **default** exports (`PillNav`,
+`SegmentedProgress`, `Reveal`). A tool can tell you a name is needed; it cannot
+tell you whether it is default or named, and a named import of a default export
+builds green and is undefined at runtime. That is the Phase 4 crash exactly.
 
-**Realistic landing is ~6,000**, not the ~4,600 this plan originally estimated.
-That figure assumed these components are most of what is left in Planner; they
-are 23% of it, and the rest is the state and wiring `structure.md` says stays.
+**Two of the plan's own groupings were wrong.** `fmtDay` cannot live in
+`shared/time/` — it formats through label arrays in `features/`, and shared must
+not import from features. And `colorMix.js` must not merge into `contrast.js`:
+`isDark` is not `luminance()` with a threshold, it uses raw sRGB bytes where
+`luminance` gamma-corrects first, so substituting one for the other repaints
+text on some themes.
+
+**Orphaned comments are a real cost of extraction, and they compound.** Four
+were found: one whose constant left in August and three describing components
+that moved in Phase 4. Each was traced to the commit that introduced it and
+either reunited with its component or removed. A comment left behind does not
+stay neutral — it silently re-attaches to whatever follows it.
 
 ---
 
-## Phase 6 — `Planner()`'s own state *(reassess before starting)*
+## Phase 6 — `Planner()`'s own state *(reassessed after Phase 5 — do not start it yet)*
 
-**Recommendation: stop after Phase 5.** `structure.md` says Planner *remains the
-composition root: state, wiring, and existing surfaces*. After Phase 5 it is ~4,600
-lines of exactly that.
+Measured rather than estimated, now that Phase 5 has landed:
 
-If pain justifies it later, the 79 `useState`s group along domain lines — and must be
-extracted **per domain**, never into a `hooks/` bucket, which ADR 0001 explicitly
-rejected. The **view & motion** group is the most self-contained; start there or not
-at all.
+| | |
+| --- | --- |
+| `Planner()` | **4,925 lines** (L602–5526) |
+| hook calls in it | **235** — 82 `useState`, 51 `useRef`, 37 `useEffect`, 26 `useMemo`, 23 `useCallback`, 4 `useLayoutEffect` |
+| everything else in the file | 4 hooks and 5 helpers, ~640 lines |
+
+That is close to the ~4,600 this plan predicted, and it is **all** state and
+wiring — which is precisely what `structure.md` assigns to Planner: *"Planner
+remains the composition root: state, wiring, and existing surfaces."* By the
+spec that governs this tree, the file is now correct. The size is a consequence
+of the app having one composition root, not of anything being in the wrong
+place.
+
+**Recommendation: stop here, and do not open Phase 6 as a refactor.**
+
+Phases 2–5 were *moves*: text relocated byte-for-byte, provable by sha256, with
+no behaviour change possible in principle. Phase 6 is not that. Lifting state
+out of `Planner()` changes hook order, effect timing and render identity — it is
+a behavioural change wearing a refactor's clothes, and this project's whole
+history is of exactly that class of change escaping every check it has. There is
+no sha256 you can compute over "the same state, hoisted".
+
+If it is ever justified, the constraints are unchanged: extract **per domain**,
+never into a `hooks/` bucket, which ADR 0001 explicitly rejected. The view &
+motion group is the most self-contained; start there or not at all.
+
+### The one Phase 6 question worth answering first
+
+This plan asserts that **Phase 5 is the fix for the nav stutter**. Phase 5 is now
+done, so that claim is finally testable — and it should be tested before anyone
+spends a line on Phase 6, because the stutter is the only concrete
+*performance* reason this document ever gave for going further.
+
+Note also that the premise behind the original diagnosis has changed underneath
+it: `NavigationFrame` (introduced 18 Aug in `72b5ee8`, from the Replit Agent)
+already owns the nav phase and takes the planner as `children`, so a nav toggle
+no longer re-renders `Planner()` by the mechanism the LoAF trace blamed.
+
+**Re-run the Long Animation Frame trace before drawing any conclusion.** The old
+numbers were taken at 9,553 lines against a different component tree and cannot
+be compared to anything measured today.
 
 ---
 
