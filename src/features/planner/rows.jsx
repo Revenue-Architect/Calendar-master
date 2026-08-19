@@ -44,6 +44,8 @@ function RowWithJoin({ T, surface, link, title, onOpen, className = "", padding 
   );
 }
 
+/* A row inside a grouped attribute card: value on the left, its icon on the right,
+   matching how the reference groups the facts that govern a task. */
 function DetailRow({ T, icon, children, divider = false, span = "full" }) {
   return (
     <div className="flex items-center gap-3 px-3 py-3" style={{ borderBottom: divider ? `1px solid ${T.line}` : "none", ...rowSpan(span) }}>
@@ -53,6 +55,9 @@ function DetailRow({ T, icon, children, divider = false, span = "full" }) {
   );
 }
 
+/* One attribute per row: an icon, the value in plain words, and an optional tint
+   when the attribute carries meaning of its own — the category's colour, or the red
+   of something overdue or blocked. */
 function Pill({ T, surface, icon, label, tint = null, span = "full" }) {
   return (
     <div className="flex items-center gap-3 px-3 py-2.5" style={{ background: tint ? `${tint}22` : surface, borderRadius: CARD_R, ...rowSpan(span) }}>

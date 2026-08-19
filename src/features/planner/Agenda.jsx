@@ -10,6 +10,9 @@ import { parseKey } from "../../shared/time/dateKey.js";
 import { CARD_R, WD, catColor } from "./constants.js";
 import { RowWithJoin } from "./rows.jsx";
 
+/* The agenda: a continuous run of days down one rail. A day with nothing in it is
+   still drawn, because the gap is the information — you can see the shape of a week
+   without counting entries. */
 function Agenda({ T, surface, days, dateKey, todayKey, clock, onOpenEvent, onOpenTask, onJump }) {
   return (
     <div className="nb-s overflow-y-auto flex-1 min-h-0" style={{ background: T.card, borderRadius: 16 }}>

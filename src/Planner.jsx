@@ -5957,14 +5957,6 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], subtasks 
 
 /* ═══════════════════════ PIECES ═══════════════════════ */
 
-/* One attribute per row: an icon, the value in plain words, and an optional tint
-   when the attribute carries meaning of its own — the category's colour, or the red
-   of something overdue or blocked. */
-/* A row inside a grouped attribute card: value on the left, its icon on the right,
-   matching how the reference groups the facts that govern a task. */
-/* The agenda: a continuous run of days down one rail. A day with nothing in it is
-   still drawn, because the gap is the information — you can see the shape of a week
-   without counting entries. */
 /* The true week: 7 day columns against one shared time axis. Events are blocks and
    free time is the open space between them — the shape of the week is the point,
    so the columns carry as little chrome as they can. */
