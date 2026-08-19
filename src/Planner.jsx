@@ -237,6 +237,7 @@ import {
 import Sheet from "./features/motion/Sheet.jsx";
 import { plannerStyles } from "./features/motion/plannerStyles.js";
 import { DISPLAY, MONO, SERIF } from "./design/typography.js";
+import { isDark, mixHex } from "./design/colorMix.js";
 import {
   VIEW_PILL_COMPACT_MAX,
   VIEW_PILL_ICON,
@@ -373,20 +374,6 @@ function ribbonRangeAround(anchorKey) {
    Math.random token. Ephemeral React keys reuse the same helper; a UUID in a
    toast key is harmless and keeps one id story in this file. */
 const uid = createId;
-const hexToRgb = (hex) => {
-  const n = parseInt(hex.slice(1), 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-};
-const mixHex = (a, b, t) => {
-  const [ar, ag, ab] = hexToRgb(a);
-  const [br, bg, bb] = hexToRgb(b);
-  const c = (x, y) => Math.round(x + (y - x) * t).toString(16).padStart(2, "0");
-  return `#${c(ar, br)}${c(ag, bg)}${c(ab, bb)}`;
-};
-const isDark = (hex) => {
-  const n = parseInt(hex.slice(1), 16);
-  return (0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255 < 0.5;
-};
 const snapTo = (m, s = SNAP) => Math.max(0, Math.min(1440, Math.round(m / s) * s));
 /* A start is a minute of the day, and a day has no minute 1440. Snapping "now" at
    23:53 rounded up to it and built "…T24:00", which the time model rejects — from
