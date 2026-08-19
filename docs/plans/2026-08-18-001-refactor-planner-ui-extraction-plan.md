@@ -223,6 +223,30 @@ and gesture numbers, not vocabulary.
 top-level `components`/`hooks`/`services`/`utils` folders, whose problem is having no
 owner. This file sits inside `features/planner/` and has one.
 
+### Phase 4 shipped a crash. What the guards could not see.
+
+`fields.jsx` went out missing `parseInline` and `rowSpan`. Both were in Planner's
+module scope as *imports* rather than declarations, so the components that moved lost
+them silently. The app threw on first render and the ErrorBoundary caught it:
+**133 browser-test failures against a baseline of 2.**
+
+Everything that ran was green. The move was byte-exact and proven so. The build
+succeeded — Vite bundles an undefined identifier without complaint. All 599 unit
+tests passed — none of them render Planner. The static check used at the time looked
+only at *capitalised* identifiers and only at Planner's own *declarations*, and
+`parseInline` is lowercase and imported, so it was invisible twice over.
+
+Two things came out of it, both mandatory now: the scope ratchet in
+`src/architecture.test.js`, covering Planner's full module scope, and loading the
+built app to read its console before committing. The handoff has the recipe; it takes
+about fifteen seconds and it is the only check that catches this class.
+
+A footnote worth heeding: the first version of that ratchet was written through
+nested JS string escaping, which ate its backslashes and left it matching identifiers
+one letter at a time. It was deaf while green, and shipped. Generate code through a
+quoted heredoc, and watch a new guard fail before trusting it.
+
+---
 ### A trap this phase found: generated files and CRLF
 
 The working tree is a CRLF checkout. A move script that joins lines with `"\n"` after

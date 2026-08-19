@@ -8,150 +8,193 @@ Read this, then `docs/plans/2026-08-18-001-refactor-planner-ui-extraction-plan.m
 
 - **`main` clean and pushed.** Phases 2, 3 and 4 are all on it; the
   `claude/phase-2-…` branch was merged and deleted.
-- **599 unit / 0 fail. 301 browser / 2 fail** — measured, not remembered. See below.
-- `Planner.jsx` is **7,755 lines**, down from 9,616 three sessions ago.
-- Two ratchets in `src/architecture.test.js` enforce that: a line ceiling, and a rule
-  that no module under `src/features/` is left unimported. Both must only move down.
+- **600 unit / 0 fail. 301 browser / 2 fail** — measured this session, not inherited.
+- `Planner.jsx` is **7,625 lines**, down from 9,616 three sessions ago.
+- **Three ratchets** in `src/architecture.test.js`, all one-directional: a line
+  ceiling, a rule that no module under `src/features/` is left unimported, and a scope
+  check described below. Lower them; never raise one quietly.
 
 ---
 
-## Phases 2, 3 and 4 are done. Do Phase 5 next.
+## Read this before you move any code
 
-**Phase 5 starts with two things Phase 4 handed it deliberately:**
-`DurationPicker`, which is not a leaf because it renders `PillNav`, and `dur`, the
-duration formatter only `DurationPicker` uses. Move `PillNav` first and both follow.
+**A green build and a green unit suite do not mean an extraction worked.** This
+project has now had the same failure three times:
 
-Phase 4's own lesson, worth repeating for the composites: **do the dependency recon
-before moving anything.** Three constants (`SERIF`, `CARD_R`, `useLiquidPill`) had to
-move first, and knowing that up front meant twenty-two components moved without a
-single mid-move discovery. Phase 5's components are far larger and will have more of
-these; find them first.
+| When | What was lost | Cost |
+| --- | --- | --- |
+| Phase 1.3 | `MONO` import | 46 browser tests |
+| Phase 4 | `parseInline`, `rowSpan` from `fields.jsx` | **133 browser tests — the app crashed on first render** |
 
-Group by the concept, not one file per component. Phase 4 put twenty-two components
-into five modules because that is how Planner already grouped them, and a directory of
+Both built cleanly. Both passed every unit test. Vite bundles an undefined identifier
+without complaint, and no unit test renders Planner, so nothing between the edit and
+the browser can see it.
+
+The third occurrence is the instructive one, because it happened *while following a
+document that warned about the first two*. Byte-exactness was proven, the ratchet was
+lowered, the commit message was careful — and the app was dead. Every check that
+passed was incapable of catching it.
+
+### Two things are now mandatory after any move
+
+**1. The scope ratchet.** `src/architecture.test.js` fails if a module under
+`src/features/` uses a name from Planner's module scope without importing it. It
+covers both halves of that scope: the ~292 names Planner *imports* and the ~69 it
+*declares*. Losing either looks identical at runtime.
+
+It is narrow by design. It matches free identifiers only — not properties
+(`item.dur`), not object keys (`dur:`), not hyphenated strings such as the CSS custom
+property `--nb-morph-dur`. All three produced false positives on entirely correct
+modules the first time it ran.
+
+**2. Load the built app and read the console.** Fifteen seconds, and the only check
+that actually catches this class:
+
+```bash
+npm run build && npx vite preview --port 4322 --strictPort
+```
+
+Then, in a throwaway Playwright script, assert that `pageerror` and `console.error`
+are both empty and that `document.body.innerText` does not contain `SOMETHING BROKE` —
+the ErrorBoundary's copy. Do this **before** committing, not after.
+
+### If you write your own guard
+
+The first version of that ratchet was written through `node -e` and nested JS string
+literals, which ate the backslashes: `[\w$]` silently became `[w$]`, so it matched
+identifiers one letter at a time. It was deaf while appearing green, and shipped in
+one commit before being caught.
+
+Write generated code through a **quoted shell heredoc**, never through nested string
+escaping. And prove a new guard fails against the bug it is meant to catch before
+trusting it — remove the import again and watch it go red. A guard that has only ever
+been seen passing has not been tested.
+
+---
+
+## Phases 2, 3 and 4 are done. Phase 5 is next.
+
+- **Phase 2** — the stylesheet is `features/motion/plannerStyles.js`. 9,184 → 8,513.
+- **Phase 3** — 21 icons in `features/planner/icons.jsx`, ten constants in
+  `features/planner/constants.js`. 8,513 → 8,389.
+- **Phase 4** — all 23 leaf components out. 8,389 → **7,625**.
+
+### What Phase 4 actually taught
+
+**Do the dependency recon before moving anything.** Three things had to move first —
+`SERIF` → `design/typography.js`, `CARD_R` → `features/planner/constants.js`,
+`useLiquidPill` → `features/motion/liquidPill.js`. Knowing that up front meant
+twenty-two components then moved with no mid-move discoveries at all.
+
+**Group by concept; do not make one file per component.** Twenty-two components became
+five modules — `rows.jsx`, `fields.jsx`, `liquid.jsx`, `gooey.jsx`, and
+`motion/Reveal.jsx` — because that is how Planner already grouped them. A directory of
 twenty-two eight-line files would be worse than the monolith.
 
+**Scope recon to the whole file, not to the thing you are moving.** `dur` looked like
+`DurationPicker`'s private helper when the search was scoped to leaf components. It has
+14 call sites across Planner and now lives in `shared/time/duration.js`. An earlier
+draft of this document claimed 131 uses — that counted `.dur`, the duration property on
+an event, which is a different thing entirely.
 
+**Estimates in the plan run ~20% optimistic.** They count components, but the lines are
+mostly the comments explaining them, and import blocks give lines back.
 
-- **Phase 2** — the stylesheet is `features/motion/plannerStyles.js`, as
-  `plannerStyles({ T, preferences })`. 9,184 → 8,513.
-- **Phase 3** — 21 icons are `features/planner/icons.jsx`, ten constants are
-  `features/planner/constants.js`. 8,513 → **8,389**, short of the plan's ~8,250:
-  the icons were 106 lines rather than "~24 components", and 35 lines came back as
-  import blocks. **Discount Phase 4's ~820-line estimate by about a fifth** for the
-  same reason.
-- `Sheet.jsx`'s duplicate `CloseIcon` is gone; it imports the shared one now. Two
-  further duplicates were found and deliberately kept — see the plan's Phase 3
-  outcome for why `DAY_LETTERS` and `MINUTE_MS` should stay as they are.
+### CRLF, which will bite any script that writes a file
 
-**Anything that writes a file here needs a lone-`\r` assertion.** This is a CRLF
-checkout, a `split("\n")`/`join("\n")` move script emits a stray `\r` at every blank
-line it adds, and `sed`/`awk` in this shell normalise CRLF so the damage is invisible
-to the obvious check. It happened twice in one session:
-`(text.match(/\r(?!\n)/g) || []).length` must be `0`.
+This is a CRLF checkout. A `split("\n")` / `join("\n")` move script emits a **lone
+`\r`** wherever it adds a blank line, and removing the *last* block in a file leaves a
+trailing one. `sed` and `awk` in this Git Bash silently normalise CRLF, so the damage
+is invisible to every obvious check. It happened at three separate boundaries.
 
-Next: Phase 4 (leaf components), 5 (composite surfaces).
-**Phase 5 is also the fix for the nav stutter** — see below.
+Assert on the bytes in any script that writes a file:
 
-### The verification order that worked, in cost order
+```js
+(text.match(/\r(?!\n)/g) || []).length   // must be 0
+```
 
-Reuse this for Phases 3–5. The second one is the cheap discovery:
-
-1. **Diff the moved bytes programmatically.** Extract the old text and the new text and
-   compare them in code. 51,909 bytes both sides is a fact; "looks right" is not.
-2. **Run the extracted module under `node` before touching a browser.** A `Proxy`
-   theme records every key it reads and a missing import raises immediately. Seconds,
-   no build. This is the check that would have caught the dropped `MONO` in 1.3, which
-   built cleanly and took out 46 e2e tests.
-3. **Compare parsed CSS**, both digest and rule list:
-   ```js
-   [...document.styleSheets].flatMap(s => { try { return [...s.cssRules] } catch { return [] } })
-     .map(r => r.cssText).join("\n").length
-   ```
-4. **Look at it.** Desktop, mobile, nav open, a sheet.
-
-Two notes for whoever writes the next standalone Playwright script: pass
-`executablePath` from `PLAYWRIGHT_CHROMIUM_EXECUTABLE` (the image's Chromium is a
-build behind what Playwright expects), and call
-`selectors.setTestIdAttribute("data-test")` — outside the config, `getByTestId` looks
-for `data-testid` and silently matches nothing.
+`sed -i` also rewrites a whole file's endings to LF. Harmless — git stores LF either
+way — but it makes anchor matching in later scripts fail confusingly.
 
 ---
 
-## Test baseline — measure it, do not inherit it
+## Phase 5 — composite surfaces
 
-**301 browser tests, 2 failures in a full run.** The previous version of this document
-listed six known failures. Four of them do not fail here, and one that does was not on
-the list. Re-measure at the start of a session; the numbers below are from 19 Aug.
+`TaskCard` (206), `ActionsPanel` (232), `Composer` (287), `WeekGrid` (587), then
+`Agenda`, `NoteEditor`, `NoteBlock`, `CommandPalette`, `ShortcutSheet`,
+`NotebookPanel`, `EventScheduleEditor`, `SubComposer`, `PromotedSubtasks`,
+`EntityNotes`, `NoteHistory`, `NavigationShell`, `FluidEditActions`.
 
-| Spec | Full run | Alone | Reading |
-| --- | --- | --- | --- |
-| `interaction-feedback.spec.js:41` | fails | — | pre-existing; **was on no earlier list** |
-| `planning.spec.js:64` | fails | fails | long-standing |
-| `planning.spec.js:132` | varies | passes | localStorage bleed |
-| `view-pills.spec.js:145` | varies | **fails** | pre-existing, order-sensitive, unowned |
+`PillNav` already moved, so the composites that render it are unblocked.
 
-`timeline-chrome-scroll.spec.js:34` and `navigation-shell.spec.js:298`, previously
-recorded as five of the six and flagged as recently degraded, **passed in both full
-runs.** Whatever that degradation was, it is not visible here.
+These are far larger than Phase 4's leaves and will have more blockers. Find them the
+same way: for each component, list the Planner-scope names it references, move those
+first, and only then move the component.
 
-**Re-measured before merging to `main` (third full run): 299 passed, 2 failed —
-`planning.spec.js:64` and `view-pills.spec.js:145`.** Same count as above, but
-`interaction-feedback.spec.js:41` *passed* this time, so treat it as flaky rather than
-consistently failing; `planning.spec.js:132` passed too. Both of the run's failures
-were then reproduced on `f631f77`, the commit before the stylesheet move, failing
-identically — so the move is not responsible for either. The lesson holds twice over:
-only two of these four fail on any given run, and which two varies. Run the suite, do
-not read this table and assume.
+**Phase 5 is also the fix for the nav stutter** — see below.
 
-`view-pills.spec.js:145` is the one worth someone's time: it samples
-`transition-timing-function` on `.nb-view-track` while `.is-sliding` is transiently
-applied, so it races a 340ms window and reads `ease` when it loses. Confirmed
-unrelated to Phase 2 by checking out the commit before the move and watching it fail
-there too.
+---
+
+## Test baseline — measure it, never inherit it
+
+**301 browser tests, 2 failures per full run.** But *which* two varies, and every
+version of this document that listed a fixed set has been wrong.
+
+| Spec | Behaviour |
+| --- | --- |
+| `planning.spec.js:64` | fails in every run measured; fails alone too |
+| `view-pills.spec.js:145` | failed 3 runs, passed 1; fails alone; races a 340ms window |
+| `navigation-shell.spec.js:298` | passed 3 runs, failed 1 — but **fails 4 of 5 in isolation** |
+| `interaction-feedback.spec.js:41` | failed on an earlier machine's runs, passed on all of this session's |
+| `planning.spec.js:132` | cross-spec localStorage bleed; passes alone |
+
+`navigation-shell.spec.js:298` is worth understanding before blaming yourself for it.
+It asserts an animation delta **< 35ms**, sitting directly on top of the documented
+~85ms React re-render stall. Measured either side of Phase 4 with `--repeat-each=5`:
+**4 of 5 failures on both**, so it is pre-existing and load-sensitive. It behaves
+*opposite* to `planning.spec.js` — isolation makes it worse, not better.
 
 ### Traps that produce false readings
 
-- **`planning.spec.js` has cross-spec localStorage bleed.** A different case fails in
-  full runs each time and passes in isolation. Re-run that file alone before believing
-  any new failure in it.
-- **Kill port 4321 before a full run.** `reuseExistingServer` will otherwise serve a
-  stale bundle. I lost a measurement to this: a 5.4s "test run" was reusing a server
-  from a background job and I nearly filed a working fix as broken.
-- **A green build is not a completed move.** Vite bundles an undefined identifier
-  happily. A dropped `MONO` import built cleanly and took out 46 e2e tests at runtime.
+- **Kill port 4321 before a full run.** `reuseExistingServer` otherwise serves a stale
+  bundle. A 5.4s "test run" once reused a background server and nearly got a working
+  fix filed as broken.
+- **`test-results/` is your early warning.** With `trace: retain-on-failure`, one
+  directory per failure appears *while the run is still going*. 133 of them is how the
+  Phase 4 crash was noticed before the run finished — check it early rather than
+  waiting ten minutes for a summary.
 - **A hidden Chrome tab freezes animation clocks** (`currentTime` never advances,
-  `setTimeout` still fires). I misread this as a product bug twice. Check the clock
-  actually moved before believing a stalled frame.
+  `setTimeout` still fires). Check the clock moved before believing a stalled frame.
+- **The in-app browser pane may not composite**, so `screenshot` times out. Drive
+  Playwright directly and write PNGs to disk instead.
+- **Dismiss the welcome modal first** in any script that drives the app. A fresh
+  browser context has no localStorage, the modal is up, and every click you think you
+  are making lands on the scrim. Three "verification" screenshots turned out to be the
+  same frame before this was noticed.
+- Outside the Playwright config, call `selectors.setTestIdAttribute("data-test")` —
+  `getByTestId` otherwise looks for `data-testid` and silently matches nothing.
 
 ---
 
 ## The nav stutter — diagnosed, not fixed
-
-Profiled with the Long Animation Frame API after eight CSS interventions all failed.
 
 ```
 frame 1   86ms   script 79ms   style+layout  2ms   MessagePort.onmessage  (React scheduler)
 frame 2   91ms   script 86ms   style+layout  0ms   DIV#root.onclick
 ```
 
-**It is ~85ms of React re-render, not CSS.** Toggling the nav re-renders all of
-`Planner()` — no component boundaries, so the whole render function runs for a change
-that affects a drawer and one class.
+**~85ms of React re-render, not CSS.** Toggling the nav re-renders all of `Planner()`.
 
 Do not retry these; all measured, all inside the same 73–127ms band: `will-change` on
-the rail and on the surface, `contain: layout paint` on both, each animation disabled
-in turn, **all** surface motion disabled, resting clip pre-rounded, no rounded corner
-when open.
+the rail and the surface, `contain: layout paint` on both, each animation disabled in
+turn, all surface motion disabled, resting clip pre-rounded, no rounded corner open.
 
-**The fix is Phase 5** — extracting composite surfaces creates the boundaries
-`React.memo` needs. There is nothing to memoise today.
+**The fix is Phase 5** — composite boundaries are what `React.memo` needs. Phase 4 did
+not create them: extracting leaves gives Planner things to render, not fewer renders.
+Nothing measurable changed, and nothing was expected to.
 
-A cheaper interim exists and was deliberately not attempted: apply the open class
-imperatively via `navShellRef`, or wrap `setPhase` in `startTransition`. Both touch the
-composition root in Codex's area. The stated reason for holding off — that the nav
-probes were flaking — no longer holds: `navigation-shell.spec.js` passed clean in both
-full runs on 19 Aug. If Phase 5 stays far off, this is worth reconsidering.
+A cheaper interim was deliberately not attempted: apply the open class imperatively via
+`navShellRef`, or wrap `setPhase` in `startTransition`.
 
 ---
 
@@ -159,35 +202,34 @@ full runs on 19 Aug. If Phase 5 stays far off, this is worth reconsidering.
 
 - **`docs/adr/0001`** (Accepted) owns the target tree. **`docs/spec/structure.md`** is
   the ownership map and outranks any plan: visible surfaces go to `src/features/*`
-  *"for now; later `src/ui/...` once that tree exists"* — target `features/*`, not `ui/`.
-- ADR 0001 **explicitly rejected** a `components/hooks/services/utils` split. Organise
-  by domain, never by mechanism. No `src/hooks/`.
-- **Planner stays the composition root** — state and wiring belong there. Do not try to
-  dissolve it. Phase 6 is optional and probably unnecessary.
+  *"for now; later `src/ui/...` once that tree exists"*.
+- ADR 0001 **rejected** a `components/hooks/services/utils` split — but it rejects
+  mechanism-named *folders with no owner*. `features/planner/constants.js` is fine: it
+  sits inside a folder that has one.
+- **Planner stays the composition root.** Phase 6 is optional and probably unnecessary.
 - **Codex, the Replit Agent, and commits authored as `Revenue-Architect` all land in
-  this repo.** Twelve commits appeared mid-session. `git fetch` before assuming your
-  push will go through, and check authorship before blaming anyone.
-- Motion in the app lives in **one template literal**, now
-  `features/motion/plannerStyles.js` rather than inside `Planner.jsx`;
-  `src/index.css` still has no animation at all. Do not reflow that CSS — it moved
-  byte-exact so the commit reads as a relocation, and a backtick in a CSS comment
-  ends the template literal and breaks the build.
+  this repo.** `git fetch` before assuming your push will go through.
+- Two duplicates were found and **deliberately kept**: `DAY_LETTERS` in
+  `eventToIcs.js` is the RFC 5545 `BYDAY` token set that only coincidentally equals a
+  row of UI labels, and merging it would point `domains/` at `features/`; `MINUTE_MS`
+  is one stable literal in two neighbouring files.
+- `build-artifact.mjs` now creates `artifact/` itself; it used to do the whole build
+  and then die with ENOENT on its last line in any fresh clone.
 
 ---
 
 ## Working agreements that earned their place
 
-- **Look, don't just measure.** Every real defect that session was found by putting a
-  paused frame on screen. Measurements twice said a morph was fine while a screenshot
-  showed it broken.
-- **Baseline before blaming, and measure the baseline yourself.** `git stash`, or check
-  out the commit before yours, and re-run. Every "regression" so far has been
-  pre-existing — including the two that appeared during Phase 2, one of which fails
-  identically on the commit before the move. An inherited list of known failures is
-  not a baseline; the first version of this document got four of six wrong.
-- **Watch every new guard fail** against the behaviour it replaces before trusting it.
-- **Prefer reverting to patching under uncertainty.** One revert-diagnose-reland cycle
-  produced a better result than a speculative patch would have.
-- **Profile before optimising.** Eight CSS guesses cost more than one LoAF trace, which
-  answered it immediately.
+- **Look, don't just measure.** Every real defect this month was found by putting a
+  frame on screen.
+- **Baseline before blaming, and measure it yourself.** Check out the commit before
+  yours and re-run. Every "regression" so far has been pre-existing — including both
+  of Phase 4's.
+- **Watch every new guard fail** against the behaviour it replaces. One shipped deaf
+  because it had only ever been seen passing.
+- **A move commit moves. It never edits.** Prove it: extract the removed text and the
+  added text and compare sha256 in code. Doing that caught a comment that had been
+  silently rewritten rather than moved.
+- **Prefer reverting to patching under uncertainty.**
+- **Profile before optimising.** Eight CSS guesses cost more than one LoAF trace.
 - The commit messages are the real design document here — `git log` is worth reading.
