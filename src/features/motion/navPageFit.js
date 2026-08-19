@@ -18,9 +18,9 @@ export function navPageFit({
   viewportHeight,
   navWidth = 304,
   gap = 18,
-  marginTop = 16,
+  marginTop = 24,
   marginRight = 22,
-  marginBottom = 16,
+  marginBottom = 24,
   headroom = HEADROOM,
 } = {}) {
   const left = navWidth + gap;

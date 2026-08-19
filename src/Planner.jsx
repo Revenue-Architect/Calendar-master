@@ -4002,9 +4002,9 @@ export default function Planner() {
              that reaches the HUD, so it stays under the header's own 8px of
              padding and the hamburger never loses its top. */
           --nav-headroom:4px;
-          --nav-margin-top:16px;
+          --nav-margin-top:24px;
           --nav-margin-right:22px;
-          --nav-margin-bottom:16px;
+          --nav-margin-bottom:24px;
           --nav-page-x:calc(var(--nav-width) + var(--nav-gap));
           --nav-page-y:calc(var(--nav-margin-top) - var(--nav-headroom));
           --nav-clip-top:var(--nav-headroom);

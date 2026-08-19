@@ -20,8 +20,8 @@ test("a missing viewport falls back instead of inventing NaN", () => {
 
 test("the black frame reads even on every side", () => {
   const fit = navPageFit({ viewportWidth: 1280, viewportHeight: 900 });
-  assert.equal(fit.frameTop, 16);
-  assert.equal(fit.frameBottom, 16);
+  assert.equal(fit.frameTop, 24);
+  assert.equal(fit.frameBottom, 24);
   assert.ok(Math.abs(fit.frameRight - fit.frameTop) <= 6, `right ${fit.frameRight} vs top ${fit.frameTop}`);
 });
 
