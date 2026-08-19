@@ -68,7 +68,7 @@ created.
 
 Two executable rules, both allowed to move one direction only:
 
-1. **`Planner.jsx` does not grow.** Ceiling 9,616. `structure.md` said "do not grow
+1. **`Planner.jsx` does not grow.** Ceiling 9,590 (lowered by 1.1). `structure.md` said "do not grow
    Planner.jsx" and nothing enforced it; had this existed, `9470 → 9470` on a commit
    named "extract Sheet from Planner" would have been a visible non-event and
    `9470 → 9616` a hard failure.
@@ -91,7 +91,7 @@ import → run the guarding spec → lower the ratchet.
 
 | # | Module | Moves out of Planner | Guarded by |
 | --- | --- | --- | --- |
-| 1.1 | `morphTiming.js` | 4 constants, no logic | `motion.spec.js` |
+| ~~1.1~~ | ~~`morphTiming.js`~~ **done** | 4 constants + 2 stage fractions that were magic numbers | `motion.spec.js` |
 | 1.2 | `fluidTrigger.js` | `recentFluidTriggerRect` + radius/fill helpers | `motion.spec.js` |
 | 1.3 | `Sheet.jsx` | the 370-line `Sheet` | `motion.spec.js`, `editor-rows.spec.js`, `composer.spec.js` |
 
@@ -101,7 +101,7 @@ file never received. Port that forward into `features/motion/Sheet.jsx` first, v
 the two are equivalent, *then* swap the import and delete Planner's copy. Doing it in
 the other direction silently reverts a fix.
 
-Expected: Planner 9,616 → ~9,150.
+Planner 9,616 → **9,590** after 1.1. Expected ~9,150 when 1.3 lands.
 
 ---
 

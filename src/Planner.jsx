@@ -160,6 +160,14 @@ import {
   fluidPillStretch,
 } from "./features/motion/fluidGeometry.js";
 import {
+  MORPH_FADE,
+  MORPH_LEAD,
+  MORPH_MS,
+  MORPH_STAGE_CONTENT,
+  MORPH_STAGE_REVEAL,
+  MORPH_STEP,
+} from "./features/motion/morphTiming.js";
+import {
   VIEW_PILL_COMPACT_MAX,
   VIEW_PILL_ICON,
   VIEW_PILL_WORD,
@@ -294,19 +302,6 @@ const MIN_DAY_HOUR_H = 44;
 const DAY_H = HOUR_H * 24;
 const HOLD_MS = 420;
 const LIFT_MS = 300;
-/* The notch morph's one dial. Every other beat in the sequence — the stage
-   machine below, the content cascade's lead, step and fade — is a fraction of
-   this, so retuning the whole choreography is one number rather than nine that
-   have to be kept in agreement.
-   The reference motion runs its container for 667ms (20 frames at 30fps), and
-   that is the right shape but not the right speed for a control opened dozens of
-   times a day — a showcase piece is authored to be watched once, and DESIGN.md's
-   fortieth-time test is the standard that actually applies here. 480ms keeps the
-   whole choreography, since every other beat is a fraction of this one: the
-   sheet still assembles itself group by group, it just stops making you wait
-   1.2 seconds to finish doing it. Still half again what the old 320ms pop ran
-   at, which is what made it read as a resize rather than a morph. */
-const MORPH_MS = 480;
 /* The order the three surfaces lie in, left to right. It is the one place that
    knows a view has neighbours, and both the switch animation's direction and
    the swipe's target come from it. */
@@ -315,27 +310,6 @@ const VIEW_ORDER = ["timeline", "agenda", "actions"];
    enough that it never delays the surface you asked for. The day turn next door
    moves a fraction of this distance in 240ms; a whole width wants a little more. */
 const VIEW_SLIDE_MS = 300;
-/* Fractions of MORPH_MS. Content starts a third of the way through the container's
-   travel, each group is a step behind the last, and each takes its own share of the
-   duration to arrive.
-
-   The lead is the load-bearing one and it does not move: it is the beat that makes the
-   form wait until the clip has somewhere to land, which is the difference between a
-   morph and a panel with a fade on it.
-
-   The step and the fade used to be the reference's own .2 and .5, which put the eighth
-   group's start at 936ms and its end at 1176ms — two and a half times the shape it
-   belongs to. Measured, not guessed: content was still at 0.30 opacity 622ms after the
-   press. A gesture whose content keeps arriving after its container has settled reads as
-   a fade laid over a morph, which is exactly what it was reported as.
-
-   At .04 and .3 the last group starts at ~322ms and lands at ~466ms, inside MORPH_MS
-   with room to spare, and the whole cascade spans 279ms — under the 300ms an interface
-   opened dozens of times a day can afford. The stagger survives; only its tail is gone.
-   Keep the arithmetic true if MORPH_MS ever moves: lead + 8*step + fade must stay <= 1. */
-const MORPH_LEAD = 0.35;
-const MORPH_STEP = 0.04;
-const MORPH_FADE = 0.3;
 /* Where a drag stops following the finger one-for-one and starts resisting. Not
    a limit — past this the page keeps moving, just less of it. */
 const SWIPE_SOFT_LIMIT = 140;
@@ -8841,8 +8815,8 @@ function Sheet({ T, onClose, title, children, headerAction = null, beforeClose =
        used — 56%, 69%, 100% — so stretching MORPH_MS moves these with it rather
        than leaving the handoff stranded at an absolute millisecond that no
        longer means anything in the new timeline. */
-    const reveal = window.setTimeout(() => stage("reveal"), MORPH_MS * 0.56);
-    const content = window.setTimeout(() => stage("content"), MORPH_MS * 0.69);
+    const reveal = window.setTimeout(() => stage("reveal"), MORPH_MS * MORPH_STAGE_REVEAL);
+    const content = window.setTimeout(() => stage("content"), MORPH_MS * MORPH_STAGE_CONTENT);
     const open = window.setTimeout(() => stage("open"), MORPH_MS);
     return () => {
       window.clearTimeout(reveal);
