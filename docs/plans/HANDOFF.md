@@ -7,7 +7,7 @@ Written at the end of a long session. Read this, then
 
 ## State
 
-- `main` at **`6cc4691`**, clean, pushed.
+- `main` at **`f631f77`** (this document's own commit), clean, pushed.
 - **599 unit / 0 fail.** **295 browser / 6 fail** — all six are established, listed below.
 - `Planner.jsx` is **9,184 lines**, down from 9,616 at the start of the session.
 - Two ratchets in `src/architecture.test.js` enforce that: a line ceiling, and a rule
