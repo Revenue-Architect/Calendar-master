@@ -305,7 +305,7 @@ import {
   eventsToIcs,
 } from "./domains/calendar/index.js";
 import { addDays, addDaysToKey, diffDays, isDateKey, keyOf, parseKey } from "./shared/time/dateKey.js";
-import { createId } from "./shared/ids.js";
+import { uid } from "./shared/ids.js";
 import { addMinutesToLocalDateTime, localDateTimeToEpochMinutes } from "./shared/time/localDateTime.js";
 import { getOffsetCandidates } from "./shared/time/timezone.js";
 import { dur } from "./shared/time/duration.js";
@@ -362,11 +362,6 @@ function ribbonRangeAround(anchorKey) {
 
 /* ═══════════════════════ UTILS ═══════════════════════ */
 
-/* Persisted records (events, tasks, notes, exceptions, awards) go through
-   createId() — crypto.randomUUID — so two writes cannot collide on a 7-char
-   Math.random token. Ephemeral React keys reuse the same helper; a UUID in a
-   toast key is harmless and keeps one id story in this file. */
-const uid = createId;
 const snapTo = (m, s = SNAP) => Math.max(0, Math.min(1440, Math.round(m / s) * s));
 /* A start is a minute of the day, and a day has no minute 1440. Snapping "now" at
    23:53 rounded up to it and built "…T24:00", which the time model rejects — from

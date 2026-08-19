@@ -20,3 +20,13 @@ export function createId() {
   const noise = Math.random().toString(36).slice(2, 12);
   return `id-${time}-${noise}`;
 }
+
+/* Persisted records (events, tasks, notes, exceptions, awards) go through
+   createId() — crypto.randomUUID — so two writes cannot collide on a 7-char
+   Math.random token. Ephemeral React keys reuse the same helper; a UUID in a
+   toast key is harmless and keeps one id story in this file. */
+const uid = createId;
+
+export {
+  uid,
+};
