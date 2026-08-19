@@ -120,9 +120,16 @@ function bindings(text) {
   return { code, imported: names };
 }
 
-test("no module under src/features uses a binding Planner imports without importing it", () => {
+test("no module under src/features uses a Planner binding without importing it", () => {
   const planner = readFileSync(join(SRC, "Planner.jsx"), "utf8");
-  const plannerImports = bindings(planner).imported;
+  /* Both halves of Planner's module scope. An extracted component loses a name
+     Planner imported and a name Planner declared in exactly the same silent way,
+     so both belong here. */
+  const plannerScope = new Set([
+    ...bindings(planner).imported,
+    ...[...planner.matchAll(/^(?:const|let|var)s+([A-Za-z_$][w$]*)/gm)].map((m) => m[1]),
+    ...[...planner.matchAll(/^functions+([A-Za-z_$][w$]*)/gm)].map((m) => m[1]),
+  ]);
 
   const offenders = [];
   for (const file of sourceFiles(SRC)) {
@@ -142,7 +149,7 @@ test("no module under src/features uses a binding Planner imports without import
 
     const used = new Set([...code.matchAll(/\b([A-Za-z_$][\w$]*)\b/g)].map((m) => m[1]));
     for (const name of used) {
-      if (plannerImports.has(name) && !imported.has(name) && !local.has(name)) {
+      if (plannerScope.has(name) && !imported.has(name) && !local.has(name)) {
         offenders.push(`${rel} uses ${name}`);
       }
     }
