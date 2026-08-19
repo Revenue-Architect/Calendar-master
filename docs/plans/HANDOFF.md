@@ -8,7 +8,7 @@ Read this, then `docs/plans/2026-08-18-001-refactor-planner-ui-extraction-plan.m
 
 - **`main` clean and pushed.** Phases 2, 3 and 4 are all on it; the
   `claude/phase-2-…` branch was merged and deleted.
-- **600 unit / 0 fail. 301 browser / 2 fail** — measured this session, not inherited.
+- **600 unit / 0 fail. 301 browser / 2–3 fail** — measured this session, not inherited.
 - `Planner.jsx` is **7,625 lines**, down from 9,616 three sessions ago.
 - **Three ratchets** in `src/architecture.test.js`, all one-directional: a line
   ceiling, a rule that no module under `src/features/` is left unimported, and a scope
@@ -137,8 +137,12 @@ first, and only then move the component.
 
 ## Test baseline — measure it, never inherit it
 
-**301 browser tests, 2 failures per full run.** But *which* two varies, and every
-version of this document that listed a fixed set has been wrong.
+**301 browser tests, 2–3 failures per full run.** Both the count *and* which ones
+vary. Every version of this document that listed a fixed set has been wrong, and the
+version that said "2 failures" was wrong by the next run: the final Phase 4 run was
+**298 passed / 3 failed**, all three of them from the pool below, each independently
+proven pre-existing by checking out a commit that predates the work and watching it
+fail there. Treat the pool as the baseline, not a number.
 
 | Spec | Behaviour |
 | --- | --- |
