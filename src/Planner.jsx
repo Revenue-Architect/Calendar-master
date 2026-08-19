@@ -303,6 +303,7 @@ import { createId } from "./shared/ids.js";
 import { addMinutesToLocalDateTime, localDateTimeToEpochMinutes } from "./shared/time/localDateTime.js";
 import { getOffsetCandidates } from "./shared/time/timezone.js";
 import { dur } from "./shared/time/duration.js";
+import { fmtHour, fmtTime, fromHhmm, hhmm, pad } from "./shared/time/clockFormat.js";
 import { NOW_RED, THEMES } from "./design/themes.js";
 import { readable } from "./design/contrast.js";
 
@@ -367,19 +368,6 @@ function ribbonRangeAround(anchorKey) {
 
 /* ═══════════════════════ UTILS ═══════════════════════ */
 
-const pad = (n) => String(n).padStart(2, "0");
-/* The clock is a display choice, never a stored one — minutes since midnight stay
-   the single representation, so switching format can never move an event. */
-const h12 = (h) => (h % 12 === 0 ? 12 : h % 12);
-const meridiem = (h) => (h < 12 ? "AM" : "PM");
-const fmtTime = (m, clock) => {
-  const hour = Math.floor(m / 60) % 24;
-  const minute = Math.round(m) % 60;
-  if (clock === "24") return `${pad(hour)}:${pad(minute)}`;
-  return `${h12(hour)}:${pad(minute)} ${meridiem(hour)}`;
-};
-/* The rail drops ":00" — an hour label is a ruler mark, not a timestamp. */
-const fmtHour = (h, clock) => (clock === "24" ? pad(h) : `${h12(h)} ${meridiem(h)}`);
 /* Persisted records (events, tasks, notes, exceptions, awards) go through
    createId() — crypto.randomUUID — so two writes cannot collide on a 7-char
    Math.random token. Ephemeral React keys reuse the same helper; a UUID in a
@@ -405,9 +393,6 @@ const snapTo = (m, s = SNAP) => Math.max(0, Math.min(1440, Math.round(m / s) * s
    inside render, so the whole page went blank. A new entry begins in the last slot
    the day actually has. */
 const startSlot = (m, s = 15) => Math.min(snapTo(m, s), 1440 - s);
-/* The wire form a native time input speaks, independent of the 12/24 display clock. */
-const hhmm = (m) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
-const fromHhmm = (s) => { const [h, m] = s.split(":").map(Number); return h * 60 + m; };
 /* The pressed-trigger snapshot lives in features/motion/fluidTrigger.js, which
    also owns the listeners that feed it. Installed here because Planner is the
    composition root and this is a document-level concern, not a component one. */
