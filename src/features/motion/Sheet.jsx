@@ -9,6 +9,7 @@ import {
 } from "../accessibility/dialogFocus.js";
 import { fluidMorphFromRects } from "./fluidGeometry.js";
 import { recentFluidTriggerRadius, recentFluidTriggerRect } from "./fluidTrigger.js";
+import { MONO } from "../../design/typography.js";
 import { MORPH_MS, MORPH_STAGE_CONTENT, MORPH_STAGE_REVEAL } from "./morphTiming.js";
 
 function CloseIcon({ size = 14 }) {
@@ -21,6 +22,10 @@ function CloseIcon({ size = 14 }) {
   );
 }
 
+/* Kept in step with Planner deliberately: this is the copy that runs.
+   Planner's own Sheet was the newer of the two by 134 lines -- it had gained
+   first-paint height measurement that this file never received -- so the merge
+   went in that direction. Reversing it would have silently reverted that fix. */
 export default function Sheet({ T, onClose, title, children, headerAction = null, beforeClose = null, morph = "auto", morphSurface = null, closeSignal = null }) {
   /* Ignore a backdrop dismissal that arrives in the same tap that opened the sheet.
      Belt and braces alongside preventDefault at the source: any future path that
@@ -46,17 +51,15 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
   const [closing, setClosing] = useState(false);
   const [sheetHeight, setSheetHeight] = useState(null);
   const [heightReady, setHeightReady] = useState(false);
-  /* The opening accent is the animation's job, not this state's.
-     nbnotchwash paints var(--morph-accent) at 0% and animations outrank inline
-     styles, so the carry is pixel-identical either way — but painting it from
-     the stage made the sheet's *resting* colour depend on three setTimeouts
-     firing. Where they did not, the sheet stayed a solid accent slab with the
-     right colour sitting unused in the style attribute and nothing able to
-     reach it: the stage-open guarantee in the stylesheet never matched, because
-     the stage never got to open. Mobile Chrome throttles timers hard enough for
-     that to be an ordinary device state, which is why it only ever showed on a
-     phone. "closing" keeps the accent because the fold needs it back and a
-     closing sheet always unmounts. */
+  /* The opening accent is the animation's job, not this state's. nbnotchwash
+     paints var(--morph-accent) at 0% and animations outrank inline styles, so the
+     carry is pixel-identical either way — but painting it from the stage made the
+     sheet's *resting* colour depend on three setTimeouts firing. Where they did
+     not, the sheet stayed a solid accent slab with the right colour sitting unused
+     in the style attribute: the stage-open guarantee never matched, because the
+     stage never got to open. Mobile Chrome throttles timers hard enough for that
+     to be an ordinary device state, which is why it only ever showed on a phone.
+     Mirrored in features/motion/Sheet.jsx, which is not wired up yet. */
   const [morphStage, setMorphStage] = useState(morph === "notch" && morphSurface ? "source" : "open");
   const titleId = useRef(`sheet-title-${Math.random().toString(36).slice(2, 9)}`);
   const closeSignalRef = useRef(closeSignal);
@@ -64,6 +67,8 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
      so the keyboard cannot drive the sheet's height. See the measure effect. */
   const viewportCap = useRef(0);
   const viewportWidth = useRef(0);
+  const heightMeasureFrame = useRef(null);
+  const lastSheetHeight = useRef(null);
   useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
   useEffect(() => { beforeCloseRef.current = beforeClose; }, [beforeClose]);
   const requestClose = useCallback(() => {
@@ -139,49 +144,101 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
        or a window drag, which should re-cap, from a keyboard, which must not. */
     if (!viewportCap.current) viewportCap.current = window.innerHeight;
     if (!viewportWidth.current) viewportWidth.current = window.innerWidth;
-    const measure = () => {
-      const next = Math.min(content.scrollHeight, Math.round(viewportCap.current * .88));
-      setSheetHeight(next);
-      /* A notch sheet is mid-morph for its opening animation; letting height
-         transition underneath it animates the same box on two curves at once. */
-      if (morphRef.current === "notch" && !openedRef.current) return;
-      window.requestAnimationFrame(() => setHeightReady(true));
+    /* Establish the final resting box before first paint, but do not animate its
+       height yet. The panel's entry animation can then stay entirely on compositor
+       properties instead of relaying out sticky/overflow descendants mid-flight. */
+    const next = Math.min(content.scrollHeight, Math.round(viewportCap.current * .88));
+    lastSheetHeight.current = next;
+    setSheetHeight(next);
+    return () => {
+      window.cancelAnimationFrame(heightMeasureFrame.current);
+      heightMeasureFrame.current = null;
     };
-    const onResize = () => {
-      if (window.innerWidth === viewportWidth.current) return;
-      viewportWidth.current = window.innerWidth;
-      viewportCap.current = window.innerHeight;
-      measure();
-    };
-    measure();
-    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
-    observer?.observe(content);
-    window.addEventListener("resize", onResize);
-    return () => { observer?.disconnect(); window.removeEventListener("resize", onResize); };
   }, [morph]);
   const guardedClose = useCallback(() => {
     if (Date.now() - openedAt.current < 350) return;
     requestClose();
   }, [requestClose]);
   useEffect(() => {
-    if (morph !== "notch") { openedRef.current = true; return undefined; }
     const panel = dialogRef.current;
     if (!panel) return undefined;
+    let heightReadyFrame = null;
+    const finishEntry = () => {
+      if (closingRef.current || openedRef.current) return;
+      openedRef.current = true;
+      /* Content can settle while the observer is intentionally disconnected
+         (fonts and composer branches are common). Absorb that final geometry with
+         transitions still off, then arm interpolation on the following frame.
+         Otherwise the first observer record becomes a delayed second bounce. */
+      const content = contentRef.current;
+      if (content?.isConnected) {
+        const next = Math.min(content.scrollHeight, Math.round(viewportCap.current * .88));
+        if (lastSheetHeight.current !== next) {
+          lastSheetHeight.current = next;
+          setSheetHeight(next);
+        }
+      }
+      heightReadyFrame = window.requestAnimationFrame(() => {
+        heightReadyFrame = null;
+        if (!closingRef.current) setHeightReady(true);
+      });
+    };
     const done = (event) => {
       /* Only the panel's own entry animation, not one bubbling from inside it. */
       if (event.target !== panel || closingRef.current) return;
-      openedRef.current = true;
-      setHeightReady(true);
+      if (!["nbfluid", "nbfluidorigin", "nbnotchin"].includes(event.animationName)) return;
+      finishEntry();
     };
     panel.addEventListener("animationend", done);
-    /* A belt for the case the animation never fires — a hidden tab, or reduced
-       motion stripping it — so the sheet can never be left unable to resize. */
-    const fallback = window.setTimeout(() => { openedRef.current = true; setHeightReady(true); }, 600);
+    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+      || window.getComputedStyle(panel).animationName === "none";
+    /* A no-motion sheet can interpolate later changes immediately. All other sheet
+       kinds—not only notch sheets—wait for their entry animation to finish. */
+    const readyFrame = reduced ? window.requestAnimationFrame(finishEntry) : null;
+    /* A belt for a backgrounded tab or cancelled CSS animation. */
+    const fallback = reduced ? null : window.setTimeout(finishEntry, MORPH_MS + 120);
     return () => {
       panel.removeEventListener("animationend", done);
       window.clearTimeout(fallback);
+      window.cancelAnimationFrame(readyFrame);
+      window.cancelAnimationFrame(heightReadyFrame);
     };
   }, [morph]);
+  useLayoutEffect(() => {
+    if (!heightReady) return undefined;
+    const content = contentRef.current;
+    if (!content) return undefined;
+    /* ResizeObserver can emit several records while an editor unfolds. Collapse
+       those records into one read/write per frame and skip identical targets, so
+       React never restarts the same height transition or creates an observer loop. */
+    const scheduleMeasure = () => {
+      if (closingRef.current || heightMeasureFrame.current != null) return;
+      heightMeasureFrame.current = window.requestAnimationFrame(() => {
+        heightMeasureFrame.current = null;
+        if (closingRef.current || !content.isConnected) return;
+        const next = Math.min(content.scrollHeight, Math.round(viewportCap.current * .88));
+        if (lastSheetHeight.current === next) return;
+        lastSheetHeight.current = next;
+        setSheetHeight(next);
+      });
+    };
+    const onResize = () => {
+      if (window.innerWidth === viewportWidth.current) return;
+      viewportWidth.current = window.innerWidth;
+      viewportCap.current = window.innerHeight;
+      scheduleMeasure();
+    };
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(scheduleMeasure) : null;
+    observer?.observe(content);
+    window.addEventListener("resize", onResize);
+    scheduleMeasure();
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", onResize);
+      window.cancelAnimationFrame(heightMeasureFrame.current);
+      heightMeasureFrame.current = null;
+    };
+  }, [heightReady]);
   useEffect(() => {
     if (morph !== "notch" || !morphSurface) {
       setMorphStage("open");
@@ -290,7 +347,7 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
     const restorePageScroll = () => applyScrollSnapshot(pageScrollRef.current);
     restorePageScroll();
     window.addEventListener("scroll", restorePageScroll, true);
-    const unlock = window.setTimeout(() => window.removeEventListener("scroll", restorePageScroll, true), MORPH_MS);
+    const unlock = window.setTimeout(() => window.removeEventListener("scroll", restorePageScroll, true), 480);
     /* `nb-sheet-h` transitions height, and it used to switch on one frame into
        the notch's own 360ms morph — two curves animating the same box, which is
        the bounce. The height transition waits until the shape has finished
@@ -317,10 +374,10 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
         )}
         <div ref={contentRef} className="nb-notch-body">
         <div className="sticky top-0 flex items-center justify-between px-4 sm:px-5 pt-3 pb-2" style={{ background: T.card, zIndex: 3 }}>
-          <span id={titleId.current} style={{ fontFamily: "var(--font-data)", color: T.dimText }} className="nb-data">{title || "Details"}</span>
+          <span id={titleId.current} style={{ fontFamily: MONO, color: T.dimText }} className="nb-data">{title || "Details"}</span>
           <div className="flex items-center gap-1.5">
             {headerAction}
-            <button onClick={requestClose} aria-label="Close" style={{ color: T.dimText, fontFamily: "var(--font-data)" }} className="nb-tap nb-hover-icon -mr-1 px-2 py-1 text-sm flex items-center justify-center"><CloseIcon /></button>
+            <button onClick={requestClose} aria-label="Close" style={{ color: T.dimText, fontFamily: MONO }} className="nb-tap nb-hover-icon -mr-1 px-2 py-1 text-sm flex items-center justify-center"><CloseIcon /></button>
           </div>
         </div>
         {/* Padding deeper than the panel's 24px corner radius, so the last row

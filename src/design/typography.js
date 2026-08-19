@@ -13,6 +13,10 @@
  */
 
 /** Every step, in the order they appear in the scale. */
+/* The data face. Lifted out of Planner so the sheet can use it without
+   importing the composition root. */
+export const MONO = "var(--font-data)";
+
 export const TYPE_SCALE = Object.freeze({
   display: { px: 64, weight: 800, tracking: -0.035, family: "data", role: "The day numeral, and nothing else." },
   title:   { px: 24, weight: 700, tracking: -0.018, family: "display", role: "Sheet titles and view headings." },
