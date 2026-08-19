@@ -225,6 +225,7 @@ import {
 } from "./features/motion/fluidGeometry.js";
 import { VIEW_SLIDE_MS } from "./features/motion/morphTiming.js";
 import { useLiquidPill } from "./features/motion/liquidPill.js";
+import Reveal from "./features/motion/Reveal.jsx";
 import {
   installFluidTriggerListeners,
   recentFluidTriggerRadius,
@@ -6964,18 +6965,6 @@ function usePresence(value, exitMs = 220) {
     return () => clearTimeout(t);
   }, [present, present ? value : null]);
   return [held, leaving && !present];
-}
-
-/* An inline surface that grows open and folds closed instead of popping — the same
-   grid-rows idiom the choice rows use, shared by the Settings confirmations. */
-function Reveal({ open, children }) {
-  return (
-    <div style={{ display: "grid", gridTemplateRows: open ? "1fr" : "0fr", transition: "grid-template-rows 260ms cubic-bezier(.23,1,.32,1)" }}>
-      <div className="overflow-hidden" inert={!open} style={{ minHeight: 0, visibility: open ? "visible" : "hidden", transition: `visibility 0s linear ${open ? 0 : 300}ms` }}>
-        {children}
-      </div>
-    </div>
-  );
 }
 
 /* §4.6. The value is the field. These render as the record reads until they are
