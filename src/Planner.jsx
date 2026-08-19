@@ -211,10 +211,15 @@ import {
   ALERT_CHOICES,
   CARD_R,
   CATS,
+  DAY_H,
   DAY_LETTERS,
+  HOLD_MS,
+  HOUR_H,
+  LIFT_MS,
   MO,
   REPEATS,
   SHORTCUTS,
+  SWIPE_SOFT_LIMIT,
   VIEW_ORDER,
   WD,
   WD1,
@@ -327,7 +332,6 @@ function repeatFor(freq, current, dateKey) {
   };
 }
 
-const HOUR_H = 68;
 /* The ribbon is a rolling window, not a date limit. Keeping roughly two years
    mounted gives the person room to browse without making the DOM grow forever;
    reaching an edge shifts that window by one year and preserves the viewport. */
@@ -347,12 +351,6 @@ const REVEAL_FALLBACK_MS = 120;
    the preferred scale. Forty-four pixels still gives an hour a real touch-sized
    row; below that, density starts making the timeline less usable than scrolling. */
 const MIN_DAY_HOUR_H = 44;
-const DAY_H = HOUR_H * 24;
-const HOLD_MS = 420;
-const LIFT_MS = 300;
-/* Where a drag stops following the finger one-for-one and starts resisting. Not
-   a limit — past this the page keeps moving, just less of it. */
-const SWIPE_SOFT_LIMIT = 140;
 const SNAP = 5;
 
 function ribbonRangeAround(anchorKey) {

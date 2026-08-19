@@ -70,19 +70,38 @@ const MO = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT"
    Phase 3 as a layout number rather than vocabulary, which was the right call
    while Planner was its only reader. Phase 4 changes that: Pill, RowWithJoin,
    InlineField and InlineChoice all need it, and none of them can leave while it
-   is defined in the file they are leaving. HOUR_H and the RIBBON_* window stay
-   behind — those are timeline geometry, and the timeline is not going anywhere. */
+   is defined in the file they are leaving. the RIBBON_* window stays
+   behind — that is Planner's own scrolling state. HOUR_H did too, on the
+   grounds that "the timeline is not going anywhere"; Phase 5 moves WeekGrid,
+   so it is going somewhere, and the geometry goes with it. */
+
+/* Timeline geometry and the gesture thresholds that read it. HOUR_H is the
+   height of one hour and everything else here is derived from or measured
+   against it, which is why they travel together. */
 const CARD_R = 14;
+
+const HOUR_H = 68;
+const DAY_H = HOUR_H * 24;
+const HOLD_MS = 420;
+const LIFT_MS = 300;
+/* Where a drag stops following the finger one-for-one and starts resisting. Not
+   a limit — past this the page keeps moving, just less of it. */
+const SWIPE_SOFT_LIMIT = 140;
 
 export {
   ALERT_CHOICES,
   CARD_R,
-  CATS,
   CAT_COLOR,
+  CATS,
+  DAY_H,
   DAY_LETTERS,
+  HOLD_MS,
+  HOUR_H,
+  LIFT_MS,
   MO,
   REPEATS,
   SHORTCUTS,
+  SWIPE_SOFT_LIMIT,
   VIEW_ORDER,
   WD,
   WD1,
