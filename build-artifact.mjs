@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, readdirSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, mkdirSync } from "node:fs";
 
 /* One file that runs the whole planner.
  *
@@ -56,6 +56,9 @@ ${bundle}
 </script>
 `;
 
+/* `artifact/` is gitignored, so it does not exist in a fresh clone and this
+   script failed on its last line with ENOENT — after doing all the work. */
+mkdirSync("artifact", { recursive: true });
 writeFileSync("artifact/planner.html", page);
 const kb = (n) => `${(n / 1024).toFixed(0)} kB`;
 console.log(`js ${kb(bundle.length)} + css ${kb(styles.length)} -> artifact/planner.html ${kb(page.length)}`);
