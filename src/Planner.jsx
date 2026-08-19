@@ -225,6 +225,7 @@ import {
   WD1,
   catColor,
 } from "./features/planner/constants.js";
+import { fmtDay, plannedLabel } from "./features/planner/dateLabels.js";
 import TimelineActionCard from "./features/planner/TimelineActionCard.jsx";
 import { HAPTIC_PATTERNS, triggerDeviceHaptic } from "./features/feedback/haptics.js";
 import {
@@ -378,14 +379,6 @@ const countdownLabel = (dateKey, startMin, todayKey, nowMin, durationMin = 0) =>
   if (minutes < 1440) return `${Math.floor(minutes / 60)}h`;
   return `${Math.floor(minutes / 1440)}d`;
 };
-const plannedLabel = (dateKey, todayKey) => {
-  const days = diffDays(dateKey, todayKey);
-  if (days === 0) return "Today";
-  if (days === 1) return "Tomorrow";
-  if (days === -1) return "Yesterday";
-  return fmtDay(dateKey);
-};
-const fmtDay = (k) => { const d = parseKey(k); return `${WD[d.getDay()]} ${pad(d.getDate())} ${MO[d.getMonth()]}`; };
 
 function canonicalOccurrenceIdentity(id) {
   try { return parseOccurrenceId(id); } catch { return null; }
