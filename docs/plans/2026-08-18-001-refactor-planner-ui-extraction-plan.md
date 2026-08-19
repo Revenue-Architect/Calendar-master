@@ -216,18 +216,36 @@ alone before believing any new failure in it.
 
 ---
 
-## Known open item, not in scope here
+## The nav stutter is a symptom of the monolith
 
-**Mobile nav first-frame cost.** Opening the nav costs ~100ms on the first frame at
-6× CPU throttle (~60ms on later opens), and it is *not* any of the animations:
-measured with the clip transition off, the content fade off, the drawer motion off,
-and with all surface motion off, the cost stays in the same 91–127ms band. React
-render is 2ms. `will-change` on the rail and on the surface both failed to move it,
-as did `contain`. It is the style recalc and repaint triggered by the nav-open state
-change propagating across the whole app subtree — `data-nav-state` lives on
-`.nb-nav-shell`, which wraps both the drawer and the entire app, so every selector
-keyed off it invalidates everything.
+Profiled with the Long Animation Frame API rather than guessed at. The expensive
+first frame of a mobile nav open is **not paint and not CSS** — it is ~85ms of
+JavaScript:
 
-The plausible fix is to scope that invalidation (move the open-state flag off the
-shared ancestor), which collides with Codex's nav work and with tests that read
-`data-nav-state`. Needs its own plan.
+| frame | duration | script | style+layout | named invoker |
+| --- | --- | --- | --- | --- |
+| 1 | 86ms | **79ms** | 2ms |  — React's concurrent scheduler |
+| 2 | 91ms | **86ms** | 0ms |  |
+| 3 | 97ms | 13ms | 78ms | rAF |
+
+Toggling the nav re-renders the whole of . At 9,553 lines with 224
+hook calls in one function there are no child component boundaries, so the entire
+render function re-runs for a state change that visually affects a drawer and one
+class. React's scheduler splits it across two frames; both are ~85ms of script.
+
+This is why every CSS lever failed. Measured and rejected, so nobody repeats them:
+ on the rail and on the surface,  on both,
+the clip-path transition off, the content opacity fade off, the drawer and label
+motion off, **all surface motion off**, resting clip pre-rounded, and no rounded
+corner when open. Every one stayed inside the same 73–127ms band.
+
+**The fix is Phase 5.** Extracting composite surfaces creates the component
+boundaries that  needs; today there is nothing to memoise because
+there are no components. Until then a nav toggle will always pay for re-rendering
+the timeline, the actions panel and everything else that did not change.
+
+A cheaper interim exists — apply the open class imperatively via  so
+the animation starts on the next frame while React's render happens behind it, or
+wrap  in  so the render yields. Both are real changes
+to the composition root in Codex's active area, and the nav e2e probes are
+currently flaking, so neither should be attempted casually.
