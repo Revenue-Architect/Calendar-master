@@ -24,7 +24,7 @@ Execution is deliberately ordered:
 4. Introduce an Expo Android client, shared JavaScript packages, durable local repositories and outboxes, Clerk identity, and Convex sync as one end-to-end trust program before continuing broad web extraction.
 5. Prove one complete Day workflow offline, through force-stop recovery, sync, conflict handling, recurrence round trips, and web convergence.
 6. Add Chrono behind a deterministic parser contract, then certify a private beta.
-7. Continue broader web extraction only after the trust slice is operating. Timeline is the final web surface to move.
+7. Continue broader web extraction only after the trust slice is operating. Timeline is the final web surface to move. *(Overtaken — see Amendment 2. Web extraction completed ahead of the trust slice; `WeekGrid` moved 2026-08-19.)*
 
 The architecture remains a domain-oriented modular monolith. The repository becomes a workspace only when the Expo client exists and consumes shared code. The root React/Vite web app remains where it is; there is no apps/web move in this plan.
 
@@ -81,7 +81,7 @@ These items are deferred by explicit product and sequencing decisions, not omitt
 | src/domains contains calendar, tasks, notes, planner, reminders, gamification, and search modules with public indexes and extensive node:test coverage. | Reuse and mechanically relocate mature JavaScript domains; do not reimplement their rules in React Native or Convex. |
 | src/domains/planner/queries/dayAggregate.js composes public calendar, task, and note indexes; notes migration validation imports the prior task migration validator. | The boundary checker needs two narrow, documented composition/migration rules rather than a blanket ban or wildcard exemption. |
 | src/platform/persistence owns versioned notebook import, read, store, backup, recovery, preferences, reminders, diagnostics, and motivation stores. | New repositories must sit behind app/domain ports and preserve current recovery/export semantics and keys during compatibility migration. |
-| src/Planner.jsx still imports domain, feature, platform, and storage seams and declares NavigationShell, ActionsPanel, WeekGrid, Agenda, sheets, notebook, note editor, command palette, shortcuts, and composer locally. | Planner.jsx receives a ratcheting exception, not permanent exemption. Every extraction must remove controller state/effects and direct dependencies along with its JSX. |
+| src/Planner.jsx still imports domain, feature, platform, and storage seams. **As of 2026-08-19 it declares no React components at all** — NavigationShell, ActionsPanel, WeekGrid, Agenda, sheets, notebook, note editor, command palette, shortcuts and composer are all in `src/features/planner/`. What remains is `Planner()` itself at 4,925 lines with 235 hook calls. | Planner.jsx receives a ratcheting exception, not permanent exemption. The JSX has now gone; the controller state, effects and direct dependencies did **not** go with it, because those extractions were byte-exact moves. That residue is the debt this row now tracks. |
 | package.json is a single private React 19/Vite 7 package with node:test and Playwright scripts and no workspaces, Expo, Convex, Clerk, or Chrono dependency. | Workspace and dependency changes are explicit, reviewable units with a package-legitimacy gate and lockfile review. |
 | Playwright runs the production bundle, Chromium only, with one worker because tests share localStorage; tests/e2e/helpers.js directly uses nbmp:state:v8. | Existing browser behavior remains a gate. Persistence migration must introduce a repository-aware test bridge while retaining separate compatibility tests for the v8 snapshot. |
 | Existing E2E suites cover Actions, timeline gestures/touch/polish, Week drag, Join, navigation, composer, recurrence, accessibility, mobile layouts, backup, and crash recovery. | New tests extend these suites and preserve their current contracts; they do not replace them with broad screenshots or mocks. |
@@ -104,7 +104,7 @@ The identifiers below are traceability labels for this plan.
 | BD-09 | The binding order is regression remediation, governance/enforcement, low-risk extraction, cross-platform trust slice, then archive/name alignment after reference updates. |
 | BD-10 | Architecture, product behavior, visual principles, approved local contracts, sequencing, QA evidence, and drafts have distinct document authorities. |
 | BD-11 | Every extracted UI surface has a prepared controller/view model and named command/query boundary. UI cannot import persistence or mutate canonical records. |
-| BD-12 | Timeline is the final web surface extracted because it is the highest-risk interaction seam. |
+| BD-12 | Timeline is the final web surface extracted because it is the highest-risk interaction seam. **Satisfied 2026-08-19** — `WeekGrid` (578 lines) was the last and largest surface to move, into `src/features/planner/WeekGrid.jsx`. |
 | BD-13 | Preserve healthy behavior, regression gates, stable domain semantics, persistence keys, export/recovery paths, and data compatibility unless an explicit migration unit changes them with compatibility evidence. |
 
 ## Documentation authority and change protocol
@@ -351,19 +351,39 @@ For every repaired scenario, preserve the source plan's negative-control require
 - The baseline ledger has exact edges, owner, rationale, and removal phase; it has no wildcard.
 - npm run test:all remains green.
 
-### Phase 2 — Extract low-risk web surfaces through app boundaries
+### Phase 2 — Extract low-risk web surfaces through app boundaries *(half landed — read the status note)*
 
 **Purpose:** Prove the controller/view-model pattern and reduce Planner.jsx responsibilities without delaying the trust slice for complete web cleanup.  
 **Dependencies:** G2.  
 **Decision coverage:** BD-08, BD-09, BD-11, BD-12, BD-13.  
 **Gate:** G3.
 
+> **Status, 2026-08-19 — the extraction half of this phase has landed; the app boundary has not.**
+>
+> All four surfaces are out of `src/Planner.jsx`. They were moved by the UI-extraction
+> programme (see `docs/plans/2026-08-18-001-refactor-planner-ui-extraction-plan.md`), which
+> was a **different programme with a different method**, and that difference is the whole
+> point of this note:
+>
+> - **They landed in `src/features/planner/`, not `src/ui/`.** `docs/spec/structure.md` puts
+>   visible React surfaces there "for now; later `src/ui/...` once that tree exists", and ADR
+>   0001's `ui/` tree still does not exist. Every `src/ui/...` path named below is superseded.
+> - **They moved byte-exact, not through a controller/view-model.** Each extraction was a
+>   relocation proven by sha256, with only imports and an export line differing. The
+>   components still receive props from Planner; no `getNavigationViewModel`,
+>   `usePlannerCommandController` or `getAgendaViewModel` exists.
+>
+> So this phase's stated purpose — *prove the controller/view-model pattern* — is **unmet**,
+> and its per-unit "Owned files" now name the wrong module. What each unit still owes is the
+> boundary, not the move. Unit entries below are annotated accordingly.
+
 All units in this phase are extraction-only. Freeze the current production-bundle traces before each move: route, selected date, focus owner, accessible names/roles, relevant bounding boxes, motion under normal and reduced-motion settings, and persisted notebook digest. A parity failure stops the unit; it is not normalized by updating the expectation.
 
 #### P2.1 — Extract navigation shell with a navigation controller/view model
 
 - **Type:** Extraction-only.
-- **Owned files:** src/app/navigation/useNavigationController.js; src/app/navigation/useNavigationController.test.js; src/ui/navigation/NavigationShell.jsx; src/Planner.jsx; tests/e2e/navigation-shell.spec.js.
+- **Owned files:** `src/features/planner/navigation.jsx` **(exists — supersedes the planned `src/ui/navigation/NavigationShell.jsx`)**; `src/app/navigation/useNavigationController.js` *(to create)*; `src/app/navigation/useNavigationController.test.js` *(to create)*; `src/Planner.jsx`; `tests/e2e/navigation-shell.spec.js`.
+- **Landed 2026-08-19:** the whole navigation cluster — `NavigationContext`, `NavigationFrame`, `NavigationToggle`, `NavigationShell`, 223 lines — moved byte-exact as one concept. The context has one provider and one consumer, both inside that module; Planner imports only the frame and the toggle. **Remaining:** the controller/view-model boundary below.
 - **Named boundary:** Query getNavigationViewModel; commands selectPlannerRoute, selectPlannerZoom, selectPlannerDate, stepPlannerDate, openPlannerSearch, openPlannerShortcuts.
 - **Action:** Move route/date/zoom/ribbon presentation derivation and event-to-command translation into the app controller. Make NavigationShell passive: it renders the view model and invokes named commands. It receives no notebook setter, persistence adapter, or canonical database object. Remove the corresponding local component and controller responsibilities from Planner.jsx.
 - **Automated verification:** node --test src/app/navigation/useNavigationController.test.js; npm run test:e2e -- tests/e2e/navigation-shell.spec.js tests/e2e/shell.spec.js tests/e2e/actions.spec.js; npm run check:architecture.
@@ -373,7 +393,8 @@ All units in this phase are extraction-only. Freeze the current production-bundl
 #### P2.2 — Extract command palette and shortcuts with a search/command controller
 
 - **Type:** Extraction-only.
-- **Owned files:** src/app/search/usePlannerCommandController.js; src/app/search/usePlannerCommandController.test.js; src/ui/search/CommandPalette.jsx; src/Planner.jsx; tests/e2e/search-control.spec.js.
+- **Owned files:** `src/features/planner/commandSurfaces.jsx` **(exists — supersedes the planned `src/ui/search/CommandPalette.jsx`; shared with P2.3)**; `src/app/search/usePlannerCommandController.js` *(to create)*; `src/app/search/usePlannerCommandController.test.js` *(to create)*; `src/Planner.jsx`; `tests/e2e/search-control.spec.js`.
+- **Landed 2026-08-19:** `CommandPalette` moved byte-exact. Note it shares a module with P2.3's `ShortcutSheet` — the two sit next to each other in Planner, share a sheet and a `surface` prop, and were extracted as one concept. This plan assumed two separate files; there is one. **Remaining:** the controller boundary below.
 - **Named boundary:** Query searchPlannerCommands; commands executePlannerCommand, openSearchResult, closeCommandPalette.
 - **Action:** Preserve the existing feature search projection and command matching. The app controller owns query text, result projection, target resolution, and command dispatch. The passive palette receives serializable rows and callbacks only. Quick-add remains an app command and is not reimplemented in the view.
 - **Automated verification:** node --test src/app/search/usePlannerCommandController.test.js src/features/planner/commandPalette.test.js src/features/search/searchProjection.test.js; npm run test:e2e -- tests/e2e/search-control.spec.js tests/e2e/navigation-shell.spec.js; npm run check:architecture.
@@ -383,7 +404,8 @@ All units in this phase are extraction-only. Freeze the current production-bundl
 #### P2.3 — Extract the shortcut sheet
 
 - **Type:** Extraction-only.
-- **Owned files:** src/app/navigation/getShortcutViewModel.js; src/app/navigation/getShortcutViewModel.test.js; src/ui/navigation/ShortcutSheet.jsx; src/Planner.jsx; tests/e2e/accessibility-quality.spec.js.
+- **Owned files:** `src/features/planner/commandSurfaces.jsx` **(exists — supersedes the planned `src/ui/navigation/ShortcutSheet.jsx`; shared with P2.2)**; `src/app/navigation/getShortcutViewModel.js` *(to create)*; `src/app/navigation/getShortcutViewModel.test.js` *(to create)*; `src/Planner.jsx`; `tests/e2e/accessibility-quality.spec.js`.
+- **Landed 2026-08-19:** `ShortcutSheet` moved byte-exact, in the same module as P2.2. It renders from the `SHORTCUTS` constant in `src/features/planner/constants.js`, so the sheet still cannot claim a key the handler does not answer to. **Remaining:** the pure view model below.
 - **Named boundary:** Query getShortcutViewModel; command closeShortcutSheet.
 - **Action:** Move shortcut rows and platform-aware labels into a pure app view model. Keep dialog lifecycle/focus handling in the established app accessibility boundary and pass only rendered data and close intent into the view.
 - **Automated verification:** node --test src/app/navigation/getShortcutViewModel.test.js src/features/accessibility/dialogFocus.test.js; npm run test:e2e -- tests/e2e/accessibility-quality.spec.js tests/e2e/navigation-shell.spec.js.
@@ -393,7 +415,8 @@ All units in this phase are extraction-only. Freeze the current production-bundl
 #### P2.4 — Extract Agenda with an Agenda view model
 
 - **Type:** Extraction-only.
-- **Owned files:** src/app/agenda/getAgendaViewModel.js; src/app/agenda/getAgendaViewModel.test.js; src/ui/agenda/AgendaView.jsx; src/Planner.jsx; tests/e2e/planning.spec.js.
+- **Owned files:** `src/features/planner/Agenda.jsx` **(exists — supersedes the planned `src/ui/agenda/AgendaView.jsx`)**; `src/app/agenda/getAgendaViewModel.js` *(to create)*; `src/app/agenda/getAgendaViewModel.test.js` *(to create)*; `src/Planner.jsx`; `tests/e2e/planning.spec.js`.
+- **Landed 2026-08-19:** `Agenda` moved byte-exact (59 lines). It still builds its own rows inline from `RowWithJoin`, `catColor` and the clock helpers rather than from a view model, so JOIN eligibility is still decided in the view — which is exactly what the Action below forbids. **Remaining:** the view model below.
 - **Named boundary:** Query getAgendaViewModel; commands openAgendaItem, selectAgendaDate, joinAgendaMeeting.
 - **Action:** Reuse existing calendar/task queries and event presentation helpers to build serializable section/row data in app code. The view must not inspect canonical record variants or decide JOIN eligibility. Preserve route transitions and inspector opening exactly.
 - **Automated verification:** node --test src/app/agenda/getAgendaViewModel.test.js src/features/planner/dayProjection.test.js src/features/planner/eventPresentation.test.js src/features/planner/meetingLink.test.js; npm run test:e2e -- tests/e2e/planning.spec.js tests/e2e/join.spec.js tests/e2e/navigation-shell.spec.js.
@@ -402,12 +425,20 @@ All units in this phase are extraction-only. Freeze the current production-bundl
 
 #### Gate G3 — Controller/view extraction pattern
 
-- Four surfaces use named query/command boundaries and passive views.
+- Four surfaces use named query/command boundaries and passive views. **Not met** — the
+  surfaces moved, the boundaries did not. This is the only G3 criterion still open, and it
+  is the one the phase exists for.
 - The architecture ledger shrinks for each removed Planner/UI edge; it never grows.
-- Planner.jsx has measurably fewer inline component declarations, effects/state owners, and direct dependencies. A line-count reduction alone is insufficient.
-- No persistence key, canonical schema, product assertion, gesture contract, or visual/motion behavior changed.
+- Planner.jsx has measurably fewer inline component declarations, effects/state owners, and direct dependencies. A line-count reduction alone is insufficient. **Partly met** —
+  `Planner.jsx` declares **zero** React components (9,616 → 5,570 lines). But this criterion
+  explicitly refuses to count lines, and the effects/state owners did not move: 235 hook
+  calls remain in `Planner()`. Relocation is not the boundary.
+- No persistence key, canonical schema, product assertion, gesture contract, or visual/motion behavior changed. **Met** — proven per move by sha256 plus a browser check.
 - npm run test:all passes twice without retries.
-- No Actions, inspector, notebook, composer, Week/Month, or Timeline extraction begins before G3.
+- No Actions, inspector, notebook, composer, Week/Month, or Timeline extraction begins before G3. **Overtaken, deliberately.** All of them were extracted before G3 by the
+  UI-extraction programme. That programme claimed no boundary and changed no behaviour, so
+  it did not consume this gate — but the sequencing constraint written here no longer
+  describes the repository, and must not be read as still blocking.
 
 ### Phase 3 — Start the Expo client and activate shared packages
 

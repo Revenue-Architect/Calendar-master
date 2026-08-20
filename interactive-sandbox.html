@@ -1,0 +1,1306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Calendar Master — Cross-Pane Drag & Hybrid Sync Sandbox</title>
+  <style>
+    :root {
+      --bg: #0c0d10;
+      --surface: #15171e;
+      --surface-elevated: #1e212b;
+      --surface-hover: #262a37;
+      --border: #272a36;
+      --border-subtle: #1a1d27;
+      --text: #f3f4f8;
+      --text-muted: #868c9f;
+      --accent: #d4ff00;
+      --accent-dim: rgba(212, 255, 0, 0.12);
+      --accent-glow: rgba(212, 255, 0, 0.25);
+      --danger: #ff4757;
+      --warning: #ffa502;
+      --info: #2ed573;
+      --blue: #1e90ff;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      height: 56px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      background: var(--surface);
+      z-index: 10;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      font-size: 15px;
+    }
+
+    .brand .badge {
+      background: var(--accent);
+      color: #000;
+      font-size: 10px;
+      font-weight: 800;
+      padding: 2px 6px;
+      border-radius: 4px;
+      letter-spacing: 0.5px;
+    }
+
+    .hud-stats {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .hud-stat-pill {
+      background: var(--surface-elevated);
+      padding: 4px 10px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    }
+
+    .hud-stat-pill .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: 1fr 380px;
+      flex: 1;
+      height: calc(100vh - 56px - 44px);
+      position: relative;
+    }
+
+    /* Left Pane: Timeline */
+    .timeline-pane {
+      border-right: 1px solid var(--border);
+      position: relative;
+      overflow-y: auto;
+      background: var(--bg);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .timeline-header {
+      position: sticky;
+      top: 0;
+      background: rgba(12, 13, 16, 0.88);
+      backdrop-filter: blur(12px);
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      z-index: 5;
+    }
+
+    .timeline-header .date-display {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+    }
+
+    .timeline-header .date-display span {
+      font-size: 13px;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    .timeline-canvas {
+      position: relative;
+      flex: 1;
+      min-height: 1080px;
+      padding: 20px 20px 40px 70px;
+    }
+
+    .hour-rule {
+      position: absolute;
+      left: 0;
+      right: 20px;
+      height: 60px;
+      border-top: 1px solid var(--border-subtle);
+      pointer-events: none;
+    }
+
+    .hour-label {
+      position: absolute;
+      left: 16px;
+      top: -8px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .now-marker {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 255px; /* 10:15 AM */
+      display: flex;
+      align-items: center;
+      z-index: 4;
+      pointer-events: none;
+    }
+
+    .now-pill {
+      background: var(--accent);
+      color: #000;
+      font-size: 10px;
+      font-weight: 800;
+      padding: 2px 6px;
+      border-radius: 4px;
+      margin-left: 10px;
+    }
+
+    .now-line {
+      flex: 1;
+      height: 2px;
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent-glow);
+    }
+
+    /* Common Card Styling */
+    .timeline-card {
+      position: absolute;
+      left: 70px;
+      right: 20px;
+      border-radius: 8px;
+      padding: 10px 14px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      transition: border-color 0.15s, box-shadow 0.15s, transform 0.1s;
+      cursor: grab;
+      touch-action: none;
+    }
+
+    .timeline-card:active {
+      cursor: grabbing;
+    }
+
+    /* Category 1: External Calendar Events */
+    .timeline-card.event-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--blue);
+    }
+
+    .timeline-card.event-card:hover {
+      border-color: var(--text-muted);
+      background: var(--surface-elevated);
+    }
+
+    .timeline-card.event-card.conflict-state {
+      border-left-color: var(--warning);
+    }
+
+    /* Category 2: Local Actions / Tasks */
+    .timeline-card.action-card-timeline {
+      background: #14171f;
+      border: 1px solid rgba(212, 255, 0, 0.25);
+      border-left: 3px solid var(--accent);
+    }
+
+    .timeline-card.action-card-timeline:hover {
+      border-color: var(--accent);
+      background: #191d27;
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .card-title {
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: -0.2px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .card-time {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .card-actions-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .card-delete-btn {
+      opacity: 0;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 14px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      transition: all 0.15s;
+    }
+
+    .timeline-card:hover .card-delete-btn {
+      opacity: 1;
+    }
+
+    .card-delete-btn:hover {
+      color: var(--danger);
+      background: rgba(255, 71, 87, 0.15);
+    }
+
+    /* Sync Badges (Used ONLY on External Calendar Events) */
+    .sync-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text-muted);
+      transition: all 0.2s ease;
+      cursor: pointer;
+    }
+
+    .sync-badge.synced {
+      color: var(--info);
+      background: rgba(46, 213, 115, 0.1);
+    }
+
+    .sync-badge.syncing {
+      color: var(--accent);
+      background: var(--accent-dim);
+      animation: pulse-sync 1s infinite alternate;
+    }
+
+    .sync-badge.conflict {
+      color: var(--warning);
+      background: rgba(255, 165, 2, 0.15);
+      border: 1px solid var(--warning);
+    }
+
+    @keyframes pulse-sync {
+      from { opacity: 0.5; transform: scale(0.96); }
+      to { opacity: 1; transform: scale(1.02); }
+    }
+
+    /* Local Task Checkbox */
+    .task-checkbox {
+      width: 14px;
+      height: 14px;
+      border: 1px solid var(--accent);
+      border-radius: 3px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      margin-right: 4px;
+      transition: background 0.15s;
+    }
+
+    .task-checkbox.checked {
+      background: var(--accent);
+      color: #000;
+    }
+
+    /* Ghost Slot */
+    .ghost-slot {
+      position: absolute;
+      left: 70px;
+      right: 20px;
+      background: var(--accent-dim);
+      border: 2px dashed var(--accent);
+      border-radius: 8px;
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 700;
+      pointer-events: none;
+      z-index: 6;
+      transition: top 0.04s linear, height 0.12s ease-out;
+      box-shadow: 0 0 20px var(--accent-glow);
+    }
+
+    /* Right Pane: Actions List */
+    .actions-pane {
+      background: var(--surface);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      border-left: 1px solid var(--border);
+    }
+
+    .actions-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .actions-header h2 {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+    }
+
+    .actions-count {
+      font-size: 11px;
+      font-weight: 700;
+      background: var(--surface-elevated);
+      padding: 2px 8px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      color: var(--accent);
+    }
+
+    .actions-list {
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .action-card {
+      background: var(--surface-elevated);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+      cursor: grab;
+      position: relative;
+      touch-action: none;
+      transition: transform 0.12s cubic-bezier(0.16, 1, 0.3, 1),
+                  box-shadow 0.12s ease,
+                  border-color 0.15s,
+                  opacity 0.2s;
+    }
+
+    .action-card:hover {
+      border-color: var(--text-muted);
+      background: var(--surface-hover);
+    }
+
+    .action-card:active {
+      cursor: grabbing;
+    }
+
+    .action-card.pressing {
+      transform: scale(0.97);
+      border-color: var(--accent);
+    }
+
+    .action-card.is-dragging-source {
+      opacity: 0.3;
+      border: 1px dashed var(--text-muted);
+    }
+
+    .action-card.scheduled {
+      border-left: 3px solid var(--accent);
+      background: rgba(30, 33, 43, 0.85);
+    }
+
+    .action-title {
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .action-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .action-tag {
+      background: rgba(255, 255, 255, 0.05);
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+
+    .action-duration {
+      font-variant-numeric: tabular-nums;
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    /* Floating Drag Avatar */
+    .drag-avatar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 280px;
+      background: var(--surface-elevated);
+      border: 2px solid var(--accent);
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5), 0 0 24px var(--accent-glow);
+      border-radius: 8px;
+      padding: 14px;
+      pointer-events: none;
+      z-index: 1000;
+      opacity: 0;
+      visibility: hidden;
+      transform-origin: top left;
+      will-change: transform;
+    }
+
+    footer {
+      height: 44px;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .controls-group {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .control-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn {
+      background: var(--surface-elevated);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .btn:hover {
+      background: var(--surface-hover);
+      border-color: var(--text-muted);
+    }
+
+    .btn-accent {
+      background: var(--accent);
+      color: #000;
+      border-color: var(--accent);
+    }
+
+    .btn-accent:hover {
+      background: #e6ff33;
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 60px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: var(--surface-elevated);
+      border: 1px solid var(--accent);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+      padding: 10px 18px;
+      border-radius: 30px;
+      font-size: 12px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      z-index: 100;
+    }
+
+    .toast.visible {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+      pointer-events: auto;
+    }
+
+    .conflict-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      backdrop-filter: blur(4px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 500;
+    }
+
+    .conflict-dialog {
+      width: 400px;
+      background: var(--surface);
+      border: 1px solid var(--warning);
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+    }
+
+    .conflict-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--warning);
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .conflict-body {
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.5;
+      margin-bottom: 18px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="brand">
+      <span>CALENDAR MASTER</span>
+      <span class="badge">SANDBOX</span>
+      <span style="font-size: 12px; color: var(--text-muted); font-weight: normal;">Events (Synced) vs Actions (Local Tasks)</span>
+    </div>
+
+    <div class="hud-stats">
+      <div class="hud-stat-pill">
+        <div class="dot" id="statusDot"></div>
+        <span id="hudState">STATE: IDLE</span>
+      </div>
+      <div class="hud-stat-pill">
+        <span>VELOCITY:</span>
+        <span id="hudVelocity" style="color: var(--text);">0 px/s</span>
+      </div>
+      <div class="hud-stat-pill">
+        <span>GRID:</span>
+        <span style="color: var(--accent);">15 MIN (15px)</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Workspace -->
+  <div class="workspace" id="workspace">
+
+    <!-- Left Pane: Timeline -->
+    <div class="timeline-pane" id="timelinePane">
+      <div class="timeline-header">
+        <div class="date-display">
+          <span>THURSDAY</span> 20 AUG 2026
+        </div>
+        <div style="font-size: 11px; color: var(--text-muted); font-weight: 600;">
+          <span style="color: var(--blue);">■ External Events (Google)</span> &nbsp;|&nbsp; <span style="color: var(--accent);">■ Planned Tasks (Local)</span>
+        </div>
+      </div>
+
+      <div class="timeline-canvas" id="timelineCanvas">
+        <!-- 18 Hour Grid (6 AM to Midnight) -->
+
+        <!-- Live Now indicator -->
+        <div class="now-marker" style="top: 255px;">
+          <div class="now-pill">10:15 AM</div>
+          <div class="now-line"></div>
+        </div>
+
+        <!-- Ghost slot projection -->
+        <div class="ghost-slot" id="ghostSlot">
+          <span id="ghostTitle">✦ Drop to Plan</span>
+          <span id="ghostTime">11:00 AM – 11:45 AM</span>
+        </div>
+
+        <!-- 1. External Calendar Event (Google Calendar) -->
+        <div class="timeline-card event-card" id="event-standup" style="top: 120px; height: 90px;" data-id="event-standup" data-title="Morning Standup & Roadmap Sync" data-duration="90" data-type="event">
+          <div class="card-header">
+            <span class="card-title">Morning Standup & Roadmap Sync</span>
+            <div class="card-actions-row">
+              <span class="sync-badge synced" onclick="cycleSyncState(this, event)">✓ GOOGLE SYNCED</span>
+            </div>
+          </div>
+          <div class="card-time">8:00 AM – 9:30 AM · Google Calendar (Work)</div>
+        </div>
+
+        <!-- 2. External Calendar Event with Conflict (Outlook) -->
+        <div class="timeline-card event-card conflict-state" id="event-board" style="top: 360px; height: 75px;" data-id="event-board" data-title="Board Review Preparation" data-duration="75" data-type="event">
+          <div class="card-header">
+            <span class="card-title">Board Review Preparation</span>
+            <div class="card-actions-row">
+              <span class="sync-badge conflict" onclick="showConflictDialog(event)">⚠️ CONFLICT</span>
+            </div>
+          </div>
+          <div class="card-time">12:00 PM – 1:15 PM · Outlook 365 (Remote update pending)</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right Pane: Actions List -->
+    <div class="actions-pane" id="actionsPane">
+      <div class="actions-header">
+        <h2>Actions Due Today</h2>
+        <span class="actions-count" id="actionsCount">4 Items</span>
+      </div>
+
+      <div class="actions-list" id="actionsList">
+        <!-- Action 1 -->
+        <div class="action-card" id="card-task-1" data-id="task-1" data-title="Rebuild pricing tier math" data-duration="45" data-tag="#finance" data-type="action">
+          <div class="action-title">
+            <span>Rebuild pricing tier math</span>
+            <span class="action-duration">45m</span>
+          </div>
+          <div class="action-meta">
+            <span class="action-tag">#finance</span>
+            <span>Personal task · Due today</span>
+          </div>
+        </div>
+
+        <!-- Action 2 -->
+        <div class="action-card" id="card-task-2" data-id="task-2" data-title="Draft board deck pitch" data-duration="60" data-tag="#strategy" data-type="action">
+          <div class="action-title">
+            <span>Draft board deck pitch</span>
+            <span class="action-duration">60m</span>
+          </div>
+          <div class="action-meta">
+            <span class="action-tag">#strategy</span>
+            <span>Blocked by model</span>
+          </div>
+        </div>
+
+        <!-- Action 3 -->
+        <div class="action-card" id="card-task-3" data-id="task-3" data-title="Send Nordwell timeline" data-duration="30" data-tag="#client" data-type="action">
+          <div class="action-title">
+            <span>Send Nordwell timeline</span>
+            <span class="action-duration">30m</span>
+          </div>
+          <div class="action-meta">
+            <span class="action-tag">#client</span>
+            <span>Quick sync</span>
+          </div>
+        </div>
+
+        <!-- Action 4 -->
+        <div class="action-card" id="card-task-4" data-id="task-4" data-title="Review team pull requests" data-duration="30" data-tag="#dev" data-type="action">
+          <div class="action-title">
+            <span>Review team pull requests</span>
+            <span class="action-duration">30m</span>
+          </div>
+          <div class="action-meta">
+            <span class="action-tag">#dev</span>
+            <span>2 reviews pending</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Floating Drag Avatar -->
+  <div class="drag-avatar" id="dragAvatar">
+    <div class="action-title" style="margin-bottom: 4px;">
+      <span id="avatarTitle">Rebuild pricing tier math</span>
+      <span class="action-duration" id="avatarDuration">45m</span>
+    </div>
+    <div class="action-meta">
+      <span class="action-tag" id="avatarTag">#finance</span>
+      <span style="color: var(--accent); font-weight: 600;" id="avatarStatus">Carving out time on timeline...</span>
+    </div>
+  </div>
+
+  <!-- Bottom Control Bar -->
+  <footer>
+    <div class="controls-group">
+      <div class="control-item">
+        <span>Spring Damping:</span>
+        <input type="range" id="dampingSlider" min="0.6" max="1.2" step="0.05" value="0.85" />
+        <span id="dampingVal" style="color: var(--accent); font-weight: bold;">0.85</span>
+      </div>
+      <div class="control-item">
+        <span>Response (s):</span>
+        <input type="range" id="responseSlider" min="0.2" max="0.6" step="0.05" value="0.32" />
+        <span id="responseVal" style="color: var(--accent); font-weight: bold;">0.32s</span>
+      </div>
+    </div>
+
+    <div class="controls-group">
+      <button class="btn" onclick="undoLastAction()">⌘Z Undo Move</button>
+      <button class="btn" onclick="resetDemo()">Reset Demo</button>
+    </div>
+  </footer>
+
+  <!-- Toast -->
+  <div class="toast" id="toast">
+    <span id="toastMessage">Task scheduled for 11:15 AM</span>
+    <button class="btn btn-accent" style="padding: 2px 8px;" onclick="undoLastAction()">UNDO</button>
+  </div>
+
+  <!-- Conflict Modal (Used for External Events) -->
+  <div class="conflict-modal" id="conflictModal" onclick="hideConflictDialog(event)">
+    <div class="conflict-dialog" onclick="event.stopPropagation()">
+      <div class="conflict-title">
+        <span>⚠️ Meeting Rescheduled by Remote Organizer</span>
+      </div>
+      <div class="conflict-body">
+        The remote organizer moved <strong>"Board Review Preparation"</strong> to <strong>2:00 PM – 3:15 PM</strong> on Outlook Calendar while you scheduled it for 12:00 PM.
+      </div>
+      <div style="display: flex; gap: 10px; justify-content: flex-end;">
+        <button class="btn" onclick="resolveConflict('local')">KEEP LOCAL (12:00 PM)</button>
+        <button class="btn btn-accent" onclick="resolveConflict('remote')">ACCEPT REMOTE TIME (2:00 PM)</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // --- Render Timeline Hour Rules ---
+    const timelineCanvas = document.getElementById('timelineCanvas');
+    const startHour = 6;
+    const totalHours = 18;
+    const pixelsPerHour = 60;
+
+    for (let i = 0; i <= totalHours; i++) {
+      const hour = (startHour + i) % 24;
+      const displayHour = hour === 0 ? '12 AM' : hour === 12 ? '12 PM' : hour > 12 ? `${hour - 12} PM` : `${hour} AM`;
+      const rule = document.createElement('div');
+      rule.className = 'hour-rule';
+      rule.style.top = `${i * pixelsPerHour}px`;
+      rule.innerHTML = `<span class="hour-label">${displayHour}</span>`;
+      timelineCanvas.appendChild(rule);
+    }
+
+    const scheduledTasks = new Map();
+    let undoHistory = [];
+
+    // --- Spring Physics Engine ---
+    let dampingRatio = 0.85;
+    let responseTime = 0.32;
+
+    document.getElementById('dampingSlider').addEventListener('input', (e) => {
+      dampingRatio = parseFloat(e.target.value);
+      document.getElementById('dampingVal').textContent = dampingRatio.toFixed(2);
+    });
+
+    document.getElementById('responseSlider').addEventListener('input', (e) => {
+      responseTime = parseFloat(e.target.value);
+      document.getElementById('responseVal').textContent = `${responseTime.toFixed(2)}s`;
+    });
+
+    function animateSpring({ startX, startY, targetX, targetY, initialVx = 0, initialVy = 0, damping = 0.85, response = 0.32, onUpdate, onComplete }) {
+      const omega = (2 * Math.PI) / response;
+      const startTime = performance.now();
+
+      function frame(now) {
+        const t = (now - startTime) / 1000;
+        let x, y;
+
+        if (damping < 1.0) {
+          const omegaD = omega * Math.sqrt(1 - damping * damping);
+          const decay = Math.exp(-damping * omega * t);
+          const c1X = startX - targetX;
+          const c2X = (initialVx + damping * omega * c1X) / omegaD;
+          x = targetX + decay * (c1X * Math.cos(omegaD * t) + c2X * Math.sin(omegaD * t));
+
+          const c1Y = startY - targetY;
+          const c2Y = (initialVy + damping * omega * c1Y) / omegaD;
+          y = targetY + decay * (c1Y * Math.cos(omegaD * t) + c2Y * Math.sin(omegaD * t));
+        } else {
+          const decay = Math.exp(-omega * t);
+          const c1X = startX - targetX;
+          const c2X = initialVx + omega * c1X;
+          x = targetX + decay * (c1X + c2X * t);
+
+          const c1Y = startY - targetY;
+          const c2Y = initialVy + omega * c1Y;
+          y = targetY + decay * (c1Y + c2Y * t);
+        }
+
+        onUpdate(x, y);
+
+        const dist = Math.hypot(x - targetX, y - targetY);
+        if (t > 0.08 && (dist < 0.5 || t > response * 2.5)) {
+          onUpdate(targetX, targetY);
+          if (onComplete) onComplete();
+          return;
+        }
+
+        requestAnimationFrame(frame);
+      }
+
+      requestAnimationFrame(frame);
+    }
+
+    // --- Unified Drag Coordinator ---
+    const dragAvatar = document.getElementById('dragAvatar');
+    const ghostSlot = document.getElementById('ghostSlot');
+    const hudState = document.getElementById('hudState');
+    const hudVelocity = document.getElementById('hudVelocity');
+    const statusDot = document.getElementById('statusDot');
+    const timelinePane = document.getElementById('timelinePane');
+
+    let isPressing = false;
+    let isDragging = false;
+    let dragSource = null;
+    let activeCard = null;
+    let grabOffset = { x: 0, y: 0 };
+    let startPos = { x: 0, y: 0 };
+    let velocityHistory = [];
+    let pressTimer = null;
+
+    document.querySelectorAll('.action-card').forEach((card) => {
+      card.addEventListener('pointerdown', (e) => handlePointerDown(e, 'action-pane'));
+    });
+
+    document.querySelectorAll('.timeline-card').forEach((card) => {
+      card.addEventListener('pointerdown', (e) => handlePointerDown(e, 'timeline'));
+    });
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
+
+    function formatTime(m) {
+      const h = Math.floor(m / 60) % 24;
+      const mins = m % 60;
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      const displayH = h === 0 ? 12 : h > 12 ? h - 12 : h;
+      return `${displayH}:${mins.toString().padStart(2, '0')} ${ampm}`;
+    }
+
+    function handlePointerDown(e, source) {
+      if (isDragging) return;
+      if (e.target.closest('.card-delete-btn') || e.target.closest('.sync-badge') || e.target.closest('.task-checkbox')) return;
+
+      activeCard = e.currentTarget;
+      dragSource = source;
+      const rect = activeCard.getBoundingClientRect();
+
+      grabOffset = {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top,
+      };
+
+      startPos = { x: e.clientX, y: e.clientY };
+      isPressing = true;
+      velocityHistory = [{ x: e.clientX, y: e.clientY, time: performance.now() }];
+
+      activeCard.classList.add('pressing');
+      hudState.textContent = 'STATE: ARMING (200ms)';
+      statusDot.style.background = '#ffa502';
+
+      pressTimer = setTimeout(() => {
+        if (isPressing) {
+          startDragMode(e);
+        }
+      }, 200);
+    }
+
+    function startDragMode(e) {
+      isDragging = true;
+      isPressing = false;
+      activeCard.classList.remove('pressing');
+      activeCard.classList.add('is-dragging-source');
+
+      const title = activeCard.dataset.title || activeCard.querySelector('.card-title, .action-title').textContent.trim();
+      const duration = activeCard.dataset.duration || '30';
+      const tag = activeCard.dataset.tag || '#task';
+
+      document.getElementById('avatarTitle').textContent = title;
+      document.getElementById('avatarDuration').textContent = `${duration}m`;
+      document.getElementById('avatarTag').textContent = tag;
+      document.getElementById('avatarStatus').textContent = dragSource === 'timeline' ? 'Moving on timeline...' : 'Carving out time...';
+
+      dragAvatar.style.opacity = '1';
+      dragAvatar.style.visibility = 'visible';
+      updateAvatarPosition(e.clientX - grabOffset.x, e.clientY - grabOffset.y);
+
+      hudState.textContent = 'STATE: DRAGGING';
+      statusDot.style.background = 'var(--accent)';
+    }
+
+    function handlePointerMove(e) {
+      if (!isPressing && !isDragging) return;
+
+      const now = performance.now();
+      velocityHistory.push({ x: e.clientX, y: e.clientY, time: now });
+      if (velocityHistory.length > 5) velocityHistory.shift();
+
+      const dt = (now - velocityHistory[0].time) / 1000;
+      if (dt > 0) {
+        const vx = (e.clientX - velocityHistory[0].x) / dt;
+        const vy = (e.clientY - velocityHistory[0].y) / dt;
+        hudVelocity.textContent = `${Math.round(Math.hypot(vx, vy))} px/s`;
+      }
+
+      if (isPressing) {
+        const dist = Math.hypot(e.clientX - startPos.x, e.clientY - startPos.y);
+        if (dist > 8) {
+          clearTimeout(pressTimer);
+          startDragMode(e);
+        }
+        return;
+      }
+
+      if (isDragging) {
+        const avatarX = e.clientX - grabOffset.x;
+        const avatarY = e.clientY - grabOffset.y;
+        updateAvatarPosition(avatarX, avatarY);
+
+        const timelineRect = timelineCanvas.getBoundingClientRect();
+        if (
+          e.clientX >= timelineRect.left &&
+          e.clientX <= timelineRect.right &&
+          e.clientY >= timelineRect.top &&
+          e.clientY <= timelineRect.bottom
+        ) {
+          const relativeY = e.clientY - timelineRect.top + timelinePane.scrollTop;
+          const durationMins = parseInt(activeCard.dataset.duration, 10) || 30;
+
+          const snappedY = Math.max(0, Math.round(relativeY / 15) * 15);
+          const startMins = 6 * 60 + snappedY;
+          const endMins = startMins + durationMins;
+
+          ghostSlot.style.display = 'flex';
+          ghostSlot.style.top = `${snappedY}px`;
+          ghostSlot.style.height = `${durationMins}px`;
+          document.getElementById('ghostTitle').textContent = `✦ ${document.getElementById('avatarTitle').textContent}`;
+          document.getElementById('ghostTime').textContent = `${formatTime(startMins)} – ${formatTime(endMins)}`;
+
+          hudState.textContent = `SNAPPED: ${formatTime(startMins)}`;
+        } else {
+          ghostSlot.style.display = 'none';
+          hudState.textContent = 'STATE: DRAGGING';
+        }
+      }
+    }
+
+    function handlePointerUp(e) {
+      clearTimeout(pressTimer);
+
+      if (isPressing) {
+        isPressing = false;
+        activeCard.classList.remove('pressing');
+        hudState.textContent = 'STATE: IDLE';
+        statusDot.style.background = 'var(--accent)';
+        return;
+      }
+
+      if (!isDragging) return;
+
+      isDragging = false;
+      const timelineRect = timelineCanvas.getBoundingClientRect();
+      const isOverTimeline = (
+        e.clientX >= timelineRect.left &&
+        e.clientX <= timelineRect.right &&
+        e.clientY >= timelineRect.top &&
+        e.clientY <= timelineRect.bottom
+      );
+
+      let initialVx = 0, initialVy = 0;
+      if (velocityHistory.length >= 2) {
+        const last = velocityHistory[velocityHistory.length - 1];
+        const first = velocityHistory[0];
+        const dt = (last.time - first.time) / 1000;
+        if (dt > 0) {
+          initialVx = (last.x - first.x) / dt;
+          initialVy = (last.y - first.y) / dt;
+        }
+      }
+
+      const currentAvatarRect = dragAvatar.getBoundingClientRect();
+
+      if (isOverTimeline) {
+        hudState.textContent = 'STATE: COMMITTING';
+        const targetTop = parseFloat(ghostSlot.style.top);
+        const targetLeft = timelineRect.left + 70;
+        const targetTopViewport = timelineRect.top - timelinePane.scrollTop + targetTop;
+
+        ghostSlot.style.display = 'none';
+
+        animateSpring({
+          startX: currentAvatarRect.left,
+          startY: currentAvatarRect.top,
+          targetX: targetLeft,
+          targetY: targetTopViewport,
+          initialVx,
+          initialVy,
+          damping: dampingRatio,
+          response: responseTime,
+          onUpdate: (x, y) => updateAvatarPosition(x, y),
+          onComplete: () => {
+            hideAvatar();
+            commitTaskPlacement(activeCard, targetTop, dragSource);
+          }
+        });
+
+      } else {
+        // Abort
+        hudState.textContent = 'STATE: ABORTING';
+        const cardRect = activeCard.getBoundingClientRect();
+
+        animateSpring({
+          startX: currentAvatarRect.left,
+          startY: currentAvatarRect.top,
+          targetX: cardRect.left,
+          targetY: cardRect.top,
+          initialVx,
+          initialVy,
+          damping: 1.0,
+          response: 0.28,
+          onUpdate: (x, y) => updateAvatarPosition(x, y),
+          onComplete: () => {
+            hideAvatar();
+            activeCard.classList.remove('is-dragging-source');
+            hudState.textContent = 'STATE: IDLE';
+          }
+        });
+      }
+    }
+
+    function updateAvatarPosition(x, y) {
+      dragAvatar.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+    }
+
+    function hideAvatar() {
+      dragAvatar.style.opacity = '0';
+      dragAvatar.style.visibility = 'hidden';
+      dragAvatar.style.transform = 'none';
+    }
+
+    function commitTaskPlacement(cardEl, topPx, source) {
+      const taskId = cardEl.dataset.id;
+      const title = cardEl.dataset.title;
+      const duration = parseInt(cardEl.dataset.duration, 10) || 30;
+      const tag = cardEl.dataset.tag || '#action';
+      const startMins = 6 * 60 + topPx;
+      const endMins = startMins + duration;
+      const timeLabel = `${formatTime(startMins)} – ${formatTime(endMins)}`;
+
+      let actionCardEl = source === 'action-pane' ? cardEl : document.getElementById(`card-${taskId}`);
+      let timelineCardEl = null;
+
+      if (scheduledTasks.has(taskId)) {
+        const existing = scheduledTasks.get(taskId);
+        timelineCardEl = existing.element;
+        const prevTop = existing.topPx;
+
+        timelineCardEl.style.top = `${topPx}px`;
+        timelineCardEl.querySelector('.card-time').textContent = `${timeLabel} · Personal Planned Work`;
+        existing.topPx = topPx;
+
+        undoHistory.push({ type: 'MOVE', taskId, prevTop, newTop: topPx, element: timelineCardEl });
+        showToast(`Rescheduled "${title}" to ${formatTime(startMins)}`);
+
+      } else {
+        timelineCardEl = document.createElement('div');
+        timelineCardEl.className = 'timeline-card action-card-timeline';
+        timelineCardEl.id = `timeline-${taskId}`;
+        timelineCardEl.dataset.id = taskId;
+        timelineCardEl.dataset.title = title;
+        timelineCardEl.dataset.duration = duration;
+        timelineCardEl.dataset.tag = tag;
+        timelineCardEl.dataset.type = 'action';
+        timelineCardEl.style.top = `${topPx}px`;
+        timelineCardEl.style.height = `${duration}px`;
+        timelineCardEl.innerHTML = `
+          <div class="card-header">
+            <span class="card-title">
+              <span class="task-checkbox" onclick="toggleTaskComplete(this, event)"></span>
+              <span>✦ ${title}</span>
+            </span>
+            <div class="card-actions-row">
+              <span class="action-tag" style="background: var(--accent-dim); color: var(--accent); font-size: 10px;">${tag}</span>
+              <button class="card-delete-btn" title="Unschedule task" onclick="unscheduleTask('${taskId}', event)">✕</button>
+            </div>
+          </div>
+          <div class="card-time">${timeLabel} · Personal Planned Work</div>
+        `;
+
+        timelineCardEl.addEventListener('pointerdown', (e) => handlePointerDown(e, 'timeline'));
+        timelineCanvas.appendChild(timelineCardEl);
+
+        scheduledTasks.set(taskId, { topPx, duration, element: timelineCardEl });
+        undoHistory.push({ type: 'SCHEDULE', taskId, element: timelineCardEl, actionCard: actionCardEl });
+
+        showToast(`Planned "${title}" for ${formatTime(startMins)}`);
+      }
+
+      if (actionCardEl) {
+        actionCardEl.classList.remove('is-dragging-source');
+        actionCardEl.classList.add('scheduled');
+        actionCardEl.querySelector('.action-meta').innerHTML = `
+          <span class="action-tag" style="background: var(--accent-dim); color: var(--accent);">${formatTime(startMins)}</span>
+          <span>Planned on timeline · Drag to move</span>
+        `;
+      }
+
+      if (source === 'timeline') {
+        cardEl.classList.remove('is-dragging-source');
+      }
+
+      hudState.textContent = 'STATE: IDLE';
+    }
+
+    function toggleTaskComplete(checkboxEl, e) {
+      e.stopPropagation();
+      checkboxEl.classList.toggle('checked');
+      checkboxEl.textContent = checkboxEl.classList.contains('checked') ? '✓' : '';
+      const card = checkboxEl.closest('.timeline-card');
+      if (checkboxEl.classList.contains('checked')) {
+        card.style.opacity = '0.5';
+        showToast('Task marked complete! +15 XP');
+      } else {
+        card.style.opacity = '1';
+      }
+    }
+
+    function unscheduleTask(taskId, e) {
+      if (e) e.stopPropagation();
+      if (!scheduledTasks.has(taskId)) return;
+
+      const record = scheduledTasks.get(taskId);
+      if (record.element) record.element.remove();
+      scheduledTasks.delete(taskId);
+
+      const actionCardEl = document.getElementById(`card-${taskId}`);
+      if (actionCardEl) {
+        actionCardEl.classList.remove('scheduled');
+        const tag = actionCardEl.dataset.tag;
+        actionCardEl.querySelector('.action-meta').innerHTML = `
+          <span class="action-tag">${tag}</span>
+          <span>Personal task · Due today</span>
+        `;
+      }
+
+      showToast('Task unscheduled.');
+    }
+
+    function undoLastAction() {
+      if (undoHistory.length === 0) return;
+      const last = undoHistory.pop();
+
+      if (last.type === 'SCHEDULE') {
+        unscheduleTask(last.taskId);
+      } else if (last.type === 'MOVE') {
+        last.element.style.top = `${last.prevTop}px`;
+        const startMins = 6 * 60 + last.prevTop;
+        const dur = parseInt(last.element.dataset.duration, 10);
+        last.element.querySelector('.card-time').textContent = `${formatTime(startMins)} – ${formatTime(startMins + dur)} · Personal Planned Work`;
+        scheduledTasks.get(last.taskId).topPx = last.prevTop;
+
+        const actionCard = document.getElementById(`card-${last.taskId}`);
+        if (actionCard) {
+          actionCard.querySelector('.action-tag').textContent = formatTime(startMins);
+        }
+        showToast(`Reverted move to ${formatTime(startMins)}`);
+      }
+    }
+
+    function resetDemo() {
+      location.reload();
+    }
+
+    window.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
+        e.preventDefault();
+        undoLastAction();
+      }
+    });
+
+    // --- Sync Badge Controller (Events Only) ---
+    function cycleSyncState(badgeEl, e) {
+      if (e) e.stopPropagation();
+      const current = badgeEl.textContent.includes('SYNCED') ? 'synced' : badgeEl.textContent.includes('PENDING') ? 'syncing' : 'conflict';
+      if (current === 'synced') {
+        badgeEl.className = 'sync-badge syncing';
+        badgeEl.textContent = '⚡ SYNCING...';
+      } else if (current === 'syncing') {
+        badgeEl.className = 'sync-badge conflict';
+        badgeEl.textContent = '⚠️ CONFLICT';
+      } else {
+        badgeEl.className = 'sync-badge synced';
+        badgeEl.textContent = '✓ GOOGLE SYNCED';
+      }
+    }
+
+    function showConflictDialog(e) {
+      if (e) e.stopPropagation();
+      document.getElementById('conflictModal').style.display = 'flex';
+    }
+
+    function hideConflictDialog(e) {
+      document.getElementById('conflictModal').style.display = 'none';
+    }
+
+    function resolveConflict(choice) {
+      document.getElementById('conflictModal').style.display = 'none';
+      const conflictCard = document.getElementById('event-board');
+      const badge = conflictCard.querySelector('.sync-badge');
+      if (choice === 'remote') {
+        conflictCard.style.top = '480px';
+        conflictCard.querySelector('.card-time').textContent = '2:00 PM – 3:15 PM · Outlook 365 (Updated)';
+      }
+      conflictCard.classList.remove('conflict-state');
+      conflictCard.style.borderLeftColor = 'var(--blue)';
+      badge.className = 'sync-badge synced';
+      badge.textContent = '✓ RESOLVED';
+      showToast(choice === 'remote' ? 'Accepted remote time (2:00 PM)' : 'Preserved local time (12:00 PM)');
+    }
+  </script>
+</body>
+</html>
