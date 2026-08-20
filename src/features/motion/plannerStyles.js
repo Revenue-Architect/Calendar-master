@@ -111,10 +111,12 @@ export function plannerStyles({ T, preferences }) {
           .nb-app-surface-open{inset:0 auto auto 0;width:100%;height:100%;transform:translate3d(calc(100% - 49px),0,0);clip-path:inset(14px calc(100% - 44px) 14px 0 round 16px);border-radius:16px;box-shadow:none}
           .nb-app-surface>*:not(.nb-mobile-calendar-return){opacity:1;transition:opacity 150ms ease}
           .nb-app-surface-open>*:not(.nb-mobile-calendar-return){opacity:0;pointer-events:none}
-          /* The rail shares the surface's X coordinate. A nested X translation
-             made it lag behind the moving surface at the start of the push. */
-          .nb-mobile-calendar-return{display:flex;position:absolute;z-index:40;inset:14px auto 14px 0;width:44px;align-items:center;justify-content:center;border:0;border-radius:16px;background:${T.accent};color:${T.on};font-family:${MONO};font-size:10px;font-weight:700;letter-spacing:.12em;writing-mode:vertical-rl;transform:rotate(180deg);clip-path:inset(0 100% 0 0 round 16px);pointer-events:none;transition:clip-path var(--nav-page-duration) var(--nav-ease)}
-          .nb-app-surface-open .nb-mobile-calendar-return{clip-path:inset(0 0 0 0 round 16px);pointer-events:auto}
+          /* The rail is a stationary child whose geometry is owned entirely by
+             the parent surface transform and clip-path. It has a discrete visibility
+             lifecycle: visible when open/closing, and interactive only when open. */
+          .nb-mobile-calendar-return{display:none;position:absolute;z-index:40;inset:14px auto 14px 0;width:44px;align-items:center;justify-content:center;border:0;border-radius:16px;background:${T.accent};color:${T.on};font-family:${MONO};font-size:10px;font-weight:700;letter-spacing:.12em;writing-mode:vertical-rl;transform:rotate(180deg);pointer-events:none;transition:none}
+          .nb-nav-shell[data-nav-state="open"] .nb-mobile-calendar-return,.nb-nav-shell[data-nav-state="closing"] .nb-mobile-calendar-return{display:flex}
+          .nb-nav-shell[data-nav-state="open"] .nb-mobile-calendar-return{pointer-events:auto}
           .nb-navigation{padding:18px 12px}
           .nb-hud{padding:.45rem .65rem;gap:.35rem}
           .nb-hud-left{gap:.35rem}

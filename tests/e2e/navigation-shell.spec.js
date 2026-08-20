@@ -77,46 +77,122 @@ test.describe("the floating navigation shell", () => {
     await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
   });
 
-  /* The rail is the leading edge of the page that was pushed aside. It must
-     share the surface's X coordinate throughout the transition: a second
-     child X transform makes it lag a rail width behind, then catch up at the
-     edge. */
+  /* The calendar return rail is a complete, stationary child owned by the
+     surface transform. It must not animate its own clip-path, transform, or opacity,
+     and must remain fully visible and aligned during open and close transitions until
+     closed travel has completed. */
   test("the calendar rail stays on the surface edge while it is revealed", async ({ page }) => {
-
     await page.setViewportSize({ width: 390, height: 844 });
     await openPlanner(page);
     await page.getByTestId("nav-toggle").click();
 
-    const sampled = await page.evaluate(() => {
+    const openSampled = await page.evaluate(() => {
       const surface = document.querySelector('[data-test="app-surface"]');
       const rail = document.querySelector('[data-test="mobile-calendar-return"]');
       const running = [...surface.getAnimations(), ...rail.getAnimations()];
       let span = 0;
       for (const a of running) span = Math.max(span, Number(a.effect?.getTiming().duration) || 0);
       const at = (fraction) => {
-        for (const a of running) { a.pause(); a.currentTime = span * fraction; }
+        for (const a of running) {
+          a.pause();
+          a.currentTime = span * fraction;
+        }
         const surfaceBox = surface.getBoundingClientRect();
         const railBox = rail.getBoundingClientRect();
+        const railStyle = getComputedStyle(rail);
         return {
-          opacity: Number(getComputedStyle(rail).opacity),
+          opacity: Number(railStyle.opacity),
           localX: Math.round(railBox.left - surfaceBox.left),
-          clipPath: getComputedStyle(rail).clipPath,
+          width: Math.round(railBox.width),
+          clipPath: railStyle.clipPath,
+          visibility: railStyle.visibility,
+          display: railStyle.display,
         };
-
       };
-      return { transitions: getComputedStyle(rail).transitionProperty, start: at(0), mid: at(0.5), end: at(1) };
+      const samples = { start: at(0), mid: at(0.5), end: at(1) };
+      for (const a of running) {
+        a.currentTime = span;
+        a.play();
+      }
+      return {
+        transitions: getComputedStyle(rail).transitionProperty,
+        ...samples,
+      };
     });
 
-    expect(sampled.transitions, "the rail is revealed by clipping its stationary body").toContain("clip-path");
-    expect(sampled.transitions, "the rail must not receive a second X transform").not.toContain("transform");
-    expect(sampled.transitions, "the rail should stay solid rather than fade in").not.toContain("opacity");
+    expect(openSampled.transitions, "the rail must not animate its own clip-path").not.toContain("clip-path");
+    expect(openSampled.transitions, "the rail must not receive a second X transform").not.toContain("transform");
+    expect(openSampled.transitions, "the rail should stay solid rather than fade in").not.toContain("opacity");
 
-    for (const [name, frame] of Object.entries({ start: sampled.start, mid: sampled.mid, end: sampled.end })) {
-      expect(frame.opacity, `the rail is solid at ${name} — a fade is what made it appear from nowhere`).toBe(1);
-      expect(Math.abs(frame.localX), `the rail remains on its parent edge at ${name}`).toBeLessThanOrEqual(1);
+    for (const [name, frame] of Object.entries({ start: openSampled.start, mid: openSampled.mid, end: openSampled.end })) {
+      expect(frame.opacity, `the rail is solid at ${name}`).toBe(1);
+      expect(Math.abs(frame.localX), `the rail remains aligned to the surface edge at ${name}`).toBeLessThanOrEqual(1);
+      expect(frame.width, `the rail keeps its full 44px width at ${name}`).toBe(44);
+      expect(frame.clipPath, `the rail has no clip-path at ${name}`).toBe("none");
+      expect(frame.visibility, `the rail is visible at ${name}`).toBe("visible");
+      expect(frame.display, `the rail is displayed at ${name}`).not.toBe("none");
     }
-    expect(sampled.start.clipPath, "the rail begins clipped").not.toBe(sampled.end.clipPath);
 
+    await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "open");
+    await page.getByTestId("mobile-calendar-return").click();
+    await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closing");
+
+    const closeSampled = await page.evaluate(() => {
+      const surface = document.querySelector('[data-test="app-surface"]');
+      const rail = document.querySelector('[data-test="mobile-calendar-return"]');
+      const running = [...surface.getAnimations(), ...rail.getAnimations()];
+      let span = 0;
+      for (const a of running) span = Math.max(span, Number(a.effect?.getTiming().duration) || 0);
+      const at = (fraction) => {
+        for (const a of running) {
+          a.pause();
+          a.currentTime = span * fraction;
+        }
+        const surfaceBox = surface.getBoundingClientRect();
+        const railBox = rail.getBoundingClientRect();
+        const railStyle = getComputedStyle(rail);
+        return {
+          opacity: Number(railStyle.opacity),
+          localX: Math.round(railBox.left - surfaceBox.left),
+          width: Math.round(railBox.width),
+          clipPath: railStyle.clipPath,
+          visibility: railStyle.visibility,
+          display: railStyle.display,
+        };
+      };
+      const samples = { start: at(0), mid: at(0.5) };
+      for (const a of running) {
+        a.play();
+      }
+      return {
+        transitions: getComputedStyle(rail).transitionProperty,
+        ...samples,
+      };
+    });
+
+    for (const [name, frame] of Object.entries({ start: closeSampled.start, mid: closeSampled.mid })) {
+      expect(frame.opacity, `the rail is solid during close at ${name}`).toBe(1);
+      expect(Math.abs(frame.localX), `the rail remains aligned to the surface edge during close at ${name}`).toBeLessThanOrEqual(1);
+      expect(frame.width, `the rail keeps its full 44px width during close at ${name}`).toBe(44);
+      expect(frame.clipPath, `the rail has no clip-path during close at ${name}`).toBe("none");
+      expect(frame.visibility, `the rail remains visible during close at ${name}`).toBe("visible");
+      expect(frame.display, `the rail remains displayed during close at ${name}`).not.toBe("none");
+    }
+
+    await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
+    await expect(page.getByTestId("app-surface")).not.toHaveClass(/nb-app-surface-open/);
+
+    const settled = await page.evaluate(() => {
+      const rail = document.querySelector('[data-test="mobile-calendar-return"]');
+      if (!rail) return { hidden: true, display: "none", visibility: "hidden" };
+      const style = getComputedStyle(rail);
+      return {
+        display: style.display,
+        visibility: style.visibility,
+        hidden: style.display === "none" || style.visibility === "hidden",
+      };
+    });
+    expect(settled.hidden, "the rail is hidden once close travel has fully completed").toBe(true);
   });
 
   test("mobile resolves the open calendar into a return rail", async ({ page }) => {
