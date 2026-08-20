@@ -77,12 +77,12 @@ test.describe("the floating navigation shell", () => {
     await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
   });
 
-  /* The rail is the leading edge of the page you just pushed aside — same 44px
-     width, same 14px inset, same 16px corner as the slice the surface's clip
-     reveals. It is that slice. But it used to fade up over 160ms starting 120ms
-     *after* the push, so a phone showed a red bar materialising over an animation
-     that had already finished: reported as "appears out of thin air". */
-  test("the calendar rail arrives on the push rather than fading in after it", async ({ page }) => {
+  /* The rail is the leading edge of the page that was pushed aside. It must
+     share the surface's X coordinate throughout the transition: a second
+     child X transform makes it lag a rail width behind, then catch up at the
+     edge. */
+  test("the calendar rail stays on the surface edge while it is revealed", async ({ page }) => {
+
     await page.setViewportSize({ width: 390, height: 844 });
     await openPlanner(page);
     await page.getByTestId("nav-toggle").click();
@@ -95,22 +95,28 @@ test.describe("the floating navigation shell", () => {
       for (const a of running) span = Math.max(span, Number(a.effect?.getTiming().duration) || 0);
       const at = (fraction) => {
         for (const a of running) { a.pause(); a.currentTime = span * fraction; }
+        const surfaceBox = surface.getBoundingClientRect();
+        const railBox = rail.getBoundingClientRect();
         return {
           opacity: Number(getComputedStyle(rail).opacity),
-          gap: Math.round(surface.getBoundingClientRect().left - rail.getBoundingClientRect().left),
+          localX: Math.round(railBox.left - surfaceBox.left),
+          clipPath: getComputedStyle(rail).clipPath,
         };
+
       };
       return { transitions: getComputedStyle(rail).transitionProperty, start: at(0), mid: at(0.5), end: at(1) };
     });
 
-    expect(sampled.transitions, "the rail travels; it does not fade").toContain("transform");
-    expect(sampled.transitions, "the fade this replaced must not come back").not.toContain("opacity");
+    expect(sampled.transitions, "the rail is revealed by clipping its stationary body").toContain("clip-path");
+    expect(sampled.transitions, "the rail must not receive a second X transform").not.toContain("transform");
+    expect(sampled.transitions, "the rail should stay solid rather than fade in").not.toContain("opacity");
+
     for (const [name, frame] of Object.entries({ start: sampled.start, mid: sampled.mid, end: sampled.end })) {
       expect(frame.opacity, `the rail is solid at ${name} — a fade is what made it appear from nowhere`).toBe(1);
+      expect(Math.abs(frame.localX), `the rail remains on its parent edge at ${name}`).toBeLessThanOrEqual(1);
     }
-    /* Parked one rail-width outside the surface's clip, arriving flush with its edge. */
-    expect(sampled.start.gap, "the rail starts outside the clip that reveals it").toBeGreaterThan(0);
-    expect(sampled.end.gap, "and lands flush with the pushed page's edge").toBe(0);
+    expect(sampled.start.clipPath, "the rail begins clipped").not.toBe(sampled.end.clipPath);
+
   });
 
   test("mobile resolves the open calendar into a return rail", async ({ page }) => {
