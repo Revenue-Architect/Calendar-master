@@ -168,3 +168,78 @@ test("the page slide and the compact pill share a curve", async ({ page }) => {
   expect(curves.track).toBe(curves.lane);
 });
 
+test.describe("WAI-ARIA keyboard tablist navigation", () => {
+  test("Arrow keys, Home, End move selection and focus, while Tab naturally exits the tablist", async ({ page }) => {
+    await openPlanner(page);
+    const timeline = page.getByTestId("view-mode-timeline");
+    const agenda = page.getByTestId("view-mode-agenda");
+    const actions = page.getByTestId("view-mode-actions");
+
+    // Focus the active tab
+    await timeline.focus();
+    await expect(timeline).toHaveAttribute("aria-selected", "true");
+    await expect(timeline).toHaveAttribute("tabindex", "0");
+    await expect(agenda).toHaveAttribute("tabindex", "-1");
+    await expect(actions).toHaveAttribute("tabindex", "-1");
+
+    // ArrowRight moves to next tab (AGENDA)
+    await page.keyboard.press("ArrowRight");
+    await expect(agenda).toBeFocused();
+    await expect(agenda).toHaveAttribute("aria-selected", "true");
+    await expect(agenda).toHaveAttribute("tabindex", "0");
+    await expect(timeline).toHaveAttribute("aria-selected", "false");
+    await expect(timeline).toHaveAttribute("tabindex", "-1");
+
+    // ArrowRight moves to ACTIONS
+    await page.keyboard.press("ArrowRight");
+    await expect(actions).toBeFocused();
+    await expect(actions).toHaveAttribute("aria-selected", "true");
+
+    // ArrowRight wraps to TIMELINE
+    await page.keyboard.press("ArrowRight");
+    await expect(timeline).toBeFocused();
+    await expect(timeline).toHaveAttribute("aria-selected", "true");
+
+    // ArrowLeft wraps backwards to ACTIONS
+    await page.keyboard.press("ArrowLeft");
+    await expect(actions).toBeFocused();
+    await expect(actions).toHaveAttribute("aria-selected", "true");
+
+    // Home moves to first tab (TIMELINE)
+    await page.keyboard.press("Home");
+    await expect(timeline).toBeFocused();
+    await expect(timeline).toHaveAttribute("aria-selected", "true");
+
+    // End moves to last tab (ACTIONS)
+    await page.keyboard.press("End");
+    await expect(actions).toBeFocused();
+    await expect(actions).toHaveAttribute("aria-selected", "true");
+
+    // Tab key exits the tablist naturally without trapping focus
+    await page.keyboard.press("Tab");
+    const stillInside = await page.evaluate(() => {
+      const active = document.activeElement;
+      const tablist = document.querySelector('[data-test="view-mode"]');
+      return tablist ? tablist.contains(active) : false;
+    });
+    expect(stillInside, "Tab must exit the tablist naturally").toBe(false);
+  });
+
+  test("rapid pointer retargeting during travel settles cleanly on the latest selection", async ({ page }) => {
+    await openPlanner(page);
+    const timeline = page.getByTestId("view-mode-timeline");
+    const agenda = page.getByTestId("view-mode-agenda");
+    const actions = page.getByTestId("view-mode-actions");
+
+    // Rapid clicks across tabs
+    await actions.click({ delay: 20 });
+    await agenda.click({ delay: 20 });
+    await timeline.click({ delay: 20 });
+
+    await page.waitForTimeout(400);
+    await expect(timeline).toHaveAttribute("aria-selected", "true");
+    await expect(agenda).toHaveAttribute("aria-selected", "false");
+    await expect(actions).toHaveAttribute("aria-selected", "false");
+    await expect(page.locator("main.nb-main")).toBeVisible();
+  });
+});

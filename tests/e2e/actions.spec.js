@@ -843,3 +843,46 @@ test.describe("scheduled action completion in the mobile timeline", () => {
     await expect(chip).toHaveCSS("transform", "none");
   });
 });
+
+test.describe("hold to complete feedback", () => {
+  test("hold-to-complete cancels on pointer leave and does not complete early", async ({ page }) => {
+    await seedPlanner(page, scheduledAction({ id: "task-hold", title: "Review project proposal" }));
+    const actionCard = page.getByTestId("actions-column").locator('[data-task="task-hold"]');
+    const holdBtn = actionCard.getByRole("button", { name: "Hold to complete" });
+
+    // Press down briefly and leave to cancel
+    const box = await holdBtn.boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.waitForTimeout(100);
+    await page.mouse.move(box.x - 50, box.y - 50); // leave
+    await page.mouse.up();
+
+    // Task must remain open
+    await expect(actionCard).toHaveAttribute("data-task-status", "open");
+    await expect(actionCard.getByTestId("task-completion-overlay")).toHaveAttribute("data-visible", "false");
+  });
+
+  test("holding to completion completes the task and reopening does not re-celebrate", async ({ page }) => {
+    await seedPlanner(page, scheduledAction({ id: "task-hold-2", title: "Review project proposal 2" }));
+    const actionCard = page.getByTestId("actions-column").locator('[data-task="task-hold-2"]');
+    const holdBtn = actionCard.getByRole("button", { name: "Hold to complete" });
+
+    // Hold through full duration (HOLD_MS = 640ms)
+    const box = await holdBtn.boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.waitForTimeout(800);
+    await page.mouse.up();
+
+    // Task must be completed
+    const overlay = actionCard.getByTestId("task-completion-overlay");
+    await expect(overlay).toHaveAttribute("data-visible", "true");
+    await expect(actionCard.getByRole("button", { name: "Reopen" })).toBeVisible();
+
+    // Reopen task
+    await actionCard.getByRole("button", { name: "Reopen" }).click();
+    await expect(overlay).toHaveAttribute("data-visible", "false");
+    await expect(actionCard.locator(".nb-p")).toHaveCount(0); // no burst particles on reopen
+  });
+});

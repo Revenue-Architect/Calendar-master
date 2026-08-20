@@ -27,31 +27,64 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], subtasks 
   const [burst, setBurst] = useState(null);
   const [quickStepOpen, setQuickStepOpen] = useState(false);
   const raf = useRef(null), t0 = useRef(0), lastTick = useRef(0), holding = useRef(false);
+  const progRef = useRef(0);
+  const completedRef = useRef(t.status === "completed");
   const sw = useRef(null);
 
   const stopHold = (aborted) => {
     cancelAnimationFrame(raf.current);
-    if (holding.current && aborted && prog > 0.15) beep("abort");
+    const wasHolding = holding.current;
+    const currentProg = progRef.current;
     holding.current = false;
+    progRef.current = 0;
     setProg(0);
+    if (wasHolding && aborted && currentProg > 0.15) beep?.("abort");
   };
   const startHold = () => {
-    if (t.status === "completed") return;
+    if (t.status === "completed" || completedRef.current || (blockers && blockers.length > 0)) return;
+    cancelAnimationFrame(raf.current);
     holding.current = true;
     t0.current = performance.now();
     lastTick.current = 0;
+    progRef.current = 0;
     const loop = (now) => {
+      if (!holding.current) return;
       const p = Math.min(1, (now - t0.current) / HOLD_MS);
+      progRef.current = p;
       setProg(p);
       const step = 0.17 - 0.11 * p;
-      if (p - lastTick.current >= step) { lastTick.current = p; beep("ratchet", p); buzz(3); }
-      if (p >= 1) { holding.current = false; setProg(0); fire(); return; }
+      if (p - lastTick.current >= step) { lastTick.current = p; beep?.("ratchet", p); buzz?.(3); }
+      if (p >= 1) { fire(); return; }
       raf.current = requestAnimationFrame(loop);
     };
     raf.current = requestAnimationFrame(loop);
   };
-  const fire = () => { setBurst(uid()); setTimeout(() => setBurst(null), 640); onComplete(t.id); };
-  useEffect(() => () => cancelAnimationFrame(raf.current), []);
+  const fire = () => {
+    cancelAnimationFrame(raf.current);
+    holding.current = false;
+    progRef.current = 0;
+    setProg(0);
+    if (t.status === "completed" || completedRef.current) return;
+    completedRef.current = true;
+    setBurst(uid());
+    setTimeout(() => setBurst(null), 640);
+    onComplete(t.id);
+  };
+
+  useEffect(() => {
+    completedRef.current = t.status === "completed";
+    if (t.status === "completed") {
+      cancelAnimationFrame(raf.current);
+      holding.current = false;
+      progRef.current = 0;
+      setProg(0);
+    }
+  }, [t.status, t.id]);
+
+  useEffect(() => () => {
+    cancelAnimationFrame(raf.current);
+    holding.current = false;
+  }, []);
 
   const onDown = (e) => { sw.current = { x: e.clientX, y: e.clientY, live: false, at: Date.now() }; };
   const onMove = (e) => {

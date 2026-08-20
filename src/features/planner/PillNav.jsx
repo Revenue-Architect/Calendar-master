@@ -19,6 +19,8 @@ import {
 } from "../motion/viewPills.js";
 import { LiquidPillIndicator } from "./liquid.jsx";
 
+const isOptionDisabled = (opt) => Boolean(opt && (opt[2]?.disabled || opt.disabled));
+
 export default function PillNav({ T, value, options, onPick, onArm = null, ariaLabel, surface = "transparent",
                    className = "", style = {}, compact = false, icons = null, testId = null }) {
   const wrapRef = useRef(null);
@@ -33,22 +35,68 @@ export default function PillNav({ T, value, options, onPick, onArm = null, ariaL
     onPick(key, source);
   };
 
+  const onKeyDown = (event) => {
+    const enabledIndices = [];
+    options.forEach((opt, idx) => {
+      if (!isOptionDisabled(opt)) enabledIndices.push(idx);
+    });
+    if (enabledIndices.length === 0) return;
+
+    const currentPos = enabledIndices.indexOf(activeIndex);
+    let nextPos = -1;
+
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      event.preventDefault();
+      nextPos = currentPos === -1 ? 0 : (currentPos + 1) % enabledIndices.length;
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      event.preventDefault();
+      nextPos = currentPos === -1 ? enabledIndices.length - 1 : (currentPos - 1 + enabledIndices.length) % enabledIndices.length;
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      nextPos = 0;
+    } else if (event.key === "End") {
+      event.preventDefault();
+      nextPos = enabledIndices.length - 1;
+    }
+
+    if (nextPos !== -1) {
+      const nextIndex = enabledIndices[nextPos];
+      const nextOption = options[nextIndex];
+      if (nextOption) {
+        const nextKey = nextOption[0];
+        setInstant(true);
+        onPick(nextKey, "keyboard");
+        const buttons = wrapRef.current?.querySelectorAll('[role="tab"]');
+        if (buttons && buttons[nextIndex]) {
+          buttons[nextIndex].focus();
+        }
+      }
+    }
+  };
+
+  const hasSelected = options.some(([key]) => key === value);
+
   return (
     <div ref={wrapRef} role="tablist" aria-label={ariaLabel} data-test={testId}
       data-motion={instant ? "instant" : "travel"} data-compact={compact ? "icon" : "label"}
+      onKeyDown={onKeyDown}
       className={`relative flex ${className}`}
       style={{ background: surface, borderRadius: 999, width: compact ? viewPillTrackWidth({ count: options.length }) : undefined, ...style }}>
       {!compact && <LiquidPillIndicator T={T} box={box} stretch={stretch} settled={settled} />}
       {options.map(([key, label], index) => {
         const on = key === value;
+        const disabled = isOptionDisabled(options[index]);
+        const isFocusable = on || (!hasSelected && index === 0);
         const Icon = compact ? icons?.[key] : null;
         return (
           <button key={String(key)} role="tab" aria-selected={on} aria-label={label}
+            tabIndex={isFocusable ? 0 : -1}
+            disabled={disabled}
             data-test={testId ? `${testId}-${key}` : undefined}
             data-active={on ? "true" : "false"}
             data-compact={compact && !on ? "icon" : "label"}
-            onPointerDown={onArm ? () => onArm(key) : undefined}
-            onClick={(event) => pick(key, event)}
+            onPointerDown={onArm && !disabled ? () => onArm(key) : undefined}
+            onClick={(event) => { if (!disabled) pick(key, event); }}
             className={`nb-tap nb-hover-choice ${on ? "is-selected" : ""} relative ${compact ? "py-1" : "px-3 py-1"} nb-label`}
             style={{
               color: on ? T.on : T.dim,

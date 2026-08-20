@@ -64,3 +64,19 @@ test("the word is revealed by a clip, never by a track animation", () => {
 test("compact behavior stops one hundredth of a pixel below Tailwind's sm", () => {
   assert.equal(VIEW_PILL_COMPACT_MAX, 639.98);
 });
+
+test("label side resolves relative to activeIndex correctly", () => {
+  assert.equal(viewPillLabelClip(false, "left"), "inset(0 100% 0 0)");
+  assert.equal(viewPillLabelClip(false, "right"), "inset(0 0 0 100%)");
+});
+
+test("track width and slot calculations remain stable for 2, 3, 4 option sets", () => {
+  for (const count of [2, 3, 4, 5]) {
+    const total = viewPillTrackWidth({ count });
+    assert.equal(total, VIEW_PILL_ICON * count + VIEW_PILL_WORD);
+    const slots = viewPillSlots({ count, activeIndex: 0 });
+    assert.equal(slots.length, count);
+    const last = slots[count - 1];
+    assert.equal(last.left + last.width, total);
+  }
+});
