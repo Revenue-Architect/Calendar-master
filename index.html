@@ -20,9 +20,81 @@
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230A0A0C'/%3E%3Crect x='5' y='7' width='22' height='4' fill='%23CCFF00'/%3E%3Crect x='5' y='15' width='14' height='4' fill='%23CCFF00'/%3E%3Crect x='5' y='23' width='18' height='4' fill='%23CCFF00'/%3E%3C/svg%3E"
     />
     <title>Planner</title>
+    <style id="planner-critical-boot">
+      /* This is intentionally tiny and inline. JavaScript and the application
+         stylesheet may both be delayed or unavailable during a document boot;
+         the host must never get a white frame in that interval. */
+      html, body, #root { min-height: 100%; margin: 0; background: #0A0A0C; }
+      html { color-scheme: dark; }
+      body { min-height: 100dvh; }
+      #root { min-height: 100dvh; }
+      #planner-boot-shell {
+        min-height: 100dvh; box-sizing: border-box; padding: 32px 24px;
+        display: flex; align-items: center; justify-content: center;
+        background: #0A0A0C; color: #F4F4F5;
+        font: 700 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        letter-spacing: .16em;
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div id="planner-boot-shell" role="status" aria-live="polite">OPENING THE NOTEBOOK</div>
+    </div>
+    <script>
+      /* DOM-only safety net for an entry module/chunk that never reaches
+         React. It deliberately exposes no exception text or notebook data. */
+      (function () {
+        var committed = false;
+        var root = document.getElementById("root");
+        function recordFailure() {
+          /* Keep this schema aligned with bootLifecycle.js, but keep the
+             emergency writer dependency-free so it can run when that module
+             itself failed to load. */
+          try {
+            var key = "nbmp:boot-lifecycle:v1";
+            var now = new Date().toISOString();
+            var stored = window.sessionStorage.getItem(key);
+            var ledger = stored ? JSON.parse(stored) : null;
+            if (!ledger || ledger.version !== 1 || !Array.isArray(ledger.events)) {
+              ledger = { version: 1, buildId: "dev", sessionId: "boot-inline", startedAt: now, navigationType: "unknown", events: [] };
+            }
+            ledger.events = ledger.events.slice(-63);
+            ledger.events.push({ sessionId: ledger.sessionId || "boot-inline", type: "bootstrap-failure", at: now, reason: "entry-failed", navigationType: ledger.navigationType || "unknown", visibility: document.visibilityState || "unknown" });
+            window.sessionStorage.setItem(key, JSON.stringify(ledger));
+          } catch (_) {}
+        }
+        function removeShell() {
+          var shell = document.getElementById("planner-boot-shell");
+          if (shell && shell.parentNode) shell.parentNode.removeChild(shell);
+        }
+        function showFailure() {
+          if (committed || !root || document.getElementById("planner-bootstrap-failure")) return;
+          recordFailure();
+          removeShell();
+          var view = document.createElement("div");
+          view.id = "planner-bootstrap-failure";
+          view.setAttribute("role", "alert");
+          view.style.cssText = "min-height:100dvh;box-sizing:border-box;padding:32px 24px;display:flex;align-items:center;justify-content:center;background:#0A0A0C;color:#F4F4F5;font-family:system-ui,sans-serif";
+          view.innerHTML = "<div style='max-width:440px;width:100%'><p style='margin:0;color:#CCFF00;font:700 11px ui-monospace,monospace;letter-spacing:.16em'>NOTEBOOK</p><h1 style='margin:10px 0 0;font-size:28px;line-height:1.15'>The notebook is still here</h1><p style='margin:12px 0 0;color:#A1A1AA;font-size:15px;line-height:1.5'>The planner could not finish opening. Your local notebook has not been changed.</p><button type='button' style='margin-top:22px;padding:12px 16px;border:0;border-radius:10px;background:#CCFF00;color:#0A0A0C;font:700 12px ui-monospace,monospace;letter-spacing:.1em;cursor:pointer'>RELOAD</button></div>";
+          var button = view.querySelector("button");
+          if (button) button.addEventListener("click", function () { try { window.location.reload(); } catch (_) {} });
+          root.appendChild(view);
+          if (button) button.focus();
+        }
+        window.__plannerBootCommit = function () {
+          committed = true;
+          removeShell();
+        };
+        window.__plannerShowBootstrapFailure = showFailure;
+        window.addEventListener("error", function (event) {
+          if (!committed && event && event.target && event.target.tagName === "SCRIPT") showFailure();
+        }, true);
+        window.addEventListener("unhandledrejection", function () {
+          if (!committed) showFailure();
+        });
+      }());
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

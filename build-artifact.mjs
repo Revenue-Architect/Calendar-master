@@ -38,7 +38,7 @@ ${styles}
   /* Until the bundle paints, show the ground rather than the host's. */
   #root:empty { background: ${GROUND}; }
 </style>
-<div id="root"></div>
+<div id="root"><div id="planner-boot-shell" role="status" aria-live="polite" style="min-height:100dvh;box-sizing:border-box;padding:32px 24px;display:flex;align-items:center;justify-content:center;background:${GROUND};color:#F4F4F5;font:700 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.16em">OPENING THE NOTEBOOK</div></div>
 <script>
   /* The host writes this page's <head>, so the app's own viewport meta never
      ships with it. Without it a touch browser is free to zoom the whole page
@@ -50,6 +50,32 @@ ${styles}
     if (!meta) { meta = document.createElement("meta"); meta.name = "viewport"; document.head.appendChild(meta); }
     meta.setAttribute("content", "width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1");
   })();
+</script>
+<script>
+  /* Keep the artifact's failure path dependency-free too: this page is often
+     opened in a host that does not provide a dev server or a console. */
+  (function () {
+    var committed = false;
+    var root = document.getElementById("root");
+    function removeShell() { var shell = document.getElementById("planner-boot-shell"); if (shell && shell.parentNode) shell.parentNode.removeChild(shell); }
+    function showFailure() {
+      if (committed || !root || document.getElementById("planner-bootstrap-failure")) return;
+      removeShell();
+      var view = document.createElement("div");
+      view.id = "planner-bootstrap-failure";
+      view.setAttribute("role", "alert");
+      view.style.cssText = "min-height:100dvh;box-sizing:border-box;padding:32px 24px;display:flex;align-items:center;justify-content:center;background:${GROUND};color:#F4F4F5;font-family:system-ui,sans-serif";
+      view.innerHTML = "<div style='max-width:440px;width:100%'><p style='margin:0;color:#CCFF00;font:700 11px ui-monospace,monospace;letter-spacing:.16em'>NOTEBOOK</p><h1 style='margin:10px 0 0;font-size:28px;line-height:1.15'>The notebook is still here</h1><p style='margin:12px 0 0;color:#A1A1AA;font-size:15px;line-height:1.5'>The planner could not finish opening. Your local notebook has not been changed.</p><button type='button' style='margin-top:22px;padding:12px 16px;border:0;border-radius:10px;background:#CCFF00;color:${GROUND};font:700 12px ui-monospace,monospace;letter-spacing:.1em;cursor:pointer'>RELOAD</button></div>";
+      var button = view.querySelector("button");
+      if (button) button.addEventListener("click", function () { try { window.location.reload(); } catch (_) {} });
+      root.appendChild(view);
+      if (button) button.focus();
+    }
+    window.__plannerBootCommit = function () { committed = true; removeShell(); };
+    window.__plannerShowBootstrapFailure = showFailure;
+    window.addEventListener("error", function (event) { if (!committed && event && event.target && event.target.tagName === "SCRIPT") showFailure(); }, true);
+    window.addEventListener("unhandledrejection", function () { if (!committed) showFailure(); });
+  }());
 </script>
 <script type="module">
 ${bundle}

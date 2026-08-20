@@ -2,8 +2,16 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
+const BUILD_ID = process.env.VITE_BUILD_ID || "calendar-master-0.1.0";
+
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  define: {
+    /* Keep the lifecycle trail useful in a shipped bundle while allowing CI or
+       a release job to stamp a commit/build identifier without touching app
+       code. */
+    "globalThis.__PLANNER_BUILD_ID__": JSON.stringify(BUILD_ID),
+  },
   build: {
     /* The artifact ships as one HTML file with the CSS and JS inlined, and its
        CSP blocks every external request — so a font emitted as a separate asset
@@ -18,5 +26,18 @@ export default defineConfig({
     host: "0.0.0.0",
     port: 5000,
     allowedHosts: true,
+    watch: {
+      /* Generated artifact and QA output are products, not source. Watching
+         them makes an artifact build reload an open development document and
+         is the source of a particularly confusing blank/white refresh. */
+      ignored: [
+        "**/artifact/**",
+        "**/dist/**",
+        "**/test-results/**",
+        "**/playwright-report/**",
+        "**/reports/**",
+        "**/screenshots/**",
+      ],
+    },
   },
 });

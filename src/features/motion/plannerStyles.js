@@ -53,47 +53,62 @@ export function plannerStyles({ T, preferences }) {
         .nb-nav-shell{
           --nav-width:304px;
           --nav-gap:18px;
-          /* The frame you see is travel plus cut. The cut is the only part
-             that reaches the HUD, so it stays under the header's own 8px of
-             padding and the hamburger never loses its top. */
+          /* Direct viewport frame insets on the viewport mask and travel on the carrier */
           --nav-headroom:4px;
           --nav-margin-top:24px;
           --nav-margin-right:22px;
           --nav-margin-bottom:24px;
+          --nav-frame-top:var(--nav-margin-top);
+          --nav-frame-right:var(--nav-margin-right);
+          --nav-frame-bottom:var(--nav-margin-bottom);
+          --nav-frame-left:calc(var(--nav-width) + var(--nav-gap));
+          --nav-carrier-x:calc(var(--nav-width) + var(--nav-gap));
+          --nav-carrier-y:calc(var(--nav-margin-top) - var(--nav-headroom));
           --nav-page-x:calc(var(--nav-width) + var(--nav-gap));
           --nav-page-y:calc(var(--nav-margin-top) - var(--nav-headroom));
           --nav-clip-top:var(--nav-headroom);
           --nav-clip-right:var(--nav-margin-right);
           --nav-clip-bottom:calc(var(--nav-margin-bottom) + var(--nav-page-y));
           --nav-page-radius:22px;
-          /* No shadow: the clip cuts at the card's own edge, so an outer
-             drop shadow lands outside the visible shape and the inset sheen
-             lands under the cut. It painted the whole app every frame to
-             draw nothing. */
           --nav-page-duration:520ms;
           --nav-content-duration:260ms;
           --nav-item-stagger:30ms;
-          /* Deliberate ease-out, not a spring: every property lands once and
-             stays there. Keeping the curve below 1 avoids the bounce that made
-             the first pass feel disconnected from the shell. */
           --nav-ease:cubic-bezier(.22,.61,.36,1);
           position:relative;height:100dvh;overflow:clip;overflow-anchor:none;background:#17181b;
         }
         .nb-root{height:100%;overflow:clip;overflow-anchor:none}
-        /* One X-axis: the drawer slides in, the page becomes a card and
-           travels right. Clip eats the even black frame so layout never
-           reflows. Mobile keeps its own rail clip. */
-        .nb-app-surface{
-          position:absolute;inset:0;z-index:2;height:auto;overflow:clip;overflow-anchor:none;transform:translate3d(0,0,0);clip-path:inset(0 0 0 0 round 0);
-          transform-origin:left center;box-shadow:none;
-          transition:transform var(--nav-page-duration) var(--nav-ease),clip-path var(--nav-page-duration) var(--nav-ease);
+        .nb-nav-viewport,
+        .nb-nav-motion-viewport{
+          position:absolute;inset:0;z-index:2;height:100%;overflow:clip;overflow-anchor:none;clip-path:inset(0 0 0 0 round 0);
         }
-        .nb-app-surface-open{transform:translate3d(var(--nav-page-x),var(--nav-page-y),0);clip-path:inset(var(--nav-clip-top) var(--nav-clip-right) var(--nav-clip-bottom) 0 round var(--nav-page-radius))}
-        .nb-navigation{position:absolute;z-index:1;inset:0 auto 0 0;width:var(--nav-width);padding:22px 18px;color:#f2f0ea;display:flex;flex-direction:column;overflow:auto;transform:translate3d(-36%,0,0);transition:transform var(--nav-page-duration) var(--nav-ease)}
-        .nb-nav-shell[data-nav-state="open"] .nb-navigation{transform:translate3d(0,0,0)}
+        .nb-nav-shell[data-nav-state="open"] .nb-nav-viewport,
+        .nb-nav-shell[data-nav-state="open"] .nb-nav-motion-viewport,
+        .nb-nav-shell[data-nav-state="opening"] .nb-nav-viewport,
+        .nb-nav-shell[data-nav-state="opening"] .nb-nav-motion-viewport,
+        .nb-nav-motion-viewport.nb-nav-motion-viewport-open{
+          clip-path:inset(var(--nav-frame-top) var(--nav-frame-right) var(--nav-frame-bottom) var(--nav-frame-left) round var(--nav-page-radius));
+        }
+        .nb-nav-carrier,
+        .nb-nav-motion-carrier{
+          position:absolute;inset:0;width:100%;height:100%;transform:translate3d(0,0,0);transform-origin:left center;
+        }
+        .nb-nav-shell[data-nav-state="open"] .nb-nav-carrier,
+        .nb-nav-shell[data-nav-state="open"] .nb-nav-motion-carrier,
+        .nb-nav-shell[data-nav-state="opening"] .nb-nav-carrier,
+        .nb-nav-shell[data-nav-state="opening"] .nb-nav-motion-carrier,
+        .nb-nav-motion-carrier.nb-nav-motion-carrier-open{
+          transform:translate3d(var(--nav-carrier-x),var(--nav-carrier-y),0);
+        }
+        .nb-app-surface{
+          position:relative;width:100%;height:100%;overflow:clip;overflow-anchor:none;box-shadow:none;
+        }
+        .nb-navigation{position:absolute;z-index:1;inset:0 auto 0 0;width:var(--nav-width);padding:22px 18px;color:#f2f0ea;display:flex;flex-direction:column;overflow:auto;transform:translate3d(-36%,0,0)}
+        .nb-nav-shell[data-nav-state="open"] .nb-navigation,
+        .nb-nav-shell[data-nav-state="opening"] .nb-navigation{transform:translate3d(0,0,0)}
         .nb-navigation[aria-hidden="true"]{pointer-events:none}
-        .nb-nav-shell .nb-nav-brand,.nb-nav-shell .nb-nav-item,.nb-nav-shell .nb-nav-membership{opacity:0;transform:translate3d(-14px,0,0);transition:opacity var(--nav-page-duration) var(--nav-ease),transform var(--nav-page-duration) var(--nav-ease),background-color 160ms ease,color 160ms ease}
-        .nb-nav-shell[data-nav-state="open"] .nb-nav-brand,.nb-nav-shell[data-nav-state="open"] .nb-nav-item,.nb-nav-shell[data-nav-state="open"] .nb-nav-membership{opacity:1;transform:translate3d(0,0,0);transition-duration:var(--nav-content-duration),var(--nav-content-duration),160ms,160ms;transition-delay:calc(var(--nav-index, 0) * var(--nav-item-stagger)),calc(var(--nav-index, 0) * var(--nav-item-stagger)),0ms,0ms}
+        .nb-nav-shell .nb-nav-brand,.nb-nav-shell .nb-nav-item,.nb-nav-shell .nb-nav-membership{opacity:0;transform:translate3d(-14px,0,0);transition:background-color 160ms ease,color 160ms ease}
+        .nb-nav-shell[data-nav-state="open"] .nb-nav-brand,.nb-nav-shell[data-nav-state="open"] .nb-nav-item,.nb-nav-shell[data-nav-state="open"] .nb-nav-membership,
+        .nb-nav-shell[data-nav-state="opening"] .nb-nav-brand,.nb-nav-shell[data-nav-state="opening"] .nb-nav-item,.nb-nav-shell[data-nav-state="opening"] .nb-nav-membership{opacity:1;transform:translate3d(0,0,0)}
         .nb-nav-item{font-family:${MONO};font-size:15px;letter-spacing:.1em;text-align:left;padding:13px 12px;border-radius:10px;color:#c8c7c0}
         .nb-nav-item:hover,.nb-nav-item:focus-visible{background:#2a2b2f;color:#fff;outline:none}
         .nb-nav-membership{margin-top:auto;padding:15px 12px;border:1px solid #37383d;border-radius:12px;color:#aaa9a2}
@@ -102,27 +117,10 @@ export function plannerStyles({ T, preferences }) {
         .nb-shell-info{border-radius:999px;font-family:${DISPLAY};font-weight:700;letter-spacing:0}
         .nb-mobile-calendar-return{display:none}
         @media(max-width:639px){
-          .nb-nav-shell{--nav-width:min(78vw,320px);--nav-gap:11px;--nav-page-scale:.94;--nav-page-radius:16px;--nav-rail-width:44px;--nav-rail-edge-gap:5px;--nav-mobile-rail-x:calc(100vw - var(--nav-rail-width) - var(--nav-rail-edge-gap));--nav-rail-exit-duration:320ms}
-          /* Keep the calendar at its real width while its surface is clipped.
-             Animating width from the viewport to the rail size made its complete
-             layout reflow on every frame; clip-path reveals a stable left slice. */
-          .nb-app-surface{inset:0 auto auto 0;width:100%;height:100%;clip-path:inset(0 0 0 0 round 0);transition:transform var(--nav-page-duration) var(--nav-ease),clip-path var(--nav-page-duration) var(--nav-ease)}
-          .nb-app-surface-open{inset:0 auto auto 0;width:100%;height:100%;transform:translate3d(calc(100% - var(--nav-rail-width) - var(--nav-rail-edge-gap)),0,0);clip-path:inset(14px calc(100% - var(--nav-rail-width)) 14px 0 round 16px);border-radius:16px;box-shadow:none}
-          .nb-app-surface>*{opacity:1;transition:opacity 150ms ease}
-          .nb-app-surface-open>*{opacity:0;pointer-events:none}
-          /* The rail is a shell-level overlay so the surface's overflow clip cannot
-             cut off its close exit. It follows the surface's opening edge, then
-             travels past the left viewport edge before the surface completes close. */
-          .nb-mobile-calendar-return{display:flex;position:absolute;z-index:40;inset:14px auto 14px 0;width:var(--nav-rail-width);align-items:center;justify-content:center;border:0;border-radius:16px;background:${T.accent};color:${T.on};font-family:${MONO};font-size:10px;font-weight:700;letter-spacing:.12em;writing-mode:vertical-rl;visibility:hidden;transform:translate3d(0,0,0) rotate(180deg);pointer-events:none;transition:none}
-          .nb-nav-shell[data-nav-state="open"] .nb-mobile-calendar-return{visibility:visible;transform:translate3d(var(--nav-mobile-rail-x),0,0) rotate(180deg);pointer-events:auto;transition:transform var(--nav-page-duration) var(--nav-ease)}
-          .nb-nav-shell[data-nav-state="closing"] .nb-mobile-calendar-return{visibility:visible;transform:translate3d(calc(0px - var(--nav-rail-width)),0,0) rotate(180deg);transition:transform var(--nav-rail-exit-duration) var(--nav-ease)}
-          .nb-navigation{padding:18px 12px}
-          .nb-hud{padding:.45rem .65rem;gap:.35rem}
-          .nb-hud-left{gap:.35rem}
-          .nb-hud-left .w-14{width:36px}
-          .nb-hud-actions{gap:0}
-          .nb-search-wrap{width:104px}
-          
+          .nb-nav-shell{--nav-width:min(78vw,320px);--nav-gap:11px;--nav-page-scale:.94;--nav-page-radius:16px;--nav-rail-width:44px;--nav-rail-edge-gap:5px}
+          .nb-nav-motion-viewport{clip-path:inset(0 0 0 0 round 0)}
+          .nb-nav-motion-carrier{transform:translate3d(0,0,0)}
+          .nb-mobile-calendar-return{display:flex;position:absolute;z-index:40;inset:14px auto 14px 0;width:var(--nav-rail-width);align-items:center;justify-content:center;border:0;border-radius:16px;background:${T.accent};color:${T.on};font-family:${MONO};font-size:10px;font-weight:700;letter-spacing:.12em;writing-mode:vertical-rl;visibility:visible;transform:translate3d(calc(0px - var(--nav-rail-width)),0,0) rotate(180deg);pointer-events:none;transition:none}
           .nb-hud-settings{display:none}
         }
         .nb-main{padding-bottom:var(--sheet-pad)}
@@ -670,9 +668,9 @@ export function plannerStyles({ T, preferences }) {
         .nb-day-heading.is-focused{padding-top:.45rem;padding-bottom:.45rem;border-bottom:1px solid ${T.line}}
         .nb-day-heading.is-focused .nb-display{font-size:2rem;line-height:2rem}
 
-        @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.nb-fluid,.nb-view-track,.nb-msheet,.nb-timeline-chrome,.nb-timeline-chrome-inner,.nb-morph-source-label,.nb-up,.nb-list-enter{animation:none!important;transform:none!important}.nb-fluid,.nb-msheet,.nb-timeline-chrome-inner,.nb-morph-source-label{transition:opacity 160ms ease!important}.nb-view-track.is-sliding,.nb-app-surface,.nb-mobile-calendar-return,.nb-navigation,.nb-nav-brand,.nb-nav-item,.nb-nav-membership{transition:none!important}
+        @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.nb-fluid,.nb-view-track,.nb-msheet,.nb-timeline-chrome,.nb-timeline-chrome-inner,.nb-morph-source-label,.nb-up,.nb-list-enter{animation:none!important;transform:none!important}.nb-fluid,.nb-msheet,.nb-timeline-chrome-inner,.nb-morph-source-label{transition:opacity 160ms ease!important}.nb-view-track.is-sliding,.nb-app-surface,.nb-nav-viewport,.nb-nav-carrier,.nb-nav-motion-viewport,.nb-nav-motion-carrier,.nb-mobile-calendar-return,.nb-navigation,.nb-nav-brand,.nb-nav-item,.nb-nav-membership{transition:none!important;animation:none!important}
           button:active,[role="button"]:active,a[href]:active,[data-event-id]:active,[data-task-chip]:active{scale:1!important}}
-        ${preferences?.display.reducedMotion ? `.nb-fluid,.nb-view-track,.nb-msheet,.nb-timeline-chrome,.nb-timeline-chrome-inner,.nb-morph-source-label{animation:none!important;transform:none!important}.nb-fluid,.nb-msheet,.nb-timeline-chrome-inner,.nb-morph-source-label{transition:opacity 160ms ease!important}.nb-view-track.is-sliding,.nb-app-surface,.nb-mobile-calendar-return,.nb-navigation,.nb-nav-brand,.nb-nav-item,.nb-nav-membership{transition:none!important}
+        ${preferences?.display.reducedMotion ? `.nb-fluid,.nb-view-track,.nb-msheet,.nb-timeline-chrome,.nb-timeline-chrome-inner,.nb-morph-source-label{animation:none!important;transform:none!important}.nb-fluid,.nb-msheet,.nb-timeline-chrome-inner,.nb-morph-source-label{transition:opacity 160ms ease!important}.nb-view-track.is-sliding,.nb-app-surface,.nb-nav-viewport,.nb-nav-carrier,.nb-nav-motion-viewport,.nb-nav-motion-carrier,.nb-mobile-calendar-return,.nb-navigation,.nb-nav-brand,.nb-nav-item,.nb-nav-membership{transition:none!important;animation:none!important}
           button:active,[role="button"]:active,a[href]:active,[data-event-id]:active,[data-task-chip]:active{scale:1!important}` : ""}
       `;
 }

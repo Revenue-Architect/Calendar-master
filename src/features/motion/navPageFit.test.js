@@ -1,48 +1,108 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { navPageFit, navPageMotion, navDrawerMotion } from "./navPageFit.js";
+import { navMobileMotion, navPageFit, navPageMotion, navDrawerMotion } from "./navPageFit.js";
 
 const HUD_TOP = 8; /* the header's own padding, where the hamburger starts */
 
-test("the recessed page keeps every edge on a desktop viewport", () => {
+test("the recessed page keeps explicit frame and carrier geometry on a desktop viewport", () => {
   const fit = navPageFit({ viewportWidth: 1280, viewportHeight: 900 });
-  assert.ok(fit.travelX >= 304, "it must clear the drawer");
-  assert.equal(fit.frameLeft, fit.travelX);
-  assert.equal(1280 - (fit.travelX + 1280 - fit.clipRight), fit.frameRight);
+  assert.ok(fit.carrier.x >= 304, "it must clear the drawer");
+  assert.equal(fit.frame.left, 322);
+  assert.equal(fit.frame.top, 24);
+  assert.equal(fit.frame.right, 22);
+  assert.equal(fit.frame.bottom, 24);
+  assert.equal(fit.frame.radius, 22);
+  assert.equal(fit.carrier.x, 322);
+  assert.equal(fit.carrier.y, 20);
 });
 
-test("a missing viewport falls back instead of inventing NaN", () => {
+test("a missing viewport falls back safely instead of inventing NaN", () => {
   const fit = navPageFit({});
-  assert.equal(Number.isFinite(fit.travelX), true);
-  assert.equal(Number.isFinite(fit.travelY), true);
-  assert.equal(Number.isFinite(fit.clipTop), true);
+  assert.equal(Number.isFinite(fit.carrier.x), true);
+  assert.equal(Number.isFinite(fit.carrier.y), true);
+  assert.equal(Number.isFinite(fit.frame.top), true);
+  assert.equal(Number.isFinite(fit.frame.right), true);
+  assert.equal(Number.isFinite(fit.frame.bottom), true);
+  assert.equal(Number.isFinite(fit.frame.left), true);
 });
 
-test("the black frame reads even on every side", () => {
+test("the direct frame reads even on every side", () => {
   const fit = navPageFit({ viewportWidth: 1280, viewportHeight: 900 });
-  assert.equal(fit.frameTop, 24);
-  assert.equal(fit.frameBottom, 24);
-  assert.ok(Math.abs(fit.frameRight - fit.frameTop) <= 6, `right ${fit.frameRight} vs top ${fit.frameTop}`);
+  assert.equal(fit.frame.top, 24);
+  assert.equal(fit.frame.bottom, 24);
+  assert.equal(fit.frame.right, 22);
+  assert.equal(fit.frame.left, 322);
+  assert.ok(Math.abs(fit.frame.right - fit.frame.top) <= 6, `right ${fit.frame.right} vs top ${fit.frame.top}`);
 });
 
 test("a thicker frame never eats into the hamburger", () => {
-  /* The cut is what reaches the HUD; travel carries the page down with it.
-     Clearance is the header's own padding minus the cut, and it has to stay
-     positive however thick the border gets. */
   for (const marginTop of [8, 16, 24, 40]) {
     const fit = navPageFit({ viewportWidth: 1280, viewportHeight: 900, marginTop });
     assert.ok(HUD_TOP - fit.clipTop > 0, `margin ${marginTop} cut ${fit.clipTop} into the hamburger`);
-    assert.equal(fit.frameTop, marginTop, `margin ${marginTop} did not produce its own frame`);
+    assert.equal(fit.frame.top, marginTop, `margin ${marginTop} did not produce its own frame`);
   }
 });
 
-test("the open page travels on X instead of shrinking its layout box", () => {
+test("returns explicit frame mask and carrier translation across responsive viewports", () => {
+  // Desktop
+  const desktop = navPageFit({ viewportWidth: 1280, viewportHeight: 900 });
+  assert.deepEqual(desktop.frame, { top: 24, right: 22, bottom: 24, left: 322, radius: 22 });
+  assert.deepEqual(desktop.carrier, { x: 322, y: 20 });
+  assert.equal(desktop.mobile.x, 1280 - 44 - 5);
+
+  // Tablet (e.g. 768 x 1024)
+  const tablet = navPageFit({ viewportWidth: 768, viewportHeight: 1024 });
+  assert.equal(tablet.frame.left, 322);
+  assert.equal(tablet.frame.right, 22);
+  assert.equal(tablet.carrier.x, 322);
+
+  // Phone (e.g. 390 x 844)
+  const phone = navPageFit({ viewportWidth: 390, viewportHeight: 844 });
+  assert.equal(phone.mobile.railWidth, 44);
+  assert.equal(phone.mobile.edgeGap, 5);
+  assert.equal(phone.mobile.x, 390 - 44 - 5);
+
+  // Short height phone (e.g. 390 x 601)
+  const shortPhone = navPageFit({ viewportWidth: 390, viewportHeight: 601 });
+  assert.equal(shortPhone.mobile.x, 341);
+});
+
+test("mobile rail and carrier share one normalized progress geometry", () => {
+  const fit = navPageFit({ viewportWidth: 390, viewportHeight: 844 });
+  const closed = navMobileMotion({ progress: 0, mobile: fit.mobile });
+  const halfway = navMobileMotion({ progress: 0.5, mobile: fit.mobile });
+  const open = navMobileMotion({ progress: 1, mobile: fit.mobile });
+
+  assert.equal(closed.frame.left, 0);
+  assert.equal(closed.rail.x, -44);
+  assert.equal(closed.carrier.x, 0);
+  assert.equal(closed.visibleRailWidth, 0);
+
+  assert.equal(halfway.frame.left, 170.5);
+  assert.equal(halfway.rail.x, 148.5);
+  assert.equal(halfway.carrier.x, 192.5);
+  assert.equal(halfway.rail.right, halfway.carrier.x);
+  assert.equal(halfway.visibleRailWidth, 22);
+  assert.equal(halfway.gap, 0);
+
+  assert.equal(open.frame.left, 341);
+  assert.equal(open.rail.x, 341);
+  assert.equal(open.carrier.x, 385);
+  assert.equal(open.rail.right, open.carrier.x);
+  assert.equal(open.visibleRailWidth, 44);
+});
+
+test("navPageMotion creates direct viewport mask and carrier transform", () => {
   const closed = navPageMotion({ open: false });
-  const open = navPageMotion({ open: true, travelX: 322, travelY: 12, clipTop: 4, clipRight: 344, clipBottom: 28, radius: 22 });
-  assert.equal(closed.transform, "translate3d(0px, 0px, 0)");
-  assert.equal(closed.clipPath, "inset(0px 0px 0px 0px round 0px)");
-  assert.equal(open.transform, "translate3d(322px, 12px, 0)");
-  assert.equal(open.clipPath, "inset(4px 344px 28px 0px round 22px)");
+  const open = navPageMotion({
+    open: true,
+    carrier: { x: 322, y: 20 },
+    frame: { top: 24, right: 22, bottom: 24, left: 322, radius: 22 },
+  });
+  assert.equal(closed.carrierTransform, "translate3d(0px, 0px, 0)");
+  assert.equal(closed.viewportClipPath, "inset(0px 0px 0px 0px round 0px)");
+  assert.equal(open.carrierTransform, "translate3d(322px, 20px, 0)");
+  assert.equal(open.viewportClipPath, "inset(24px 22px 24px 322px round 22px)");
   assert.equal(open.durationMs, 520);
 });
 

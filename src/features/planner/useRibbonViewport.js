@@ -1,0 +1,347 @@
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  RIBBON_EDGE_BUFFER_DAYS,
+  RIBBON_FALLBACK_CELL_WIDTH,
+  RIBBON_MAX_POSITION_RETRIES,
+  RIBBON_POSITION_STATES,
+  RIBBON_RADIUS_DAYS,
+  RIBBON_RENDER_BUFFER_DAYS,
+  RIBBON_RENDER_WINDOW_DAYS,
+  RIBBON_SHIFT_DAYS,
+  nextRibbonRetry,
+  ribbonIntersection,
+  ribbonRevealTarget,
+} from "./ribbonViewport.js";
+import { addDaysToKey, diffDays } from "../../shared/time/dateKey.js";
+
+/* Owns only the ribbon viewport lifecycle. Planner still owns dates and the
+ * virtual range; this hook owns the DOM transaction that makes the selected
+ * cell visible inside that range. */
+export default function useRibbonViewport({
+  enabled,
+  ready,
+  mounted,
+  selectedDateKey,
+  zoom,
+  viewMode,
+  ribbonRange,
+  ribbonSpan,
+  ribbonWindowStart,
+  setRibbonWindowStart,
+  setRibbonRange,
+}) {
+  const stripRef = useRef(null);
+  const activeRef = useRef(null);
+  const ribbonNodeRef = useRef(null);
+  const ribbonWindowStartRef = useRef(ribbonWindowStart);
+  const ribbonShiftPendingRef = useRef(false);
+  const ribbonScrollAnchorRef = useRef(null);
+  const ribbonCenterPendingRef = useRef(false);
+  const ribbonVirtualWindowLockRef = useRef(false);
+  const ribbonScrollLockRef = useRef(null);
+  const ribbonPositionRunRef = useRef(0);
+  const ribbonPositionRequestRef = useRef(null);
+  const ribbonPositionAttemptFrameRef = useRef(null);
+  const ribbonPositionRetryTimerRef = useRef(null);
+  const ribbonPositionStateRef = useRef({ status: RIBBON_POSITION_STATES.idle, run: 0, retries: 0, reason: null });
+  const ribbonRetryPositionRef = useRef(null);
+  const [ribbonNode, setRibbonNode] = useState(null);
+  const [ribbonActiveNode, setRibbonActiveNode] = useState(null);
+  const [positionState, setPositionState] = useState(ribbonPositionStateRef.current);
+  const [edges, setEdges] = useState({ start: false, end: false });
+
+  useEffect(() => {
+    ribbonWindowStartRef.current = ribbonWindowStart;
+  }, [ribbonWindowStart]);
+
+  const updatePositionState = useCallback((next) => {
+    const current = ribbonPositionStateRef.current;
+    const value = typeof next === "function" ? next(current) : next;
+    if (!value || (value.status === current.status && value.run === current.run
+      && value.retries === current.retries && value.reason === current.reason)) return;
+    ribbonPositionStateRef.current = value;
+    setPositionState(value);
+  }, []);
+
+  const measureEdges = useCallback(() => {
+    const strip = stripRef.current;
+    if (!strip) return;
+    const max = Math.max(0, strip.scrollWidth - strip.clientWidth);
+    setEdges((current) => {
+      const next = { start: strip.scrollLeft > 2, end: max > 2 && strip.scrollLeft < max - 2 };
+      return current.start === next.start && current.end === next.end ? current : next;
+    });
+  }, []);
+
+  const releaseScroll = useCallback((run) => {
+    const lock = ribbonScrollLockRef.current;
+    if (!lock || lock.run !== run) return;
+    if (lock.fallbackFirst != null) cancelAnimationFrame(lock.fallbackFirst);
+    if (lock.fallbackSecond != null) cancelAnimationFrame(lock.fallbackSecond);
+    ribbonScrollLockRef.current = null;
+    const result = ribbonIntersection(stripRef.current, activeRef.current);
+    if (result.ok) {
+      updatePositionState((current) => current.run === run
+        ? { ...current, status: RIBBON_POSITION_STATES.settled, reason: "scroll-settled" }
+        : current);
+      return;
+    }
+    ribbonRetryPositionRef.current?.("post-scroll-intersection", { run });
+  }, [updatePositionState]);
+
+  const attachRibbon = useCallback((node) => {
+    stripRef.current = node;
+    if (ribbonNodeRef.current === node) return;
+    ribbonNodeRef.current = node;
+    setRibbonNode(node);
+    ribbonPositionRequestRef.current = null;
+    const idle = { status: RIBBON_POSITION_STATES.idle, run: ribbonPositionRunRef.current, retries: 0, reason: "node-remount" };
+    ribbonPositionStateRef.current = idle;
+    setPositionState(idle);
+    setEdges({ start: false, end: false });
+  }, []);
+
+  const attachActiveRibbon = useCallback((node) => {
+    activeRef.current = node;
+    setRibbonActiveNode(node);
+  }, []);
+
+  const reveal = useCallback((behavior = "auto", center = false, run = null) => {
+    const strip = stripRef.current;
+    const cell = activeRef.current;
+    const request = ribbonPositionRequestRef.current;
+    if (run != null && (!request || request.run !== run)) return { status: "stale-run", run };
+    if (!strip || !cell || strip.isConnected === false || cell.isConnected === false) return { status: "missing-node", run };
+    const target = ribbonRevealTarget(strip, cell, { center, inset: 24 });
+    if (target.status === "blocked-zero-width" || target.status === "missing-node") {
+      updatePositionState((current) => current.run === run
+        ? { ...current, status: target.status, reason: "zero-width-or-disconnected" }
+        : current);
+      return { ...target, run };
+    }
+    if (!target.changed && target.ok) {
+      updatePositionState((current) => current.run === run
+        ? { ...current, status: RIBBON_POSITION_STATES.settled, reason: "intersection-confirmed" }
+        : current);
+      return { ...target, status: RIBBON_POSITION_STATES.settled, run };
+    }
+    if (!target.changed) {
+      updatePositionState((current) => current.run === run
+        ? { ...current, status: RIBBON_POSITION_STATES.blockedZeroWidth, reason: "cell-cannot-fit" }
+        : current);
+      return { ...target, status: RIBBON_POSITION_STATES.blockedZeroWidth, run };
+    }
+    const previous = ribbonPositionStateRef.current;
+    const existingLock = ribbonScrollLockRef.current;
+    if (existingLock && existingLock.run === run) return { ...target, status: RIBBON_POSITION_STATES.positioning, run };
+    const lock = { run, supportsScrollEnd: "onscrollend" in strip, fallbackFirst: null, fallbackSecond: null };
+    ribbonScrollLockRef.current = lock;
+    updatePositionState((current) => current.run === run
+      ? { ...current, status: RIBBON_POSITION_STATES.positioning, reason: "programmatic-scroll" }
+      : current);
+    const scrollBehavior = behavior === "smooth" && previous.status === RIBBON_POSITION_STATES.settled ? "smooth" : "auto";
+    if (typeof strip.scrollTo === "function") strip.scrollTo({ left: target.target, behavior: scrollBehavior });
+    else strip.scrollLeft = target.target;
+    if (!lock.supportsScrollEnd) {
+      lock.fallbackFirst = requestAnimationFrame(() => {
+        lock.fallbackSecond = requestAnimationFrame(() => releaseScroll(run));
+      });
+    }
+    return { ...target, status: RIBBON_POSITION_STATES.positioning, run };
+  }, [releaseScroll, updatePositionState]);
+
+  const runAttempt = useCallback(() => {
+    const request = ribbonPositionRequestRef.current;
+    if (!request) return;
+    const result = reveal(request.behavior, request.center, request.run);
+    if (result.status === "missing-node") {
+      updatePositionState((current) => current.run === request.run
+        ? { ...current, status: RIBBON_POSITION_STATES.blockedZeroWidth, reason: request.reason }
+        : current);
+    }
+  }, [reveal, updatePositionState]);
+
+  const scheduleAttempt = useCallback(() => {
+    if (ribbonPositionAttemptFrameRef.current != null || !ribbonPositionRequestRef.current) return;
+    ribbonPositionAttemptFrameRef.current = requestAnimationFrame(() => {
+      ribbonPositionAttemptFrameRef.current = null;
+      runAttempt();
+    });
+  }, [runAttempt]);
+
+  const beginPosition = useCallback((reason, { center = false, behavior = "auto" } = {}) => {
+    const oldLock = ribbonScrollLockRef.current;
+    if (oldLock) releaseScroll(oldLock.run);
+    const run = ribbonPositionRunRef.current + 1;
+    ribbonPositionRunRef.current = run;
+    ribbonPositionRequestRef.current = { run, retries: 0, center, behavior, reason };
+    updatePositionState({ status: RIBBON_POSITION_STATES.positioning, run, retries: 0, reason });
+    scheduleAttempt();
+    return run;
+  }, [releaseScroll, scheduleAttempt, updatePositionState]);
+
+  const retryPosition = useCallback((reason, { run = null, center = null } = {}) => {
+    const current = ribbonPositionRequestRef.current;
+    if (run != null && (!current || current.run !== run)) return;
+    if (!current) {
+      beginPosition(reason, { center: center ?? true, behavior: "auto" });
+      return;
+    }
+    if (ribbonPositionStateRef.current.run === current.run
+      && ribbonPositionStateRef.current.status === RIBBON_POSITION_STATES.settled) return;
+    const retries = nextRibbonRetry(current.retries, RIBBON_MAX_POSITION_RETRIES);
+    if (retries == null) {
+      updatePositionState((value) => value.run === current.run
+        ? { ...value, status: RIBBON_POSITION_STATES.blockedZeroWidth, reason: `retry-limit:${reason}` }
+        : value);
+      return;
+    }
+    ribbonPositionRequestRef.current = {
+      ...current,
+      retries,
+      center: center == null ? current.center : center,
+      behavior: "auto",
+      reason,
+    };
+    updatePositionState((value) => value.run === current.run
+      ? { ...value, status: RIBBON_POSITION_STATES.positioning, retries, reason }
+      : value);
+    clearTimeout(ribbonPositionRetryTimerRef.current);
+    ribbonPositionRetryTimerRef.current = setTimeout(scheduleAttempt, 0);
+  }, [beginPosition, scheduleAttempt, updatePositionState]);
+  ribbonRetryPositionRef.current = retryPosition;
+
+  const setWindow = useCallback((next) => {
+    const proposed = typeof next === "function" ? next(ribbonWindowStartRef.current) : next;
+    const clamped = Math.max(0, Math.min(ribbonSpan - RIBBON_RENDER_WINDOW_DAYS, Math.round(proposed)));
+    if (clamped === ribbonWindowStartRef.current) return;
+    ribbonVirtualWindowLockRef.current = true;
+    requestAnimationFrame(() => requestAnimationFrame(() => { ribbonVirtualWindowLockRef.current = false; }));
+    ribbonWindowStartRef.current = clamped;
+    setRibbonWindowStart(clamped);
+  }, [ribbonSpan, setRibbonWindowStart]);
+
+  const shift = useCallback((direction) => {
+    if (ribbonShiftPendingRef.current) return;
+    const strip = stripRef.current;
+    const cell = strip?.querySelector("[data-day]");
+    const width = cell?.getBoundingClientRect().width || RIBBON_FALLBACK_CELL_WIDTH;
+    const signedDays = direction === "before" ? -RIBBON_SHIFT_DAYS : RIBBON_SHIFT_DAYS;
+    ribbonShiftPendingRef.current = true;
+    ribbonScrollAnchorRef.current = direction === "before"
+      ? width * RIBBON_SHIFT_DAYS
+      : -width * RIBBON_SHIFT_DAYS;
+    setWindow((current) => current + (direction === "before" ? RIBBON_SHIFT_DAYS : -RIBBON_SHIFT_DAYS));
+    setRibbonRange((current) => ({
+      startKey: addDaysToKey(current.startKey, signedDays),
+      endKey: addDaysToKey(current.endKey, signedDays),
+    }));
+  }, [setRibbonRange, setWindow]);
+
+  const onScroll = useCallback(() => {
+    const strip = stripRef.current;
+    measureEdges();
+    if (!strip || ribbonShiftPendingRef.current || ribbonScrollLockRef.current || ribbonVirtualWindowLockRef.current) return;
+    const cell = strip.querySelector("[data-day]");
+    const width = cell?.getBoundingClientRect().width || RIBBON_FALLBACK_CELL_WIDTH;
+    const edge = Math.max(160, width * RIBBON_EDGE_BUFFER_DAYS);
+    if (strip.scrollLeft <= edge) { shift("before"); return; }
+    if (strip.scrollLeft + strip.clientWidth >= strip.scrollWidth - edge) { shift("after"); return; }
+    setWindow(Math.floor(strip.scrollLeft / width) - RIBBON_RENDER_BUFFER_DAYS);
+  }, [measureEdges, setWindow, shift]);
+
+  const ensureDateVisible = useCallback((key) => {
+    if (!enabled || (zoom !== "week" && zoom !== "day")) return;
+    if (key < ribbonRange.startKey || key >= ribbonRange.endKey) {
+      ribbonCenterPendingRef.current = true;
+      setWindow(RIBBON_RADIUS_DAYS - RIBBON_RENDER_BUFFER_DAYS);
+      return;
+    }
+    const index = diffDays(key, ribbonRange.startKey);
+    const windowEnd = Math.min(ribbonSpan, ribbonWindowStartRef.current + RIBBON_RENDER_WINDOW_DAYS);
+    if (index < ribbonWindowStartRef.current || index >= windowEnd) {
+      ribbonCenterPendingRef.current = true;
+      setWindow(index - RIBBON_RENDER_BUFFER_DAYS);
+    }
+  }, [enabled, ribbonRange.endKey, ribbonRange.startKey, ribbonSpan, setWindow, zoom]);
+
+  useLayoutEffect(() => {
+    const anchor = ribbonScrollAnchorRef.current;
+    if (anchor == null || !stripRef.current) return;
+    ribbonVirtualWindowLockRef.current = true;
+    stripRef.current.scrollLeft = Math.max(0, stripRef.current.scrollLeft + anchor);
+    ribbonScrollAnchorRef.current = null;
+    ribbonShiftPendingRef.current = false;
+    requestAnimationFrame(() => requestAnimationFrame(() => { ribbonVirtualWindowLockRef.current = false; }));
+  }, [ribbonRange.startKey, ribbonRange.endKey]);
+
+  useLayoutEffect(() => {
+    if (!enabled || !ready || !ribbonNode || !ribbonActiveNode) return;
+    /* Readiness is scoped to the mounted strip, not to whether the previous
+       scroll transaction happened to emit `scrollend` yet. Chromium can omit
+       that event for an instant `scrollTo`, leaving the state as positioning
+       even though the selected cell is already painted. A following adjacent
+       date must inherit the current scroll position, never mistake that stale
+       state for first mount and recenter by one whole cell. A remounted strip
+       has no request yet, so it still receives the initial placement policy. */
+    const initial = ribbonPositionRequestRef.current == null;
+    beginPosition("view-ready", {
+      center: initial || ribbonCenterPendingRef.current,
+      behavior: initial || ribbonCenterPendingRef.current ? "auto" : "smooth",
+    });
+    ribbonCenterPendingRef.current = false;
+  }, [beginPosition, enabled, ready, ribbonActiveNode, ribbonNode, selectedDateKey]);
+
+  useLayoutEffect(() => {
+    if (!ribbonCenterPendingRef.current || !ribbonNode || !ribbonActiveNode) return;
+    beginPosition("virtual-window-remount", { center: false, behavior: "auto" });
+    ribbonCenterPendingRef.current = false;
+  }, [beginPosition, mounted, ribbonActiveNode, ribbonNode, ribbonRange.endKey, ribbonRange.startKey, ribbonWindowStart]);
+
+  useEffect(() => {
+    if (!ribbonNode) return undefined;
+    let live = true;
+    const onScrollEnd = () => {
+      const lock = ribbonScrollLockRef.current;
+      if (lock?.supportsScrollEnd) releaseScroll(lock.run);
+    };
+    const retryIfVisible = (reason) => {
+      if (!live || document.visibilityState === "hidden") return;
+      measureEdges();
+      if (ribbonNode.clientWidth > 0) retryPosition(reason);
+    };
+    const onResize = () => retryIfVisible("nonzero-resize");
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") retryIfVisible("visibility-restored");
+    };
+    ribbonNode.addEventListener("scrollend", onScrollEnd);
+    ribbonNode.addEventListener("scroll", measureEdges, { passive: true });
+    window.addEventListener("resize", onResize);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(onResize) : null;
+    observer?.observe(ribbonNode);
+    measureEdges();
+    const fontPromise = document.fonts?.ready
+      ? document.fonts.ready.then(() => retryIfVisible("fonts-ready")).catch(() => {})
+      : null;
+    return () => {
+      live = false;
+      ribbonNode.removeEventListener("scrollend", onScrollEnd);
+      ribbonNode.removeEventListener("scroll", measureEdges);
+      window.removeEventListener("resize", onResize);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      observer?.disconnect();
+      void fontPromise;
+    };
+  }, [measureEdges, releaseScroll, retryPosition, ribbonNode]);
+
+  return {
+    attachRibbon,
+    attachActiveRibbon,
+    onScroll,
+    edges,
+    positionState,
+    setWindow,
+    ensureDateVisible,
+  };
+}

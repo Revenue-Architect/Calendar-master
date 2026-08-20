@@ -141,6 +141,12 @@ import { eventForUi } from "./features/planner/eventPresentation.js";
 import { projectPlannerDay } from "./features/planner/dayProjection.js";
 import { findOpenSlots } from "./features/planner/slotSearch.js";
 import {
+  RIBBON_RADIUS_DAYS,
+  RIBBON_RENDER_BUFFER_DAYS,
+  RIBBON_RENDER_WINDOW_DAYS,
+} from "./features/planner/ribbonViewport.js";
+import useRibbonViewport from "./features/planner/useRibbonViewport.js";
+import {
   busyFractionForDay, busyFractionsForRange, monthDensitiesForRange, projectDayPeek, projectPlannerWeek,
 } from "./features/planner/weekProjection.js";
 import {
@@ -343,15 +349,6 @@ function repeatFor(freq, current, dateKey) {
   };
 }
 
-/* The ribbon is a rolling window, not a date limit. Keeping roughly two years
-   mounted gives the person room to browse without making the DOM grow forever;
-   reaching an edge shifts that window by one year and preserves the viewport. */
-const RIBBON_RADIUS_DAYS = 366;
-const RIBBON_SHIFT_DAYS = 366;
-const RIBBON_EDGE_BUFFER_DAYS = 14;
-const RIBBON_FALLBACK_CELL_WIDTH = 80;
-const RIBBON_RENDER_BUFFER_DAYS = 18;
-const RIBBON_RENDER_WINDOW_DAYS = 56;
 const TIMELINE_FOCUS_TRIGGER_PX = 24;
 /* How long the load-in fade will wait for a frame before giving up and simply
    showing the content. Long enough that a healthy page always animates on the
@@ -775,14 +772,28 @@ export default function Planner() {
   const [motivationSaveBlocked, setMotivationSaveBlocked] = useState(false);
   const [storageFailures, setStorageFailures] = useState(() => new Set(storage.writable ? [] : ["device"]));
 
-  const stripRef = useRef(null);
-  const activeRef = useRef(null);
-  const ribbonShiftPendingRef = useRef(false);
-  const ribbonScrollAnchorRef = useRef(null);
-  const ribbonCenterPendingRef = useRef(false);
-  const ribbonPositionedRef = useRef(false);
-  const ribbonWindowStartRef = useRef(ribbonInitialWindowStart);
-  const ribbonScrollLockRef = useRef(false);
+  const ribbon = useRibbonViewport({
+    enabled: ready && viewMode !== "actions" && (zoom === "week" || zoom === "day"),
+    ready,
+    mounted,
+    selectedDateKey: dateKey,
+    zoom,
+    viewMode,
+    ribbonRange,
+    ribbonSpan,
+    ribbonWindowStart,
+    setRibbonWindowStart,
+    setRibbonRange,
+  });
+  const {
+    attachRibbon,
+    attachActiveRibbon,
+    onScroll: onRibbonScroll,
+    edges: ribbonEdges,
+    positionState: ribbonPositionState,
+    setWindow: setRibbonWindow,
+    ensureDateVisible: ensureRibbonDateVisible,
+  } = ribbon;
   /* The timeline's touch gestures are delegated to the stream element rather than
      bound per card, so the effect that installs them has to know when that element
      is *replaced* — and it is, routinely: the page wrapper is keyed on the day
@@ -801,7 +812,6 @@ export default function Planner() {
   const timelineAutoPositionRef = useRef(false);
   const timelineUserScrollRef = useRef(false);
   const timelineScrollSessionRef = useRef(createScrollSession());
-  const ribbonNodeRef = useRef(null);
   const interactionRef = useRef(createIdleInteraction());
   const [streamNode, setStreamNode] = useState(null);
   const [dayHourHeight, setDayHourHeight] = useState(HOUR_H);
@@ -811,13 +821,6 @@ export default function Planner() {
     streamRef.current = node;
     timelineScrollTopRef.current = node?.scrollTop ?? 0;
     setStreamNode(node);
-  }, []);
-  const attachRibbon = useCallback((node) => {
-    stripRef.current = node;
-    if (ribbonNodeRef.current !== node) {
-      ribbonNodeRef.current = node;
-      ribbonPositionedRef.current = false;
-    }
   }, []);
   useEffect(() => {
     if (!streamNode) return undefined;
@@ -882,72 +885,6 @@ export default function Planner() {
      transformed — see `timelineLayout`. */
   const laneFreeze = useRef(null);
   const [anyTimeRef, anyTimeFade] = useEdgeFade();
-  /* The strip is a scroll container too, and the same argument applies: without
-     this the day cell at the edge is sliced down the middle by the arrow beside
-     it, which reads as a rendering fault rather than "there is more this way". */
-  const [, stripFade] = useEdgeFade(stripRef);
-  const revealRibbonCell = useCallback((behavior = "auto", center = false) => {
-    const strip = stripRef.current;
-    const cell = activeRef.current;
-    if (!strip || !cell) return;
-    const inset = 24;
-    const left = cell.offsetLeft;
-    const right = left + cell.offsetWidth;
-    const visibleLeft = strip.scrollLeft;
-    const visibleRight = visibleLeft + strip.clientWidth;
-    let next = center
-      ? Math.max(0, left - (strip.clientWidth - cell.offsetWidth) / 2)
-      : visibleLeft;
-    if (!center && left < visibleLeft + inset) next = Math.max(0, left - inset);
-    else if (!center && right > visibleRight - inset) next = Math.max(0, right - strip.clientWidth + inset);
-    if (Math.abs(next - visibleLeft) < 1) return;
-    /* Returning from Actions remounts the strip. Instant placement keeps the
-       selected cell inside the first painted frame instead of waiting on a
-       smooth scroll that can be cancelled mid-flight. */
-    strip.scrollTo({ left: next, behavior: behavior === "smooth" && ribbonPositionedRef.current ? "smooth" : "auto" });
-  }, []);
-  const setRibbonWindow = useCallback((next) => {
-    const proposed = typeof next === "function" ? next(ribbonWindowStartRef.current) : next;
-    const clamped = Math.max(0, Math.min(ribbonSpan - RIBBON_RENDER_WINDOW_DAYS, Math.round(proposed)));
-    if (clamped === ribbonWindowStartRef.current) return;
-    ribbonScrollLockRef.current = true;
-    requestAnimationFrame(() => requestAnimationFrame(() => { ribbonScrollLockRef.current = false; }));
-    ribbonWindowStartRef.current = clamped;
-    setRibbonWindowStart(clamped);
-  }, [ribbonSpan]);
-  const shiftRibbon = useCallback((direction) => {
-    if (ribbonShiftPendingRef.current) return;
-    const strip = stripRef.current;
-    const cell = strip?.querySelector("[data-day]");
-    const width = cell?.getBoundingClientRect().width || RIBBON_FALLBACK_CELL_WIDTH;
-    const signedDays = direction === "before" ? -RIBBON_SHIFT_DAYS : RIBBON_SHIFT_DAYS;
-    ribbonShiftPendingRef.current = true;
-    ribbonScrollAnchorRef.current = direction === "before"
-      ? width * RIBBON_SHIFT_DAYS
-      : -width * RIBBON_SHIFT_DAYS;
-    setRibbonWindow((current) => current + (direction === "before" ? RIBBON_SHIFT_DAYS : -RIBBON_SHIFT_DAYS));
-    setRibbonRange((current) => ({
-      startKey: addDaysToKey(current.startKey, signedDays),
-      endKey: addDaysToKey(current.endKey, signedDays),
-    }));
-  }, [setRibbonWindow]);
-  const onRibbonScroll = useCallback(() => {
-    const strip = stripRef.current;
-    if (!strip || ribbonShiftPendingRef.current || ribbonScrollLockRef.current) return;
-    const cell = strip.querySelector("[data-day]");
-    const width = cell?.getBoundingClientRect().width || RIBBON_FALLBACK_CELL_WIDTH;
-    const edge = Math.max(160, width * RIBBON_EDGE_BUFFER_DAYS);
-    if (strip.scrollLeft <= edge) { shiftRibbon("before"); return; }
-    if (strip.scrollLeft + strip.clientWidth >= strip.scrollWidth - edge) { shiftRibbon("after"); return; }
-    setRibbonWindow(Math.floor(strip.scrollLeft / width) - RIBBON_RENDER_BUFFER_DAYS);
-  }, [setRibbonWindow, shiftRibbon]);
-  useLayoutEffect(() => {
-    const anchor = ribbonScrollAnchorRef.current;
-    if (anchor == null || !stripRef.current) return;
-    stripRef.current.scrollLeft = Math.max(0, stripRef.current.scrollLeft + anchor);
-    ribbonScrollAnchorRef.current = null;
-    ribbonShiftPendingRef.current = false;
-  }, [ribbonRange.startKey, ribbonRange.endKey]);
   const startGesture = (g) => { gestureRef.current = g; setGesture(g); };
   const endGesture = () => { gestureRef.current = null; setGesture(null); };
 
@@ -1342,20 +1279,9 @@ export default function Planner() {
        outside the current rolling window. Recenter around the requested day,
        then let the layout effect place that cell without a blank intermediate
        ribbon. */
-    ribbonCenterPendingRef.current = true;
-    ribbonScrollAnchorRef.current = null;
-    ribbonShiftPendingRef.current = false;
-    setRibbonWindow(RIBBON_RADIUS_DAYS - RIBBON_RENDER_BUFFER_DAYS);
+    ensureRibbonDateVisible(dateKey);
     setRibbonRange(ribbonRangeAround(dateKey));
-  }, [dateKey, ribbonRange.startKey, ribbonRange.endKey, setRibbonWindow]);
-  useLayoutEffect(() => {
-    if (zoom !== "week" && zoom !== "day") return;
-    const index = diffDays(dateKey, ribbonRange.startKey);
-    if (index < ribbonWindowStart || index >= ribbonWindowEnd) {
-      ribbonCenterPendingRef.current = true;
-      setRibbonWindow(index - RIBBON_RENDER_BUFFER_DAYS);
-    }
-  }, [dateKey, ribbonRange.startKey, ribbonWindowStart, ribbonWindowEnd, zoom, setRibbonWindow]);
+  }, [dateKey, ensureRibbonDateVisible, ribbonRange.endKey, ribbonRange.startKey]);
   const monthGrid = useMemo(() => {
     const first = new Date(monthCursor.getFullYear(), monthCursor.getMonth(), 1);
     const start = addDays(first, backToWeekStart(first.getDay()));
@@ -1535,26 +1461,6 @@ export default function Planner() {
     prevLevel.current = level;
   }, [level, preferences, beep, buzz]);
 
-  useLayoutEffect(() => {
-    if (viewMode === "actions" || (zoom !== "week" && zoom !== "day")) return;
-    if (!ready || !activeRef.current || !stripRef.current) return;
-    const initial = !ribbonPositionedRef.current;
-    /* Remounts and date/view changes re-anchor. Virtual-window shifts from the
-       person's own scroll must not yank the selected cell back into view. */
-    if (!initial && ribbonCenterPendingRef.current === false) {
-      revealRibbonCell("smooth", false);
-      return;
-    }
-    revealRibbonCell("auto", initial);
-    ribbonPositionedRef.current = true;
-    ribbonCenterPendingRef.current = false;
-  }, [dateKey, ready, zoom, viewMode, revealRibbonCell]);
-  useLayoutEffect(() => {
-    if (!ribbonCenterPendingRef.current || !activeRef.current || !stripRef.current) return;
-    revealRibbonCell("auto");
-    ribbonCenterPendingRef.current = false;
-  }, [ribbonRange.startKey, ribbonRange.endKey, ribbonWindowStart, mounted, revealRibbonCell]);
-
   useEffect(() => {
     if (!ready || !streamRef.current) return;
     const first = timed.slice().sort((a, b) => a.start - b.start)[0];
@@ -1727,19 +1633,6 @@ export default function Planner() {
   const laneL = liveTimelineItem ? (liveTimelineItem.lane / liveTimelineItem.cols) * 100 : 0;
 
   /* ─── day turning ─── */
-  const ensureRibbonDateVisible = useCallback((key) => {
-    if (zoom !== "week" && zoom !== "day") return;
-    if (key < ribbonRange.startKey || key >= ribbonRange.endKey) {
-      ribbonCenterPendingRef.current = true;
-      setRibbonWindow(RIBBON_RADIUS_DAYS - RIBBON_RENDER_BUFFER_DAYS);
-      return;
-    }
-    const index = diffDays(key, ribbonRange.startKey);
-    if (index < ribbonWindowStart || index >= ribbonWindowEnd) {
-      ribbonCenterPendingRef.current = true;
-      setRibbonWindow(index - RIBBON_RENDER_BUFFER_DAYS);
-    }
-  }, [ribbonRange.startKey, ribbonRange.endKey, ribbonWindowStart, ribbonWindowEnd, setRibbonWindow, zoom]);
   const goDay = useCallback((n) => {
     beep("page");
     setTurn({ dir: n, k: uid() });
@@ -3006,7 +2899,9 @@ export default function Planner() {
     };
     /* Whatever the release lands on, an edge that was never dragged is not held
        any more. */
-    const drop = () => { armedResizeRef.current = null; };
+    const drop = () => {
+      armedResizeRef.current = null;
+    };
     const cancel = () => {
       armedResizeRef.current = null;
       if (gestureRef.current) abortGesture();
@@ -3035,6 +2930,10 @@ export default function Planner() {
   const canvasUp = (e) => {
     if (e.pointerType === "touch") return;
     disarmHold();
+    /* A task can be picked up from the Actions panel and released over this
+       canvas. This handler owns canvas-created event/draft gestures only; the
+       shared window drop handler owns that cross-surface task drop. */
+    if (gestureRef.current?.mode === "task") return;
     if (gestureRef.current) {
       const live = gestureRef.current;
       const moved = gestureChangedAnything(
@@ -3964,11 +3863,13 @@ export default function Planner() {
             {zoom === "day" && (
               <button onClick={() => goDay(-1)} aria-label="Previous day" style={{ color: T.dimText }} className="nb-tap nb-hover-icon shrink-0 px-2 sm:px-3 py-1 flex items-center justify-center"><ChevronIcon direction="left" /></button>
             )}
+            <div className="relative flex-1 min-w-0" data-test="ribbon-viewport"
+              data-ribbon-position={ribbonPositionState.status}>
             <div ref={attachRibbon} data-test="day-ribbon" data-ribbon-start={ribbonRange.startKey}
               data-ribbon-end={addDaysToKey(ribbonRange.endKey, -1)} data-ribbon-total-days={ribbonSpan}
               data-ribbon-window-start={ribbonWindowStart} data-ribbon-window-end={ribbonWindowEnd - 1}
               data-owns-swipe="scroller"
-              onScroll={onRibbonScroll} style={stripFade} className="nb-x overflow-x-auto flex-1 min-w-0">
+              onScroll={onRibbonScroll} className="nb-x overflow-x-auto flex-1 min-w-0">
             <div className="flex min-w-max">
               <div aria-hidden="true" className="nb-ribbon-spacer" style={{ "--nb-ribbon-cells": ribbonWindowStart }} />
               {ribbonDays.map((d, visibleIndex) => {
@@ -3978,7 +3879,7 @@ export default function Planner() {
                 const n = ribbonDensities.get(k) ?? 0;
                 const target = gesture && gesture.overDay === k;
                 return (
-                  <button key={k} data-day={k} ref={on ? activeRef : null} onClick={() => jumpTo(k)}
+                  <button key={k} data-day={k} ref={on ? attachActiveRibbon : null} onClick={() => jumpTo(k)}
                     className="nb-cell nb-tap relative w-16 sm:w-20 lg:w-24 shrink-0 py-2.5"
                     style={{ transitionDelay: `${Math.min(i, 10) * 14}ms`, boxShadow: target ? `inset 0 0 0 2px ${T.accent}` : "none" }}>
                     {/* Selection is a filled cell and today is an outlined one. Washing
@@ -4005,6 +3906,13 @@ export default function Planner() {
               })}
               <div aria-hidden="true" className="nb-ribbon-spacer" style={{ "--nb-ribbon-cells": Math.max(0, ribbonSpan - ribbonWindowEnd) }} />
             </div>
+            </div>
+            {ribbonEdges.start && <span data-test="ribbon-edge-start" aria-hidden="true"
+              className="pointer-events-none absolute inset-y-0 left-0 w-5"
+              style={{ background: `linear-gradient(90deg, ${T.bg}, transparent)` }} />}
+            {ribbonEdges.end && <span data-test="ribbon-edge-end" aria-hidden="true"
+              className="pointer-events-none absolute inset-y-0 right-0 w-6"
+              style={{ background: `linear-gradient(270deg, ${T.bg}, transparent)` }} />}
             </div>
             {zoom === "day" && (
               <button onClick={() => goDay(1)} aria-label="Next day" style={{ color: T.dimText }} className="nb-tap nb-hover-icon shrink-0 px-2 sm:px-3 py-1 flex items-center justify-center"><ChevronIcon /></button>
@@ -4222,7 +4130,7 @@ export default function Planner() {
                 {dayTasks.some((task) => task.planned.startMinute == null) && (
                   <>
                     <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label mt-1">ANY TIME</span>
-                    <div ref={anyTimeRef} data-owns-swipe="scroller" style={anyTimeFade} className="flex gap-1.5 overflow-x-auto nb-x pb-0.5">
+                    <div ref={anyTimeRef} data-test="any-time-row" data-owns-swipe="scroller" style={anyTimeFade} className="flex gap-1.5 overflow-x-auto nb-x pb-0.5">
                       {dayTasks.filter((task) => task.planned.startMinute == null).map((task) => (
                         <button key={task.id}
                           onClick={() => { beep("click"); setInspect({ kind: "task", id: task.id }); }}

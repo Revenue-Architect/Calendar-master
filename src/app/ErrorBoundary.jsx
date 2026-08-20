@@ -5,6 +5,8 @@ import {
   readHostNotebook,
   recoveryDisplayState,
 } from "./notebookRecovery.js";
+import { removeBootShell } from "./bootFallback.js";
+import { markRootCommitted, recordBoundaryFailure } from "./bootLifecycle.js";
 
 /* The last thing standing between a render error and someone's notebook.
  *
@@ -64,6 +66,13 @@ export class ErrorBoundary extends React.Component {
        how a bad record becomes a boot loop. */
     // eslint-disable-next-line no-console
     console.error("Planner crashed", error, info?.componentStack);
+    /* The fallback is itself a successful React root commit. Record only the
+       classification, never the exception text or component content, and make
+       sure the static boot message cannot remain behind the recovery UI. */
+    recordBoundaryFailure();
+    markRootCommitted({ reason: "boundary-fallback" });
+    removeBootShell();
+    globalThis.__plannerBootCommit?.();
     this.lookForHostNotebook();
   }
 

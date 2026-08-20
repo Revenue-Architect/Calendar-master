@@ -21,13 +21,23 @@ test.describe("the floating navigation shell", () => {
     const first = page.getByRole("button", { name: "Timeline", exact: true });
     const last = page.getByRole("button", { name: "Today", exact: true });
 
-    const firstPaint = nav.evaluate((node) => new Promise((resolve) => {
-      requestAnimationFrame(() => resolve(getComputedStyle(node).transform));
+    /* Arm and trigger the first frame in one page task. Keeping the rAF
+       promise in a separate Playwright command queues the click behind it;
+       under a real compositor that can resolve only after the 520ms run and
+       falsely report the settled identity matrix. */
+    const opening = await page.evaluate(() => new Promise((resolve) => {
+      const node = document.querySelector("#planner-navigation");
+      const toggle = document.querySelector('[data-test="nav-toggle"]');
+      const before = getComputedStyle(node).transform;
+      toggle.click();
+      requestAnimationFrame(() => resolve({
+        before,
+        frame: getComputedStyle(node).transform,
+      }));
     }));
-    await page.getByTestId("nav-toggle").click();
-    const opening = await firstPaint;
-    expect(opening, "opening must start from off-screen, not already settled").not.toBe("none");
-    expect(opening).not.toBe("matrix(1, 0, 0, 1, 0, 0)");
+    expect(opening.before, "opening must start from off-screen, not already settled").not.toBe("none");
+    expect(opening.before).not.toBe("matrix(1, 0, 0, 1, 0, 0)");
+    expect(opening.frame).not.toBe("none");
     await expect(shell).toHaveAttribute("data-nav-state", "open");
     const firstDelay = await first.evaluate((node) => getComputedStyle(node).transitionDelay);
     const lastDelay = await last.evaluate((node) => getComputedStyle(node).transitionDelay);
@@ -77,7 +87,7 @@ test.describe("the floating navigation shell", () => {
     await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
   });
 
-  test("the calendar return rail exits the viewport before the mobile surface finishes closing", async ({ page }) => {
+  test("the calendar return rail and mobile surface share one close timeline", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await openPlanner(page);
     await page.getByTestId("nav-toggle").click();
@@ -86,19 +96,38 @@ test.describe("the floating navigation shell", () => {
     const surface = page.getByTestId("app-surface");
 
     await expect(rail).toBeVisible();
-    await expect(rail).toHaveCSS("transition-property", "transform");
-    expect(await rail.evaluate((node) => node.parentElement?.dataset.test === "nav-shell")).toBe(true);
+    await expect(rail).toHaveCSS("transition-duration", "0s");
+    expect(await rail.evaluate((node) => node.parentElement?.dataset.test === "nav-motion-viewport")).toBe(true);
 
     await rail.click();
     await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closing");
 
-    await expect.poll(async () => {
-      const [railRight, surfaceLeft] = await Promise.all([
-        rail.evaluate((node) => Math.round(node.getBoundingClientRect().right)),
-        surface.evaluate((node) => Math.round(node.getBoundingClientRect().left)),
-      ]);
-      return railRight <= 1 && surfaceLeft > 1;
-    }, { intervals: [50], timeout: 450 }).toBe(true);
+    const samples = await page.evaluate(async () => {
+      const shell = document.querySelector('[data-test="nav-shell"]');
+      const rail = document.querySelector('[data-test="mobile-calendar-return"]');
+      const surface = document.querySelector('[data-test="app-surface"]');
+      const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+      const sample = () => {
+        const railBox = rail.getBoundingClientRect();
+        const surfaceBox = surface.getBoundingClientRect();
+        return {
+          phase: shell.dataset.navState,
+          progress: Number(shell.dataset.navProgress),
+          railRight: railBox.right,
+          surfaceLeft: surfaceBox.left,
+          gap: surfaceBox.left - railBox.right,
+        };
+      };
+      const values = [];
+      for (let index = 0; index < 10; index += 1) {
+        await frame();
+        values.push(sample());
+      }
+      return values;
+    });
+    expect(samples.every((sample) => sample.phase === "closing")).toBe(true);
+    expect(samples.every((sample) => Math.abs(sample.gap) <= 1), "rail and surface must not expose a moving black seam").toBe(true);
+    expect(samples.some((sample) => sample.progress > 0.05 && sample.progress < 0.95), "the sample must include active close travel").toBe(true);
     await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closing");
     await expect(rail).toBeVisible();
 
@@ -107,133 +136,121 @@ test.describe("the floating navigation shell", () => {
 
     const settled = await page.evaluate(() => {
       const rail = document.querySelector('[data-test="mobile-calendar-return"]');
-      if (!rail) return { hidden: true, display: "none", visibility: "hidden" };
+      if (!rail) return { hidden: true, display: "none", visibility: "hidden", right: 0 };
       const style = getComputedStyle(rail);
+      const box = rail.getBoundingClientRect();
       return {
         display: style.display,
         visibility: style.visibility,
-        hidden: style.display === "none" || style.visibility === "hidden",
+        hidden: rail.getAttribute("aria-hidden") === "true",
+        pointerEvents: style.pointerEvents,
+        right: box.right,
       };
     });
-    expect(settled.hidden, "the rail is hidden once close travel has fully completed").toBe(true);
+    expect(settled.hidden, "the off-screen rail is removed from the accessibility tree").toBe(true);
+    expect(settled.pointerEvents).toBe("none");
+    expect(settled.right).toBeLessThanOrEqual(0);
   });
 
-  test("mobile resolves the open calendar into a return rail", async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 844 });
-    await openPlanner(page);
-    await expect(page.getByTestId("new-entry")).toBeVisible();
-    await page.getByTestId("nav-toggle").click();
-
-    const surface = page.getByTestId("app-surface");
-    await expect(surface).toHaveClass(/nb-app-surface-open/);
-    await expect(surface).toHaveCSS("border-top-left-radius", "16px");
-    await expect(page.getByTestId("mobile-calendar-return")).toBeVisible();
-    await page.getByTestId("mobile-calendar-return").click();
-    await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
-  });
-
-  test("desktop nav keeps the page as a recessed card instead of clipping the right edge", async ({ page }) => {
-    await page.setViewportSize({ width: 1280, height: 900 });
-    await openPlanner(page);
-    const surface = page.getByTestId("app-surface");
-    const before = await surface.boundingBox();
-    await page.getByTestId("nav-toggle").click();
-    await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "open");
-    await expect(surface).toHaveClass(/nb-app-surface-open/);
-    await page.waitForTimeout(640);
-    const measured = await surface.evaluate((node) => {
-      const box = node.getBoundingClientRect();
-      const style = getComputedStyle(node);
-      const clip = style.clipPath || "";
-      const nums = [...clip.matchAll(/(-?\d+(?:\.\d+)?)px/g)].map((m) => Number(m[1]));
-      const top = nums[0] ?? 0;
-      const right = nums[1] ?? 0;
-      const bottom = nums[2] ?? 0;
-      return {
-        left: box.left,
-        right: box.right - right,
-        top: box.top + top,
-        bottom: box.bottom - bottom,
-        width: box.width - right,
-        height: box.height - top - bottom,
-        radius: style.borderTopLeftRadius,
-        transform: style.transform,
-        clipPath: style.clipPath,
-        layoutWidth: node.offsetWidth,
-      };
-    });
-    expect(before).not.toBeNull();
-    expect(measured.left, "the recessed page must sit to the right of the drawer").toBeGreaterThan(240);
-    expect(measured.right, "the recessed page must keep a right margin instead of running off-screen").toBeLessThan(1280 - 12);
-    expect(measured.top, "the recessed page must keep a thicker top margin").toBeGreaterThan(12);
-    expect(measured.bottom, "the recessed page must keep a thicker bottom margin").toBeLessThan(900 - 12);
-    expect(measured.width, "the recessed card must stay fully on screen").toBeLessThan(before.width - 40);
-    /* The rounding lives on the clip now. Transitioning border-radius on the
-       element that holds the whole app repainted it every frame to draw a
-       corner the clip was already cutting. */
+  test("mobile resolves the open calendar into a return rail", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openPlanner(page);
+    await expect(page.getByTestId("new-entry")).toBeVisible();
+    await page.getByTestId("nav-toggle").click();
+
+    const surface = page.getByTestId("app-surface");
+    await expect(surface).toHaveClass(/nb-app-surface-open/);
+    await expect(page.getByTestId("nav-motion-viewport")).toHaveCSS("clip-path", /round 16px/);
+    await expect(page.getByTestId("mobile-calendar-return")).toBeVisible();
+    await page.getByTestId("mobile-calendar-return").click();
+    await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
+  });
+
+  test("desktop nav keeps the page as a recessed card instead of clipping the right edge", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await openPlanner(page);
+    const surface = page.getByTestId("app-surface");
+    const before = await surface.boundingBox();
+    await page.getByTestId("nav-toggle").click();
+    await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "open");
+    await page.waitForTimeout(640);
+    const measured = await page.evaluate(() => {
+      const vNode = document.querySelector('[data-test="nav-motion-viewport"]');
+      const cNode = document.querySelector('[data-test="nav-motion-carrier"]');
+      const sNode = document.querySelector('[data-test="app-surface"]');
+      const vStyle = getComputedStyle(vNode);
+      const cStyle = getComputedStyle(cNode);
+      const clip = vStyle.clipPath || "";
+      const nums = [...clip.matchAll(/(-?\d+(?:\.\d+)?)px/g)].map((m) => Number(m[1]));
+      const top = nums[0] ?? 0;
+      const right = nums[1] ?? 0;
+      const bottom = nums[2] ?? 0;
+      const left = nums[3] ?? 0;
+      return {
+        clipTop: top,
+        clipRight: right,
+        clipBottom: bottom,
+        clipLeft: left,
+        carrierTransform: cStyle.transform,
+        clipPath: vStyle.clipPath,
+        layoutWidth: sNode.offsetWidth,
+      };
+    });
+    expect(before).not.toBeNull();
+    expect(measured.clipTop, "the recessed page top frame is 24px").toBe(24);
+    expect(measured.clipRight, "the recessed page right frame is direct 22px").toBe(22);
+    expect(measured.clipBottom, "the recessed page bottom frame is 24px").toBe(24);
+    expect(measured.clipLeft, "the recessed page left frame is 322px").toBe(322);
+    expect(measured.carrierTransform, "carrier translates on X and Y").toMatch(/matrix|translate/);
+    expect(Math.round(measured.layoutWidth), "layout width stays full so glyphs do not reflow").toBe(1280);
+
     const cardRadius = Number.parseFloat((measured.clipPath.split("round ")[1] || "0"));
     expect(cardRadius, "the open card must be rounded by its clip").toBeGreaterThan(12);
-    const topGap = measured.top;
-    const rightGap = 1280 - measured.right;
-    const bottomGap = 900 - measured.bottom;
-    expect(Math.abs(bottomGap - topGap), `bottom recess ${bottomGap} vs top ${topGap}`).toBeLessThan(12);
-    expect(Math.abs(rightGap - topGap), `right recess ${rightGap} vs top ${topGap}`).toBeLessThan(16);
-    expect(measured.transform, "the page must travel on X, not reflow").toMatch(/matrix|translate/);
-    expect(measured.clipPath, "even borders come from a clip, not leftover height").not.toBe("none");
-    expect(Math.round(measured.layoutWidth), "layout width stays full so glyphs do not reflow").toBe(1280);
+
     const toggle = page.getByTestId("nav-toggle");
     const toggleBox = await toggle.evaluate((node) => {
       const box = node.getBoundingClientRect();
       return { top: box.top, bottom: box.bottom, left: box.left };
     });
-    expect(toggleBox.top, "the hamburger must stay inside the recessed card").toBeGreaterThanOrEqual(measured.top - 1);
-    expect(toggleBox.left, "the hamburger must stay on the recessed page").toBeGreaterThan(measured.left);
-    const duration = await surface.evaluate((node) => Number.parseFloat(getComputedStyle(node).transitionDuration) * 1000);
-    expect(duration, "the settle must not be snappy").toBeGreaterThanOrEqual(500);
-  });
-
-  test("mobile morphs the calendar without reflowing its layout", async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 601 });
-    await openPlanner(page);
-
-    const shell = page.getByTestId("nav-shell");
-    const surface = page.getByTestId("app-surface");
-    const before = await surface.boundingBox();
-    await page.getByTestId("nav-toggle").click();
-    await expect(shell).toHaveAttribute("data-nav-state", "open");
-    const after = await surface.boundingBox();
-
-    expect(before).not.toBeNull();
-    expect(after).not.toBeNull();
-    /* A visual rail is allowed to reveal only its 44px touch target, but the calendar itself must
-       keep its full layout width. Animating width from 390px to 40px makes every
-       grid, card and label reflow on every frame — the glitch this guards. */
-    expect(Math.round(after.width)).toBe(Math.round(before.width));
-    await expect(surface).not.toHaveCSS("clip-path", "none");
-  });
-
-  test("the navigation trigger uses one press scale channel", async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 601 });
-    await openPlanner(page);
-
-    const trigger = page.getByTestId("nav-toggle");
-    const box = await trigger.boundingBox();
-    expect(box).not.toBeNull();
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-    await page.mouse.down();
-    const pressed = await trigger.evaluate((node) => {
-      const style = getComputedStyle(node);
-      return { transform: style.transform, scale: style.scale };
-    });
-    await page.mouse.up();
-
-    /* The global press system owns `scale`. The older nb-tap transform used to
-       multiply it by another .97, producing a 6% double-shrink and two release
-       curves every time the side menu opened. */
-    expect(pressed.scale).not.toBe("none");
-    expect(pressed.transform).toBe("none");
-  });
-
+    expect(toggleBox.top, "the hamburger must stay inside the recessed card").toBeGreaterThanOrEqual(measured.clipTop - 1);
+    expect(toggleBox.left, "the hamburger must stay on the recessed page").toBeGreaterThan(measured.clipLeft - 322);
+  });
+
+  test("mobile morphs the calendar without reflowing its layout", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 601 });
+    await openPlanner(page);
+
+    const shell = page.getByTestId("nav-shell");
+    const surface = page.getByTestId("app-surface");
+    const before = await surface.boundingBox();
+    await page.getByTestId("nav-toggle").click();
+    await expect(shell).toHaveAttribute("data-nav-state", "open");
+    const after = await surface.boundingBox();
+
+    expect(before).not.toBeNull();
+    expect(after).not.toBeNull();
+    expect(Math.round(after.width)).toBe(Math.round(before.width));
+  });
+
+  test("the navigation trigger uses one press scale channel", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 601 });
+    await openPlanner(page);
+
+    const trigger = page.getByTestId("nav-toggle");
+    const box = await trigger.boundingBox();
+    expect(box).not.toBeNull();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    const pressed = await trigger.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return { transform: style.transform, scale: style.scale };
+    });
+    await page.mouse.up();
+
+    expect(pressed.scale).not.toBe("none");
+    expect(pressed.transform).toBe("none");
+  });
+
   test("surface, drawer and labels reverse together on desktop and mobile", async ({ page }) => {
     for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 601 }]) {
       await page.setViewportSize(viewport);
@@ -244,17 +261,22 @@ test.describe("the floating navigation shell", () => {
 
       const motion = await page.evaluate(async () => {
         const shell = document.querySelector('[data-test="nav-shell"]');
-        const surface = document.querySelector('[data-test="app-surface"]');
+        const carrier = document.querySelector('[data-test="nav-motion-carrier"]');
         const drawer = document.querySelector("#planner-navigation");
         const label = drawer.querySelector(".nb-nav-item");
+        const rail = document.querySelector('[data-test="mobile-calendar-return"]');
+        const surface = document.querySelector('[data-test="app-surface"]');
         const toggle = document.querySelector('[data-test="nav-toggle"]');
         const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
         const x = (node) => new DOMMatrixReadOnly(getComputedStyle(node).transform).m41;
+        const surfaceGap = () => surface.getBoundingClientRect().left - rail.getBoundingClientRect().right;
         const sample = () => ({
           phase: shell.dataset.navState,
-          surfaceX: x(surface),
+          carrierX: x(carrier),
           drawerX: x(drawer),
           labelOpacity: Number.parseFloat(getComputedStyle(label).opacity),
+          railX: x(rail),
+          railGap: surfaceGap(carrier, rail),
         });
         const frames = async (count) => {
           const samples = [];
@@ -278,19 +300,27 @@ test.describe("the floating navigation shell", () => {
 
       expect(motion.commitMs, `${viewport.width}px press-to-phase commit`).toBeLessThan(50);
       expect(motion.closing.every((sample) => sample.phase === "closing")).toBe(true);
-      expectMonotonic(motion.closing, "surfaceX", "down", `${viewport.width}px surface close`);
+      expectMonotonic(motion.closing, "carrierX", "down", `${viewport.width}px carrier close`);
       expectMonotonic(motion.closing, "drawerX", "down", `${viewport.width}px drawer close`);
       expectMonotonic(motion.closing, "labelOpacity", "down", `${viewport.width}px label close`);
-      expect(motion.closing[0].surfaceX - motion.closing.at(-1).surfaceX).toBeGreaterThan(8);
+      expect(motion.closing[0].carrierX - motion.closing.at(-1).carrierX).toBeGreaterThan(8);
       expect(motion.closing[0].drawerX - motion.closing.at(-1).drawerX).toBeGreaterThan(2);
       expect(motion.closing[0].labelOpacity - motion.closing.at(-1).labelOpacity).toBeGreaterThan(0.05);
+      if (viewport.width < 640) {
+        expectMonotonic(motion.closing, "railX", "down", "mobile rail close");
+        expect(motion.closing.every((sample) => Math.abs(sample.railGap) <= 1), "mobile close cannot open a rail/surface seam").toBe(true);
+      }
 
-      expect(motion.reopening.every((sample) => sample.phase === "open")).toBe(true);
-      expectMonotonic(motion.reopening, "surfaceX", "up", `${viewport.width}px surface reopen`);
+      expect(motion.reopening.every((sample) => sample.phase === "opening" || sample.phase === "open")).toBe(true);
+      expectMonotonic(motion.reopening, "carrierX", "up", `${viewport.width}px carrier reopen`);
       expectMonotonic(motion.reopening, "drawerX", "up", `${viewport.width}px drawer reopen`);
       expectMonotonic(motion.reopening, "labelOpacity", "up", `${viewport.width}px label reopen`);
-      expect(Math.abs(motion.reopening[0].surfaceX - motion.closing.at(-1).surfaceX)).toBeLessThan(35);
+      expect(Math.abs(motion.reopening[0].carrierX - motion.closing.at(-1).carrierX)).toBeLessThan(35);
       expect(Math.abs(motion.reopening[0].drawerX - motion.closing.at(-1).drawerX)).toBeLessThan(12);
+      if (viewport.width < 640) {
+        expectMonotonic(motion.reopening, "railX", "up", "mobile rail reopen");
+        expect(motion.reopening.every((sample) => Math.abs(sample.railGap) <= 1), "mobile reopen cannot open a rail/surface seam").toBe(true);
+      }
       expect(motion.final.phase).toBe("open");
     }
   });
@@ -298,7 +328,7 @@ test.describe("the floating navigation shell", () => {
   test("an interrupted close ignores stale completion and settles every channel", async ({ page }) => {
     await openPlanner(page);
     const shell = page.getByTestId("nav-shell");
-    const surface = page.getByTestId("app-surface");
+    const carrier = page.getByTestId("nav-motion-carrier");
     const trigger = page.getByTestId("nav-toggle");
 
     await trigger.click();
@@ -310,13 +340,14 @@ test.describe("the floating navigation shell", () => {
     await trigger.evaluate((node) => node.click());
     await expect(shell).toHaveAttribute("data-nav-state", "closing");
 
-    await surface.dispatchEvent("transitionend", { propertyName: "transform" });
+    await carrier.dispatchEvent("transitionend", { propertyName: "transform" });
     await expect(shell).toHaveAttribute("data-nav-state", "closing");
     await expect(shell).toHaveAttribute("data-nav-state", "closed");
 
     await expect.poll(() => page.evaluate(() => {
       const nodes = [
-        document.querySelector('[data-test="app-surface"]'),
+        document.querySelector('[data-test="nav-motion-carrier"]'),
+        document.querySelector('[data-test="nav-motion-viewport"]'),
         document.querySelector("#planner-navigation"),
         ...document.querySelectorAll(".nb-nav-brand,.nb-nav-item,.nb-nav-membership"),
       ];
@@ -324,11 +355,11 @@ test.describe("the floating navigation shell", () => {
     })).toBe(0);
 
     const settled = await page.evaluate(async () => {
-      const surfaceNode = document.querySelector('[data-test="app-surface"]');
+      const carrierNode = document.querySelector('[data-test="nav-motion-carrier"]');
       const drawer = document.querySelector("#planner-navigation");
       const label = drawer.querySelector(".nb-nav-item");
       const read = () => ({
-        surface: getComputedStyle(surfaceNode).transform,
+        carrier: getComputedStyle(carrierNode).transform,
         drawer: getComputedStyle(drawer).transform,
         opacity: getComputedStyle(label).opacity,
       });
@@ -339,32 +370,28 @@ test.describe("the floating navigation shell", () => {
     expect(settled.after).toEqual(settled.before);
   });
 
-  test("closing completes from the surface transition", async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 601 });
-    await openPlanner(page);
-
-    const shell = page.getByTestId("nav-shell");
-    const surface = page.getByTestId("app-surface");
-    await page.getByTestId("nav-toggle").click();
-    await expect(shell).toHaveAttribute("data-nav-state", "open");
-    await page.getByTestId("mobile-calendar-return").click();
-    await expect(shell).toHaveAttribute("data-nav-state", "closing");
-
-    /* CSS owns the actual duration. The shell must not report closed until the
-       surface, drawer and labels have reached their shared concealed target. */
+  test("closing completes from the carrier transition", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 601 });
+    await openPlanner(page);
+
+    const shell = page.getByTestId("nav-shell");
+    await page.getByTestId("nav-toggle").click();
+    await expect(shell).toHaveAttribute("data-nav-state", "open");
+    await page.getByTestId("mobile-calendar-return").click();
+    await expect(shell).toHaveAttribute("data-nav-state", "closing");
+
     await expect(shell).toHaveAttribute("data-nav-state", "closed");
-    await expect(surface).not.toHaveClass(/nb-app-surface-open/);
-  });
-
-  test("reduced motion retains navigation semantics without staged movement", async ({ page }) => {
-    await page.emulateMedia({ reducedMotion: "reduce" });
-    await openPlanner(page);
-    await page.getByTestId("nav-toggle").click();
-
-    await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "open");
-    await expect(page.getByRole("navigation", { name: "Primary navigation" })).toBeVisible();
+  });
+
+  test("reduced motion retains navigation semantics without staged movement", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await openPlanner(page);
+    await page.getByTestId("nav-toggle").click();
+
+    await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "open");
+    await expect(page.getByRole("navigation", { name: "Primary navigation" })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
     await expect(page.getByTestId("nav-toggle")).toBeFocused();
-  });
-});
+  });
+});

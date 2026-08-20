@@ -600,7 +600,7 @@ test.describe("rows that scroll sideways say so", () => {
     await expect(page.getByText("Buy milk").first()).toBeVisible();
 
     const oneChip = await page.evaluate(() => {
-      const el = [...document.querySelectorAll("div.overflow-x-auto")].find((n) => n.scrollWidth > 0 && n.querySelector("button"));
+      const el = document.querySelector('[data-test="any-time-row"]');
       return el ? { overflowing: el.scrollWidth - el.clientWidth > 2, mask: getComputedStyle(el).maskImage } : null;
     });
     expect(oneChip, "the any-time row should exist once something is undated").not.toBeNull();
@@ -614,7 +614,8 @@ test.describe("rows that scroll sideways say so", () => {
     }
     await page.waitForTimeout(300);
     const many = await page.evaluate(() => {
-      const el = [...document.querySelectorAll("div.overflow-x-auto")].find((n) => n.scrollWidth - n.clientWidth > 2 && n.querySelector("button"));
+      const el = document.querySelector('[data-test="any-time-row"]');
+      if (!el || el.scrollWidth - el.clientWidth <= 2) return "no overflowing any-time row";
       return el ? getComputedStyle(el).maskImage : "no overflowing row";
     });
     expect(many, "an overflowing row should fade at the end it can scroll towards").toContain("gradient");
