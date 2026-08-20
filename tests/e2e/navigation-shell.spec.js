@@ -77,107 +77,30 @@ test.describe("the floating navigation shell", () => {
     await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
   });
 
-  /* The calendar return rail is a complete, stationary child owned by the
-     surface transform. It must not animate its own clip-path, transform, or opacity,
-     and must remain fully visible and aligned during open and close transitions until
-     closed travel has completed. */
-  test("the calendar rail stays on the surface edge while it is revealed", async ({ page }) => {
+  test("the calendar return rail exits the viewport before the mobile surface finishes closing", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await openPlanner(page);
     await page.getByTestId("nav-toggle").click();
-
-    const openSampled = await page.evaluate(() => {
-      const surface = document.querySelector('[data-test="app-surface"]');
-      const rail = document.querySelector('[data-test="mobile-calendar-return"]');
-      const running = [...surface.getAnimations(), ...rail.getAnimations()];
-      let span = 0;
-      for (const a of running) span = Math.max(span, Number(a.effect?.getTiming().duration) || 0);
-      const at = (fraction) => {
-        for (const a of running) {
-          a.pause();
-          a.currentTime = span * fraction;
-        }
-        const surfaceBox = surface.getBoundingClientRect();
-        const railBox = rail.getBoundingClientRect();
-        const railStyle = getComputedStyle(rail);
-        return {
-          opacity: Number(railStyle.opacity),
-          localX: Math.round(railBox.left - surfaceBox.left),
-          width: Math.round(railBox.width),
-          clipPath: railStyle.clipPath,
-          visibility: railStyle.visibility,
-          display: railStyle.display,
-        };
-      };
-      const samples = { start: at(0), mid: at(0.5), end: at(1) };
-      for (const a of running) {
-        a.currentTime = span;
-        a.play();
-      }
-      return {
-        transitions: getComputedStyle(rail).transitionProperty,
-        ...samples,
-      };
-    });
-
-    expect(openSampled.transitions, "the rail must not animate its own clip-path").not.toContain("clip-path");
-    expect(openSampled.transitions, "the rail must not receive a second X transform").not.toContain("transform");
-    expect(openSampled.transitions, "the rail should stay solid rather than fade in").not.toContain("opacity");
-
-    for (const [name, frame] of Object.entries({ start: openSampled.start, mid: openSampled.mid, end: openSampled.end })) {
-      expect(frame.opacity, `the rail is solid at ${name}`).toBe(1);
-      expect(Math.abs(frame.localX), `the rail remains aligned to the surface edge at ${name}`).toBeLessThanOrEqual(1);
-      expect(frame.width, `the rail keeps its full 44px width at ${name}`).toBe(44);
-      expect(frame.clipPath, `the rail has no clip-path at ${name}`).toBe("none");
-      expect(frame.visibility, `the rail is visible at ${name}`).toBe("visible");
-      expect(frame.display, `the rail is displayed at ${name}`).not.toBe("none");
-    }
-
     await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "open");
-    await page.getByTestId("mobile-calendar-return").click();
+    const rail = page.getByTestId("mobile-calendar-return");
+    const surface = page.getByTestId("app-surface");
+
+    await expect(rail).toBeVisible();
+    await expect(rail).toHaveCSS("transition-property", "transform");
+    expect(await rail.evaluate((node) => node.parentElement?.dataset.test === "nav-shell")).toBe(true);
+
+    await rail.click();
     await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closing");
 
-    const closeSampled = await page.evaluate(() => {
-      const surface = document.querySelector('[data-test="app-surface"]');
-      const rail = document.querySelector('[data-test="mobile-calendar-return"]');
-      const running = [...surface.getAnimations(), ...rail.getAnimations()];
-      let span = 0;
-      for (const a of running) span = Math.max(span, Number(a.effect?.getTiming().duration) || 0);
-      const at = (fraction) => {
-        for (const a of running) {
-          a.pause();
-          a.currentTime = span * fraction;
-        }
-        const surfaceBox = surface.getBoundingClientRect();
-        const railBox = rail.getBoundingClientRect();
-        const railStyle = getComputedStyle(rail);
-        return {
-          opacity: Number(railStyle.opacity),
-          localX: Math.round(railBox.left - surfaceBox.left),
-          width: Math.round(railBox.width),
-          clipPath: railStyle.clipPath,
-          visibility: railStyle.visibility,
-          display: railStyle.display,
-        };
-      };
-      const samples = { start: at(0), mid: at(0.5) };
-      for (const a of running) {
-        a.play();
-      }
-      return {
-        transitions: getComputedStyle(rail).transitionProperty,
-        ...samples,
-      };
-    });
-
-    for (const [name, frame] of Object.entries({ start: closeSampled.start, mid: closeSampled.mid })) {
-      expect(frame.opacity, `the rail is solid during close at ${name}`).toBe(1);
-      expect(Math.abs(frame.localX), `the rail remains aligned to the surface edge during close at ${name}`).toBeLessThanOrEqual(1);
-      expect(frame.width, `the rail keeps its full 44px width during close at ${name}`).toBe(44);
-      expect(frame.clipPath, `the rail has no clip-path during close at ${name}`).toBe("none");
-      expect(frame.visibility, `the rail remains visible during close at ${name}`).toBe("visible");
-      expect(frame.display, `the rail remains displayed during close at ${name}`).not.toBe("none");
-    }
+    await expect.poll(async () => {
+      const [railRight, surfaceLeft] = await Promise.all([
+        rail.evaluate((node) => Math.round(node.getBoundingClientRect().right)),
+        surface.evaluate((node) => Math.round(node.getBoundingClientRect().left)),
+      ]);
+      return railRight <= 1 && surfaceLeft > 1;
+    }, { intervals: [50], timeout: 450 }).toBe(true);
+    await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closing");
+    await expect(rail).toBeVisible();
 
     await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
     await expect(page.getByTestId("app-surface")).not.toHaveClass(/nb-app-surface-open/);

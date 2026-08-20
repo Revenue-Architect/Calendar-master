@@ -102,21 +102,20 @@ export function plannerStyles({ T, preferences }) {
         .nb-shell-info{border-radius:999px;font-family:${DISPLAY};font-weight:700;letter-spacing:0}
         .nb-mobile-calendar-return{display:none}
         @media(max-width:639px){
-          .nb-nav-shell{--nav-width:min(78vw,320px);--nav-gap:11px;--nav-page-scale:.94;--nav-page-radius:16px}
-          /* Keep the calendar at its real width while it becomes the return rail.
-             Animating width from the viewport to 40px made its complete layout
-             reflow on every frame; clip-path reveals a narrowing left slice while
-             the surface transform carries that stable slice to the right edge. */
+          .nb-nav-shell{--nav-width:min(78vw,320px);--nav-gap:11px;--nav-page-scale:.94;--nav-page-radius:16px;--nav-rail-width:44px;--nav-rail-edge-gap:5px;--nav-mobile-rail-x:calc(100vw - var(--nav-rail-width) - var(--nav-rail-edge-gap));--nav-rail-exit-duration:320ms}
+          /* Keep the calendar at its real width while its surface is clipped.
+             Animating width from the viewport to the rail size made its complete
+             layout reflow on every frame; clip-path reveals a stable left slice. */
           .nb-app-surface{inset:0 auto auto 0;width:100%;height:100%;clip-path:inset(0 0 0 0 round 0);transition:transform var(--nav-page-duration) var(--nav-ease),clip-path var(--nav-page-duration) var(--nav-ease)}
-          .nb-app-surface-open{inset:0 auto auto 0;width:100%;height:100%;transform:translate3d(calc(100% - 49px),0,0);clip-path:inset(14px calc(100% - 44px) 14px 0 round 16px);border-radius:16px;box-shadow:none}
-          .nb-app-surface>*:not(.nb-mobile-calendar-return){opacity:1;transition:opacity 150ms ease}
-          .nb-app-surface-open>*:not(.nb-mobile-calendar-return){opacity:0;pointer-events:none}
-          /* The rail is a stationary child whose geometry is owned entirely by
-             the parent surface transform and clip-path. It has a discrete visibility
-             lifecycle: visible when open/closing, and interactive only when open. */
-          .nb-mobile-calendar-return{display:none;position:absolute;z-index:40;inset:14px auto 14px 0;width:44px;align-items:center;justify-content:center;border:0;border-radius:16px;background:${T.accent};color:${T.on};font-family:${MONO};font-size:10px;font-weight:700;letter-spacing:.12em;writing-mode:vertical-rl;transform:rotate(180deg);pointer-events:none;transition:none}
-          .nb-nav-shell[data-nav-state="open"] .nb-mobile-calendar-return,.nb-nav-shell[data-nav-state="closing"] .nb-mobile-calendar-return{display:flex}
-          .nb-nav-shell[data-nav-state="open"] .nb-mobile-calendar-return{pointer-events:auto}
+          .nb-app-surface-open{inset:0 auto auto 0;width:100%;height:100%;transform:translate3d(calc(100% - var(--nav-rail-width) - var(--nav-rail-edge-gap)),0,0);clip-path:inset(14px calc(100% - var(--nav-rail-width)) 14px 0 round 16px);border-radius:16px;box-shadow:none}
+          .nb-app-surface>*{opacity:1;transition:opacity 150ms ease}
+          .nb-app-surface-open>*{opacity:0;pointer-events:none}
+          /* The rail is a shell-level overlay so the surface's overflow clip cannot
+             cut off its close exit. It follows the surface's opening edge, then
+             travels past the left viewport edge before the surface completes close. */
+          .nb-mobile-calendar-return{display:flex;position:absolute;z-index:40;inset:14px auto 14px 0;width:var(--nav-rail-width);align-items:center;justify-content:center;border:0;border-radius:16px;background:${T.accent};color:${T.on};font-family:${MONO};font-size:10px;font-weight:700;letter-spacing:.12em;writing-mode:vertical-rl;visibility:hidden;transform:translate3d(0,0,0) rotate(180deg);pointer-events:none;transition:none}
+          .nb-nav-shell[data-nav-state="open"] .nb-mobile-calendar-return{visibility:visible;transform:translate3d(var(--nav-mobile-rail-x),0,0) rotate(180deg);pointer-events:auto;transition:transform var(--nav-page-duration) var(--nav-ease)}
+          .nb-nav-shell[data-nav-state="closing"] .nb-mobile-calendar-return{visibility:visible;transform:translate3d(calc(0px - var(--nav-rail-width)),0,0) rotate(180deg);transition:transform var(--nav-rail-exit-duration) var(--nav-ease)}
           .nb-navigation{padding:18px 12px}
           .nb-hud{padding:.45rem .65rem;gap:.35rem}
           .nb-hud-left{gap:.35rem}

@@ -163,15 +163,15 @@ export function NavigationFrame({
           className={`nb-root nb-app-surface ${navOpen ? "nb-app-surface-open" : ""} flex flex-col`}
           onTransitionEnd={finishOnSurfaceTransition}
           onPointerDown={(event) => {
-            if (!navOpen || event.target.closest("[data-test='nav-toggle'], [data-test='mobile-calendar-return']")) return;
+            if (!navOpen || event.target.closest("[data-test='nav-toggle']")) return;
             event.preventDefault();
             closeNavigation();
           }}
           style={surfaceStyle}
         >
-          <button data-test="mobile-calendar-return" type="button" aria-label="Return to calendar" onClick={closeNavigation} className="nb-mobile-calendar-return">CALENDAR</button>
           {children}
         </div>
+        <button data-test="mobile-calendar-return" type="button" aria-label="Return to calendar" onClick={closeNavigation} className="nb-mobile-calendar-return">CALENDAR</button>
       </div>
     </NavigationContext.Provider>
   );
