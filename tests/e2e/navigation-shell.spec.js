@@ -126,7 +126,7 @@ test.describe("the floating navigation shell", () => {
       return values;
     });
     expect(samples.every((sample) => sample.phase === "closing")).toBe(true);
-    expect(samples.every((sample) => Math.abs(sample.gap) <= 1), "rail and surface must not expose a moving black seam").toBe(true);
+    expect(samples.every((sample) => sample.gap <= 0.5), "rail and surface must not expose a positive moving black seam").toBe(true);
     expect(samples.some((sample) => sample.progress > 0.05 && sample.progress < 0.95), "the sample must include active close travel").toBe(true);
     await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closing");
     await expect(rail).toBeVisible();
@@ -161,8 +161,37 @@ test.describe("the floating navigation shell", () => {
     const surface = page.getByTestId("app-surface");
     await expect(surface).toHaveClass(/nb-app-surface-open/);
     await expect(page.getByTestId("nav-motion-viewport")).toHaveCSS("clip-path", /round 16px/);
-    await expect(page.getByTestId("mobile-calendar-return")).toBeVisible();
-    await page.getByTestId("mobile-calendar-return").click();
+    const rail = page.getByTestId("mobile-calendar-return");
+    await expect(rail).toBeVisible();
+
+    const openGeometry = await rail.evaluate((node) => {
+      const box = node.getBoundingClientRect();
+      const centerY = box.top + (box.height / 2);
+      const hit = document.elementFromPoint(window.innerWidth - 1, centerY);
+      return {
+        right: box.right,
+        centerY,
+        hitRail: hit === node || Boolean(hit?.closest?.('[data-test="mobile-calendar-return"]')),
+      };
+    });
+    expect(Math.abs(openGeometry.right - 390), "the open rail must meet the phone viewport edge").toBeLessThanOrEqual(0.5);
+    expect(openGeometry.hitRail, "the outermost rail pixels must remain actionable").toBe(true);
+
+    await page.mouse.move(389 - 22, openGeometry.centerY);
+    await page.mouse.down();
+    await page.waitForTimeout(30);
+    const pressedGeometry = await rail.evaluate((node) => {
+      const box = node.getBoundingClientRect();
+      return {
+        right: box.right,
+        scale: getComputedStyle(node).scale,
+        overlayOpacity: getComputedStyle(node, "::after").opacity,
+      };
+    });
+    expect(Number.parseFloat(pressedGeometry.scale), "the rail must not contract under touch").toBeCloseTo(1, 4);
+    expect(Math.abs(pressedGeometry.right - openGeometry.right), "the rail edge must stay fixed under touch").toBeLessThanOrEqual(0.5);
+    expect(Number.parseFloat(pressedGeometry.overlayOpacity), "the press overlay should provide feedback").toBeGreaterThan(0);
+    await page.mouse.up();
     await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
   });
 

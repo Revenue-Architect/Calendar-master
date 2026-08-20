@@ -117,10 +117,11 @@ export function plannerStyles({ T, preferences }) {
         .nb-shell-info{border-radius:999px;font-family:${DISPLAY};font-weight:700;letter-spacing:0}
         .nb-mobile-calendar-return{display:none}
         @media(max-width:639px){
-          .nb-nav-shell{--nav-width:min(78vw,320px);--nav-gap:11px;--nav-page-scale:.94;--nav-page-radius:16px;--nav-rail-width:44px;--nav-rail-edge-gap:5px}
+          .nb-nav-shell{--nav-width:min(78vw,320px);--nav-gap:11px;--nav-page-scale:.94;--nav-page-radius:16px;--nav-rail-width:44px;--nav-rail-edge-gap:0px}
           .nb-nav-motion-viewport{clip-path:inset(0 0 0 0 round 0)}
           .nb-nav-motion-carrier{transform:translate3d(0,0,0)}
-          .nb-mobile-calendar-return{display:flex;position:absolute;z-index:40;inset:14px auto 14px 0;width:var(--nav-rail-width);align-items:center;justify-content:center;border:0;border-radius:16px;background:${T.accent};color:${T.on};font-family:${MONO};font-size:10px;font-weight:700;letter-spacing:.12em;writing-mode:vertical-rl;visibility:visible;transform:translate3d(calc(0px - var(--nav-rail-width)),0,0) rotate(180deg);pointer-events:none;transition:none}
+          .nb-mobile-calendar-return{display:flex;position:absolute;z-index:40;inset:14px auto 14px 0;width:var(--nav-rail-width);align-items:center;justify-content:center;border:0;border-radius:16px 0 0 16px;background:${T.accent};color:${T.on};font-family:${MONO};font-size:10px;font-weight:700;letter-spacing:.12em;writing-mode:vertical-rl;visibility:visible;transform:translate3d(calc(0px - var(--nav-rail-width)),0,0) rotate(180deg);pointer-events:none;touch-action:manipulation;transition:none}
+          .nb-mobile-calendar-return::after{content:"";position:absolute;inset:0;border-radius:inherit;background:#000;opacity:0;pointer-events:none;transition:opacity 100ms ease}
           .nb-hud-settings{display:none}
         }
         .nb-main{padding-bottom:var(--sheet-pad)}
@@ -632,6 +633,8 @@ export function plannerStyles({ T, preferences }) {
         button:active,[role="button"]:active,a[href]:active,summary:active,[data-event-id]:active,[data-task-chip]:active{
           scale:.965;transition:scale 90ms cubic-bezier(.4,0,.6,1);
         }
+        button.nb-mobile-calendar-return:active{scale:1!important}
+        button.nb-mobile-calendar-return:active::after{opacity:.16}
         button:disabled,button[disabled]{scale:1!important}
         /* A control that completes something pops rather than just filling in. */
         .nb-pop{animation:nbpop 300ms cubic-bezier(.23,1,.32,1)}
@@ -668,9 +671,9 @@ export function plannerStyles({ T, preferences }) {
         .nb-day-heading.is-focused{padding-top:.45rem;padding-bottom:.45rem;border-bottom:1px solid ${T.line}}
         .nb-day-heading.is-focused .nb-display{font-size:2rem;line-height:2rem}
 
-        @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.nb-fluid,.nb-view-track,.nb-msheet,.nb-timeline-chrome,.nb-timeline-chrome-inner,.nb-morph-source-label,.nb-up,.nb-list-enter{animation:none!important;transform:none!important}.nb-fluid,.nb-msheet,.nb-timeline-chrome-inner,.nb-morph-source-label{transition:opacity 160ms ease!important}.nb-view-track.is-sliding,.nb-app-surface,.nb-nav-viewport,.nb-nav-carrier,.nb-nav-motion-viewport,.nb-nav-motion-carrier,.nb-mobile-calendar-return,.nb-navigation,.nb-nav-brand,.nb-nav-item,.nb-nav-membership{transition:none!important;animation:none!important}
+        @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.nb-fluid,.nb-view-track,.nb-msheet,.nb-timeline-chrome,.nb-timeline-chrome-inner,.nb-morph-source-label,.nb-up,.nb-list-enter{animation:none!important;transform:none!important}.nb-fluid,.nb-msheet,.nb-timeline-chrome-inner,.nb-morph-source-label{transition:opacity 160ms ease!important}.nb-view-track.is-sliding,.nb-app-surface,.nb-nav-viewport,.nb-nav-carrier,.nb-nav-motion-viewport,.nb-nav-motion-carrier,.nb-mobile-calendar-return,.nb-mobile-calendar-return::after,.nb-navigation,.nb-nav-brand,.nb-nav-item,.nb-nav-membership{transition:none!important;animation:none!important}
           button:active,[role="button"]:active,a[href]:active,[data-event-id]:active,[data-task-chip]:active{scale:1!important}}
-        ${preferences?.display.reducedMotion ? `.nb-fluid,.nb-view-track,.nb-msheet,.nb-timeline-chrome,.nb-timeline-chrome-inner,.nb-morph-source-label{animation:none!important;transform:none!important}.nb-fluid,.nb-msheet,.nb-timeline-chrome-inner,.nb-morph-source-label{transition:opacity 160ms ease!important}.nb-view-track.is-sliding,.nb-app-surface,.nb-nav-viewport,.nb-nav-carrier,.nb-nav-motion-viewport,.nb-nav-motion-carrier,.nb-mobile-calendar-return,.nb-navigation,.nb-nav-brand,.nb-nav-item,.nb-nav-membership{transition:none!important;animation:none!important}
+        ${preferences?.display.reducedMotion ? `.nb-fluid,.nb-view-track,.nb-msheet,.nb-timeline-chrome,.nb-timeline-chrome-inner,.nb-morph-source-label{animation:none!important;transform:none!important}.nb-fluid,.nb-msheet,.nb-timeline-chrome-inner,.nb-morph-source-label{transition:opacity 160ms ease!important}.nb-view-track.is-sliding,.nb-app-surface,.nb-nav-viewport,.nb-nav-carrier,.nb-nav-motion-viewport,.nb-nav-motion-carrier,.nb-mobile-calendar-return,.nb-mobile-calendar-return::after,.nb-navigation,.nb-nav-brand,.nb-nav-item,.nb-nav-membership{transition:none!important;animation:none!important}
           button:active,[role="button"]:active,a[href]:active,[data-event-id]:active,[data-task-chip]:active{scale:1!important}` : ""}
       `;
 }

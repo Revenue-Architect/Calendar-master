@@ -27,7 +27,7 @@ export function navPageFit({
   headroom = HEADROOM,
   mobileBreakpoint = 640,
   railWidth = 44,
-  edgeGap = 5,
+  edgeGap = 0,
 } = {}) {
   const left = navWidth + gap;
   const clipTop = Math.min(headroom, marginTop);
@@ -93,7 +93,7 @@ export function navPageFit({
  * reveals exactly one rail width. */
 export function navMobileMotion({
   progress = 0,
-  mobile = { railWidth: 44, edgeGap: 5, x: 341 },
+  mobile = { railWidth: 44, edgeGap: 0, x: 346 },
 } = {}) {
   const p = Math.min(1, Math.max(0, Number(progress) || 0));
   const railWidth = Number(mobile.railWidth) || 44;

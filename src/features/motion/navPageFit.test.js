@@ -48,7 +48,7 @@ test("returns explicit frame mask and carrier translation across responsive view
   const desktop = navPageFit({ viewportWidth: 1280, viewportHeight: 900 });
   assert.deepEqual(desktop.frame, { top: 24, right: 22, bottom: 24, left: 322, radius: 22 });
   assert.deepEqual(desktop.carrier, { x: 322, y: 20 });
-  assert.equal(desktop.mobile.x, 1280 - 44 - 5);
+  assert.equal(desktop.mobile.x, 1280 - 44);
 
   // Tablet (e.g. 768 x 1024)
   const tablet = navPageFit({ viewportWidth: 768, viewportHeight: 1024 });
@@ -59,12 +59,13 @@ test("returns explicit frame mask and carrier translation across responsive view
   // Phone (e.g. 390 x 844)
   const phone = navPageFit({ viewportWidth: 390, viewportHeight: 844 });
   assert.equal(phone.mobile.railWidth, 44);
-  assert.equal(phone.mobile.edgeGap, 5);
-  assert.equal(phone.mobile.x, 390 - 44 - 5);
+  assert.equal(phone.mobile.edgeGap, 0);
+  assert.equal(phone.mobile.x, 390 - 44);
+  assert.equal(phone.mobile.x + phone.mobile.railWidth, 390);
 
   // Short height phone (e.g. 390 x 601)
   const shortPhone = navPageFit({ viewportWidth: 390, viewportHeight: 601 });
-  assert.equal(shortPhone.mobile.x, 341);
+  assert.equal(shortPhone.mobile.x, 346);
 });
 
 test("mobile rail and carrier share one normalized progress geometry", () => {
@@ -78,18 +79,26 @@ test("mobile rail and carrier share one normalized progress geometry", () => {
   assert.equal(closed.carrier.x, 0);
   assert.equal(closed.visibleRailWidth, 0);
 
-  assert.equal(halfway.frame.left, 170.5);
-  assert.equal(halfway.rail.x, 148.5);
-  assert.equal(halfway.carrier.x, 192.5);
+  assert.equal(halfway.frame.left, 173);
+  assert.equal(halfway.rail.x, 151);
+  assert.equal(halfway.carrier.x, 195);
   assert.equal(halfway.rail.right, halfway.carrier.x);
   assert.equal(halfway.visibleRailWidth, 22);
   assert.equal(halfway.gap, 0);
 
-  assert.equal(open.frame.left, 341);
-  assert.equal(open.rail.x, 341);
-  assert.equal(open.carrier.x, 385);
+  assert.equal(open.frame.left, 346);
+  assert.equal(open.rail.x, 346);
+  assert.equal(open.carrier.x, 390);
   assert.equal(open.rail.right, open.carrier.x);
+  assert.equal(open.rail.right, 390);
   assert.equal(open.visibleRailWidth, 44);
+
+  for (const progress of [0.1, 0.25, 0.5, 0.75, 0.9]) {
+    const sample = navMobileMotion({ progress, mobile: fit.mobile });
+    assert.equal(sample.rail.right, sample.carrier.x, `rail/carrier seam at p=${progress}`);
+    assert.equal(sample.gap, 0, `rail/carrier gap at p=${progress}`);
+    assert.ok(sample.frame.left <= sample.rail.right, `frame must reveal the rail at p=${progress}`);
+  }
 });
 
 test("navPageMotion creates direct viewport mask and carrier transform", () => {
