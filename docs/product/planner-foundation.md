@@ -4,8 +4,10 @@
 - **Last updated:** 2026-08-13
 - **Product scope:** Personal-first, collaboration-ready planner
 - **Architecture:** Domain-oriented modular monolith
-- **Integration scope:** Calendar and task provider integration is planned and
-  deliberately deferred from this specification
+- **Integration scope:** Google and Microsoft calendar integration, and mail-derived
+  event proposals, are now core product (see PRODUCT.md and the cross-platform PRD).
+  Their APIs and sync behavior remain outside *this* specification, which owns the
+  domain model those integrations map into — not the transport.
 
 ## Purpose
 
@@ -27,8 +29,11 @@ The product model is:
 1. The product is personal-first. Ownership and permission boundaries MUST allow
    future collaboration without requiring collaborative features in the first
    release.
-2. Provider integration will eventually cover calendars and tasks, but provider
-   APIs and sync behavior are outside the current foundation work.
+2. Provider integration covers Google and Microsoft calendars, and reading mail to
+   propose events. Provider APIs and sync behavior stay outside this foundation, but
+   the rule they must obey is here: provider payloads are mapped, never stored raw, and
+   the domain model in this document remains authoritative for actions, notes and
+   planning semantics.
 3. Notes initially support daily notes, notes linked to events or tasks, and
    standalone inbox notes. Their identity, ownership, content, and repository
    contracts MUST remain extensible toward a full notebook system.

@@ -10,27 +10,59 @@
 
 ## 1. Executive decision
 
-Calendar Master should become a local-first daily planning system that combines calendar commitments, executable actions, and contextual notes in one trustworthy day view.
+Calendar Master should become a **connected** daily planning system that combines the
+calendars a person already keeps, the work that arrives by mail, executable actions, and
+contextual notes in one trustworthy day view.
 
-The next release should not attempt to reproduce all of Fantastical. Its wedge is narrower and more defensible: a person can open one realistic day, understand what is fixed and what is actionable, reshape the plan directly, capture new work in natural language, and trust that the result survives offline use and appears correctly on every device.
+**This supersedes the local-first positioning of the previous revision.** Isolation was
+never the value; a correct, legible day was. A planner that cannot see the Google and
+Outlook calendars where the user's commitments actually live is not a smaller product,
+it is a wrong one — it asks the user to maintain a second copy of their day by hand.
 
-The approved platform strategy is:
+The wedge is still narrower and more defensible than reproducing Fantastical: a person
+opens one realistic day assembled from every account they use, understands what is fixed
+and what is actionable, reshapes the plan directly, captures new work in natural
+language, has the mail that creates work offered back as proposals, and trusts that the
+result survives offline use and appears correctly on every device.
+
+The approved strategy is:
 
 - Keep the existing React/Vite application as the Windows and macOS experience for now.
-- Build the Android application with Expo and React Native; support iOS after the Android interaction model and sync layer are proven.
-- Preserve and extract the existing JavaScript domain code rather than rewriting recurrence, task, note, reminder, and time logic in Dart or Kotlin.
-- Use Convex for identity-linked application data, transactions, reactive sync signals, server functions, and provider orchestration.
-- Keep an on-device database and durable outbox on every client. Convex's reactive cache improves freshness, but does not replace durable offline storage.
-- Use Chrono as one temporal parser within a deterministic quick-add pipeline. Do not put a general-purpose LLM in the critical path for event or task creation.
-- Package the existing web app with Tauri only after cross-device sync is reliable and desktop system integration becomes a measured priority.
+- Build the Android application with Expo and React Native; support iOS after the Android
+  interaction model and sync layer are proven.
+- Preserve and extract the existing JavaScript domain code rather than rewriting
+  recurrence, task, note, reminder, and time logic in Dart or Kotlin.
+- Use Convex for identity-linked application data, transactions, reactive sync signals,
+  server functions, and provider orchestration.
+- **Reach Google and Microsoft through one provider layer behind an interface.** A
+  unified API (Nylas is the leading candidate) is preferred over hand-writing Google
+  Calendar, Microsoft Graph, Gmail and Outlook-mail adapters, because breadth across four
+  integrations is exactly where a unified API earns its price. The choice is deferred to
+  an explicit gate; see §7.6.
+- **Mail proposes, it never writes.** Extraction produces candidate events a person
+  accepts or dismisses. No inbox UI, no sending, no silent calendar writes.
+- **Offline remains a first-class state, not a fallback.** Keep an on-device database and
+  durable outbox on every client. Connected does not mean online-only: the day must stay
+  readable and writable with no signal.
+- Use Chrono as one temporal parser within a deterministic quick-add pipeline. Do not put
+  a general-purpose LLM in the critical path for event or task creation.
+- Package the existing web app with Tauri only after cross-device sync is reliable and
+  desktop system integration becomes a measured priority.
 
-This document supersedes the Phase A Supabase proposal and the earlier assumption that a framework decision could wait until after sync. The framework decision now matters because the first sync vertical slice must prove the shared domain package inside both the existing web app and the new Android app.
+This document supersedes the Phase A Supabase proposal, the earlier assumption that a
+framework decision could wait until after sync, and the local-first product framing.
 
 ## 2. Product thesis
 
 ### 2.1 Problem
 
-Most calendar products show commitments but do not help users execute their day. Most task products show obligations but do not make time constraints tangible. Notes often become a third disconnected system. The user must mentally reconcile all three while moving between devices.
+Most calendar products show commitments but do not help users execute their day. Most
+task products show obligations but do not make time constraints tangible. Notes often
+become a third disconnected system. And a large share of what ends up on the day never
+arrives as a calendar invitation at all — it arrives as mail that a person has to read,
+interpret, and re-enter somewhere by hand.
+
+The user is left reconciling four systems across two accounts and several devices.
 
 Calendar Master will make the day itself the primary workspace:
 
@@ -38,10 +70,27 @@ Calendar Master will make the day itself the primary workspace:
 - Actions answer, “What must I move forward?”
 - Notes answer, “What context and thinking support this work?”
 - The timeline answers, “How does this fit in reality?”
+- Connected accounts answer, “Is this all of it?” — a day assembled from one account is
+  a guess.
+- Mail extraction answers, “What did I agree to without noticing?”
 
 ### 2.2 Positioning
 
-Calendar Master is a personal execution calendar, not a team project manager and not merely a prettier calendar client. It borrows Fantastical's speed, calendar sets, quick access, and scheduling ergonomics, while differentiating through native actions, subtask progress, planning notes, and a more opinionated daily workflow.
+Calendar Master is a personal execution calendar over the accounts a person already has —
+not a team project manager, and not merely a prettier calendar client.
+
+The pairing it claims is one neither neighbour can: a unified calendar client shows every
+event across every account and still does not know what is **owed**; a task app knows
+what is owed and cannot see Thursday. Reading mail for commitments is what closes the
+loop between them, because that is where most obligations are actually created.
+
+It borrows Fantastical's speed, calendar sets, quick access, and scheduling ergonomics,
+while differentiating through native actions, subtask progress, planning notes, mail-
+derived proposals, and a more opinionated daily workflow.
+
+Provider payloads are **mapped, never stored raw**. A Google or Outlook event becomes a
+Calendar Master event carrying its provenance, so recurrence, overdue and planning rules
+remain the app's own rather than being inherited from whichever API answered.
 
 ### 2.3 Primary user
 
@@ -66,32 +115,59 @@ The initial product is for a single knowledge worker who:
 
 ### 3.1 Goals for the first cross-platform milestone
 
-- A user can plan one complete day on a Samsung phone, close the app while offline, reopen it, and later see the same correct day on the web app.
+- A user connects a Google account and an Outlook account and sees **one** day assembled
+  from both, alongside their own Actions and Notes.
+- A user can plan one complete day on a Samsung phone, close the app while offline,
+  reopen it, and later see the same correct day on the web app.
+- Mail that creates a commitment is offered back as a proposal the user accepts or
+  dismisses, and dismissing one is remembered.
 - Events and actions share one timeline while retaining distinct semantics.
-- Touch interactions for hold, move, and resize feel native and remain correct across scrolling and overlapping items.
-- Quick add handles the common scheduling language already supported by the repository and improves temporal recognition through Chrono without reducing deterministic behavior.
-- Account, sync, conflict, and offline states are visible and recoverable.
-- The existing recurrence, occurrence identity, task, notes, search, reminder, and projection behavior remains covered by automated tests.
+- Touch interactions for hold, move, and resize feel native and remain correct across
+  scrolling and overlapping items.
+- Quick add handles the common scheduling language already supported by the repository and
+  improves temporal recognition through Chrono without reducing deterministic behavior.
+- Account, connection, sync, conflict, and offline states are visible and recoverable.
+- The existing recurrence, occurrence identity, task, notes, search, reminder, and
+  projection behavior remains covered by automated tests.
 
 ### 3.2 Non-goals for the first milestone
 
+Connected calendars and mail extraction have **moved out of this list** and into the
+product's core; see §1. What remains out of scope:
+
 - Full Fantastical feature parity.
-- Google Calendar two-way sync, Microsoft Graph, CalDAV, Apple Reminders, Google Tasks, or Todoist integration.
+- **An email client.** No inbox, no triage, no reading pane, no sending or replying. Mail
+  is read to propose events and for nothing else.
+- **Any automatic write to a connected calendar from an extracted proposal.** A person
+  confirms, always.
+- CalDAV, Apple Reminders, Google Tasks, or Todoist. Google and Microsoft first, and only
+  those until they are trustworthy.
 - Tauri packaging, tray controls, global shortcuts, widgets, or launch-at-login.
 - Scheduling links, meeting voting, or multi-user collaboration.
 - On-device open-weight LLM inference.
-- Automatic AI changes to a user's calendar.
 - A full visual rewrite of the existing web app.
 
 ### 3.3 Product principles
 
-1. **Trust before breadth.** A smaller synchronized product is better than a wide product that can lose or misrepresent time.
-2. **The day is the unit of value.** Every major capability must make planning, executing, or reviewing a day easier.
-3. **Local writes are immediate.** Network availability must not gate creation, editing, completion, moving, or resizing.
-4. **Motion explains continuity.** Animation must communicate origin, destination, or state change. It must never add a surprise bounce, zoom the viewport, or delay control.
-5. **Deterministic by default.** Dates, recurrence, reminders, task metadata, and sync policies must be auditable and testable.
-6. **Progressive intelligence.** Use heuristics and Chrono for high-confidence parsing; add model assistance later only where it creates measurable value.
-7. **One domain, adaptive surfaces.** Business rules are shared; controls and navigation adapt to touch, keyboard, window size, and operating system.
+1. **Trust before breadth.** A smaller synchronized product is better than a wide product
+   that can lose or misrepresent time. Two providers done correctly beat six done partly.
+2. **The day is the unit of value.** Every major capability must make planning,
+   executing, or reviewing a day easier.
+3. **Local writes are immediate.** Network availability must not gate creation, editing,
+   completion, moving, or resizing. Connected does not mean online-only.
+4. **Nothing enters the day unconfirmed.** Mail extraction, heuristics and models produce
+   *proposals*. The person disposes. This is what makes reading someone's mail
+   defensible, and it is not negotiable for a convenience win.
+5. **The domain model is ours; providers are sources.** Provider payloads are mapped,
+   never stored raw, and never become domain records verbatim.
+6. **Motion explains continuity.** Animation must communicate origin, destination, or
+   state change. It must never add a surprise bounce, zoom the viewport, or delay control.
+7. **Deterministic by default.** Dates, recurrence, reminders, task metadata, and sync
+   policies must be auditable and testable.
+8. **Progressive intelligence.** Use heuristics and Chrono for high-confidence parsing;
+   add model assistance later only where it creates measurable value.
+9. **One domain, adaptive surfaces.** Business rules are shared; controls and navigation
+   adapt to touch, keyboard, window size, and operating system.
 
 ## 4. Current product baseline
 
@@ -440,11 +516,90 @@ Conflict policy version is recorded with the mutation result so behavior is audi
 
 Provider integrations are server adapters, not client-specific branches.
 
-- Convex actions call Google, Microsoft, or CalDAV APIs.
-- Convex mutations commit provider results and sync changes transactionally after an action returns.
-- Provider identifiers, etags, sync tokens, provider timestamps, and origin are reserved in the model before the first provider integration.
-- Provider webhooks are hints to run delta sync; correctness does not depend on receiving every webhook.
-- The app model remains authoritative for native actions and notes. External calendars remain authoritative for provider-owned fields according to an explicit mapping policy.
+- Convex actions call the provider layer; clients never hold provider credentials.
+- Convex mutations commit provider results and sync changes transactionally after an
+  action returns.
+- Provider identifiers, etags, sync tokens, provider timestamps, and origin are reserved
+  in the model before the first provider integration.
+- Provider webhooks are hints to run delta sync; correctness does not depend on receiving
+  every webhook. This is not defensive pessimism — webhook loss and delivery latency under
+  load are among the most commonly reported failure modes of hosted provider APIs.
+- The app model remains authoritative for native actions and notes. External calendars
+  remain authoritative for provider-owned fields according to an explicit mapping policy.
+
+#### Unified API or direct adapters — decided at a gate, not now
+
+The product needs four integrations across two vendors: Google Calendar, Microsoft Graph
+calendar, Gmail, and Outlook mail. Breadth across vendors is precisely where a unified
+API earns its price, and hand-writing four adapters plus token refresh, incremental sync
+tokens, etag handling and recurrence-exception equivalence is the single largest block of
+undifferentiated work in this plan.
+
+**Nylas is the leading candidate.** What it does and does not do must be stated plainly,
+because it is easy to over-scope:
+
+| | |
+| --- | --- |
+| Replaces | Google/Microsoft calendar and mail adapters, OAuth grant handling, token refresh, provider normalisation, change notification |
+| Does **not** replace | Convex, the domain model, the outbox, conflict resolution, auth/identity, recurrence, notifications |
+| Does **not** store | Actions, subtasks, notes, revisions, tags, reminders, XP — roughly 16 of the 18 tables in §7.3 |
+
+Two consequences follow and neither is optional:
+
+1. **A unified API is an adapter, never a backend.** It is not an alternative to §7.3; it
+   sits behind §7.6. Any proposal to "use Nylas instead of Convex" is a category error.
+2. **It does not remove Google/Microsoft app verification.** Restricted Gmail scopes still
+   require the vendor's verification path and, at scale, a third-party security
+   assessment. Personal use runs in testing mode; public launch does not. Budget for this
+   as calendar time, not engineering time.
+
+**Therefore: define the boundary now, choose the implementation at the gate.** All
+provider access goes through one narrow server-side interface — roughly
+`listCalendars`, `listEvents(range)`, `writeEvent`, `deleteEvent`,
+`subscribeChanges(cursor)`, `listMessages(since)` — with at least a direct-Google
+implementation and a unified-API implementation costed against it before either is
+committed. Nothing above this interface may know which one is running.
+
+Cost shape to carry into that gate: unified APIs price **per connected account per
+month**, which is a recurring per-user cost on a consumer product and must be compared
+against the one-off engineering cost of direct adapters at the user counts this product
+actually expects — not at zero and not at a million.
+
+### 7.7 Mail extraction boundary
+
+Mail is read to **propose** and for nothing else. This section is a constraint, not a
+feature description.
+
+**Scope.** Read-only access to Gmail and Outlook mail. No inbox surface, no triage, no
+reading pane, no drafting, no sending, no reply. The user never manages mail here.
+
+**Pipeline.** Each stage is separable and testable:
+
+1. Fetch new messages since a cursor, server-side.
+2. Detect candidates — structured invitations first, then booking, travel and
+   reservation confirmations, then natural-language scheduling intent.
+3. Reconcile against events already known, so an invitation that is already on the
+   calendar never becomes a proposal.
+4. Emit a proposal carrying its source message reference and a confidence.
+5. The user accepts, edits-then-accepts, or dismisses. Only acceptance runs a domain
+   command.
+
+**Determinism.** Structured invitations and machine-generated confirmations are parsed
+deterministically and must never depend on a model. Model assistance is permitted only
+for step 2 on unstructured prose, only as a proposal, and never as the recurrence engine,
+occurrence-identity authority, or conflict resolver — consistent with §3.3.4.
+
+**Dismissal is memory, not a no-op.** A dismissed proposal must not return. Re-proposing
+something the user rejected is the fastest way to make this feature feel like spam and
+get the whole connection revoked.
+
+**What is stored.** Proposals, their source message identifiers, and extraction
+decisions. **Not** raw message bodies, and not attachments. Retention for extraction
+state is bounded and stated in the privacy policy alongside §10.
+
+**Failure posture.** Extraction is best-effort and additive. It may be behind, it may
+miss things, and the day must be complete and correct without it. Nothing in the
+planner's correctness may depend on a proposal having been generated.
 
 ## 8. Local storage and migration
 
@@ -475,15 +630,37 @@ These capabilities follow the reliable local model and are not prerequisites for
 
 ## 10. Privacy and security
 
+Reading a person's mailbox is a far larger commitment than reading their calendar, and
+the first four rules exist because of it.
+
+- **Request the narrowest provider scopes that work, and say why each is needed at the
+  moment it is requested.** Calendar and mail authorization are separate consents,
+  incremental, and separate again from sign-in.
+- **Do not retain message bodies or attachments.** Extraction keeps proposals, source
+  message identifiers, and decisions; see §7.7.
+- **Mail is read to propose and for nothing else.** No profiling, no advertising, no
+  training a model on user mail, no derived data sold or shared. This is a product
+  boundary, not only a policy sentence.
+- **Disconnecting an account removes its derived data**, not just the token, and the UI
+  says what will be removed before the user confirms.
 - Encrypt transport everywhere and use the platform's encryption at rest.
 - Store provider refresh tokens only on the server, encrypted with managed key material.
 - Store device refresh/session material in SecureStore or an OS credential store.
-- Apply authorization at the Convex function boundary for every read and write. Public functions are thin authenticated wrappers; internal functions perform privileged work.
-- Do not log event titles, note content, descriptions, meeting links, or parsed input.
-- Keep content analytics off by default. Product analytics use event names and coarse counts, not authored text.
-- Support complete JSON export, individual device revocation, and account deletion with a stated grace period.
-- Do not claim end-to-end encryption while the server must read provider and calendar fields for sync. Explain this honestly in the privacy policy.
-- Treat deep links and meeting links as untrusted input and validate protocol, host, and redirect behavior.
+- Apply authorization at the Convex function boundary for every read and write. Public
+  functions are thin authenticated wrappers; internal functions perform privileged work.
+- Do not log event titles, note content, descriptions, meeting links, message subjects,
+  or parsed input.
+- Keep content analytics off by default. Product analytics use event names and coarse
+  counts, not authored text.
+- Support complete JSON export, individual device revocation, and account deletion with a
+  stated grace period.
+- Do not claim end-to-end encryption while the server must read provider, calendar and
+  mail fields. Explain this honestly in the privacy policy.
+- Treat deep links and meeting links as untrusted input and validate protocol, host, and
+  redirect behavior.
+- **Budget for vendor verification as calendar time.** Restricted Gmail scopes require
+  Google's verification path and, at scale, a third-party security assessment. A unified
+  provider API does not remove this.
 
 ## 11. Accessibility and motion quality
 
@@ -534,7 +711,24 @@ Within the first seven days, a user:
 
 ## 13. Release roadmap
 
-Each phase is an outcome gate, not a date promise. Later phases may be reordered only when evidence changes the product risk.
+Each phase is an outcome gate, not a date promise. Later phases may be reordered only when
+evidence changes the product risk.
+
+**This sequence was reordered when the product moved from local-first to connected.** The
+previous order built the cross-platform sync slice first and reached Google Calendar at
+Phase 4. That made sense when connected calendars were an enhancement. They are now the
+product, which changes two things:
+
+- **The riskiest assumption moved.** It is no longer "can two clients converge offline";
+  it is "can this assemble a correct day from accounts we do not control". Untested risk
+  should be retired early, so provider work now comes first.
+- **Mobile is no longer the gate to value.** The existing web client can prove connected
+  calendars on its own. Building Expo and Android before knowing whether provider mapping,
+  recurrence equivalence and token handling hold up would be building a second client for
+  an unproven product.
+
+Offline remains non-negotiable (§3.3.3), but it arrives where it is first needed: reads are
+cached from Phase 1, and the durable outbox lands in Phase 2 with the first write.
 
 ### Phase 0 — Freeze behavior and establish boundaries
 
@@ -547,20 +741,56 @@ Each phase is an outcome gate, not a date promise. Later phases may be reordered
 
 **Gate:** Existing web behavior and tests remain green; the package imports in both Node and a minimal Expo screen.
 
-### Phase 1 — Cross-platform trust vertical slice
+### Phase 1 — Account, server, and the first connected calendar (read-only)
+
+**Outcome:** The existing web client shows one real day assembled from the user's own Google calendar alongside their Actions and Notes, and is honest about connection state.
+
+- Convex project, OIDC sign-in, `users`/`devices`, and only the sync tables from §7.3 this slice needs.
+- The provider interface of §7.6, with a direct-Google implementation and a unified-API implementation behind it, so the gate below is decided on measurement.
+- Incremental Google calendar authorization, separate from sign-in, with server-held tokens.
+- Initial import, delta sync by sync token, webhook hints, and visible connection health.
+- Provider event mapping: recurrence and exception equivalence, all-day handling, timezone fidelity, attendee fields, conferencing links, provenance on every record.
+- Read-only. Nothing writes back to Google in this phase.
+- Cached provider reads so the day still renders with no signal.
+
+**Gate:** A controlled Google calendar containing recurring series, exceptions, all-day events and cross-timezone events renders for a full month identically to Google's own UI, survives token revocation and webhook loss without corrupting the local day, and the provider-layer decision of §7.6 is made against the two implementations rather than a vendor page.
+
+### Phase 2 — Two-way sync and Microsoft
+
+**Outcome:** Calendar Master is a safe daily interface over real external calendars, not a viewer.
+
+- Durable outbox and idempotent mutation push; local writes are immediate and queue offline.
+- Outbound create/edit/delete with retry, reconciliation, and the conflict rules of §7.5.
+- Microsoft Graph calendar through the same provider interface, which is what proves the interface was real.
+- Conflict comparison UI and recoverable sync-failure states.
+
+**Gate:** An offline edit to a recurring occurrence on a connected calendar, made with no signal and synced later, produces exactly one correct change in the provider and no duplicate or ghost occurrence — proven on both Google and Microsoft.
+
+### Phase 3 — Mail proposals
+
+**Outcome:** Work that arrived by mail is offered back as something the user accepts, and the day stops silently missing things.
+
+- Read-only Gmail and Outlook mail access through the provider interface.
+- The extraction pipeline of §7.7: fetch, detect, reconcile against known events, propose.
+- Deterministic parsing for structured invitations and machine-generated confirmations; model assistance permitted only for unstructured prose, only as a proposal.
+- A proposal surface with accept, edit-then-accept, and dismiss — and dismissal that is remembered.
+- Retention and privacy disclosure for extraction state.
+
+**Gate:** Across a real mailbox for two weeks: no proposal duplicates an event already on the calendar, no dismissed proposal returns, no message body is retained, and precision is high enough that the user does not begin ignoring the surface. Recall is explicitly not gated — missing a proposal is acceptable, inventing one is not.
+
+### Phase 4 — Cross-platform trust vertical slice
 
 **Outcome:** One real day survives offline Android use and converges with web through Convex.
 
 - Scaffold the Expo app and Android-first day route.
-- Add SQLite and IndexedDB per-record repositories with durable outboxes.
-- Add OIDC sign-in, devices, typed event/action records, idempotent push, indexed pull, and visible sync health in Convex.
-- Render one day of events and actions on mobile.
+- Add SQLite per-record repositories with durable outboxes, matching the web contract.
+- Render one day of events and actions on mobile, including connected-calendar events.
 - Support create, edit, complete, Join, hold-to-move, and edge resize for non-recurring timed items.
 - Prove two-client convergence, process termination recovery, and Samsung hardware behavior.
 
 **Gate:** Plan a day offline on Android, terminate and reopen the app, reconnect, and see byte-equivalent domain records and the same rendered day on web with zero lost edits.
 
-### Phase 2 — Mobile core parity
+### Phase 5 — Mobile core parity
 
 **Outcome:** Android can serve as the user's daily primary client.
 
@@ -573,7 +803,7 @@ Each phase is an outcome gate, not a date promise. Later phases may be reordered
 
 **Gate:** Two weeks of real use on Android plus web, with no unexplained divergence, lost edits, or severity-one gesture failures.
 
-### Phase 3 — Contextual notes and review loop
+### Phase 6 — Contextual notes and review loop
 
 **Outcome:** Notes improve execution without turning Calendar Master into a general document suite.
 
@@ -585,18 +815,7 @@ Each phase is an outcome gate, not a date promise. Later phases may be reordered
 
 **Gate:** Users can prepare, execute, and review a meeting or focused action without leaving the linked Calendar Master context.
 
-### Phase 4 — Google Calendar integration
-
-**Outcome:** Calendar Master becomes a safe daily interface over a real external calendar.
-
-- Incremental Google calendar authorization separate from sign-in.
-- Server-held tokens, initial import, delta sync, webhook hints, and health UI.
-- Provider event mapping, recurrence/exception equivalence, attendee fields, conferencing links, and provider conflict rules.
-- Outbound create/edit/delete with retry and reconciliation.
-
-**Gate:** A controlled Google calendar passes recurring-series, offline-write, webhook-loss, token-revocation, and two-device reconciliation tests before broad beta.
-
-### Phase 5 — Native shells and ambient access
+### Phase 7 — Native shells and ambient access
 
 **Outcome:** Calendar Master is available at the speed expected of a system calendar.
 
@@ -607,20 +826,19 @@ Each phase is an outcome gate, not a date promise. Later phases may be reordered
 
 **Gate:** Quick access launches reliably, preserves the same account/local database contract, and adds no duplicate-notification or stale-widget defects.
 
-### Phase 6 — Calendar sets and provider breadth
+### Phase 8 — Calendar sets and context
 
-**Outcome:** Users can control context and availability across accounts.
+**Outcome:** Users can control context and availability across the accounts they have connected.
 
 - Manual calendar/task-list sets.
 - Time-based automatic switching.
 - Location rules only after a privacy and battery review.
 - Busy-without-details availability overlays.
-- Microsoft 365 adapter, followed by CalDAV based on demand.
-- Task-provider imports only where ownership and conflict behavior are explicit.
+- CalDAV only if demand is evidenced; task providers only where ownership and conflict behavior are explicit.
 
 **Gate:** Context switching never changes underlying data, leaks private event details, or causes provider write ambiguity.
 
-### Phase 7 — Proposals and scheduling links
+### Phase 9 — Scheduling links
 
 **Outcome:** Users can offer availability without a separate scheduling tool.
 
@@ -631,7 +849,7 @@ Each phase is an outcome gate, not a date promise. Later phases may be reordered
 
 **Gate:** Double-booking, race, timezone, cancellation, and provider-failure scenarios pass before public availability.
 
-### Phase 8 — Optional assistive intelligence
+### Phase 10 — Optional assistive intelligence
 
 **Outcome:** Intelligence saves effort without weakening trust.
 
@@ -702,21 +920,41 @@ Every new high-risk test must be mutation-tested once: deliberately break the be
 
 ### Locked by this PRD
 
+- **The product is connected, not local-first.** Google and Microsoft calendars, and
+  mail-derived proposals, are core rather than enhancements.
+- **Offline is a first-class state.** Durable local storage and an outbox on every
+  client; connected never means online-only.
+- **Mail proposes, never writes.** No inbox surface, no sending, no unconfirmed calendar
+  writes.
+- **Provider access sits behind one server-side interface**, so the implementation is
+  replaceable and no domain code knows which vendor answered.
 - Expo/React Native for Android and later iOS.
-- Existing web client for Windows/macOS during the trust milestone.
+- Existing web client for Windows/macOS during the connected milestone.
 - Convex backend with durable local databases on clients.
 - Shared domain package; no Flutter or Kotlin rewrite.
 - Chrono as an adapter inside deterministic quick add; no LLM dependency for launch.
-- Google Calendar is the first provider, after native cross-device data is trustworthy.
-- Notes are contextual execution support and enter before provider breadth.
+- Google is the first provider, Microsoft the second, and no third until both are
+  trustworthy.
 
 ### Decisions made at explicit gates
 
-- **Authentication provider:** validate Clerk + Google inside the Phase 1 tracer; retain only if Expo, web, device revocation, and Convex authorization are straightforward.
-- **Expo Go to development build:** switch when the first required native capability cannot run faithfully in Expo Go.
-- **Chrono graduation:** promote individual expression classes only after corpus metrics meet the accuracy guardrail.
-- **Tauri timing:** begin only after cross-device sync is stable and desktop quick-access demand is validated.
-- **Open-weight model:** evaluate only in Phase 8 against a named bounded task and total operating cost.
+- **Provider layer — unified API or direct adapters.** Build both behind the §7.6
+  interface during Phase 1 and decide on measured integration cost, latency, webhook
+  reliability and per-connected-account price at the user counts actually expected. Do
+  not decide from a vendor page, and do not let the decision leak above the interface.
+- **Mail extraction technique.** Deterministic parsers ship first. A model is admitted
+  for unstructured prose only if it measurably raises precision without lowering it
+  elsewhere, and only as a proposal.
+- **Authentication provider:** validate Clerk + Google inside the Phase 1 tracer; retain
+  only if Expo, web, device revocation, and Convex authorization are straightforward.
+- **Expo Go to development build:** switch when the first required native capability
+  cannot run faithfully in Expo Go.
+- **Chrono graduation:** promote individual expression classes only after corpus metrics
+  meet the accuracy guardrail.
+- **Tauri timing:** begin only after cross-device sync is stable and desktop quick-access
+  demand is validated.
+- **Open-weight model:** evaluate only in Phase 10 against a named bounded task and total
+  operating cost.
 
 ## 17. References
 

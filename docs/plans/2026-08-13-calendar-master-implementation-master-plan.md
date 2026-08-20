@@ -8,13 +8,13 @@
 **Product authority:** the approved cross-platform PRD, promoted by Phase 1 to docs/product/calendar-master-cross-platform.md  
 **Visual and motion authority:** DESIGN.md  
 **Sequencing authority:** this plan  
-**Amended:** 2026-08-16 — see Amendment 1 at the end of this document. The evidence below was measured on 2026-08-13 and has drifted materially since: Planner.jsx is 9,079 lines, not ~8,100. Read Amendment 1 before executing any phase.  
+**Amended:** 2026-08-16 (Amendment 1) and 2026-08-19 (Amendment 2 — connected product and resequencing; read it first, it controls). The evidence below was measured on 2026-08-13 and has drifted materially since: Planner.jsx is 9,079 lines, not ~8,100. Read Amendment 1 before executing any phase.  
 
 This plan supersedes the sequencing and stale commit-transfer instructions in docs/superpowers/plans/2026-08-11-cross-platform-trust-phase-1.md wherever they conflict. It does not replace that document as historical planning evidence. It does not create or use a competing .planning source of truth.
 
 ## Executive decision
 
-Calendar Master will evolve from the existing React/Vite web application into an Android-first, local-first cross-platform product without replacing the working web client or rewriting its mature domain behavior.
+Calendar Master will evolve from the existing React/Vite web application into an Android-first, **connected** cross-platform product (see Amendment 2) without replacing the working web client or rewriting its mature domain behavior.
 
 Execution is deliberately ordered:
 
@@ -1259,3 +1259,46 @@ That is defensible for a sequencing document — order is its stated authority, 
 4. Hosted preview target — **still open.** Blocks P8.2.
 5. Android distribution and hardware — **still open.** Blocks P8.2-P8.4.
 6. **New:** Interaction contracts for the Phase 6 port surfaces are unsettled. Closed by G3.5.
+
+---
+
+## Amendment 2 — 2026-08-19: connected product, and the resequencing that follows
+
+**Status:** Binding amendment. Where this section conflicts with the body above or with Amendment 1, this section controls.
+**Reason:** The product moved from local-first to connected. Two things in the body are now wrong — its positioning, and its execution order — and one of its central complaints has been resolved.
+
+### A2.1 — The positioning changed
+
+The Executive decision above describes "an Android-first, **local-first** cross-platform product". That is superseded.
+
+Calendar Master is a **connected** day planner: Google and Outlook calendars assembled into one day, and mail read to propose events the user confirms. Isolation was never the value; a correct, legible day was, and a planner that cannot see the calendars where commitments actually live asks the user to maintain their day twice.
+
+**Offline is unchanged and non-negotiable.** Durable local storage, immediate local writes and a durable outbox all survive verbatim. Every "offline" requirement in the body below still binds. What is retired is *isolation as a product promise*, not offline capability as an engineering property. Do not read this amendment as permission to build an online-only client.
+
+Authority for the new positioning is `PRODUCT.md` and the cross-platform PRD, both revised the same day.
+
+### A2.2 — Measured re-baseline
+
+Measured 2026-08-19, not estimated.
+
+| Claim in the body or Amendment 1 | Measured today | Consequence |
+|---|---|---|
+| `src/Planner.jsx` is 9,079 lines and "moving backwards" | **5,570 lines** | Down 3,509 (−38.7%) from Amendment 1's measurement, and 4,046 below the 9,616 peak. The complaint that motivated Amendment 1 is closed. |
+| Broad web extraction is deferred behind the trust slice | **Complete** | Zero React components remain in `Planner.jsx`; 18 modules under `src/features/planner/`. Item 7 of the execution order ("continue broader web extraction only after the trust slice is operating") has been overtaken by events and no longer gates anything. |
+| Timeline is the final web surface to move | **Moved** | `WeekGrid` (578 lines) left on 2026-08-19. |
+| The app makes no network calls | **Still true** | `src/` has zero `fetch`/XHR/WebSocket. Everything connected is committed and unbuilt. |
+
+### A2.3 — The sequencing changed
+
+The body orders Expo/Android and the Convex trust slice **before** any provider work; the PRD reached Google Calendar at Phase 4. Both are superseded by the PRD's revised §13, and the reason is risk, not preference:
+
+- **The riskiest untested assumption moved.** It is no longer "can two clients converge offline" — it is "can this assemble a correct day out of accounts we do not control", including recurrence and exception equivalence against two foreign engines. Untested risk is retired early.
+- **Mobile is no longer the gate to value.** The existing web client can prove connected calendars alone. Building a second client before provider mapping and token handling are known to hold up is building for an unproven product.
+
+**New order:** server + auth + Google read-only → two-way sync + Microsoft → mail proposals → *then* the Expo/Android trust slice → mobile parity → notes. The Convex sync infrastructure this plan specifies is still the prerequisite for all of it; it simply lands with a web client first.
+
+### A2.4 — What survives unchanged
+
+Everything about durability and correctness. Specifically: durable local repositories and outboxes, idempotent push, indexed pull, conflict retention, force-stop recovery, recurrence round trips, the shared domain package, ADR 0001's dependency rules and the ratcheting build gate, and Chrono behind a deterministic parser contract.
+
+One rule is added by the new direction and binds everywhere: **provider payloads are mapped, never stored raw, and mail proposes rather than writes.** See PRD §7.6 and §7.7.

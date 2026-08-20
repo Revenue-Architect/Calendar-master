@@ -1,8 +1,14 @@
 # Planner
 
-A single-page day planner: a 24-hour timeline, an actions list with hold-to-complete
-and swipe gestures, recurring events and tasks, reminders, XP/levels/streaks, and fifteen
-themes. All state is local to the device.
+A connected day planner: a 24-hour timeline, an actions list with hold-to-complete and
+swipe gestures, recurring events and tasks, reminders, XP/levels/streaks, and fifteen
+themes.
+
+Google and Outlook calendar sync, and turning mail into proposed events, are the
+committed next direction — see [`PRODUCT.md`](PRODUCT.md) and the
+[connected-product PRD](docs/superpowers/specs/2026-08-11-calendar-master-cross-platform-prd.md).
+**Today the app is entirely local:** `src/` makes no network calls and state lives in
+`localStorage`. Read that gap as the roadmap.
 
 ## Running it
 

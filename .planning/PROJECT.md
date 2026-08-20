@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A personal-first, collaboration-ready planner that combines time-bound Events, finishable Actions, and contextual Notes into a daily operating system. The day is the primary surface. The app is local-first: the notebook lives on the device under schema v8, with host `window.storage` or `localStorage`.
+A personal-first, collaboration-ready planner that combines time-bound Events, finishable Actions, and contextual Notes into a daily operating system. The day is the primary surface. The app is connected and offline-capable: Google and Outlook calendars are assembled into one day and mail is read to propose events, while the device keeps a working copy (schema v8, host `window.storage` or `localStorage`) so the day still reads with no signal. Authority for this is PRODUCT.md and the cross-platform PRD, not this file.
 
 ## Core Value
 

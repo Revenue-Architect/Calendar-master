@@ -230,8 +230,8 @@ function NavigationShell({ phase, firstItemRef, onTimeline, onActions, onSetup, 
         ))}
       </div>
       <div className="nb-nav-membership" style={{ "--nav-index": 7 }}>
-        <p className="text-xs tracking-[.14em]" style={{ fontFamily: MONO }}>LOCAL FIRST</p>
-        <p className="text-base mt-1 leading-snug">Everything in this planner stays on this device.</p>
+        <p className="text-xs tracking-[.14em]" style={{ fontFamily: MONO }}>OFFLINE READY</p>
+        <p className="text-base mt-1 leading-snug">Your day still works with no signal.</p>
       </div>
     </aside>
   );
