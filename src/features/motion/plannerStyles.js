@@ -369,11 +369,11 @@ export function plannerStyles({ T, preferences }) {
           to{transform:translateY(0)}
         }
         /* A sheet grows from its trigger by being *revealed*, not by being zoomed.
-           The panel is at its true size from the first frame, centred over the
-           button and clipped to a rounded window exactly the button's size; the
-           window opens out to the panel's own edges. Nothing inside is ever
-           scaled, so the text is laid out once and never resampled — see
-           features/motion/fluidGeometry.js for why that is the whole fix. */
+           The panel is at its true size from the first frame, edge-aligned to the
+           measured button and clipped to a rounded window exactly the button's
+           size; the window opens out to the panel's own edges. Nothing inside is
+           ever scaled, so the text is laid out once and never resampled — see
+           features/motion/fluidGeometry.js for the pure anchor arithmetic. */
         .nb-fluid[data-fluid-origin="none"]{animation:none;transform:none;clip-path:none}
         .nb-fluid[data-fluid-origin="trigger"]{animation-name:nbfluidorigin;animation-timing-function:cubic-bezier(.22,.85,.28,1);transform-origin:center}
         /* The corner has to stop being a pill early, or the whole reveal reads as a
@@ -387,9 +387,10 @@ export function plannerStyles({ T, preferences }) {
            still small enough to read as that control, then becomes card-cornered for
            the rest of the travel. */
         @keyframes nbfluidorigin{
-          0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round var(--fluid-radius, 999px))}
-          22%{clip-path:inset(calc(var(--fluid-inset-y) * .48) calc(var(--fluid-inset-x) * .48) round 24px)}
-          100%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px round 24px)}
+          0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-top) var(--fluid-inset-right) var(--fluid-inset-bottom) var(--fluid-inset-left) round var(--fluid-radius, 999px))}
+          15%{clip-path:inset(calc(var(--fluid-inset-top) * .84) calc(var(--fluid-inset-right) * .84) calc(var(--fluid-inset-bottom) * .84) calc(var(--fluid-inset-left) * .84) round var(--fluid-radius, 999px))}
+          35%{clip-path:inset(calc(var(--fluid-inset-top) * .48) calc(var(--fluid-inset-right) * .48) calc(var(--fluid-inset-bottom) * .48) calc(var(--fluid-inset-left) * .48) round var(--fluid-target-radius, 24px))}
+          100%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px 0px 0px round var(--fluid-target-radius, 24px))}
         }
         /* The clip is the transition. Fading the body independently made the
            opening shape empty and erased the contents before the closing shape
@@ -403,8 +404,8 @@ export function plannerStyles({ T, preferences }) {
            vaguely downward on the way out — the two halves of one gesture did not
            describe the same path. Same distance, same clip, reversed. */
         @keyframes nbfluidoriginout{
-          0%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px round 24px)}
-          100%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round var(--fluid-radius, 999px))}
+          0%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px 0px 0px round var(--fluid-target-radius, 24px))}
+          100%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-top) var(--fluid-inset-right) var(--fluid-inset-bottom) var(--fluid-inset-left) round var(--fluid-radius, 999px))}
         }
         .nb-fluid.nb-fluid-closing[data-fluid-origin="trigger"] .nb-notch-body{animation:none;opacity:1}
         /* The notch is the sheet itself taking on the trigger's material and
@@ -469,9 +470,10 @@ export function plannerStyles({ T, preferences }) {
            while it is still small enough to read as that button, then becomes
            card-cornered for the rest of the travel. */
         @keyframes nbnotchin{
-          0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round var(--fluid-radius, 999px))}
-          22%{clip-path:inset(calc(var(--fluid-inset-y) * .5) calc(var(--fluid-inset-x) * .5) round 24px)}
-          100%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px round 24px)}
+          0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-top) var(--fluid-inset-right) var(--fluid-inset-bottom) var(--fluid-inset-left) round var(--fluid-radius, 999px))}
+          15%{clip-path:inset(calc(var(--fluid-inset-top) * .84) calc(var(--fluid-inset-right) * .84) calc(var(--fluid-inset-bottom) * .84) calc(var(--fluid-inset-left) * .84) round var(--fluid-radius, 999px))}
+          35%{clip-path:inset(calc(var(--fluid-inset-top) * .48) calc(var(--fluid-inset-right) * .48) calc(var(--fluid-inset-bottom) * .48) calc(var(--fluid-inset-left) * .48) round var(--fluid-target-radius, 24px))}
+          100%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px 0px 0px round var(--fluid-target-radius, 24px))}
         }
         /* The sheet assembles itself rather than appearing.
            The body used to fade as a single block from 60% of the morph, which
@@ -525,8 +527,8 @@ export function plannerStyles({ T, preferences }) {
           animation:nbnotchout 240ms cubic-bezier(.4,0,.3,1) forwards;
         }
         @keyframes nbnotchout{
-          0%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px round 24px)}
-          100%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round var(--fluid-radius, 999px))}
+          0%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px 0px 0px round var(--fluid-target-radius, 24px))}
+          100%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-top) var(--fluid-inset-right) var(--fluid-inset-bottom) var(--fluid-inset-left) round var(--fluid-radius, 999px))}
         }
         .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-notch-body,
         .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-notch-cascade>*,

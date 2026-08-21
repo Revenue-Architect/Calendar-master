@@ -623,17 +623,19 @@ test.describe("sheet exits", () => {
       const style = getComputedStyle(node);
       return {
         x: style.getPropertyValue("--fluid-x").trim(),
-        insetX: style.getPropertyValue("--fluid-inset-x").trim(),
-        insetY: style.getPropertyValue("--fluid-inset-y").trim(),
+        insetTop: style.getPropertyValue("--fluid-inset-top").trim(),
+        insetRight: style.getPropertyValue("--fluid-inset-right").trim(),
+        insetBottom: style.getPropertyValue("--fluid-inset-bottom").trim(),
+        insetLeft: style.getPropertyValue("--fluid-inset-left").trim(),
       };
     });
     expect(geometry.x).not.toBe("");
-    /* A timeline card on a wide screen is wider than the panel it opens, so the
-       horizontal inset is legitimately nothing to open from — the reveal starts
-       as a band the card's height and spreads vertically. What matters is that
-       both are set and neither has gone negative. */
-    expect(parseFloat(geometry.insetX)).toBeGreaterThanOrEqual(0);
-    expect(parseFloat(geometry.insetY)).toBeGreaterThan(0);
+    /* A timeline card on a wide screen can be wider than the panel it opens, so
+       one horizontal inset is legitimately zero. What matters is that every
+       edge is explicit and no asymmetric clip goes negative. */
+    for (const name of ["insetTop", "insetRight", "insetBottom", "insetLeft"]) {
+      expect(parseFloat(geometry[name]), `${name} must not be negative`).toBeGreaterThanOrEqual(0);
+    }
 
     await page.keyboard.press("Escape");
     await expect(sheet).toHaveCount(0, { timeout: 3000 });
@@ -674,10 +676,73 @@ test.describe("the shape a sheet grows from", () => {
     return {
       x: number("--fluid-x"),
       y: number("--fluid-y"),
-      insetX: number("--fluid-inset-x"),
-      insetY: number("--fluid-inset-y"),
+      insetTop: number("--fluid-inset-top"),
+      insetRight: number("--fluid-inset-right"),
+      insetBottom: number("--fluid-inset-bottom"),
+      insetLeft: number("--fluid-inset-left"),
+      anchorX: node.dataset.morphAnchorX,
+      anchorY: node.dataset.morphAnchorY,
       panel: { top: rect.top, left: rect.left, width: rect.width, height: rect.height },
     };
+  });
+
+  test("desktop NEW starts at its measured top-right bounds and expands left/down", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await openPlanner(page);
+    const trigger = page.getByTestId("new-entry");
+    const source = await trigger.boundingBox();
+    await trigger.click();
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).toHaveAttribute("data-fluid-origin", "notch");
+    await expect(sheet).toHaveAttribute("data-morph-anchor-x", "right");
+    await expect(sheet).toHaveAttribute("data-morph-anchor-y", "top");
+
+    const samples = await sheet.evaluate((node) => {
+      const entry = node.getAnimations().find((animation) => animation.animationName === "nbnotchin");
+      if (!entry?.effect) return null;
+      const duration = Number(entry.effect.getTiming().duration);
+      const read = () => {
+        const style = getComputedStyle(node);
+        const rect = node.getBoundingClientRect();
+        const matrix = new DOMMatrixReadOnly(style.transform);
+        const clip = style.clipPath.match(/^inset\((.*?)\s+round/);
+        const [top, right, bottom, left] = (clip ? clip[1] : "0px 0px 0px 0px")
+          .trim().split(/\s+/).map((value) => Number.parseFloat(value) || 0);
+        return {
+          left: rect.left + left,
+          right: rect.right - right,
+          top: rect.top + top,
+          bottom: rect.bottom - bottom,
+          width: rect.width - left - right,
+          height: rect.height - top - bottom,
+          scaleX: matrix.a,
+          scaleY: matrix.d,
+        };
+      };
+      entry.pause();
+      entry.currentTime = 0;
+      const start = read();
+      entry.currentTime = duration * .5;
+      const mid = read();
+      entry.currentTime = duration;
+      const end = read();
+      entry.play();
+      return { start, mid, end };
+    });
+
+    expect(samples).not.toBeNull();
+    expect(Math.abs(samples.start.left - source.x)).toBeLessThan(2);
+    expect(Math.abs(samples.start.top - source.y)).toBeLessThan(2);
+    expect(Math.abs(samples.start.width - source.width)).toBeLessThan(2);
+    expect(Math.abs(samples.start.height - source.height)).toBeLessThan(2);
+    expect(samples.mid.left, "the opposite horizontal edge should expand left").toBeLessThan(samples.start.left);
+    expect(samples.mid.bottom, "the opposite vertical edge should expand down").toBeGreaterThan(samples.start.bottom);
+    expect(samples.end.width).toBeGreaterThan(samples.start.width);
+    expect(samples.end.height).toBeGreaterThan(samples.start.height);
+    expect(samples.start.scaleX).toBeCloseTo(1, 5);
+    expect(samples.start.scaleY).toBeCloseTo(1, 5);
+    expect(samples.mid.scaleX).toBeCloseTo(1, 5);
+    expect(samples.mid.scaleY).toBeCloseTo(1, 5);
   });
 
   test("the morph is measured from the panel, not from the panel mid-animation", async ({ page }) => {
@@ -693,27 +758,20 @@ test.describe("the shape a sheet grows from", () => {
     await page.waitForTimeout(700);
     const g = await geometryOf(sheet);
 
-    const panelCenterY = g.panel.top + g.panel.height / 2;
-    const triggerCenterY = box.y + box.height / 2;
     /* A CSS animation's first keyframe is applied before any layout effect runs,
        so a naive `getBoundingClientRect()` in that effect measures the *pill*.
        `.nb-fluid`'s 0% is `translateY(26px) scale(.965)` about the bottom edge,
        which put this number tens of pixels out. */
-    expect(
-      Math.abs(g.y - (triggerCenterY - panelCenterY)),
-      "the morph's travel does not match the distance between the button and the panel",
-    ).toBeLessThan(2);
-
-    /* The reveal starts as a window exactly the size of the button that opened
-       it, centred in the panel — so each inset is half the difference. */
-    expect(
-      Math.abs(g.insetX - (g.panel.width - box.width) / 2),
-      "the clip does not start at the button's width",
-    ).toBeLessThan(1);
-    expect(
-      Math.abs(g.insetY - (g.panel.height - box.height) / 2),
-      "the clip does not start at the button's height",
-    ).toBeLessThan(1);
+    const visible = {
+      left: g.panel.left + g.x + g.insetLeft,
+      top: g.panel.top + g.y + g.insetTop,
+      width: g.panel.width - g.insetLeft - g.insetRight,
+      height: g.panel.height - g.insetTop - g.insetBottom,
+    };
+    expect(Math.abs(visible.left - box.x)).toBeLessThan(2);
+    expect(Math.abs(visible.top - box.y)).toBeLessThan(2);
+    expect(Math.abs(visible.width - box.width)).toBeLessThan(2);
+    expect(Math.abs(visible.height - box.height)).toBeLessThan(2);
   });
 
   test("the same is true of an ordinary sheet, not just the notch", async ({ page }) => {
@@ -742,8 +800,10 @@ test.describe("the shape a sheet grows from", () => {
     await page.waitForTimeout(700);
 
     const g = await geometryOf(sheet);
-    const panelCenterY = g.panel.top + g.panel.height / 2;
-    expect(Math.abs(g.y - ((box.y + box.height / 2) - panelCenterY))).toBeLessThan(2);
+    const visibleTop = g.panel.top + g.y + g.insetTop;
+    const visibleHeight = g.panel.height - g.insetTop - g.insetBottom;
+    expect(Math.abs(visibleTop - box.y)).toBeLessThan(2);
+    expect(Math.abs(visibleHeight - box.height)).toBeLessThan(2);
   });
 
   test("opening a sheet scrolls neither the page nor the sheet", async ({ page }) => {
@@ -847,15 +907,18 @@ test.describe("a sheet must not resize what is inside it", () => {
       const vars = await sheet.evaluate((node) => {
         const style = getComputedStyle(node);
         return {
-          insetX: style.getPropertyValue("--fluid-inset-x").trim(),
-          insetY: style.getPropertyValue("--fluid-inset-y").trim(),
+          insetTop: style.getPropertyValue("--fluid-inset-top").trim(),
+          insetRight: style.getPropertyValue("--fluid-inset-right").trim(),
+          insetBottom: style.getPropertyValue("--fluid-inset-bottom").trim(),
+          insetLeft: style.getPropertyValue("--fluid-inset-left").trim(),
           s: style.getPropertyValue("--fluid-s").trim(),
           sx: style.getPropertyValue("--fluid-sx").trim(),
           sy: style.getPropertyValue("--fluid-sy").trim(),
         };
       });
-      expect(parseFloat(vars.insetX), "the reveal needs a shape to open from").toBeGreaterThan(0);
-      expect(parseFloat(vars.insetY)).toBeGreaterThan(0);
+      const insets = [vars.insetTop, vars.insetRight, vars.insetBottom, vars.insetLeft].map(Number.parseFloat);
+      expect(insets.every((value) => value >= 0), "the reveal must expose four non-negative edge insets").toBe(true);
+      expect(insets.some((value) => value > 0), "the reveal needs a shape to open from").toBe(true);
       /* Gone from the stylesheet, not merely unused: a scale left lying about is
          a scale something will animate again. */
       expect(vars.s, "the single scale must be gone").toBe("");

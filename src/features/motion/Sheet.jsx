@@ -7,7 +7,7 @@ import {
   snapshotAncestorScroll,
   trapDialogTab,
 } from "../accessibility/dialogFocus.js";
-import { fluidMorphFromRects } from "./fluidGeometry.js";
+import { anchoredFluidMorphFromRects } from "./fluidGeometry.js";
 import { recentFluidTriggerRadius, recentFluidTriggerRect } from "./fluidTrigger.js";
 import { MONO } from "../../design/typography.js";
 import { MORPH_MS, MORPH_STAGE_CONTENT, MORPH_STAGE_REVEAL } from "./morphTiming.js";
@@ -88,9 +88,11 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
       const style = window.getComputedStyle(panel);
       const x = panel.style.getPropertyValue("--fluid-x");
       const y = panel.style.getPropertyValue("--fluid-y");
-      const insetX = panel.style.getPropertyValue("--fluid-inset-x");
-      const insetY = panel.style.getPropertyValue("--fluid-inset-y");
-      if (inFlight && x && y && insetX && insetY && typeof panel.animate === "function") {
+      const insetTop = panel.style.getPropertyValue("--fluid-inset-top");
+      const insetRight = panel.style.getPropertyValue("--fluid-inset-right");
+      const insetBottom = panel.style.getPropertyValue("--fluid-inset-bottom");
+      const insetLeft = panel.style.getPropertyValue("--fluid-inset-left");
+      if (inFlight && x && y && insetTop && insetRight && insetBottom && insetLeft && typeof panel.animate === "function") {
         panel.dataset.fluidReverse = "true";
         /* Freeze exactly what is on screen before removing the CSS animation,
            then let WAAPI fold those compositor properties back to the trigger. */
@@ -103,7 +105,7 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
           from,
           {
             transform: `translate(${x}, ${y})`,
-            clipPath: `inset(${insetY} ${insetX} round var(--fluid-radius, 999px))`,
+            clipPath: `inset(${insetTop} ${insetRight} ${insetBottom} ${insetLeft} round var(--fluid-radius, 999px))`,
           },
         ], {
           duration: boundedTime == null ? MORPH_MS : (boundedTime / duration) * MORPH_MS,
@@ -309,15 +311,23 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
       /* Named `geometry`, not `morph`: the prop of that name says *how* to move,
          this says *how far*, and letting the local shadow the prop silently
          compared an object to a string and lost the notch every time. */
-      const geometry = fluidMorphFromRects(triggerRect, panelRect);
+      const sourceRadius = Number.parseFloat(recentFluidTriggerRadius()) || 999;
+      const geometry = anchoredFluidMorphFromRects(triggerRect, panelRect, {
+        sourceRadius,
+        targetRadius: 24,
+      });
       panel.dataset.fluidOrigin = morphRef.current === "notch" ? "notch" : "trigger";
+      panel.dataset.morphAnchorX = geometry.anchorX;
+      panel.dataset.morphAnchorY = geometry.anchorY;
       panel.style.setProperty("--fluid-x", `${geometry.translateX}px`);
       panel.style.setProperty("--fluid-y", `${geometry.translateY}px`);
       /* The shape the reveal starts from, not a scale to grow the panel by:
          animating a scale magnifies everything inside the panel — see
          fluidGeometry.js. */
-      panel.style.setProperty("--fluid-inset-x", `${geometry.insetX}px`);
-      panel.style.setProperty("--fluid-inset-y", `${geometry.insetY}px`);
+      panel.style.setProperty("--fluid-inset-top", `${geometry.insetTop}px`);
+      panel.style.setProperty("--fluid-inset-right", `${geometry.insetRight}px`);
+      panel.style.setProperty("--fluid-inset-bottom", `${geometry.insetBottom}px`);
+      panel.style.setProperty("--fluid-inset-left", `${geometry.insetLeft}px`);
       /* The corner the reveal starts from is the trigger's own corner.
          It used to be a flat 999px, which is right for a pill — the NEW button is
          one — and badly wrong for anything wide and low. On a full-width event card
@@ -326,8 +336,8 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
          with a finished sheet behind it. That reads as a portal, not as the card
          being pulled out, which is the whole reason the morph did not feel connected.
          Reading the real radius makes a card open as a card and a pill as a pill. */
-      const triggerRadius = Number.parseFloat(recentFluidTriggerRadius()) || 999;
-      panel.style.setProperty("--fluid-radius", `${triggerRadius}px`);
+      panel.style.setProperty("--fluid-radius", `${geometry.sourceRadius}px`);
+      panel.style.setProperty("--fluid-target-radius", `${geometry.targetRadius}px`);
     }
     const frame = window.requestAnimationFrame(() => {
       focusDialogOnOpen(dialogRef.current);
