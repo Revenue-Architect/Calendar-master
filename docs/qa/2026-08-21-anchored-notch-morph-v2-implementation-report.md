@@ -3,12 +3,14 @@
 **Date:** 2026-08-21  
 **Repository:** Revenue-Architect/Calendar-master  
 **Branch:** `main`  
-**Final commit:** [`e44b058`](https://github.com/Revenue-Architect/Calendar-master/commit/e44b058388851e6e8c89b8b817811cafcbf55519)  
-**Remote state:** `origin/main` is at the same commit.
+**Initial implementation commit:** [`e44b058`](https://github.com/Revenue-Architect/Calendar-master/commit/e44b058388851e6e8c89b8b817811cafcbf55519)  
+**Remote state at initial report:** `origin/main` was at the same commit.
+
+> **Superseded:** the review remediation is now in [`9333296`](https://github.com/Revenue-Architect/Calendar-master/commit/9333296) and the evidence/corrections are recorded in the [remediation report](./2026-08-21-anchored-notch-morph-v2-remediation-report.md). Read that report for the current sign-off status; this document describes the initial implementation only.
 
 ## Executive summary
 
-The implementation in `docs/plans/2026-08-20-004-feat-anchored-notch-morph-v2-plan.md` is complete and pushed to `main`.
+The initial implementation in `docs/plans/2026-08-20-004-feat-anchored-notch-morph-v2-plan.md` was pushed to `main`. A subsequent review identified scope and verification gaps; those are corrected in the remediation report linked above.
 
 The existing Sheet architecture was retained: the Sheet is measured and laid out at its final size, then revealed with a translated four-sided `clip-path`. The implementation now derives the source anchor from the measured trigger and panel geometry, supports all four anchor quadrants, preserves source identity during the handoff, and reverses from the actual rendered frame when dismissed in flight.
 
@@ -52,7 +54,7 @@ M  tests/e2e/planning.spec.js
 ?? scripts/profile-navigation-loaf.mjs
 ```
 
-The final branch check confirmed:
+The initial branch check confirmed:
 
 ```text
 HEAD        e44b058388851e6e8c89b8b817811cafcbf55519
@@ -76,11 +78,11 @@ The helper:
 
 For example, a desktop `NEW` trigger above and to the right of the panel returns `right/top`, translates the true-size panel to the trigger's right/top relationship, and opens the clip primarily leftward and downward. A mobile `+ ACTION` trigger near the lower-right edge derives `right/bottom` from the same algorithm; there is no source-ID special case.
 
-The old `fluidMorphFromRects()` export remains as a compatibility delegate to the anchored implementation, avoiding a second geometry path for existing composition-root imports.
+The old `fluidMorphFromRects()` export remains the centered compatibility path for ordinary trigger-origin Sheets; only notch Composer surfaces use the asymmetric helper.
 
 ### 2. True-size Sheet wiring
 
-[`src/features/motion/Sheet.jsx`](../../src/features/motion/Sheet.jsx) now uses the anchored helper for both ordinary trigger morphs and notch morphs.
+[`src/features/motion/Sheet.jsx`](../../src/features/motion/Sheet.jsx) now uses the anchored helper for notch Composer morphs while preserving the centered ordinary trigger path.
 
 The layout effect continues to suppress the entry animation for one measurement so the panel rectangle is the final, untransformed size. It then writes:
 
@@ -139,7 +141,7 @@ The scrim blur remains a fixed paint value. No primary Sheet keyframe introduces
 
 ### 4. Timing
 
-[`src/features/motion/morphTiming.js`](../../src/features/motion/morphTiming.js) retimes the notch entry to `380ms`, with the existing fractional stage handoffs preserved. The notch close remains the shorter exit path. The Sheet scroll-restore fallback now uses the shared `MORPH_MS` constant instead of a stale hard-coded duration.
+[`src/features/motion/morphTiming.js`](../../src/features/motion/morphTiming.js) retimes the notch entry to `380ms`, with the existing fractional stage handoffs preserved. Ordinary Sheets use a shared `420ms` entry token, and each path's scroll guard now matches its actual entrance duration.
 
 ### 5. Test coverage added or updated
 
@@ -259,4 +261,4 @@ The implementation keeps the authoritative motion architecture intact and fulfil
 - Event ↔ Action and More Options flows retained;
 - unrelated user work preserved.
 
-This report file is currently local and uncommitted. The implementation itself is already pushed to `origin/main` at `e44b058`.
+The initial implementation is superseded by the pushed remediation at `9333296`; the current branch and QA evidence are tracked in the remediation report.
