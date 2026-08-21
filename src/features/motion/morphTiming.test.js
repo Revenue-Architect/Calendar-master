@@ -41,6 +41,7 @@ test("the lead is the wait that keeps content off an unfinished clip", () => {
 test("v3 handoff effects stay inside the opening cadence", () => {
   assert.ok(MORPH_HANDOFF_MS < MORPH_MS);
   assert.ok(MORPH_CLOSE_MS < MORPH_MS);
+  assert.equal(MORPH_CLOSE_MS, 250, "settled notch close uses the 250ms cadence");
   assert.ok(MORPH_LEAD + CASCADE_GROUPS * MORPH_STEP + MORPH_FADE <= 1);
   assert.ok(MORPH_CONTENT_SCALE >= .98 && MORPH_CONTENT_SCALE <= .995);
   assert.ok(MORPH_CONTENT_BLUR_PX >= 0 && MORPH_CONTENT_BLUR_PX <= 2);

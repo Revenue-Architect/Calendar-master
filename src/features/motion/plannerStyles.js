@@ -527,6 +527,11 @@ export function plannerStyles({ T, preferences }) {
           64%,100%{opacity:1;transform:translateX(0) scale(1);filter:blur(0)}
         }
         .nb-fluid[data-fluid-origin="notch"][data-morph-stage="content"] .nb-notch-body,.nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-notch-body{pointer-events:auto}
+        /* The wall-clock stage is authoritative once the morph deadline has
+           passed. This is deliberately scoped to the settled state: it repairs
+           a stalled body animation without stealing the opening interpolation
+           or the reversible closing animation. */
+        .nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-notch-body{animation:none!important;opacity:1!important;transform:none!important;filter:none!important}
         .nb-fluid[data-fluid-origin="notch"] .nb-notch-body>:last-child:not(:has(.nb-notch-cascade)){--nb-stage:1}
         ${Array.from({ length: 8 }, (_, n) => `.nb-fluid[data-fluid-origin="notch"] .nb-notch-cascade>*:nth-child(${n + 1}){--nb-stage:${n + 1}}`).join("")}
         .nb-fluid[data-fluid-origin="notch"] .nb-notch-cascade>*:nth-child(n+9){--nb-stage:8}
@@ -569,7 +574,7 @@ export function plannerStyles({ T, preferences }) {
            reverse (data-fluid-reverse) does not take this delay — the form is
            mid-arrival and leaves with the shape. Unmount stays at MORPH_MS. */
         .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"]:not([data-fluid-reverse="true"]){
-          animation:nbnotchout 240ms cubic-bezier(.4,0,.3,1) forwards;
+          animation:nbnotchout var(--nb-morph-close,${MORPH_CLOSE_MS}ms) cubic-bezier(.4,0,.3,1) forwards;
         }
         @keyframes nbnotchout{
           0%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px 0px 0px round var(--fluid-target-radius, 24px))}
@@ -612,7 +617,7 @@ export function plannerStyles({ T, preferences }) {
            in with it, so it costs one blur instead of eighteen and looks the same. */
         .nb-scrim{animation:nbscrim 260ms cubic-bezier(.23,1,.32,1) forwards;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
         @keyframes nbscrim{from{opacity:0}to{opacity:1}}
-        .nb-scrim.nb-fluid-closing{animation:nbscrimout ${MORPH_CLOSE_MS}ms ease forwards}
+        .nb-scrim.nb-fluid-closing{animation:nbscrimout 240ms ease forwards}
         @keyframes nbscrimout{0%,25%{opacity:1}100%{opacity:0}}
         .nb-sheet-h{transition:height 320ms cubic-bezier(.2,.8,.25,1)}
         .nb-edit-actions{transition:width 360ms cubic-bezier(.23,1,.32,1),background-color 260ms ease,box-shadow 260ms ease}
@@ -730,9 +735,9 @@ export function plannerStyles({ T, preferences }) {
         .nb-day-heading.is-focused{padding-top:.45rem;padding-bottom:.45rem;border-bottom:1px solid ${T.line}}
         .nb-day-heading.is-focused .nb-display{font-size:2rem;line-height:2rem}
 
-        @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.nb-fluid,.nb-view-track,.nb-msheet,.nb-timeline-chrome,.nb-timeline-chrome-inner,.nb-morph-source-label,.nb-up,.nb-list-enter{animation:none!important;transform:none!important}.nb-fluid,.nb-msheet,.nb-timeline-chrome-inner,.nb-morph-source-label{transition:opacity 160ms ease!important}.nb-view-track.is-sliding,.nb-app-surface,.nb-nav-viewport,.nb-nav-carrier,.nb-nav-motion-viewport,.nb-nav-motion-carrier,.nb-mobile-calendar-return,.nb-mobile-calendar-return::after,.nb-navigation,.nb-nav-brand,.nb-nav-item,.nb-nav-membership{transition:none!important;animation:none!important}
+        @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.nb-fluid,.nb-view-track,.nb-msheet,.nb-timeline-chrome,.nb-timeline-chrome-inner,.nb-morph-source-label,.nb-up,.nb-list-enter{animation:none!important;transform:none!important}.nb-fluid,.nb-msheet,.nb-timeline-chrome-inner,.nb-morph-source-label{transition:opacity 160ms ease!important}.nb-fluid[data-fluid-origin="notch"] .nb-notch-body{animation:none!important;transition:none!important;opacity:1!important;transform:none!important;filter:none!important}.nb-fluid[data-fluid-origin="notch"] .nb-morph-source-label{animation:none!important;transition:none!important;opacity:0!important;transform:none!important;filter:none!important;pointer-events:none!important}.nb-view-track.is-sliding,.nb-app-surface,.nb-nav-viewport,.nb-nav-carrier,.nb-nav-motion-viewport,.nb-nav-motion-carrier,.nb-mobile-calendar-return,.nb-mobile-calendar-return::after,.nb-navigation,.nb-nav-brand,.nb-nav-item,.nb-nav-membership{transition:none!important;animation:none!important}
           button:active,[role="button"]:active,a[href]:active,[data-event-id]:active,[data-task-chip]:active{scale:1!important}}
-        ${preferences?.display.reducedMotion ? `.nb-fluid,.nb-view-track,.nb-msheet,.nb-timeline-chrome,.nb-timeline-chrome-inner,.nb-morph-source-label{animation:none!important;transform:none!important}.nb-fluid,.nb-msheet,.nb-timeline-chrome-inner,.nb-morph-source-label{transition:opacity 160ms ease!important}.nb-view-track.is-sliding,.nb-app-surface,.nb-nav-viewport,.nb-nav-carrier,.nb-nav-motion-viewport,.nb-nav-motion-carrier,.nb-mobile-calendar-return,.nb-mobile-calendar-return::after,.nb-navigation,.nb-nav-brand,.nb-nav-item,.nb-nav-membership{transition:none!important;animation:none!important}
+        ${preferences?.display.reducedMotion ? `.nb-fluid,.nb-view-track,.nb-msheet,.nb-timeline-chrome,.nb-timeline-chrome-inner,.nb-morph-source-label{animation:none!important;transform:none!important}.nb-fluid,.nb-msheet,.nb-timeline-chrome-inner,.nb-morph-source-label{transition:opacity 160ms ease!important}.nb-fluid[data-fluid-origin="notch"] .nb-notch-body{animation:none!important;transition:none!important;opacity:1!important;transform:none!important;filter:none!important}.nb-fluid[data-fluid-origin="notch"] .nb-morph-source-label{animation:none!important;transition:none!important;opacity:0!important;transform:none!important;filter:none!important;pointer-events:none!important}.nb-view-track.is-sliding,.nb-app-surface,.nb-nav-viewport,.nb-nav-carrier,.nb-nav-motion-viewport,.nb-nav-motion-carrier,.nb-mobile-calendar-return,.nb-mobile-calendar-return::after,.nb-navigation,.nb-nav-brand,.nb-nav-item,.nb-nav-membership{transition:none!important;animation:none!important}
           button:active,[role="button"]:active,a[href]:active,[data-event-id]:active,[data-task-chip]:active{scale:1!important}` : ""}
       `;
 }

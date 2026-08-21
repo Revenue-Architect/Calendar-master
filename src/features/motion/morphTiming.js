@@ -5,7 +5,7 @@
    The reference motion runs its container for 667ms (20 frames at 30fps), and
    that is the right shape but not the right speed for a control opened dozens of
    times a day — a showcase piece is authored to be watched once, and DESIGN.md's
-   fortieth-time test is the standard that actually applies here. 380ms keeps the
+   fortieth-time test is the standard that actually applies here. 350ms keeps the
    physical choreography while removing the wait between repeated planner actions:
    the sheet still assembles itself group by group, but the complete cascade lands
    before the surface settles. It remains longer than the old 320ms pop that read
