@@ -10,7 +10,16 @@
    the sheet still assembles itself group by group, but the complete cascade lands
    before the surface settles. It remains longer than the old 320ms pop that read
    as a resize rather than a morph. */
-export const MORPH_MS = 380;
+export const MORPH_MS = 350;
+
+/* V3 separates the faster settled close from the opening gesture. Keeping the
+   values as named tokens lets Sheet and CSS share the reference cadence without
+   coupling ordinary trigger-origin Sheets to the notch choreography. */
+export const MORPH_CLOSE_MS = 250;
+export const MORPH_HANDOFF_MS = 200;
+export const MORPH_HANDOFF_SLIDE_PX = 32;
+export const MORPH_CONTENT_SCALE = 0.985;
+export const MORPH_CONTENT_BLUR_PX = 1.5;
 
 /* Ordinary trigger-origin Sheets retain their established CSS entrance. Keep
    this beside the notch dial so JS guards and the stylesheet cannot drift apart
@@ -45,8 +54,8 @@ export const CASCADE_GROUPS = 8;
    than leaving the handoff stranded at an absolute millisecond that no
    longer means anything in the new timeline. Wall-clock, not animation-clock:
    the stage machine has to keep working when a tab freezes CSS animations. */
-export const MORPH_STAGE_REVEAL = 0.56;
-export const MORPH_STAGE_CONTENT = 0.69;
+export const MORPH_STAGE_REVEAL = 0.38;
+export const MORPH_STAGE_CONTENT = 0.52;
 
 /* Long enough that a full pane width reads as travel rather than a jump, short
    enough that it never delays the surface you asked for. The day turn next door
