@@ -28,7 +28,10 @@ const OUT = path.resolve(process.argv.includes("--out")
   : "contact-sheet");
 const EXECUTABLE = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined;
 
-const STATE_KEY = "nbmp:state:v8";
+/* The fixture below is deliberately v4-shaped. Store it under the matching
+   legacy key so loadPlannerState exercises the real migration chain instead of
+   treating an old object as a malformed v8 notebook. */
+const STATE_KEY = "nbmp:state:v4";
 const PREFS_KEY = "nbmp:preferences:v1";
 
 const WIDTHS = [
@@ -57,24 +60,25 @@ const SURFACES = [
 function notebook() {
   const d = new Date();
   const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  const at = (h, m, dur) => ({
-    kind: "timed", timeZoneMode: "floating",
-    startLocal: `${key}T${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`,
-    endLocal: `${key}T${String(h + Math.floor((m + dur) / 60)).padStart(2, "0")}:${String((m + dur) % 60).padStart(2, "0")}`,
-  });
+  const at = (h, m, dur) => ({ date: key, start: h * 60 + m, dur });
   return {
-    schemaVersion: 8,
+    /* This fixture intentionally uses the compact legacy shape below. Let the
+       app's real v4→v8 migration path normalize it instead of labelling a
+       v4-shaped object as v8 (which correctly triggers the unreadable-notebook
+       recovery UI and makes every contact-sheet frame a false negative). */
+    schemaVersion: 4,
+    overrides: {},
     calendars: [{ id: "calendar-default", name: "Personal", color: "#CCFF00", visible: true, readOnly: false }],
     events: [
-      { id: "e1", calendarId: "calendar-default", title: "Standup", category: "PEOPLE", timing: at(9, 30, 30), link: "https://meet.example.com/abc-defg", alerts: [10] },
-      { id: "e2", calendarId: "calendar-default", title: "Client Review — Nordwell", category: "DEEP", timing: at(11, 0, 90), place: "Room 4" },
-      { id: "e3", calendarId: "calendar-default", title: "Lunch and a walk", category: "BODY", timing: at(13, 0, 55) },
-      { id: "e4", calendarId: "calendar-default", title: "Migration checkpoint", category: "ADMIN", timing: at(15, 30, 45) },
+      { id: "e1", calendarId: "calendar-default", title: "Standup", cat: "PEOPLE", ...at(9, 30, 30), link: "https://meet.example.com/abc-defg", alerts: [10] },
+      { id: "e2", calendarId: "calendar-default", title: "Client Review — Nordwell", cat: "DEEP", ...at(11, 0, 90), place: "Room 4" },
+      { id: "e3", calendarId: "calendar-default", title: "Lunch and a walk", cat: "BODY", ...at(13, 0, 55) },
+      { id: "e4", calendarId: "calendar-default", title: "Migration checkpoint", cat: "ADMIN", ...at(15, 30, 45) },
     ],
     tasks: [
-      { id: "t1", title: "Ship the pricing model v2", status: "open", category: "DEEP", planned: { date: key, startMinute: null, estimateMinutes: null }, checklist: [], tags: [] },
-      { id: "t2", title: "Send Nordwell the migration deadline", status: "open", category: "ADMIN", planned: { date: key, startMinute: null, estimateMinutes: null }, checklist: [], tags: [] },
-      { id: "t3", title: "Draft the retention note", status: "open", category: "DEEP", planned: { date: key, startMinute: 17 * 60, estimateMinutes: 60 }, checklist: [], tags: [] },
+      { id: "t1", date: key, at: null, due: key, order: 0, title: "Ship the pricing model v2", cat: "DEEP", xp: 60, done: false, note: "", subs: [] },
+      { id: "t2", date: key, at: null, due: null, order: 1, title: "Send Nordwell the migration deadline", cat: "ADMIN", xp: 40, done: false, note: "", subs: [] },
+      { id: "t3", date: key, at: 17 * 60, due: null, order: 2, title: "Draft the retention note", cat: "DEEP", xp: 50, done: false, note: "", subs: [] },
     ],
     notes: [],
     lists: [],
