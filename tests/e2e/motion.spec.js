@@ -67,6 +67,22 @@ const sampleNotchFrames = async (sheet, fractions) => sheet.evaluate((node, requ
   return frames;
 }, fractions);
 
+const readHandoffRestState = async (sheet) => sheet.evaluate((node) => {
+  const read = (element) => {
+    const style = getComputedStyle(element);
+    return {
+      opacity: Number(style.opacity),
+      transform: style.transform,
+      filter: style.filter,
+      animations: element.getAnimations().map((animation) => animation.animationName),
+    };
+  };
+  return {
+    source: read(node.querySelector(".nb-morph-source-label")),
+    body: read(node.querySelector(".nb-notch-body")),
+  };
+});
+
 test.describe("the liquid pill", () => {
   test("slides without a filter at all", () => {
     /* A trailing droplet plus a goo filter was tried and removed. The droplet
@@ -316,6 +332,14 @@ test.describe("the notch morph", () => {
     const sheet = page.getByTestId("sheet");
     await expect(sheet).toHaveAttribute("data-morph-stage", "open");
     await expect(sheet.getByTestId("morph-source-label")).toHaveCSS("opacity", "0");
+    const rest = await readHandoffRestState(sheet);
+    expect(rest.body.animations).not.toContain("nbnotchbodyin");
+    expect(rest.body.opacity).toBeGreaterThanOrEqual(.99);
+    expect(rest.body.transform).toMatch(/none|matrix\(1, 0, 0, 1, 0, 0\)/);
+    expect(rest.body.filter).toMatch(/none|blur\(0(px)?\)/);
+    expect(rest.source.opacity).toBeLessThanOrEqual(.01);
+    expect(rest.source.transform).toMatch(/none|matrix\(1, 0, 0, 1, 0, 0\)/);
+    expect(rest.source.filter).toMatch(/none|blur\(0(px)?\)/);
   });
 
   test("NEW grows the composer out of the button, and folds it back", async ({ page }) => {
@@ -458,6 +482,31 @@ test.describe("the notch morph", () => {
 
     expect(settled.fill, "a stalled wash must not leave the sheet painted as its trigger").not.toBe(accent);
     expect(settled.clipped, "a stalled cascade must not leave the form clipped away").toBe(0);
+  });
+
+  test("a stalled Composer body is repaired when the wall-clock stage opens", async ({ page }) => {
+    await openPlanner(page);
+    await page.getByTestId("new-entry").click();
+    const sheet = page.getByTestId("sheet");
+    const stalled = await sheet.evaluate((node) => {
+      const bodyAnimation = node.getAnimations({ subtree: true })
+        .find((animation) => animation.animationName === "nbnotchbodyin");
+      if (!bodyAnimation?.effect) return false;
+      bodyAnimation.pause();
+      bodyAnimation.currentTime = Number(bodyAnimation.effect.getTiming().duration) * .1;
+      return true;
+    });
+    expect(stalled, "the body handoff must be running before the stall").toBe(true);
+
+    await expect(sheet).toHaveAttribute("data-morph-stage", "open");
+    const rest = await readHandoffRestState(sheet);
+    expect(rest.body.opacity).toBeGreaterThanOrEqual(.99);
+    expect(rest.body.transform).toMatch(/none|matrix\(1, 0, 0, 1, 0, 0\)/);
+    expect(rest.body.filter).toMatch(/none|blur\(0(px)?\)/);
+    expect(rest.body.animations).not.toContain("nbnotchbodyin");
+    expect(rest.source.opacity).toBeLessThanOrEqual(.01);
+    expect(rest.source.transform).toMatch(/none|matrix\(1, 0, 0, 1, 0, 0\)/);
+    expect(rest.source.filter).toMatch(/none|blur\(0(px)?\)/);
   });
 
   /* Reported from a phone three times before it was reproduced, because it needs a
@@ -654,6 +703,8 @@ test.describe("the notch morph", () => {
         body: Number(getComputedStyle(node.querySelector(".nb-notch-body")).opacity),
         label: Number(getComputedStyle(node.querySelector('[data-test="morph-source-label"]')).opacity),
         foldDelay: delay,
+        foldDuration: duration,
+        closeDuration: parseFloat(getComputedStyle(node).getPropertyValue("--nb-morph-close")),
         bodyDuration: Number(bodyOut?.effect?.getTiming().duration || 0),
         labelDuration: Number(labelIn?.effect?.getTiming().duration || 0),
       };
@@ -661,8 +712,9 @@ test.describe("the notch morph", () => {
 
     expect(mid.body, "form groups must be gone while the clip is still folding").toBeLessThan(0.2);
     expect(mid.label, "NEW returns as the visible material of the fold").toBeGreaterThan(0.8);
-    expect(mid.bodyDuration, "destination plane close uses the v3 close token").toBe(250);
-    expect(mid.labelDuration, "source return uses the v3 close token").toBe(250);
+    expect(mid.foldDuration, "panel fold uses the v3 close token").toBe(mid.closeDuration);
+    expect(mid.bodyDuration, "destination plane close uses the v3 close token").toBe(mid.closeDuration);
+    expect(mid.labelDuration, "source return uses the v3 close token").toBe(mid.closeDuration);
   });
 
   test("a sheet opened from the keyboard arrives on its own terms", async ({ page }) => {
@@ -688,7 +740,16 @@ test.describe("the notch morph", () => {
 
     const sheet = page.getByTestId("sheet");
     await expect(sheet).toBeVisible();
+    await expect(sheet).toHaveAttribute("data-morph-stage", "open");
     await expect(sheet.getByTestId("morph-source-label")).toHaveCSS("opacity", "0");
+    const rest = await readHandoffRestState(sheet);
+    expect(rest.body.animations).not.toContain("nbnotchbodyin");
+    expect(rest.body.opacity).toBeGreaterThanOrEqual(.99);
+    expect(rest.body.transform).toMatch(/none|matrix\(1, 0, 0, 1, 0, 0\)/);
+    expect(rest.body.filter).toMatch(/none|blur\(0(px)?\)/);
+    expect(rest.source.opacity).toBeLessThanOrEqual(.01);
+    expect(rest.source.transform).toMatch(/none|matrix\(1, 0, 0, 1, 0, 0\)/);
+    expect(rest.source.filter).toMatch(/none|blur\(0(px)?\)/);
     await expect(trigger).toHaveCSS("visibility", "hidden");
 
     await page.keyboard.press("Escape");
@@ -752,6 +813,35 @@ test.describe("the notch morph", () => {
 });
 
 test.describe("sheet exits", () => {
+  test("ordinary Settings stays on the generic Sheet and scrim cadence", async ({ page }) => {
+    await openPlanner(page);
+    await page.getByRole("button", { name: "Settings" }).click();
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).not.toHaveAttribute("data-fluid-origin", "notch");
+    const opening = await sheet.evaluate((node) => {
+      const animation = node.getAnimations().find((item) => item.effect?.target === node);
+      return {
+        name: animation?.animationName,
+        duration: Number(animation?.effect?.getTiming().duration || 0),
+        descendants: node.getAnimations({ subtree: true }).map((item) => item.animationName),
+      };
+    });
+    expect(opening.name).toBe("nbfluidorigin");
+    expect(opening.duration).toBe(420);
+    expect(opening.descendants).not.toContain("nbnotchbodyin");
+    expect(opening.descendants).not.toContain("nbnotchlabelout");
+
+    await page.keyboard.press("Escape");
+    await expect(sheet).toHaveClass(/nb-fluid-closing/);
+    const closing = await page.locator(".nb-scrim").first().evaluate((node) => {
+      const animation = node.getAnimations()[0];
+      return { name: animation?.animationName, duration: Number(animation?.effect?.getTiming().duration || 0) };
+    });
+    expect(closing.name).toBe("nbscrimout");
+    expect(closing.duration).toBe(240);
+    await expect(sheet).toHaveCount(0, { timeout: 3000 });
+  });
+
   test("a trigger morph approaches rest without bouncing past it", async ({ page }) => {
     await openPlanner(page, { keepSample: true });
     await page.getByRole("tab", { name: "AGENDA", exact: true }).click();
@@ -780,6 +870,9 @@ test.describe("sheet exits", () => {
 
     const sheet = page.getByTestId("sheet");
     await expect(sheet).toHaveAttribute("data-fluid-origin", "trigger");
+    const entryNames = await sheet.evaluate((node) => node.getAnimations({ subtree: true }).map((animation) => animation.animationName));
+    expect(entryNames).not.toContain("nbnotchbodyin");
+    expect(entryNames).not.toContain("nbnotchlabelout");
 
     /* Sample the rendered animation itself. A class-name assertion passed while
        the body independently faded from zero, which is exactly why the previous
@@ -836,6 +929,10 @@ test.describe("sheet exits", () => {
 
     const sheet = page.getByTestId("sheet");
     await expect(sheet).toHaveAttribute("data-sheet-title", "ACTION");
+    await expect(sheet).toHaveAttribute("data-fluid-origin", "trigger");
+    const entryNames = await sheet.evaluate((node) => node.getAnimations({ subtree: true }).map((animation) => animation.animationName));
+    expect(entryNames).not.toContain("nbnotchbodyin");
+    expect(entryNames).not.toContain("nbnotchlabelout");
     await sheet.getByRole("button", { name: "MARK COMPLETE" }).click();
 
     await expect(sheet).toHaveClass(/nb-fluid-closing/);
