@@ -985,12 +985,16 @@ test.describe("the shape a sheet grows from", () => {
     expect(Math.abs(samples.start.height - source.height)).toBeLessThan(2);
     expect(samples.start.radius).toBeLessThanOrEqual(Math.min(source.width, source.height) / 2 + 1);
     expect(samples.early.radius).toBeLessThan(Math.min(samples.early.width, samples.early.height) * .75);
-    expect(Math.abs(samples.anchored15.right - samples.start.right), "the top/right source corner stays pinned during the first clip reveal").toBeLessThan(2);
-    expect(Math.abs(samples.anchored15.top - samples.start.top), "the top/right source corner stays pinned during the first clip reveal").toBeLessThan(2);
-    expect(Math.abs(samples.anchored35.right - samples.start.right), "the right source edge stays pinned through the radius handoff").toBeLessThan(2);
-    expect(Math.abs(samples.anchored35.top - samples.start.top), "the top source edge stays pinned through the radius handoff").toBeLessThan(2);
-    expect(Math.abs(samples.anchored60.right - samples.start.right), "the anchored edge drifts less than the expanding opposite edge").toBeLessThan(Math.abs(samples.anchored60.left - samples.start.left));
-    expect(Math.abs(samples.anchored60.top - samples.start.top), "the anchored edge drifts less than the expanding opposite edge").toBeLessThan(Math.abs(samples.anchored60.bottom - samples.start.bottom));
+    /* V3 deliberately removes v2's early transform hold: translation and clip
+       both progress from the first fifth, so the source corner is allowed to
+       travel continuously while the visible window expands. */
+    expect(samples.anchored15.left, "the visible window must already expand left by 15%").toBeLessThan(samples.start.left);
+    expect(samples.anchored15.bottom, "the visible window must already expand down by 15%").toBeGreaterThan(samples.start.bottom);
+    expect(samples.anchored35.left, "the visible window keeps expanding left").toBeLessThan(samples.anchored15.left);
+    expect(samples.anchored35.bottom, "the visible window keeps expanding down").toBeGreaterThan(samples.anchored15.bottom);
+    expect(samples.anchored60.left, "the visible window continues toward the final left edge").toBeLessThan(samples.anchored35.left);
+    expect(samples.anchored60.bottom, "the visible window continues toward the final bottom edge").toBeGreaterThan(samples.anchored35.bottom);
+    expect(samples.anchored35.radius).toBeCloseTo(24, 0);
     expect(samples.mid.left, "the opposite horizontal edge should expand left").toBeLessThan(samples.start.left);
     expect(samples.mid.bottom, "the opposite vertical edge should expand down").toBeGreaterThan(samples.start.bottom);
     expect(samples.end.width).toBeGreaterThan(samples.start.width);
@@ -1001,7 +1005,7 @@ test.describe("the shape a sheet grows from", () => {
     expect(samples.mid.scaleY).toBeCloseTo(1, 5);
   });
 
-  test("source identity occupies the measured window until Composer content arrives", async ({ page }) => {
+  test("source and destination identities exchange without a gap", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await openPlanner(page);
     const trigger = page.getByTestId("new-entry");
@@ -1012,20 +1016,23 @@ test.describe("the shape a sheet grows from", () => {
     const samples = await sheet.evaluate((node) => {
       const entry = node.getAnimations().find((animation) => animation.animationName === "nbnotchin");
       const label = node.querySelector('[data-test="morph-source-label"]');
-      if (!entry?.effect || !label) return null;
+      const body = node.querySelector(".nb-notch-body");
+      if (!entry?.effect || !label || !body) return null;
       const duration = Number(entry.effect.getTiming().duration);
       const at = (fraction) => {
         for (const animation of node.getAnimations({ subtree: true })) {
           animation.pause();
           animation.currentTime = duration * fraction;
         }
-        const groups = node.getAnimations({ subtree: true })
-          .filter((animation) => animation.animationName === "nbnotchgroupin")
-          .map((animation) => getComputedStyle(animation.effect.target).clipPath);
         const labelRect = label.getBoundingClientRect();
+        const bodyStyle = getComputedStyle(body);
+        const bodyMatrix = new DOMMatrixReadOnly(bodyStyle.transform === "none"
+          ? "matrix(1,0,0,1,0,0)"
+          : bodyStyle.transform);
         return {
           labelOpacity: Number(getComputedStyle(label).opacity),
-          started: groups.filter((clip) => !clip.includes("100%")).length,
+          bodyOpacity: Number(bodyStyle.opacity),
+          bodyTransformX: bodyMatrix.e,
           labelRect: { x: labelRect.x, y: labelRect.y, width: labelRect.width, height: labelRect.height },
         };
       };
@@ -1038,8 +1045,10 @@ test.describe("the shape a sheet grows from", () => {
     expect(Math.abs(samples.zero.labelRect.width - source.width)).toBeLessThan(2);
     expect(Math.abs(samples.zero.labelRect.height - source.height)).toBeLessThan(2);
     expect(samples.zero.labelOpacity).toBeGreaterThan(.9);
-    expect(samples.quarter.labelOpacity > .05 || samples.quarter.started > 0).toBe(true);
-    expect(samples.handoff.labelOpacity > .05 || samples.handoff.started > 0).toBe(true);
+    expect(Math.max(samples.quarter.labelOpacity, samples.quarter.bodyOpacity), "source and destination must never both disappear").toBeGreaterThan(.05);
+    expect(samples.handoff.bodyOpacity).toBeGreaterThan(.1);
+    expect(samples.handoff.bodyTransformX).toBeGreaterThan(0);
+    expect(samples.handoff.labelOpacity).toBeLessThan(.9);
   });
 
   test("the morph is measured from the panel, not from the panel mid-animation", async ({ page }) => {

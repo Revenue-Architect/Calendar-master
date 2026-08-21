@@ -508,6 +508,8 @@ export function plannerStyles({ T, preferences }) {
           pointer-events:none;
           transform-origin:top right;
           animation:nbnotchbodyin var(--nb-morph-handoff) cubic-bezier(.34,1.15,.64,1) both;
+          /* The body is hidden until this point, then resolves during the
+             source's exit window so the two identities briefly overlap. */
           animation-delay:calc(var(--nb-morph-dur) * .28);
           will-change:transform,opacity,filter;
         }
@@ -554,7 +556,7 @@ export function plannerStyles({ T, preferences }) {
            destination panel; an edge-anchored clip must not hide the identity in
            the middle of the true-size Sheet at frame zero. It remains decorative
            and non-interactive, then hands off as the first content group arrives. */
-        @keyframes nbnotchlabelout{0%,18%{opacity:1;transform:translateX(0) scale(1);filter:blur(0)}58%,100%{opacity:0;transform:translateX(calc(-1 * var(--nb-morph-slide))) scale(var(--nb-morph-content-scale));filter:blur(var(--nb-morph-content-blur))}}
+        @keyframes nbnotchlabelout{0%,18%{opacity:1;transform:translateX(0) scale(1);filter:blur(0)}58%{opacity:.28;transform:translateX(calc(var(--nb-morph-slide) * -.72)) scale(var(--nb-morph-content-scale));filter:blur(var(--nb-morph-content-blur))}100%{opacity:0;transform:translateX(calc(-1 * var(--nb-morph-slide))) scale(var(--nb-morph-content-scale));filter:blur(var(--nb-morph-content-blur))}}
         .nb-fluid[data-fluid-origin="notch"][data-morph-stage="reveal"] .nb-morph-source-label,.nb-fluid[data-fluid-origin="notch"][data-morph-stage="content"] .nb-morph-source-label,.nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-morph-source-label{opacity:0}
         /* Close spends the existing lead *inside* MORPH_MS: the form leaves for
            --nb-morph-lead, then the lime object folds for the rest. Adding a
