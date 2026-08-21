@@ -570,7 +570,7 @@ export function plannerStyles({ T, preferences }) {
         .nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-morph-source-label{animation:none!important;opacity:0;transform:none!important;filter:none!important}
         /* Close spends the existing lead *inside* MORPH_MS: the form leaves for
            --nb-morph-lead, then the lime object folds for the rest. Adding a
-           133ms lead on top of 380 would fail the fortieth-time test. In-flight
+           133ms lead on top of 350 would fail the fortieth-time test. In-flight
            reverse (data-fluid-reverse) does not take this delay — the form is
            mid-arrival and leaves with the shape. Unmount stays at MORPH_MS. */
         .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"]:not([data-fluid-reverse="true"]){
