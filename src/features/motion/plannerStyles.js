@@ -20,7 +20,12 @@ import { DISPLAY, MONO } from "../../design/typography.js";
 import {
   MORPH_FADE,
   MORPH_LEAD,
+  MORPH_HANDOFF_MS,
+  MORPH_HANDOFF_SLIDE_PX,
+  MORPH_CONTENT_BLUR_PX,
+  MORPH_CONTENT_SCALE,
   MORPH_MS,
+  MORPH_CLOSE_MS,
   MORPH_STEP,
   SHEET_ENTRY_MS,
   VIEW_SLIDE_MS,
@@ -414,6 +419,11 @@ export function plannerStyles({ T, preferences }) {
            the physical move has established the new space. */
         .nb-fluid[data-fluid-origin="notch"]{
           --nb-morph-dur:${MORPH_MS}ms;
+          --nb-morph-close:${MORPH_CLOSE_MS}ms;
+          --nb-morph-handoff:${MORPH_HANDOFF_MS}ms;
+          --nb-morph-slide:${MORPH_HANDOFF_SLIDE_PX}px;
+          --nb-morph-content-scale:${MORPH_CONTENT_SCALE};
+          --nb-morph-content-blur:${MORPH_CONTENT_BLUR_PX}px;
           --nb-morph-lead:calc(var(--nb-morph-dur) * ${MORPH_LEAD});
           --nb-morph-step:calc(var(--nb-morph-dur) * ${MORPH_STEP});
           --nb-morph-fade:calc(var(--nb-morph-dur) * ${MORPH_FADE});
@@ -434,7 +444,7 @@ export function plannerStyles({ T, preferences }) {
            already-visible content. That is a colour flash, not a material carry. The
            surface now finishes becoming the card before the first group arrives, so
            content lands on the sheet rather than on the button. */
-        @keyframes nbnotchwash{0%,16%{background-color:var(--morph-accent)}46%,100%{background-color:var(--morph-card)}}
+        @keyframes nbnotchwash{0%,10%{background-color:var(--morph-accent)}32%,100%{background-color:var(--morph-card)}}
         /* The wall clock has the last word on the resting paint.
            A CSS animation in the running state outranks the inline background whether
            or not its clock is advancing, so an animation that stalls — a backgrounded
@@ -468,11 +478,14 @@ export function plannerStyles({ T, preferences }) {
            came from. The window keeps the button's own corner through the first
            15%, then becomes card-cornered by 35% and stays there for the rest of
            the travel. */
-         @keyframes nbnotchin{
-           0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-top) var(--fluid-inset-right) var(--fluid-inset-bottom) var(--fluid-inset-left) round var(--fluid-radius, 999px))}
-           15%{transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(calc(var(--fluid-inset-top) * .84) calc(var(--fluid-inset-right) * .84) calc(var(--fluid-inset-bottom) * .84) calc(var(--fluid-inset-left) * .84) round var(--fluid-radius, 999px))}
-           35%{transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(calc(var(--fluid-inset-top) * .48) calc(var(--fluid-inset-right) * .48) calc(var(--fluid-inset-bottom) * .48) calc(var(--fluid-inset-left) * .48) round var(--fluid-target-radius, 24px))}
-          100%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px 0px 0px round var(--fluid-target-radius, 24px))}
+        @keyframes nbnotchin{
+          0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-top) var(--fluid-inset-right) var(--fluid-inset-bottom) var(--fluid-inset-left) round var(--fluid-radius, 999px))}
+          10%{transform:translate(calc(var(--fluid-x) * .86),calc(var(--fluid-y) * .86));clip-path:inset(calc(var(--fluid-inset-top) * .86) calc(var(--fluid-inset-right) * .86) calc(var(--fluid-inset-bottom) * .86) calc(var(--fluid-inset-left) * .86) round var(--fluid-radius, 999px))}
+          20%{transform:translate(calc(var(--fluid-x) * .72),calc(var(--fluid-y) * .72));clip-path:inset(calc(var(--fluid-inset-top) * .72) calc(var(--fluid-inset-right) * .72) calc(var(--fluid-inset-bottom) * .72) calc(var(--fluid-inset-left) * .72) round var(--fluid-radius, 999px))}
+          32%{transform:translate(calc(var(--fluid-x) * .48),calc(var(--fluid-y) * .48));clip-path:inset(calc(var(--fluid-inset-top) * .48) calc(var(--fluid-inset-right) * .48) calc(var(--fluid-inset-bottom) * .48) calc(var(--fluid-inset-left) * .48) round var(--fluid-target-radius, 24px))}
+          45%{transform:translate(calc(var(--fluid-x) * .34),calc(var(--fluid-y) * .34));clip-path:inset(calc(var(--fluid-inset-top) * .34) calc(var(--fluid-inset-right) * .34) calc(var(--fluid-inset-bottom) * .34) calc(var(--fluid-inset-left) * .34) round var(--fluid-target-radius, 24px))}
+          72%{transform:translate(calc(var(--fluid-x) * .08),calc(var(--fluid-y) * .08));clip-path:inset(calc(var(--fluid-inset-top) * .08) calc(var(--fluid-inset-right) * .08) calc(var(--fluid-inset-bottom) * .08) calc(var(--fluid-inset-left) * .08) round var(--fluid-target-radius, 24px))}
+          88%,100%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px 0px 0px round var(--fluid-target-radius, 24px))}
         }
         /* The sheet assembles itself rather than appearing.
            The body used to fade as a single block from 60% of the morph, which
