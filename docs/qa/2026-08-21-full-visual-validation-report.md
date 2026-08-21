@@ -1,13 +1,13 @@
 # Full visual validation and interaction QA report
 
 Date: 2026-08-21
-Branch: `main`
-Validated source before this report: `353f924`
+Branch: `fix/visual-qa-harness-integrity`
+Validated source: `0ea23b3`
 Scope: production visual review of the Calendar shell, navigation motion, Anchored Notch v2 Composer work, Week ribbon, sheets, calendar surfaces, gestures, themes, and recovery states.
 
 ## Executive result
 
-The application is production-ready for the browser scope exercised in this audit. I found no application-level blocker, blank-screen regression, Week-ribbon visibility regression, navigation gap, sheet scaling, animated blur, or broken click-through. The complete Playwright suite passed **314/314**, the unit suite passed **630/630**, the production build passed, and the corrected visual contact matrix produced **120/120 frames**.
+The visual-QA harness is trustworthy for the browser scope exercised in this track. I found no application-level blocker, blank-screen regression, navigation gap, sheet scaling, animated blur, or broken click-through. The complete Playwright suite passed **314/314**, the unit suite passed **630/630**, the production build passed, and the corrected contact matrix reached **120 requested states, positively verified all 120, captured all 120, and recorded 0 reach/verification failures**. The Week-ribbon issue was not reproduced in this visual audit; its dedicated responsive-readiness P1 remains open.
 
 The only defect found during the audit was in the QA contact-sheet fixture itself. It labelled a compact v4 fixture as schema v8 and stored it under the v8 key. The application correctly rejected that malformed claim and displayed its recovery UI, which made the visual audit look like a product failure. I corrected the fixture to use the real v4 key/schema and legacy field shape so the contact sheet now exercises the application's actual v4-to-v8 migration path. No production React or CSS component was changed for this correction.
 
@@ -29,29 +29,30 @@ This audit used the named design/motion guidance as review criteria:
 
 ## Repository and change discipline
 
-Before testing, `HEAD`, branch, and worktree were checked. The branch was `main` at `353f924`, matching the pushed Anchored Notch remediation history. Several unrelated user-owned plan, handoff, profiling, screenshot, and E2E edits were already dirty; they were preserved and were not staged.
+Before testing, `origin/main` was fetched and an isolated worktree was created from `0ea23b3`. Several unrelated user-owned plan, handoff, profiling, screenshot, and E2E edits remained dirty in the source checkout; they were preserved and were not staged.
 
 The only intentional source change from this audit is:
 
-- `scripts/contact-sheet.mjs`: align the deterministic fixture with schema v4 (`nbmp:state:v4`, `schemaVersion: 4`, `overrides`, legacy event/task fields) so the real migration chain produces valid v8 state.
+- `scripts/contact-sheet.mjs`: retain the schema-v4 fixture correction and add positive Day/Week/Month/Composer verification, per-state diagnostics, a derived-count manifest, and a non-zero failure gate.
 
-No `Planner.jsx`, `Sheet.jsx`, navigation component, motion stylesheet, ribbon implementation, or domain module was modified by this audit. The report commit will stage only this report and the contact-sheet correction.
+No `Planner.jsx`, `Sheet.jsx`, navigation component, motion stylesheet, ribbon implementation, or domain module was modified by this track. Track A stages only this report and the contact-sheet correction.
 
 ## Visual coverage
 
 ### Deterministic contact matrix
 
-The corrected harness completed **120 frames**:
+The corrected harness completed **120 requested states** and positively verified every one before capture:
 
 - 15 themes: dark, light, neutral, and high-chroma combinations from the app's single source of truth.
 - 393 × 844 phone viewport.
 - 1280 × 900 desktop viewport.
 - Four reachable surfaces per theme/viewport: Day, Week, Month, and settled Composer sheet.
 - Seeded events, actions, a meeting link, a deadline, and an Any Time row so the review included real content rather than an empty shell.
+- `manifest.json` records one machine-readable result per requested combination: 120 passed, 0 failed.
 
 The artifacts are in:
 
-`C:\Users\Kamran\Documents\Codex\2026-08-19\visual-audit-2026-08-21\contact-sheet-final`
+`C:\Users\Kamran\Documents\Codex\2026-08-21-track-a-final`
 
 Representative frames manually inspected included Obsidian/Timepage Red desktop Day and Composer, Obsidian/Acid desktop Month, Cream/Terracotta desktop Composer, and Cream/Terracotta phone Composer. They showed complete populated content, readable contrast, stable card geometry, correct selected-day treatment, no white recovery screen, and no clipped Composer controls.
 
@@ -104,15 +105,19 @@ The fixture now:
 3. Uses the legacy `date`, `start`, and `dur` event representation and the legacy task fields.
 4. Lets the production migration chain normalize the fixture to v8 before capture.
 
-The corrected run completed 120 frames with populated calendar content and no recovery banner.
+The corrected run completed 120 requested states with 120 positive verifications, 120 normal screenshots, 0 failures, and populated calendar content with no recovery banner.
 
 ### Confirmed clear: mobile red rail and shared navigation motion
 
 The rail's settled right edge measured flush with the viewport (`right ≈ viewport width`), and intermediate Chrome captures showed the carrier and rail moving on the same timeline. Playwright additionally covers synchronized open/close, interrupted close, stale completion suppression, mobile layout preservation, and reduced motion. No edge gap or early disappearance was reproduced.
 
-### Confirmed clear: Week ribbon visibility
+### Week-ribbon issue was not reproduced in this visual audit
 
-Cold load, reload, narrow remount, Day ↔ Week transitions, Actions return, and reveal-without-paint cases all passed. The ribbon was visible without requiring arrow interaction. The Anchored Notch work did not touch the ribbon implementation.
+Cold load, reload, narrow remount, Day ↔ Week transitions, Actions return, and reveal-without-paint cases all passed. The ribbon was visible without requiring arrow interaction in this run. **Plan #003 responsive-readiness P1 remains open pending its dedicated breakpoint and programmatic-scroll regression work.** The Anchored Notch work did not touch the ribbon implementation.
+
+### Harness negative control passed
+
+Before trusting the real matrix, I temporarily made the Month verifier expect an impossible zoom. The harness produced a non-zero exit, a manifest with 120 records / 90 passes / 30 failures, and 30 diagnostic PNGs. The deliberate sabotage was reverted before the final run and is not part of this branch.
 
 ### Confirmed clear: blank-screen behavior
 
@@ -130,7 +135,7 @@ The live and automated checks confirm the design contract: no full-sheet scale, 
 | Production build | PASS | `npm run build` — built successfully; existing advisory only for the 670 kB JS chunk |
 | Focused visual/interaction suite | PASS | 84 passed, 0 failed across navigation, motion, Composer, ribbon, recovery, feedback, and mobile specs |
 | Full Playwright suite | PASS | `npx playwright test` — 314 passed in 9.7 minutes |
-| Contact-sheet matrix | PASS | 120/120 frames generated |
+| Contact-sheet matrix | PASS | 120 requested / 120 positively verified / 120 screenshots / 0 failures; machine-readable manifest emitted |
 | Source motion scan | PASS | No `transition: all`, no `scale(0)`, no animated blur in audited paths |
 | Worktree safety | PASS | Only the report and contact-sheet correction will be staged; unrelated user changes remain untouched |
 
@@ -145,8 +150,8 @@ These are non-blocking recommendations. They are deliberately not mixed into the
 | Real-device validation | Chrome/Playwright cover responsive browser behavior and coarse pointers | Add one Safari iOS and one Android hardware pass before a major public release | Hardware compositor, safe-area, keyboard, and touch-cancel behavior can differ from Chromium |
 | Bundle advisory | The production build reports a 669.83 kB minified JS chunk | Track a follow-up split-point investigation with a budget and a before/after measurement | Improves cold load without changing motion or interaction behavior |
 | Full-suite stability | The current full run is green; earlier historical runs had a load-sensitive interaction test | Keep a same-machine baseline/current rerun in release QA if that flake returns | Prevents unrelated timing noise from being misattributed to motion work |
-| Week ribbon scope | Ribbon readiness is green and was intentionally independent of Anchored Notch | Keep the ribbon P1 as a separate change stream | Avoids coupling two timing-sensitive surfaces and makes regressions easier to localize |
+| Week ribbon scope | The ribbon issue was not reproduced here; responsive-readiness P1 remains open | Keep the ribbon P1 as a separate change stream with breakpoint and programmatic-scroll regressions | Avoids treating a visual spot check as closure for a timing-sensitive controller |
 
 ## Sign-off
 
-For the tested Chromium/browser automation and visual matrix, this audit is a **PASS**. The corrected QA harness, report, and evidence are ready to push to `main`. The only follow-up items are the non-blocking polish suggestions above and a future real-device pass; neither prevents shipping the validated work.
+Track A is a **PASS**: the visual harness now fails honestly, its negative control was proven, and the real matrix has 120 positively verified states. This report does not close the Week-ribbon P1; Track B must prove or disprove that issue with dedicated responsive and programmatic-scroll regressions.
