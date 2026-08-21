@@ -690,6 +690,8 @@ test.describe("the notch morph", () => {
         .find((animation) => animation.animationName === "nbnotchbodyout");
       const labelIn = node.querySelector(".nb-morph-source-label")?.getAnimations()
         .find((animation) => animation.animationName === "nbnotchlabelin");
+      const scrimOut = node.parentElement?.getAnimations()
+        .find((animation) => animation.animationName === "nbscrimout");
       const duration = Number(fold?.effect?.getTiming().duration || 0);
       const delay = Number(fold?.effect?.getTiming().delay || 0)
         || (parseFloat(getComputedStyle(node).animationDelay) || 0) * 1000;
@@ -707,6 +709,7 @@ test.describe("the notch morph", () => {
         closeDuration: parseFloat(getComputedStyle(node).getPropertyValue("--nb-morph-close")),
         bodyDuration: Number(bodyOut?.effect?.getTiming().duration || 0),
         labelDuration: Number(labelIn?.effect?.getTiming().duration || 0),
+        scrimDuration: Number(scrimOut?.effect?.getTiming().duration || 0),
       };
     });
 
@@ -715,6 +718,7 @@ test.describe("the notch morph", () => {
     expect(mid.foldDuration, "panel fold uses the v3 close token").toBe(mid.closeDuration);
     expect(mid.bodyDuration, "destination plane close uses the v3 close token").toBe(mid.closeDuration);
     expect(mid.labelDuration, "source return uses the v3 close token").toBe(mid.closeDuration);
+    expect(mid.scrimDuration, "notch scrim close uses the v3 close token").toBe(mid.closeDuration);
   });
 
   test("a sheet opened from the keyboard arrives on its own terms", async ({ page }) => {

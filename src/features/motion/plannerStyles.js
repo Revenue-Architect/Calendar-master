@@ -618,6 +618,7 @@ export function plannerStyles({ T, preferences }) {
         .nb-scrim{animation:nbscrim 260ms cubic-bezier(.23,1,.32,1) forwards;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
         @keyframes nbscrim{from{opacity:0}to{opacity:1}}
         .nb-scrim.nb-fluid-closing{animation:nbscrimout 240ms ease forwards}
+        .nb-scrim.nb-fluid-closing:has(> .nb-fluid[data-fluid-origin="notch"]){animation:nbscrimout var(--nb-morph-close,${MORPH_CLOSE_MS}ms) ease forwards}
         @keyframes nbscrimout{0%,25%{opacity:1}100%{opacity:0}}
         .nb-sheet-h{transition:height 320ms cubic-bezier(.2,.8,.25,1)}
         .nb-edit-actions{transition:width 360ms cubic-bezier(.23,1,.32,1),background-color 260ms ease,box-shadow 260ms ease}

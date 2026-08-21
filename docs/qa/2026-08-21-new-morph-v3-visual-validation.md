@@ -59,7 +59,7 @@ second modal framework, or duplicated Composer DOM was introduced.
 | In-app reduced motion | With the generated preference selectors temporarily removed, the same body animation remained active. | The in-app `preferences?.display.reducedMotion` CSS path did not normalize the new body animation. | The generated preference CSS contains the same body and source rest-state normalization independently of the OS media query. | In-app reduced-motion assertions pass with an immediately readable body and cleaned source. |
 | Stalled Composer body | With the open-stage body rule temporarily removed, pausing `nbnotchbodyin` near 10% left the body at opacity 0 when the wall-clock stage reached `open`. | The v2 wall-clock recovery normalized the source but v3 had not made the body rest state authoritative. | At `data-fluid-origin="notch"` + `data-morph-stage="open"`, the body is forced to animation none, opacity 1, identity transform, and no filter. This selector does not apply to source/content/closing stages. | The deterministic stalled-body test passes and verifies source cleanup as well. |
 | Settled close cadence | Temporarily restoring the panel fold to 240ms made the close test report token 250ms vs actual 240ms. | `nbnotchout` retained a hard-coded 240ms while body, source, and unmount used `MORPH_CLOSE_MS`. | Notch panel fold now uses `var(--nb-morph-close, 250ms)`, sharing the production token with body/source/unmount. | Browser inspection reports fold, body, and label durations all equal the CSS close token; unit coverage pins `MORPH_CLOSE_MS` to 250ms. |
-| Ordinary Sheet scope leak | Review identified the global scrim retime as a possible non-notch regression. | A notch-specific cadence had changed the generic scrim rule from 240ms to 250ms. | Generic `.nb-scrim.nb-fluid-closing` is restored to its baseline 240ms. Notch panel/body/source use the 250ms token without changing ordinary scrims. | Settings, Event inspector, and Action inspector remain `data-fluid-origin="trigger"`, use generic animation names, and do not run notch body/label animations. |
+| Ordinary Sheet scope leak | Review identified the global scrim retime as a possible non-notch regression. | A notch-specific cadence had changed the generic scrim rule from 240ms to 250ms. | Generic `.nb-scrim.nb-fluid-closing` is restored to its baseline 240ms; the existing `.nb-scrim:has(> .nb-fluid[data-fluid-origin="notch"])` boundary applies the 250ms token only to notch scrims. | Settings, Event inspector, and Action inspector remain `data-fluid-origin="trigger"`, use generic animation names, and do not run notch body/label animations. |
 
 No RED sabotage was committed. Each deliberate negative control was restored
 before the corresponding implementation commit.
@@ -146,8 +146,8 @@ There is no eight-group visible arrival, layout jump, or blank identity gap.
   introduce page scrolling, clipping, or a white flash.
 - **Close:** a live 390×601 close sample reported `data-morph-stage="closing"`,
   body opacity 0, body transform translating left by the handoff distance, and
-  the panel still moving as one surface. The screenshot showed the underlying
-  timeline returning without a stale scrim or snapped edge.
+  the panel and notch scrim still moving as one surface. The screenshot showed
+  the underlying timeline returning without a stale scrim or snapped edge.
 - **Desktop:** the settled NEW form was centered and fully readable; the
   source label was gone and the panel had no horizontal scrollbar.
 - **Performance:** the first-open path was inspected at desktop and mobile.
