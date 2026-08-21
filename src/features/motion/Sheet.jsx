@@ -297,13 +297,11 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
          already made it.
          A CSS animation's first keyframe is applied the moment the element is
          first styled — which is before any layout effect runs — so the rect read
-         here is the *pill*: `.nb-fluid`'s 0% is `translateY(26px) scale(.965)`,
-         and `getBoundingClientRect` reports transformed boxes. The morph was
-         being computed from its own output, so it started a few per cent too
-         small and 26px too low and then snapped to the real box on the last
-         frame. Suppressing the animation for the length of one measurement costs
-         nothing — this is all still before the first paint — and the animation is
-         handed back the correct numbers to start from. */
+         here is the *animated* entry box, and `getBoundingClientRect` reports
+         transformed boxes. Suppressing the animation for the length of one
+         measurement costs nothing — this is all still before the first paint —
+         and the animation is handed back the correct true-size numbers to start
+         from. */
       const suppressed = panel.style.animation;
       panel.style.animation = "none";
       const panelRect = panel.getBoundingClientRect();
@@ -328,6 +326,8 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
       panel.style.setProperty("--fluid-inset-right", `${geometry.insetRight}px`);
       panel.style.setProperty("--fluid-inset-bottom", `${geometry.insetBottom}px`);
       panel.style.setProperty("--fluid-inset-left", `${geometry.insetLeft}px`);
+      panel.style.setProperty("--fluid-source-width", `${Math.max(0, triggerRect.width)}px`);
+      panel.style.setProperty("--fluid-source-height", `${Math.max(0, triggerRect.height)}px`);
       /* The corner the reveal starts from is the trigger's own corner.
          It used to be a flat 999px, which is right for a pill — the NEW button is
          one — and badly wrong for anything wide and low. On a full-width event card

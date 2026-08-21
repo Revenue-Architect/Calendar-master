@@ -383,9 +383,8 @@ export function plannerStyles({ T, preferences }) {
            several hundred pixels wide is an ellipse. Watched frame by frame, what the
            eye saw was a soft circular portal opening onto a finished sheet — which is
            exactly the "appears out of nowhere" this was supposed to fix. The window
-           keeps the trigger's own corner for the first fifth, by which point it is
-           still small enough to read as that control, then becomes card-cornered for
-           the rest of the travel. */
+           keeps the trigger's own corner through the first 15%, then becomes
+           card-cornered by 35% and stays there for the rest of the travel. */
         @keyframes nbfluidorigin{
           0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-top) var(--fluid-inset-right) var(--fluid-inset-bottom) var(--fluid-inset-left) round var(--fluid-radius, 999px))}
           15%{clip-path:inset(calc(var(--fluid-inset-top) * .84) calc(var(--fluid-inset-right) * .84) calc(var(--fluid-inset-bottom) * .84) calc(var(--fluid-inset-left) * .84) round var(--fluid-radius, 999px))}
@@ -466,9 +465,9 @@ export function plannerStyles({ T, preferences }) {
            999px while the window is already hundreds of pixels wide, and a 999px
            corner on a 336px box is a circle: a quarter of the way in, the composer
            was a lime disc blooming mid-screen with no relationship to the button it
-           came from. The window keeps the button's own corner for the first fifth,
-           while it is still small enough to read as that button, then becomes
-           card-cornered for the rest of the travel. */
+           came from. The window keeps the button's own corner through the first
+           15%, then becomes card-cornered by 35% and stays there for the rest of
+           the travel. */
         @keyframes nbnotchin{
           0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-top) var(--fluid-inset-right) var(--fluid-inset-bottom) var(--fluid-inset-left) round var(--fluid-radius, 999px))}
           15%{clip-path:inset(calc(var(--fluid-inset-top) * .84) calc(var(--fluid-inset-right) * .84) calc(var(--fluid-inset-bottom) * .84) calc(var(--fluid-inset-left) * .84) round var(--fluid-radius, 999px))}
@@ -512,10 +511,12 @@ export function plannerStyles({ T, preferences }) {
            delay and then released entirely -- a group left permanently clipped to its
            own box would cut off anything it later opens. */
         @keyframes nbnotchgroupin{from{clip-path:inset(-14px -14px 100% -14px)}to{clip-path:inset(-14px -14px -14px -14px)}}
-        .nb-morph-source-label{position:absolute;inset:0;z-index:8;display:flex;align-items:center;justify-content:center;pointer-events:none;font-size:.75rem;font-weight:700;letter-spacing:.1em;opacity:1;animation:nbnotchlabelout var(--nb-morph-dur,320ms) cubic-bezier(.23,1,.32,1) both;transition:opacity 100ms cubic-bezier(.23,1,.32,1);will-change:opacity}
+        .nb-morph-source-label{position:absolute;left:var(--fluid-inset-left,0px);top:var(--fluid-inset-top,0px);width:var(--fluid-source-width,100%);height:var(--fluid-source-height,100%);box-sizing:border-box;z-index:8;display:flex;align-items:center;justify-content:center;pointer-events:none;font-size:.75rem;font-weight:700;letter-spacing:.1em;opacity:1;animation:nbnotchlabelout var(--nb-morph-dur,320ms) cubic-bezier(.23,1,.32,1) both;transition:opacity 100ms cubic-bezier(.23,1,.32,1);will-change:opacity}
         /* The label is the button's own word, so it leaves with the button's own
-           colour. Holding it to 55% left "NEW" floating in the middle of a sheet
-           that had already grown past it; it now goes with the wash. */
+           colour. It occupies the measured source window rather than the full
+           destination panel; an edge-anchored clip must not hide the identity in
+           the middle of the true-size Sheet at frame zero. It remains decorative
+           and non-interactive, then hands off as the first content group arrives. */
         @keyframes nbnotchlabelout{0%,16%{opacity:1}38%,100%{opacity:0}}
         .nb-fluid[data-fluid-origin="notch"][data-morph-stage="reveal"] .nb-morph-source-label,.nb-fluid[data-fluid-origin="notch"][data-morph-stage="content"] .nb-morph-source-label,.nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-morph-source-label{opacity:0}
         /* Close spends the existing lead *inside* MORPH_MS: the form leaves for

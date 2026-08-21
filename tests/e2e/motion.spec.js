@@ -219,14 +219,42 @@ test.describe("the notch morph", () => {
   test("the mobile create button morphs the same way", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await openPlanner(page);
-    await page.getByTestId("new-action").click();
+    const trigger = page.getByTestId("new-action");
+    const source = await trigger.boundingBox();
+    await trigger.click();
     const sheet = page.getByTestId("sheet");
     await expect(sheet).toHaveAttribute("data-fluid-origin", "notch");
     await expect(sheet).toHaveAttribute("data-morph-source", "new-action");
+    await expect(sheet).toHaveAttribute("data-morph-anchor-x", "right");
+    await expect(sheet).toHaveAttribute("data-morph-anchor-y", "bottom");
     await expect(sheet.getByTestId("morph-source-label")).toHaveText("+ ACTION");
     await expect(sheet.getByTestId("notch-surface")).toHaveCount(0);
     await expect(page.getByTestId("new-action")).toHaveCSS("visibility", "hidden");
     await expect(page.getByTestId("composer")).toHaveAttribute("data-composer-kind", "task");
+
+    const start = await sheet.evaluate((node) => {
+      const entry = node.getAnimations().find((animation) => animation.animationName === "nbnotchin");
+      entry?.pause();
+      if (entry) entry.currentTime = 0;
+      const style = getComputedStyle(node);
+      const rect = node.getBoundingClientRect();
+      const matrix = new DOMMatrixReadOnly(style.transform);
+      const clip = style.clipPath.match(/^inset\((.*?)\s+round/);
+      const [top, right, bottom, left] = (clip ? clip[1] : "0px 0px 0px 0px")
+        .trim().split(/\s+/).map((value) => Number.parseFloat(value) || 0);
+      return {
+        left: rect.left + left,
+        top: rect.top + top,
+        width: rect.width - left - right,
+        height: rect.height - top - bottom,
+        transformX: matrix.e,
+        transformY: matrix.f,
+      };
+    });
+    expect(Math.abs(start.left - source.x)).toBeLessThan(2);
+    expect(Math.abs(start.top - source.y)).toBeLessThan(2);
+    expect(Math.abs(start.width - source.width)).toBeLessThan(2);
+    expect(Math.abs(start.height - source.height)).toBeLessThan(2);
   });
 
   test("NEW morphs the sheet material itself before the composer content arrives", async ({ page }) => {
@@ -745,6 +773,47 @@ test.describe("the shape a sheet grows from", () => {
     expect(samples.mid.scaleY).toBeCloseTo(1, 5);
   });
 
+  test("source identity occupies the measured window until Composer content arrives", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await openPlanner(page);
+    const trigger = page.getByTestId("new-entry");
+    const source = await trigger.boundingBox();
+    await trigger.click();
+    const sheet = page.getByTestId("sheet");
+
+    const samples = await sheet.evaluate((node) => {
+      const entry = node.getAnimations().find((animation) => animation.animationName === "nbnotchin");
+      const label = node.querySelector('[data-test="morph-source-label"]');
+      if (!entry?.effect || !label) return null;
+      const duration = Number(entry.effect.getTiming().duration);
+      const at = (fraction) => {
+        for (const animation of node.getAnimations({ subtree: true })) {
+          animation.pause();
+          animation.currentTime = duration * fraction;
+        }
+        const groups = node.getAnimations({ subtree: true })
+          .filter((animation) => animation.animationName === "nbnotchgroupin")
+          .map((animation) => getComputedStyle(animation.effect.target).clipPath);
+        const labelRect = label.getBoundingClientRect();
+        return {
+          labelOpacity: Number(getComputedStyle(label).opacity),
+          started: groups.filter((clip) => !clip.includes("100%")).length,
+          labelRect: { x: labelRect.x, y: labelRect.y, width: labelRect.width, height: labelRect.height },
+        };
+      };
+      return { zero: at(0), quarter: at(.25), handoff: at(.4) };
+    });
+
+    expect(samples).not.toBeNull();
+    expect(Math.abs(samples.zero.labelRect.x - source.x)).toBeLessThan(2);
+    expect(Math.abs(samples.zero.labelRect.y - source.y)).toBeLessThan(2);
+    expect(Math.abs(samples.zero.labelRect.width - source.width)).toBeLessThan(2);
+    expect(Math.abs(samples.zero.labelRect.height - source.height)).toBeLessThan(2);
+    expect(samples.zero.labelOpacity).toBeGreaterThan(.9);
+    expect(samples.quarter.labelOpacity > .05 || samples.quarter.started > 0).toBe(true);
+    expect(samples.handoff.labelOpacity > .05 || samples.handoff.started > 0).toBe(true);
+  });
+
   test("the morph is measured from the panel, not from the panel mid-animation", async ({ page }) => {
     await openPlanner(page);
     const trigger = page.getByTestId("new-entry");
@@ -760,8 +829,7 @@ test.describe("the shape a sheet grows from", () => {
 
     /* A CSS animation's first keyframe is applied before any layout effect runs,
        so a naive `getBoundingClientRect()` in that effect measures the *pill*.
-       `.nb-fluid`'s 0% is `translateY(26px) scale(.965)` about the bottom edge,
-       which put this number tens of pixels out. */
+       the transformed box would put this number tens of pixels out. */
     const visible = {
       left: g.panel.left + g.x + g.insetLeft,
       top: g.panel.top + g.y + g.insetTop,
