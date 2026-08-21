@@ -427,6 +427,7 @@ export function plannerStyles({ T, preferences }) {
           --nb-morph-lead:calc(var(--nb-morph-dur) * ${MORPH_LEAD});
           --nb-morph-step:calc(var(--nb-morph-dur) * ${MORPH_STEP});
           --nb-morph-fade:calc(var(--nb-morph-dur) * ${MORPH_FADE});
+          overflow-x:clip;
           animation-name:nbnotchin,nbnotchwash;animation-duration:var(--nb-morph-dur);
           animation-timing-function:cubic-bezier(.22,.85,.28,1),cubic-bezier(.4,0,.6,1);
           transition:background-color 210ms cubic-bezier(.22,.85,.28,1);
@@ -499,7 +500,30 @@ export function plannerStyles({ T, preferences }) {
            inside a .nb-notch-cascade root follows. A sheet that does not opt in
            keeps the old single-block behaviour on the new timing, which is why
            the :has() guard is here rather than a second class on every sheet. */
-        .nb-fluid[data-fluid-origin="notch"] .nb-notch-body{pointer-events:none}
+        /* V3 treats the Composer as one destination plane. The existing cascade
+           markup stays in place for structure and non-notch surfaces, but its
+           notch-entry animations are suppressed so eight independent wipes do
+           not fight the single reference-like handoff below. */
+        .nb-fluid[data-fluid-origin="notch"] .nb-notch-body{
+          pointer-events:none;
+          transform-origin:top right;
+          animation:nbnotchbodyin var(--nb-morph-handoff) cubic-bezier(.34,1.15,.64,1) both;
+          animation-delay:calc(var(--nb-morph-dur) * .28);
+          will-change:transform,opacity,filter;
+        }
+        .nb-fluid[data-fluid-origin="notch"] .nb-notch-body > :first-child,
+        .nb-fluid[data-fluid-origin="notch"] .nb-notch-cascade > *,
+        .nb-fluid[data-fluid-origin="notch"] .nb-notch-body > :last-child:not(:has(.nb-notch-cascade)){
+          animation:none!important;
+          clip-path:none!important;
+          will-change:auto;
+        }
+        @keyframes nbnotchbodyin{
+          0%{opacity:0;transform:translateX(calc(var(--nb-morph-slide) * 1.125)) scale(var(--nb-morph-content-scale));filter:blur(var(--nb-morph-content-blur))}
+          18%{opacity:.32}
+          46%{opacity:.9}
+          64%,100%{opacity:1;transform:translateX(0) scale(1);filter:blur(0)}
+        }
         .nb-fluid[data-fluid-origin="notch"][data-morph-stage="content"] .nb-notch-body,.nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-notch-body{pointer-events:auto}
         .nb-fluid[data-fluid-origin="notch"] .nb-notch-body>:last-child:not(:has(.nb-notch-cascade)){--nb-stage:1}
         ${Array.from({ length: 8 }, (_, n) => `.nb-fluid[data-fluid-origin="notch"] .nb-notch-cascade>*:nth-child(${n + 1}){--nb-stage:${n + 1}}`).join("")}
@@ -524,13 +548,13 @@ export function plannerStyles({ T, preferences }) {
            delay and then released entirely -- a group left permanently clipped to its
            own box would cut off anything it later opens. */
         @keyframes nbnotchgroupin{from{clip-path:inset(-14px -14px 100% -14px)}to{clip-path:inset(-14px -14px -14px -14px)}}
-        .nb-morph-source-label{position:absolute;left:var(--fluid-inset-left,0px);top:var(--fluid-inset-top,0px);width:var(--fluid-source-width,100%);height:var(--fluid-source-height,100%);box-sizing:border-box;z-index:8;display:flex;align-items:center;justify-content:center;pointer-events:none;font-size:.75rem;font-weight:700;letter-spacing:.1em;opacity:1;animation:nbnotchlabelout var(--nb-morph-dur,320ms) cubic-bezier(.23,1,.32,1) both;transition:opacity 100ms cubic-bezier(.23,1,.32,1);will-change:opacity}
+        .nb-morph-source-label{position:absolute;left:var(--fluid-inset-left,0px);top:var(--fluid-inset-top,0px);width:var(--fluid-source-width,100%);height:var(--fluid-source-height,100%);box-sizing:border-box;z-index:8;display:flex;align-items:center;justify-content:center;pointer-events:none;font-size:.75rem;font-weight:700;letter-spacing:.1em;opacity:1;animation:nbnotchlabelout var(--nb-morph-handoff,200ms) cubic-bezier(.34,1.15,.64,1) both;transition:opacity 100ms cubic-bezier(.23,1,.32,1);will-change:transform,opacity,filter}
         /* The label is the button's own word, so it leaves with the button's own
            colour. It occupies the measured source window rather than the full
            destination panel; an edge-anchored clip must not hide the identity in
            the middle of the true-size Sheet at frame zero. It remains decorative
            and non-interactive, then hands off as the first content group arrives. */
-        @keyframes nbnotchlabelout{0%,16%{opacity:1}38%,100%{opacity:0}}
+        @keyframes nbnotchlabelout{0%,18%{opacity:1;transform:translateX(0) scale(1);filter:blur(0)}58%,100%{opacity:0;transform:translateX(calc(-1 * var(--nb-morph-slide))) scale(var(--nb-morph-content-scale));filter:blur(var(--nb-morph-content-blur))}}
         .nb-fluid[data-fluid-origin="notch"][data-morph-stage="reveal"] .nb-morph-source-label,.nb-fluid[data-fluid-origin="notch"][data-morph-stage="content"] .nb-morph-source-label,.nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-morph-source-label{opacity:0}
         /* Close spends the existing lead *inside* MORPH_MS: the form leaves for
            --nb-morph-lead, then the lime object folds for the rest. Adding a

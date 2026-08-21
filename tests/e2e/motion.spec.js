@@ -48,6 +48,9 @@ const sampleNotchFrames = async (sheet, fractions) => sheet.evaluate((node, requ
       panelClip: panelStyle.clipPath,
       panelOffsetWidth: node.offsetWidth,
       panelOffsetHeight: node.offsetHeight,
+      panelClientWidth: node.clientWidth,
+      panelScrollWidth: node.scrollWidth,
+      panelOverflowX: panelStyle.overflowX,
       panelBackground: panelStyle.backgroundColor,
       sourceOpacity: Number(sourceStyle.opacity),
       sourceTransform: matrixValues(sourceStyle.transform),
@@ -202,6 +205,8 @@ test.describe("the notch morph", () => {
       expect.soft(frame.panelOffsetWidth, `Sheet width changed at ${frame.fraction * 100}%`).toBe(width);
       expect.soft(frame.panelOffsetHeight, `Sheet height changed at ${frame.fraction * 100}%`).toBe(height);
       expect.soft(Math.abs(frame.bodyScrollHeight - scrollHeight), `body scrollHeight changed at ${frame.fraction * 100}%`).toBeLessThanOrEqual(1);
+      expect.soft(frame.panelOverflowX, `horizontal scrolling stayed exposed at ${frame.fraction * 100}%`)
+        .not.toMatch(/auto|scroll/);
     }
   });
 
@@ -253,6 +258,7 @@ test.describe("the notch morph", () => {
           .map((animation) => getComputedStyle(animation.effect.target).clipPath);
         return {
           source: Number(getComputedStyle(node.querySelector('[data-test="morph-source-label"]')).opacity),
+          body: Number(getComputedStyle(node.querySelector(".nb-notch-body")).opacity),
           groups: groups.length,
           started: groups.filter((clip) => clip === "none" || !clip.includes("100%")).length,
           fill: getComputedStyle(node).backgroundColor,
@@ -264,16 +270,13 @@ test.describe("the notch morph", () => {
     expect(sample, "the notch entry animation must still be running").not.toBeNull();
     expect(sample.early.fill, "the window is still the trigger's own paint while it has nowhere to land").toBe(accent);
     expect(sample.early.source, "the trigger's label is the material it carries out").toBeGreaterThanOrEqual(.9);
-    /* Codex's constraint, kept: content waits for the clip to have somewhere to land.
-       What changed is only that it is uncovered rather than faded, so the same
-       question is now asked of the wipe. */
-    expect(sample.quarter.started, "form content must wait until the move has established the new space").toBe(0);
-    /* And the complaint that prompted the retiming: the wash used to hold accent to
-       55% and finish at 100%, so the form arrived part-opaque over a lime slab and
-       the surface turned dark underneath content that was already there. The surface
-       must finish becoming itself before the first group is uncovered. */
+    /* The body plane starts after the surface has begun its move, so the source
+       remains the only readable identity during the first quarter. */
+    expect(sample.quarter.body, "destination content must wait for the handoff").toBeLessThan(.95);
+    expect(sample.quarter.started, "the legacy cascade must not create a second arrival path").toBe(0);
+    /* The wash finishes becoming the card before the body plane is readable. */
     expect(sample.mid.fill, "the surface has become the sheet's own before content lands on it").not.toBe(accent);
-    expect(sample.end.started, "every group is uncovered by the time the shape settles").toBe(sample.end.groups);
+    expect(sample.end.groups, "notch entry uses one destination plane, not eight arrivals").toBe(0);
   });
 
   test("the notch lands on the composer's own surface", async ({ page }) => {
@@ -370,17 +373,18 @@ test.describe("the notch morph", () => {
     await expect(sheet.getByTestId("notch-surface")).toHaveCount(0);
     await expect(trigger).toHaveCSS("visibility", "hidden");
 
-    /* The body is no longer one faded block — its groups arrive on a stagger, so
-       what has to be true is that each group animates opacity and nothing that
-       costs layout. Reading `.nb-notch-body`'s own transition would now report
-       the wrapper, which is deliberately inert. */
+    /* V3 intentionally replaces the old eight-group notch cascade with one
+       destination-plane handoff. The Composer markup remains unchanged; only
+       its entry choreography is owned by `.nb-notch-body`. */
     const transitions = await sheet.evaluate((node) => {
       const groups = node.getAnimations({ subtree: true })
         .filter((animation) => animation.animationName === "nbnotchgroupin");
-      /* Read the shape's own duration rather than hardcoding it, so the bound below
-         still means "inside the shape" if MORPH_MS is ever retuned. */
+      const body = node.getAnimations({ subtree: true })
+        .filter((animation) => animation.animationName === "nbnotchbodyin");
+      /* Read production timing rather than hardcoding it, so the bound still means
+         "inside the shape" if the reference cadence is retuned. */
       const morphMs = parseFloat(getComputedStyle(node).getPropertyValue("--nb-morph-dur"));
-      const arrivals = groups.map((animation) => {
+      const bodyTiming = body.map((animation) => {
         const timing = animation.effect.getTiming();
         return Math.round(Number(timing.delay) + Number(timing.duration));
       });
@@ -388,37 +392,19 @@ test.describe("the notch morph", () => {
         panel: getComputedStyle(node).transitionProperty,
         morphMs,
         groupCount: groups.length,
-        lastArrival: arrivals.length ? Math.max(...arrivals) : null,
-        groupDelays: groups.map((animation) => Math.round(Number(animation.effect.getTiming().delay))).sort((a, b) => a - b),
-        groupProps: [...new Set(groups.flatMap((animation) => (
+        bodyCount: body.length,
+        bodyLastArrival: bodyTiming.length ? Math.max(...bodyTiming) : null,
+        bodyProps: [...new Set(body.flatMap((animation) => (
           animation.effect.getKeyframes().flatMap((frame) => Object.keys(frame))
         )))],
       };
     });
     expect(transitions.panel, "the shared panel must transition from the trigger accent to its own surface").toContain("background-color");
-    expect(transitions.groupCount, "the composer's content must arrive as staggered groups, not one block").toBeGreaterThan(2);
-    /* Uncovered, not faded. Eight groups finishing their fade together against a
-       surface that was still washing was the one part of this morph a person
-       actually noticed, so the groups now wipe open on the same stagger. `transform`
-       is banned alongside the layout properties for its own reason: a transformed
-       descendant extends the scroller's overflow, which sizes the sheet taller than
-       its content and breaks the clip's match to the button it grew from. */
-    expect(transitions.groupProps, "form content should be uncovered after geometry, never faded").toContain("clipPath");
-    expect(transitions.groupProps, "the cascade must not reintroduce the fade it replaced").not.toContain("opacity");
-    for (const property of ["transform", "width", "height", "top", "left", "margin", "padding"]) {
-      expect(transitions.groupProps, `content groups must not animate ${property}`).not.toContain(property);
-    }
-    /* The bound this suite never had. The cascade used to finish at 1176ms against a
-       480ms shape, so content kept arriving long after the sheet had settled and the
-       whole gesture read as a fade laid over a morph. Nothing caught it, because every
-       assertion here described the stagger's shape and none described its end. */
-    expect(transitions.lastArrival,
-      "content must finish arriving inside the shape it belongs to").toBeLessThanOrEqual(transitions.morphMs);
-    const [first, second] = transitions.groupDelays;
-    /* Loosened from 50ms deliberately, not incidentally: the step shrank to ~19ms when
-       the tail was cut. What still has to be true is that the groups are staggered at
-       all, not that they are slow. */
-    expect(second - first, "each group must wait a beat behind the one before it").toBeGreaterThan(8);
+    expect(transitions.groupCount, "notch entry must not create eight independent arrivals").toBe(0);
+    expect(transitions.bodyCount, "the Composer must enter as one destination plane").toBe(1);
+    expect(transitions.bodyProps).toEqual(expect.arrayContaining(["opacity", "transform", "filter"]));
+    expect(transitions.bodyLastArrival,
+      "destination content must finish arriving inside the primary morph").toBeLessThanOrEqual(transitions.morphMs);
 
     await page.keyboard.press("Escape");
     await expect(sheet).toHaveCount(0, { timeout: 3000 });
