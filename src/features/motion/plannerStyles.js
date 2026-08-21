@@ -557,7 +557,12 @@ export function plannerStyles({ T, preferences }) {
            the middle of the true-size Sheet at frame zero. It remains decorative
            and non-interactive, then hands off as the first content group arrives. */
         @keyframes nbnotchlabelout{0%,18%{opacity:1;transform:translateX(0) scale(1);filter:blur(0)}58%{opacity:.28;transform:translateX(calc(var(--nb-morph-slide) * -.72)) scale(var(--nb-morph-content-scale));filter:blur(var(--nb-morph-content-blur))}100%{opacity:0;transform:translateX(calc(-1 * var(--nb-morph-slide))) scale(var(--nb-morph-content-scale));filter:blur(var(--nb-morph-content-blur))}}
-        .nb-fluid[data-fluid-origin="notch"][data-morph-stage="reveal"] .nb-morph-source-label,.nb-fluid[data-fluid-origin="notch"][data-morph-stage="content"] .nb-morph-source-label,.nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-morph-source-label{opacity:0}
+        .nb-fluid[data-fluid-origin="notch"][data-morph-stage="reveal"] .nb-morph-source-label,.nb-fluid[data-fluid-origin="notch"][data-morph-stage="content"] .nb-morph-source-label{opacity:0}
+        /* Once the handoff is settled, remove the transient label transform and
+           filter rather than leaving the animation's fill value on a hidden
+           node. Closing sheets enter a separate "closing" stage, so their
+           reversible label-in animation still owns these properties. */
+        .nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-morph-source-label{animation:none!important;opacity:0;transform:none!important;filter:none!important}
         /* Close spends the existing lead *inside* MORPH_MS: the form leaves for
            --nb-morph-lead, then the lime object folds for the rest. Adding a
            133ms lead on top of 380 would fail the fortieth-time test. In-flight

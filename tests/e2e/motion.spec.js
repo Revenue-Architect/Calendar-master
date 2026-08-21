@@ -195,6 +195,20 @@ test.describe("the notch morph", () => {
     expect.soft(Math.abs(end.bodyTransform.x), "destination body must be at rest at 100%").toBeLessThanOrEqual(0.01);
     expect.soft(end.bodyOpacity).toBeGreaterThanOrEqual(.99);
     expect.soft(end.bodyFilter, "destination body must have no filter at rest").toMatch(/none|blur\(0(px)?\)/);
+    /* Frame scrubbing intentionally holds the stage machine at "source"; the
+       settled cleanup is a separate, wall-clock contract. Verify it after the
+       production stage reaches open so this cannot accidentally bless a filled
+       animation value as the resting state. */
+    const settledSource = page.getByTestId("sheet").locator('[data-test="morph-source-label"]');
+    await expect(page.getByTestId("sheet")).toHaveAttribute("data-morph-stage", "open");
+    const settledSourceStyle = await settledSource.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return { opacity: Number(style.opacity), transform: style.transform, filter: style.filter };
+    });
+    expect(settledSourceStyle.opacity, "source identity must remain hidden at rest").toBeLessThanOrEqual(.01);
+    expect(settledSourceStyle.transform, "source identity must clear its transient transform at rest")
+      .toMatch(/none|matrix\(1, 0, 0, 1, 0, 0\)/);
+    expect(settledSourceStyle.filter, "source identity must not retain a blur at rest").toMatch(/none|blur\(0(px)?\)/);
 
     /* Richer handoff motion must never alter the true-size layout box or the
        scrollable form geometry. */
