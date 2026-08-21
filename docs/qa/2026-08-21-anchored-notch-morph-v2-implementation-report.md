@@ -3,7 +3,7 @@
 **Date:** 2026-08-21  
 **Repository:** Revenue-Architect/Calendar-master  
 **Branch:** `main`  
-**Initial implementation commit:** [`e44b058`](https://github.com/Revenue-Architect/Calendar-master/commit/e44b058388851e6e8c89b8b817811cafcbf55519)  
+**Initial implementation commit:** [`e44b058`](https://github.com/Revenue-Architect/Calendar-master/commit/e44b058388851e6e8c89b8b817811cafcbf55519)
 **Remote state at initial report:** `origin/main` was at the same commit.
 
 > **Superseded:** the review remediation is now in [`9333296`](https://github.com/Revenue-Architect/Calendar-master/commit/9333296) and the evidence/corrections are recorded in the [remediation report](./2026-08-21-anchored-notch-morph-v2-remediation-report.md). Read that report for the current sign-off status; this document describes the initial implementation only.
