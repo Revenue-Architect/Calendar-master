@@ -309,7 +309,20 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
       /* Named `geometry`, not `morph`: the prop of that name says *how* to move,
          this says *how far*, and letting the local shadow the prop silently
          compared an object to a string and lost the notch every time. */
-      const sourceRadius = Number.parseFloat(recentFluidTriggerRadius()) || 999;
+      /* CSS resolves a pill's nominal `999px` radius against its own box, so a
+         39x28 source control would be visually bounded to a 14px radius. Carry
+         that effective radius into the growing clip, rather than carrying the
+         unbounded token:
+         once the visible window passes through a near-square, 999px normalizes
+         into the circular/portal blob this morph is expressly meant to avoid.
+         A real zero radius stays zero; only a missing snapshot uses the safe
+         source-box bound. */
+      const measuredRadius = Number.parseFloat(recentFluidTriggerRadius());
+      const sourceRadiusLimit = Math.max(0, Math.min(triggerRect.width, triggerRect.height) / 2);
+      const sourceRadius = Math.min(
+        Number.isFinite(measuredRadius) ? Math.max(0, measuredRadius) : 999,
+        sourceRadiusLimit,
+      );
       const geometry = anchoredFluidMorphFromRects(triggerRect, panelRect, {
         sourceRadius,
         targetRadius: 24,
@@ -331,11 +344,11 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
       /* The corner the reveal starts from is the trigger's own corner.
          It used to be a flat 999px, which is right for a pill — the NEW button is
          one — and badly wrong for anything wide and low. On a full-width event card
-         a 999px radius makes the intermediate clip an enormous ellipse, so what the
-         eye actually sees is a soft circular hole opening in the middle of the screen
-         with a finished sheet behind it. That reads as a portal, not as the card
-         being pulled out, which is the whole reason the morph did not feel connected.
-         Reading the real radius makes a card open as a card and a pill as a pill. */
+         a nominal 999px radius makes the intermediate clip an enormous ellipse, so
+         what the eye actually sees is a soft circular hole opening in the middle of
+         the screen with a finished sheet behind it. The effective radius is the
+         measured corner bounded by the source box, so the opening remains a pill
+         until the planned panel-radius handoff. */
       panel.style.setProperty("--fluid-radius", `${geometry.sourceRadius}px`);
       panel.style.setProperty("--fluid-target-radius", `${geometry.targetRadius}px`);
     }

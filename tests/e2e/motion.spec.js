@@ -239,8 +239,9 @@ test.describe("the notch morph", () => {
       const style = getComputedStyle(node);
       const rect = node.getBoundingClientRect();
       const matrix = new DOMMatrixReadOnly(style.transform);
-      const clip = style.clipPath.match(/^inset\((.*?)\s+round/);
-      const [top, right, bottom, left] = (clip ? clip[1] : "0px 0px 0px 0px")
+      const clip = style.clipPath.match(/^inset\(([^)]*)\)/);
+      const insetText = clip ? clip[1].split(/\s+round\b/)[0] : "0px 0px 0px 0px";
+      const [top, right, bottom, left] = insetText
         .trim().split(/\s+/).map((value) => Number.parseFloat(value) || 0);
       return {
         left: rect.left + left,
@@ -733,8 +734,10 @@ test.describe("the shape a sheet grows from", () => {
         const style = getComputedStyle(node);
         const rect = node.getBoundingClientRect();
         const matrix = new DOMMatrixReadOnly(style.transform);
-        const clip = style.clipPath.match(/^inset\((.*?)\s+round/);
-        const [top, right, bottom, left] = (clip ? clip[1] : "0px 0px 0px 0px")
+        const clip = style.clipPath.match(/^inset\(([^)]*)\)/);
+        const insetText = clip ? clip[1].split(/\s+round\b/)[0] : "0px 0px 0px 0px";
+        const radius = Number.parseFloat(style.clipPath.match(/\s+round\s+([0-9.]+)px/)?.[1] ?? "0");
+        const [top, right, bottom, left] = insetText
           .trim().split(/\s+/).map((value) => Number.parseFloat(value) || 0);
         return {
           left: rect.left + left,
@@ -743,6 +746,7 @@ test.describe("the shape a sheet grows from", () => {
           bottom: rect.bottom - bottom,
           width: rect.width - left - right,
           height: rect.height - top - bottom,
+          radius,
           scaleX: matrix.a,
           scaleY: matrix.d,
         };
@@ -750,12 +754,14 @@ test.describe("the shape a sheet grows from", () => {
       entry.pause();
       entry.currentTime = 0;
       const start = read();
+      entry.currentTime = duration * .1;
+      const early = read();
       entry.currentTime = duration * .5;
       const mid = read();
       entry.currentTime = duration;
       const end = read();
       entry.play();
-      return { start, mid, end };
+      return { start, early, mid, end };
     });
 
     expect(samples).not.toBeNull();
@@ -763,6 +769,8 @@ test.describe("the shape a sheet grows from", () => {
     expect(Math.abs(samples.start.top - source.y)).toBeLessThan(2);
     expect(Math.abs(samples.start.width - source.width)).toBeLessThan(2);
     expect(Math.abs(samples.start.height - source.height)).toBeLessThan(2);
+    expect(samples.start.radius).toBeLessThanOrEqual(Math.min(source.width, source.height) / 2 + 1);
+    expect(samples.early.radius).toBeLessThan(Math.min(samples.early.width, samples.early.height) * .75);
     expect(samples.mid.left, "the opposite horizontal edge should expand left").toBeLessThan(samples.start.left);
     expect(samples.mid.bottom, "the opposite vertical edge should expand down").toBeGreaterThan(samples.start.bottom);
     expect(samples.end.width).toBeGreaterThan(samples.start.width);
