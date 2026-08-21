@@ -346,7 +346,7 @@ test.describe("the notch morph", () => {
 
     await page.evaluate(() => {
       const real = window.setTimeout.bind(window);
-      /* The three stage timers land at 56%, 69% and 100% of a 480ms morph. */
+      /* The three stage timers land at 56%, 69% and 100% of the current morph. */
       window.setTimeout = (fn, ms, ...rest) => (ms >= 250 && ms <= 500 ? 0 : real(fn, ms, ...rest));
     });
 

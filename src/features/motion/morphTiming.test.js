@@ -24,8 +24,8 @@ test("the cascade finishes inside the shape it belongs to", () => {
 test("stage handoffs stay ordered fractions of the container", () => {
   assert.ok(MORPH_STAGE_REVEAL < MORPH_STAGE_CONTENT);
   assert.ok(MORPH_STAGE_CONTENT < 1);
-  assert.equal(MORPH_MS * MORPH_STAGE_REVEAL, 268.8);
-  assert.equal(MORPH_MS * MORPH_STAGE_CONTENT, 331.2);
+  assert.equal(MORPH_MS * MORPH_STAGE_REVEAL, 212.8);
+  assert.equal(MORPH_MS * MORPH_STAGE_CONTENT, 262.2);
 });
 
 test("the lead is the wait that keeps content off an unfinished clip", () => {

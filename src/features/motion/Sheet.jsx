@@ -348,7 +348,7 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
     const restorePageScroll = () => applyScrollSnapshot(pageScrollRef.current);
     restorePageScroll();
     window.addEventListener("scroll", restorePageScroll, true);
-    const unlock = window.setTimeout(() => window.removeEventListener("scroll", restorePageScroll, true), 480);
+    const unlock = window.setTimeout(() => window.removeEventListener("scroll", restorePageScroll, true), MORPH_MS);
     /* `nb-sheet-h` transitions height, and it used to switch on one frame into
        the notch's own 360ms morph — two curves animating the same box, which is
        the bounce. The height transition waits until the shape has finished

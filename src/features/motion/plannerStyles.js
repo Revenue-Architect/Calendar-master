@@ -455,7 +455,7 @@ export function plannerStyles({ T, preferences }) {
            own at rest, and pinning it would cost a gesture to insure against a stall. */
         .nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"]{clip-path:none!important}
         /* The surface is guaranteed from "reveal" rather than "open": the wash is
-           finished at 46% of the morph (221ms) and reveal fires at 56% (269ms), so
+           finished at 46% of the morph (~175ms) and reveal fires at 56% (~213ms), so
            there is nothing left for the animation to say about colour by then. The
            clip is not included here because it legitimately runs to 100%. */
         .nb-fluid[data-fluid-origin="notch"]:is([data-morph-stage="reveal"],[data-morph-stage="content"],[data-morph-stage="open"]){background-color:var(--morph-card)!important}
@@ -520,7 +520,7 @@ export function plannerStyles({ T, preferences }) {
         .nb-fluid[data-fluid-origin="notch"][data-morph-stage="reveal"] .nb-morph-source-label,.nb-fluid[data-fluid-origin="notch"][data-morph-stage="content"] .nb-morph-source-label,.nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-morph-source-label{opacity:0}
         /* Close spends the existing lead *inside* MORPH_MS: the form leaves for
            --nb-morph-lead, then the lime object folds for the rest. Adding a
-           233ms lead on top of 480 would fail the fortieth-time test. In-flight
+           133ms lead on top of 380 would fail the fortieth-time test. In-flight
            reverse (data-fluid-reverse) does not take this delay — the form is
            mid-arrival and leaves with the shape. Unmount stays at MORPH_MS. */
         .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"]:not([data-fluid-reverse="true"]){

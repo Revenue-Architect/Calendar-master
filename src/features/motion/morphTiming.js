@@ -5,12 +5,12 @@
    The reference motion runs its container for 667ms (20 frames at 30fps), and
    that is the right shape but not the right speed for a control opened dozens of
    times a day — a showcase piece is authored to be watched once, and DESIGN.md's
-   fortieth-time test is the standard that actually applies here. 480ms keeps the
-   whole choreography, since every other beat is a fraction of this one: the
-   sheet still assembles itself group by group, it just stops making you wait
-   1.2 seconds to finish doing it. Still half again what the old 320ms pop ran
-   at, which is what made it read as a resize rather than a morph. */
-export const MORPH_MS = 480;
+   fortieth-time test is the standard that actually applies here. 380ms keeps the
+   physical choreography while removing the wait between repeated planner actions:
+   the sheet still assembles itself group by group, but the complete cascade lands
+   before the surface settles. It remains longer than the old 320ms pop that read
+   as a resize rather than a morph. */
+export const MORPH_MS = 380;
 
 /* Fractions of MORPH_MS. Content starts a third of the way through the container's
    travel, each group is a step behind the last, and each takes its own share of the
@@ -26,8 +26,8 @@ export const MORPH_MS = 480;
    press. A gesture whose content keeps arriving after its container has settled reads as
    a fade laid over a morph, which is exactly what it was reported as.
 
-   At .04 and .3 the last group starts at ~322ms and lands at ~466ms, inside MORPH_MS
-   with room to spare, and the whole cascade spans 279ms — under the 300ms an interface
+   At .04 and .3 the last group starts at ~255ms and lands at ~369ms, inside MORPH_MS
+   with room to spare, and the whole cascade spans 281ms — under the 300ms an interface
    opened dozens of times a day can afford. The stagger survives; only its tail is gone.
    Keep the arithmetic true if MORPH_MS ever moves: lead + groups*step + fade must stay <= 1. */
 export const MORPH_LEAD = 0.35;
