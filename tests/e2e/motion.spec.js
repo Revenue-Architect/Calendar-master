@@ -11,6 +11,59 @@ import { openPlanner } from "./helpers.js";
 
 const filters = (page, prefix) => page.locator(`filter[id^="${prefix}"]`);
 
+/* Read the running notch choreography at one shared production clock. The
+ * sampler deliberately scrubs the CSS/WAAPI animations themselves rather than
+ * recreating their interpolation in test code; the assertions below therefore
+ * describe the current browser-rendered contract and can catch a choreography
+ * that changes without making the test's model stale. */
+const sampleNotchFrames = async (sheet, fractions) => sheet.evaluate((node, requestedFractions) => {
+  const entry = node.getAnimations().find((animation) => animation.animationName === "nbnotchin");
+  if (!entry?.effect) return null;
+  const morphMs = Number(entry.effect.getTiming().duration);
+  const source = node.querySelector('[data-test="morph-source-label"]');
+  const body = node.querySelector(".nb-notch-body");
+  if (!source || !body || !Number.isFinite(morphMs) || morphMs <= 0) return null;
+
+  const matrixValues = (value) => {
+    const matrix = new DOMMatrixReadOnly(value === "none" ? "matrix(1, 0, 0, 1, 0, 0)" : value);
+    return {
+      x: matrix.e,
+      y: matrix.f,
+      scaleX: matrix.a,
+      scaleY: matrix.d,
+      raw: value,
+    };
+  };
+  const read = (fraction) => {
+    for (const animation of node.getAnimations({ subtree: true })) {
+      animation.pause();
+      animation.currentTime = morphMs * fraction;
+    }
+    const panelStyle = getComputedStyle(node);
+    const sourceStyle = getComputedStyle(source);
+    const bodyStyle = getComputedStyle(body);
+    return {
+      fraction,
+      panelTransform: matrixValues(panelStyle.transform),
+      panelClip: panelStyle.clipPath,
+      panelOffsetWidth: node.offsetWidth,
+      panelOffsetHeight: node.offsetHeight,
+      panelBackground: panelStyle.backgroundColor,
+      sourceOpacity: Number(sourceStyle.opacity),
+      sourceTransform: matrixValues(sourceStyle.transform),
+      sourceFilter: sourceStyle.filter,
+      bodyOpacity: Number(bodyStyle.opacity),
+      bodyTransform: matrixValues(bodyStyle.transform),
+      bodyFilter: bodyStyle.filter,
+      bodyScrollHeight: body.scrollHeight,
+    };
+  };
+
+  const frames = requestedFractions.map(read);
+  for (const animation of node.getAnimations({ subtree: true })) animation.play();
+  return frames;
+}, fractions);
+
 test.describe("the liquid pill", () => {
   test("slides without a filter at all", () => {
     /* A trailing droplet plus a goo filter was tried and removed. The droplet
@@ -104,6 +157,54 @@ test.describe("adjacent weekdays", () => {
 });
 
 test.describe("the notch morph", () => {
+  test("characterizes the production surface, source handoff, and destination handoff", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await openPlanner(page);
+    await page.getByTestId("new-entry").click();
+
+    const frames = await sampleNotchFrames(page.getByTestId("sheet"), [0, .2, .4, .6, .8, 1]);
+    expect(frames, "the production notch must expose a running nbnotchin animation").not.toBeNull();
+    const [zero, twenty, forty, sixty, eighty, end] = frames;
+
+    /* The surface must travel from the first fifth. v2 deliberately held its
+       transform until the radius handoff, so this is expected to be RED on the
+       baseline and becomes the guard against recreating that split choreography. */
+    expect.soft(Math.abs(twenty.panelTransform.x), "panel X translation must progress by 20%")
+      .toBeLessThan(Math.abs(zero.panelTransform.x) * .9);
+    expect.soft(Math.abs(twenty.panelTransform.y), "panel Y translation must progress by 20%")
+      .toBeLessThan(Math.abs(zero.panelTransform.y) * .9);
+
+    /* The source identity must visibly leave in the reference's lateral
+       direction, not only disappear through opacity. */
+    expect.soft(forty.sourceTransform.x, "source identity must travel left by 40%").toBeLessThan(-8);
+    expect.soft(forty.sourceOpacity, "source identity must soften during its departure").toBeLessThan(.9);
+    expect.soft(sixty.sourceOpacity, "source identity must be gone before the settle").toBeLessThanOrEqual(.1);
+
+    /* The real Composer body is the destination plane. At 40% it should still
+       be arriving from the right; by 65% it should be effectively settled. */
+    expect.soft(forty.bodyTransform.x, "destination body must enter from the right").toBeGreaterThanOrEqual(8);
+    expect.soft(forty.bodyOpacity, "destination body must not be fully present at 40%")
+      .toBeGreaterThan(.1);
+    expect.soft(forty.bodyOpacity, "destination body must not win before its handoff")
+      .toBeLessThan(.95);
+    expect.soft(Math.abs(sixty.bodyTransform.x), "destination body must settle by 60%").toBeLessThanOrEqual(2);
+    expect.soft(sixty.bodyOpacity, "destination body must be readable by 60%").toBeGreaterThanOrEqual(.95);
+    expect.soft(Math.abs(end.bodyTransform.x), "destination body must be at rest at 100%").toBeLessThanOrEqual(0.01);
+    expect.soft(end.bodyOpacity).toBeGreaterThanOrEqual(.99);
+    expect.soft(end.bodyFilter, "destination body must have no filter at rest").toMatch(/none|blur\(0(px)?\)/);
+
+    /* Richer handoff motion must never alter the true-size layout box or the
+       scrollable form geometry. */
+    const width = zero.panelOffsetWidth;
+    const height = zero.panelOffsetHeight;
+    const scrollHeight = zero.bodyScrollHeight;
+    for (const frame of frames) {
+      expect.soft(frame.panelOffsetWidth, `Sheet width changed at ${frame.fraction * 100}%`).toBe(width);
+      expect.soft(frame.panelOffsetHeight, `Sheet height changed at ${frame.fraction * 100}%`).toBe(height);
+      expect.soft(Math.abs(frame.bodyScrollHeight - scrollHeight), `body scrollHeight changed at ${frame.fraction * 100}%`).toBeLessThanOrEqual(1);
+    }
+  });
+
   test("creation carries the trigger material until the composer content can arrive", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await openPlanner(page);
