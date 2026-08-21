@@ -1,186 +1,186 @@
-# NEW Morph v3 — perceptual validation report
+# NEW Morph v3 — remediation and perceptual validation report
 
-Date: 2026-08-21  
-Branch: `feat/new-morph-v3-transitions-match`  
-Baseline: `e3bca9f86cae2cdcb3b4ed4879a8d31d678c6914` (`origin/main` at start)  
-Implementation under review: `c47ef44`
+Date: 2026-08-21
+Branch: `feat/new-morph-v3-transitions-match` (PR #6)
+PR URL: https://github.com/Revenue-Architect/Calendar-master/pull/6
+HEAD before remediation: `71e4ed150c9d0b30ab7a036cbc27f476fd1d3782`
+Code/test remediation head before this report: `3fc68eb`
+Base used for comparison: `e3bca9f86cae2cdcb3b4ed4879a8d31d678c6914`
 
 ## Executive result
 
-NEW Morph v3 is implemented as a true-size, clip-path morph with a continuous
-source-to-surface handoff. The Composer body enters from the right while the
-NEW identity leaves left, then the sheet settles without scaling or horizontal
-scrolling. The same path was visually checked in Chromium at desktop and both
-required mobile heights, in the default dark/high-chroma theme and a light
-theme.
+The remediation corrects the review findings without redesigning NEW Morph v3.
+The accepted causal sequence remains:
 
-The motion-specific verification is green. The repository-wide Playwright run
-finished with 323 passing tests and one reproducible pre-existing failure in
-`tests/e2e/interaction-feedback.spec.js`; none of the files changed by this
-track are involved in that assertion.
+```text
+measured NEW / +ACTION trigger
+  → true-size Sheet surface expands continuously
+  → source identity exits left
+  → Composer body arrives from the right
+  → fast settle
+  → reverse on close
+```
 
-## Scope and invariants
+The intentional `.985` Composer micro-scale, 350ms open cadence, 200ms
+handoff, 32px handoff travel, asymmetric clip-path, ResizeObserver sizing,
+in-flight reversal, reduced-motion semantics, and keyboard/focus behavior were
+preserved. No Planner, Composer, Sheet markup, navigation, ribbon,
+persistence, or domain files were changed by this remediation.
 
-Changed files:
+The motion, interaction, unit, build, and Composer gates are green. The final
+repository E2E run produced **324 passes and two failures** in the existing
+timeline-chrome scroll cases (phone and desktop). The same two tests fail on
+the PR base in the same Chromium environment, while the other two tests in
+that file pass on both revisions. They are therefore documented as baseline
+failures, not attributed to v3; the full suite is not described as an
+unqualified green run.
 
+## Remediation scope
+
+The remediation delta contains only these files:
+
+- `src/features/motion/plannerStyles.js`
 - `src/features/motion/morphTiming.js`
 - `src/features/motion/morphTiming.test.js`
-- `src/features/motion/plannerStyles.js`
-- `src/features/motion/Sheet.jsx`
 - `tests/e2e/motion.spec.js`
+- `tests/e2e/interaction-feedback.spec.js`
 - this report
 
-`Planner.jsx`, Composer ownership, ordinary trigger Sheets, persistence,
-navigation, and business behavior were not changed. The implementation keeps:
+The existing PR's earlier `Sheet.jsx` work remains unchanged. The real Sheet
+is still true-size: no width/height animation, full-Sheet scale, animated blur,
+second modal framework, or duplicated Composer DOM was introduced.
 
-- the measured true-size Sheet and `ResizeObserver` height path;
-- asymmetric `clip-path` geometry rather than layout or full-sheet scale;
-- compositor-only transient translation, opacity, scale (`.985` minimum), and
-  blur (`1.5px` maximum);
-- reduced-motion and keyboard/focus/scroll-lock behavior;
-- in-flight reversal, including exact current-value handoff;
-- Event ↔ Action and More Options behavior.
+## Review findings and fixes
 
-## Implementation summary
+| Finding | RED evidence | Root cause | Remediation | GREEN evidence |
+| --- | --- | --- | --- | --- |
+| Interaction feedback geometry | Baseline interaction test failed with expected width `401.8800048828125` and received `408`. | The test sampled ADD TO TIMELINE while the intentional `.985` Composer entrance scale was still active, then compared it after the body settled. | `interaction-feedback.spec.js` now waits for the product state `[data-test="sheet"][data-morph-stage="open"]` before establishing the geometry baseline. No tolerance was changed and the `.985` scale remains. | The interaction suite passed 4/4 on three consecutive runs. |
+| OS reduced motion | With the new body normalization temporarily removed, computed styles still reported a running `nbnotchbodyin` animation. | The original reduced-motion rule predated the independently animated `.nb-notch-body`. | Scoped OS selectors now force body animation/transition off, opacity 1, identity transform, and no filter; the source is hidden, identity-transformed, unblurred, and non-interactive. | OS reduced-motion assertions pass with no body travel/scale/blur and no `nbnotchbodyin`. |
+| In-app reduced motion | With the generated preference selectors temporarily removed, the same body animation remained active. | The in-app `preferences?.display.reducedMotion` CSS path did not normalize the new body animation. | The generated preference CSS contains the same body and source rest-state normalization independently of the OS media query. | In-app reduced-motion assertions pass with an immediately readable body and cleaned source. |
+| Stalled Composer body | With the open-stage body rule temporarily removed, pausing `nbnotchbodyin` near 10% left the body at opacity 0 when the wall-clock stage reached `open`. | The v2 wall-clock recovery normalized the source but v3 had not made the body rest state authoritative. | At `data-fluid-origin="notch"` + `data-morph-stage="open"`, the body is forced to animation none, opacity 1, identity transform, and no filter. This selector does not apply to source/content/closing stages. | The deterministic stalled-body test passes and verifies source cleanup as well. |
+| Settled close cadence | Temporarily restoring the panel fold to 240ms made the close test report token 250ms vs actual 240ms. | `nbnotchout` retained a hard-coded 240ms while body, source, and unmount used `MORPH_CLOSE_MS`. | Notch panel fold now uses `var(--nb-morph-close, 250ms)`, sharing the production token with body/source/unmount. | Browser inspection reports fold, body, and label durations all equal the CSS close token; unit coverage pins `MORPH_CLOSE_MS` to 250ms. |
+| Ordinary Sheet scope leak | Review identified the global scrim retime as a possible non-notch regression. | A notch-specific cadence had changed the generic scrim rule from 240ms to 250ms. | Generic `.nb-scrim.nb-fluid-closing` is restored to its baseline 240ms. Notch panel/body/source use the 250ms token without changing ordinary scrims. | Settings, Event inspector, and Action inspector remain `data-fluid-origin="trigger"`, use generic animation names, and do not run notch body/label animations. |
 
-The cadence is now explicit in `morphTiming.js`:
+No RED sabotage was committed. Each deliberate negative control was restored
+before the corresponding implementation commit.
 
-- open shape: `350ms`;
-- symmetric close: `250ms`;
-- source/body handoff: `200ms`;
-- handoff travel: `32px`;
-- handoff scale: `.985`;
-- handoff blur cap: `1.5px`.
+## Motion and reduced-motion contract
 
-`nbnotchin` travels continuously from the measured NEW bounds instead of
-holding the panel at the trigger until a late snap. Its clip/radius sequence
-keeps the physical source radius early, reaches the card radius by the first
-third, and resolves to the full true-size panel before the final settle.
+The final implementation preserves these v3 tokens:
 
-The old eight independent notch child reveals are disabled only for notch
-Composer surfaces. The existing markup remains; one `.nb-notch-body` plane
-arrives from the right and is readable before the shape completes. The source
-label leaves to the left during the same handoff. On a settled `open` stage,
-the hidden source label explicitly clears its animation fill, transform, and
-filter so no transient blur remains in the resting DOM.
+- `MORPH_MS = 350`
+- `MORPH_CLOSE_MS = 250`
+- `MORPH_HANDOFF_MS = 200`
+- `MORPH_HANDOFF_SLIDE_PX = 32`
+- `MORPH_CONTENT_SCALE = .985`
+- `MORPH_CONTENT_BLUR_PX = 1.5`
 
-Close uses the same source/body identities in reverse. When close interrupts an
-entry, `Sheet.jsx` freezes the current computed values and starts the close from
-those values instead of restarting from either endpoint.
+At rest, both reduced-motion paths produce the same effective state without
+waiting for the staged morph: the Composer body is immediately readable at
+identity transform and no blur, and the source clone is immediately hidden,
+identity-transformed, unblurred, and non-interactive.
 
-## Test-first evidence
-
-The first implementation test was intentionally run against the baseline. The
-baseline failed the new characterization because the panel was still pinned at
-its source transform at the sampled midpoint, the source identity did not move
-left, and the Composer body was already fully present rather than entering as a
-destination plane. The implementation was then made green without weakening
-the assertions.
-
-The final motion contract now covers:
-
-- 0/20/40/60/80/100% shared-clock samples;
-- continuous panel travel and asymmetric clip geometry;
-- source opacity plus leftward travel;
-- body opacity plus rightward entry and settle;
-- true-size width/height and body `scrollHeight` at every sample;
-- no exposed horizontal scrolling;
-- settled source cleanup after the actual `data-morph-stage="open"` transition;
-- reduced motion;
-- 25/50/75% Escape interruption;
-- backdrop interruption;
-- rapid close/reopen;
-- interrupted unmount and fresh reopen;
-- Event ↔ Action switching and More Options.
+The wall-clock `open` stage is authoritative if a CSS animation clock stalls.
+Closing is not affected by the open-only recovery selector, so the close path
+can still reverse and fold normally.
 
 ## Automated verification
 
 | Check | Result |
 | --- | ---: |
 | `node --test src/features/motion/morphTiming.test.js src/features/motion/fluidGeometry.test.js` | 17 passed |
-| `npx playwright test tests/e2e/motion.spec.js --workers=1` | 46 passed |
+| `npx playwright test tests/e2e/motion.spec.js --workers=1 --grep "notch\|reduced"` | 25 passed |
+| `npx playwright test tests/e2e/motion.spec.js --workers=1 --grep "ordinary Settings"` | 1 passed |
+| `npx playwright test tests/e2e/motion.spec.js --workers=1` | 48 passed |
+| `npx playwright test tests/e2e/interaction-feedback.spec.js --workers=1` | 4 passed, repeated 3 consecutive times |
 | `npx playwright test tests/e2e/composer.spec.js --workers=1` | 6 passed |
-| `npm test` | 634 passed |
-| `npm run build` | passed |
-| full `npx playwright test --workers=1` | 323 passed, 1 known failure |
+| `npm test` | 634 passed, 0 failed |
+| `npm run build` | passed; only the existing large-chunk warning |
+| Full `npx playwright test --workers=1` on remediation | 324 passed, 2 failed |
+| Same focused timeline suite on base `e3bca9f` | 2 passed, 2 failed — the same two failures |
 
-The build emitted only the repository's existing large-chunk warning.
+The two residual failures are:
+
+```text
+tests/e2e/timeline-chrome-scroll.spec.js
+  phone: gives day view its hours back on the way down, and the heading back at midnight
+  desktop: gives day view its hours back on the way down, and the heading back at midnight
+  Error: scrolling away from midnight must collapse the chrome
+  Expected: true; Received: false
+```
+
+The failures reproduced on the untouched PR base under the same Chromium
+binary and test command. The same file's Week cases pass on both revisions.
+No v3 remediation file is involved in that behavior, and no attempt was made
+to widen this PR into a timeline-chrome fix.
 
 ## Chromium visual validation
 
-The production bundle was served from the isolated worktree on
-`127.0.0.1:4178` and checked in real Chrome at 100% browser zoom.
+Validation used the production bundle from the isolated PR worktree in real
+Chrome at 100% browser zoom. The default `Obsidian / Acid` dark, high-chroma
+theme was used for the frame matrix. Computed values below were read from the
+live DOM at the shared 350ms clock; screenshots were also inspected at early,
+midpoint, settled, and close states.
 
-### 1280 × 900 — dark/high-chroma (`Obsidian / Acid`)
+### Shared-clock observations
 
-- Entry: the measured panel grows out of the NEW origin and travels toward its
-  final position from the first visible beat; it does not hold and snap.
-- Midpoint: the source identity is visibly moving left while the Composer body
-  arrives from the right; the handoff has no blank identity gap.
-- Settled: the Composer is centered and fully readable, with stable controls,
-  no horizontal scrollbar, and the source label gone with no residual blur.
-- Close: the underlying timeline returns cleanly and the NEW trigger remains
-  available; no stale scrim or mounted sheet remained.
+| Frame | Desktop 1280×900 — NEW | Mobile 390×844 — +ACTION |
+| --- | --- | --- |
+| 0% | Panel starts at the measured NEW bounds (`x≈764`, `y≈36`) with a true-size `448×505` surface translated from the trigger. Source opacity is 1; body opacity is 0, scaled `.985`, and blurred 1.5px. | Panel begins at the bottom +ACTION origin (`x≈−10`, `y≈377`) with the true-size `390×458` surface. Source remains fully present; body is hidden, scaled `.985`, and blurred 1.5px. |
+| 20% | Panel has moved left/down (`x≈611`, `y≈107`); source is fading and has travelled about 23px left; body has begun entering at ~6% opacity from the right. | Panel has moved toward the bottom edge (`x≈−6`, `y≈381`); source is ~28% opaque and travelling left; body has begun entering at ~6% opacity. |
+| 40% | Panel is near its destination (`x≈473`, `y≈172`); source is effectively gone; body is ~90% opaque, nearly identity scale, and its blur is effectively zero. | Panel is within about 2px of its destination; source is gone; body is ~90% opaque and nearly at identity. |
+| 60% | Body is fully readable at identity with no blur; panel still completes its final ~32px physical travel; source stays left and non-readable. | Body is fully readable with no blur; the panel finishes its short bottom-edge travel without a gap. |
+| 80% | Panel is at final bounds (`x≈416`, `y≈198`) and body is settled. The source cleanup is finishing its rest-state normalization. | Panel is flush to the viewport (`x≈0`, `y≈387`) and body is settled; no horizontal gap or white flash is visible. |
+| 100% | `data-morph-stage="open"`; panel/body transforms are identity, body opacity is 1 and filter none, source opacity is 0 with identity transform/filter. | Same final contract; the full-width sheet is readable, source is hidden, and no residual transform/filter tail remains. |
 
-### 390 × 844 — dark/high-chroma (`Obsidian / Acid`)
+The screenshots show a single continuous material handoff: the surface starts
+moving before the Composer body is readable, the source exits left while the
+body arrives from the right, and the physical Sheet settles without scaling.
+There is no eight-group visible arrival, layout jump, or blank identity gap.
 
-- The sheet grows from the mobile NEW control and settles against the bottom
-  viewport edge without clipping the Event/Action switcher, time controls,
-  categories, More Options, or Add to Timeline.
-- The source/body handoff remains one shared motion; the panel does not scale
-  its form contents.
-- More Options expands into the sheet's own scroll area and remains usable.
-- Event → Action → Event switches correctly during the same session.
+### Additional viewport and close checks
 
-### 390 × 601 — dark/high-chroma (`Obsidian / Acid`)
+- **390×601:** settled +ACTION sheet measured `390×458` at `y≈143`; body
+  opacity was 1, transform none, filter none, and source opacity was 0. The
+  primary action remained inside the bounded sheet; the short viewport did not
+  introduce page scrolling, clipping, or a white flash.
+- **Close:** a live 390×601 close sample reported `data-morph-stage="closing"`,
+  body opacity 0, body transform translating left by the handoff distance, and
+  the panel still moving as one surface. The screenshot showed the underlying
+  timeline returning without a stale scrim or snapped edge.
+- **Desktop:** the settled NEW form was centered and fully readable; the
+  source label was gone and the panel had no horizontal scrollbar.
+- **Performance:** the first-open path was inspected at desktop and mobile.
+  The 1.5px transient blur remained because no visible first-open stutter was
+  observed. It is explicitly cleared at rest and under both reduced-motion
+  paths.
 
-- The shorter viewport uses the bounded sheet height and keeps the primary
-  controls reachable; the content can scroll inside the sheet instead of
-  moving the page.
-- Entry and settled states show no white flash, blank sheet, or clipped primary
-  action.
+## Ordinary Sheet verification
 
-### Light-theme confirmation — `Cream / Terracotta`
+The Settings Sheet, Event inspector, and Action inspector were opened and
+closed in Chromium and asserted in the motion suite. Each remains a generic
+`data-fluid-origin="trigger"` surface with its existing `nbfluidorigin` entry
+and 240ms generic scrim close. None uses `nbnotchbodyin`, `nbnotchlabelout`, or
+the notch settled-close choreography. This remediation therefore does not
+retime or redesign ordinary Sheets.
 
-The settings surface was opened through the mobile navigation, the light theme
-was selected, and the NEW Composer was opened and visually checked. Accent
-contrast, border/radius treatment, source/body handoff, and settled form
-readability remained coherent. The browser session was then restored to the
-default dark/high-chroma theme.
+## Residual difference from Transitions.dev
 
-The same Chrome session also exercised the mobile navigation open state and its
-calendar return rail; the rail was flush to the viewport edge and did not
-introduce a gap while the app surface moved.
+The implementation intentionally does not copy Transitions.dev CSS. It keeps
+the app's measured true-size Sheet, asymmetric clip-path geometry, source
+identity handoff, ResizeObserver height path, app-specific timing tokens,
+focus/scroll-lock semantics, in-flight reversal, and reduced-motion behavior.
+The perceptual reference is the causal motion sequence, not a literal CSS or
+modal-framework transplant.
 
-## Known remaining failure
+## Suggestions
 
-The only full-suite failure is reproducible in isolation:
-
-```text
-tests/e2e/interaction-feedback.spec.js:41
-focus remains visible and disabled primary actions stay inert
-Expected width: 401.88006591796875
-Received width: 408
-```
-
-The test failed both in the full run and in a dedicated rerun. The motion track
-does not touch that test's implementation surface; the changed production
-files are limited to motion timing, Sheet motion, and notch styles. This should
-be handled as a separate interaction-feedback baseline investigation rather
-than folded into the morph change.
-
-## Follow-up suggestions
-
-1. Establish a same-environment baseline for the interaction-feedback width
-   assertion and decide whether its expected geometry should be tokenized or
-   whether a responsive measurement is intended.
-2. Keep the settled source cleanup assertion alongside future morph changes;
-   without it, a hidden label can silently retain a blur/transform animation
-   fill even when the screenshot looks correct.
-3. If a future visual pass changes the handoff cadence, retain the shared-clock
-   sampler and the 25/50/75% interruption matrix so a pleasing midpoint cannot
-   regress reversal behavior.
-
-## Review
-
-Pull request: https://github.com/Revenue-Architect/Calendar-master/pull/6
+1. Track the two timeline-chrome scroll failures in their own regression PR;
+   the same-environment comparison proves they predate this v3 remediation.
+2. Keep the interaction baseline synchronized on `data-morph-stage="open"`;
+   replacing it with a sleep would reintroduce the `.985` sampling race.
+3. Keep the open-stage body recovery assertion next to future motion changes;
+   it protects against a dead CSS animation clock without adding React
+   per-frame state.
+4. If first-open performance changes on lower-end devices, remove the transient
+   body/source blur before changing translate, opacity, or the micro-scale.
