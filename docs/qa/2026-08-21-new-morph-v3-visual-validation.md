@@ -28,12 +28,11 @@ preserved. No Planner, Composer, Sheet markup, navigation, ribbon,
 persistence, or domain files were changed by this remediation.
 
 The motion, interaction, unit, build, and Composer gates are green. The final
-repository E2E run produced **324 passes and two failures** in the existing
-timeline-chrome scroll cases (phone and desktop). The same two tests fail on
-the PR base in the same Chromium environment, while the other two tests in
-that file pass on both revisions. They are therefore documented as baseline
-failures, not attributed to v3; the full suite is not described as an
-unqualified green run.
+fresh repository E2E run produced **323 passes and three failures** in the
+existing timeline-chrome scroll cases (phone Day, desktop Day, and desktop
+Week). The same three tests fail on the PR base in the same Chromium
+environment. They are therefore documented as baseline failures, not
+attributed to v3; the full suite is not described as an unqualified green run.
 
 ## Remediation scope
 
@@ -96,8 +95,9 @@ can still reverse and fold normally.
 | `npx playwright test tests/e2e/composer.spec.js --workers=1` | 6 passed |
 | `npm test` | 634 passed, 0 failed |
 | `npm run build` | passed; only the existing large-chunk warning |
-| Full `npx playwright test --workers=1` on remediation | 324 passed, 2 failed |
-| Same focused timeline suite on base `e3bca9f` | 2 passed, 2 failed — the same two failures |
+| Full `npx playwright test --workers=1` on final remediation tip | 323 passed, 3 failed |
+| Same focused timeline suite on base `e3bca9f` | 1 passed, 3 failed — the same three failures |
+| `npx playwright test tests/e2e/week-drag.spec.js --workers=1` on final tip | 8 passed |
 
 The two residual failures are:
 
@@ -105,14 +105,19 @@ The two residual failures are:
 tests/e2e/timeline-chrome-scroll.spec.js
   phone: gives day view its hours back on the way down, and the heading back at midnight
   desktop: gives day view its hours back on the way down, and the heading back at midnight
+  desktop: gives week view its hours back on the way down, and the heading back at midnight
   Error: scrolling away from midnight must collapse the chrome
   Expected: true; Received: false
 ```
 
-The failures reproduced on the untouched PR base under the same Chromium
-binary and test command. The same file's Week cases pass on both revisions.
-No v3 remediation file is involved in that behavior, and no attempt was made
-to widen this PR into a timeline-chrome fix.
+The three failures reproduced on the untouched PR base under the same Chromium
+binary and test command. The phone Week case passes on both revisions. A
+separate one-off Week drag failure appeared in an earlier full-suite run, but
+the affected test passed in isolation on both revisions and the complete
+Week-drag file passed 8/8 on the final tip; it was not reproducible and was not
+treated as a v3 regression. No v3 remediation file is involved in the
+timeline-chrome behavior, and no attempt was made to widen this PR into a
+timeline-chrome fix.
 
 ## Chromium visual validation
 
