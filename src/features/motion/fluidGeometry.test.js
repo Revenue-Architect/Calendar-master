@@ -3,6 +3,8 @@ import test from "node:test";
 
 import {
   anchoredFluidMorphFromRects,
+  effectiveFluidSourceRadius,
+  fluidMorphFromRects,
   fluidPillBox,
   fluidPillStretch,
 } from "./fluidGeometry.js";
@@ -23,6 +25,13 @@ test("fluid pill stretch grows with travel and stays bounded", () => {
   assert.equal(fluidPillStretch({ left: 0 }, { left: 1000 }), 1.18);
 });
 
+test("effective source radius is bounded by the physical trigger box", () => {
+  assert.equal(effectiveFluidSourceRadius({ width: 39, height: 28 }, 999), 14);
+  assert.equal(effectiveFluidSourceRadius({ width: 120, height: 40 }, 12), 12);
+  assert.equal(effectiveFluidSourceRadius({ width: 120, height: 40 }, 0), 0);
+  assert.equal(effectiveFluidSourceRadius({ width: 120, height: 40 }, Number.NaN), 20);
+});
+
 test("sheet morph starts from the trigger's anchored edges", () => {
   assert.deepEqual(
     anchoredFluidMorphFromRects(
@@ -30,7 +39,7 @@ test("sheet morph starts from the trigger's anchored edges", () => {
       { left: 100, top: 100, width: 400, height: 500 },
     ),
     { translateX: -80, translateY: -90, insetTop: 0, insetRight: 360, insetBottom: 480, insetLeft: 0,
-      sourceRadius: 999, targetRadius: 24, anchorX: "left", anchorY: "top" },
+      sourceRadius: 10, targetRadius: 24, anchorX: "left", anchorY: "top" },
   );
 });
 
@@ -105,7 +114,7 @@ test("anchored morph keeps a top-right source attached while it opens left and d
   assert.equal(geometry.anchorY, "top");
   assert.equal(geometry.translateX, 100);
   assert.equal(geometry.translateY, -80);
-  assert.equal(geometry.sourceRadius, 999);
+  assert.equal(geometry.sourceRadius, 20);
   assert.equal(geometry.targetRadius, 24);
 });
 
@@ -162,16 +171,26 @@ test("anchored morph clamps source sizes larger than the true-size panel", () =>
   assert.equal(visible.height, 500);
 });
 
-test("anchored morph keeps subpixel rectangles stable and exposes the full target clip", () => {
+test("anchored morph keeps subpixel rectangles stable and derives its source window", () => {
   const trigger = { left: 12.25, top: 611.5, width: 97.5, height: 41.25 };
   const panel = { left: 83.75, top: 147.125, width: 431.5, height: 528.875 };
   const geometry = assertAnchoredStart(trigger, panel, { sourceRadius: 12.5, targetRadius: 24 });
 
   assert.equal(geometry.sourceRadius, 12.5);
   assert.equal(geometry.targetRadius, 24);
+  const visible = startVisibleRect(geometry, panel);
   assert.deepEqual(
-    { top: 0, right: 0, bottom: 0, left: 0 },
-    { top: 0, right: 0, bottom: 0, left: 0 },
-    "the end state always resolves to the full panel clip",
+    { width: visible.width, height: visible.height },
+    { width: trigger.width, height: trigger.height },
+  );
+});
+
+test("ordinary trigger morphs remain centered and symmetric", () => {
+  assert.deepEqual(
+    fluidMorphFromRects(
+      { left: 700, top: 20, width: 100, height: 40 },
+      { left: 200, top: 100, width: 500, height: 600 },
+    ),
+    { translateX: 300, translateY: -360, insetX: 200, insetY: 280 },
   );
 });

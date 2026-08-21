@@ -22,6 +22,7 @@ import {
   MORPH_LEAD,
   MORPH_MS,
   MORPH_STEP,
+  SHEET_ENTRY_MS,
   VIEW_SLIDE_MS,
 } from "./morphTiming.js";
 
@@ -356,7 +357,7 @@ export function plannerStyles({ T, preferences }) {
         /* Every menu and sheet is the same material as the control that opened it.
            When a trigger can be measured the surface grows from that exact pill;
            first-run and system sheets use the bottom-sheet fallback. */
-        .nb-fluid{animation:nbfluid 420ms cubic-bezier(.23,1,.32,1);transform-origin:bottom center;border-radius:24px 24px 0 0;will-change:transform,opacity,clip-path}
+         .nb-fluid{animation:nbfluid ${SHEET_ENTRY_MS}ms cubic-bezier(.23,1,.32,1);transform-origin:bottom center;border-radius:24px 24px 0 0;will-change:transform,opacity,clip-path}
         /* The one surface with no origin and no way to have one: nothing was pressed
            to open first-run, so there is no rect to grow from. It comes from the edge
            instead, a full self-height so the distance is right at any size, and it
@@ -385,11 +386,10 @@ export function plannerStyles({ T, preferences }) {
            exactly the "appears out of nowhere" this was supposed to fix. The window
            keeps the trigger's own corner through the first 15%, then becomes
            card-cornered by 35% and stays there for the rest of the travel. */
-        @keyframes nbfluidorigin{
-          0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-top) var(--fluid-inset-right) var(--fluid-inset-bottom) var(--fluid-inset-left) round var(--fluid-radius, 999px))}
-          15%{clip-path:inset(calc(var(--fluid-inset-top) * .84) calc(var(--fluid-inset-right) * .84) calc(var(--fluid-inset-bottom) * .84) calc(var(--fluid-inset-left) * .84) round var(--fluid-radius, 999px))}
-          35%{clip-path:inset(calc(var(--fluid-inset-top) * .48) calc(var(--fluid-inset-right) * .48) calc(var(--fluid-inset-bottom) * .48) calc(var(--fluid-inset-left) * .48) round var(--fluid-target-radius, 24px))}
-          100%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px 0px 0px round var(--fluid-target-radius, 24px))}
+         @keyframes nbfluidorigin{
+           0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round var(--fluid-radius, 999px))}
+           22%{clip-path:inset(calc(var(--fluid-inset-y) * .48) calc(var(--fluid-inset-x) * .48) round 24px)}
+           100%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px round 24px)}
         }
         /* The clip is the transition. Fading the body independently made the
            opening shape empty and erased the contents before the closing shape
@@ -402,9 +402,9 @@ export function plannerStyles({ T, preferences }) {
            and stop at scale(.88), so a sheet that flew out of its card drifted
            vaguely downward on the way out — the two halves of one gesture did not
            describe the same path. Same distance, same clip, reversed. */
-        @keyframes nbfluidoriginout{
-          0%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px 0px 0px round var(--fluid-target-radius, 24px))}
-          100%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-top) var(--fluid-inset-right) var(--fluid-inset-bottom) var(--fluid-inset-left) round var(--fluid-radius, 999px))}
+         @keyframes nbfluidoriginout{
+           0%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px round 24px)}
+           100%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-y) var(--fluid-inset-x) round var(--fluid-radius, 999px))}
         }
         .nb-fluid.nb-fluid-closing[data-fluid-origin="trigger"] .nb-notch-body{animation:none;opacity:1}
         /* The notch is the sheet itself taking on the trigger's material and
@@ -468,10 +468,10 @@ export function plannerStyles({ T, preferences }) {
            came from. The window keeps the button's own corner through the first
            15%, then becomes card-cornered by 35% and stays there for the rest of
            the travel. */
-        @keyframes nbnotchin{
-          0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-top) var(--fluid-inset-right) var(--fluid-inset-bottom) var(--fluid-inset-left) round var(--fluid-radius, 999px))}
-          15%{clip-path:inset(calc(var(--fluid-inset-top) * .84) calc(var(--fluid-inset-right) * .84) calc(var(--fluid-inset-bottom) * .84) calc(var(--fluid-inset-left) * .84) round var(--fluid-radius, 999px))}
-          35%{clip-path:inset(calc(var(--fluid-inset-top) * .48) calc(var(--fluid-inset-right) * .48) calc(var(--fluid-inset-bottom) * .48) calc(var(--fluid-inset-left) * .48) round var(--fluid-target-radius, 24px))}
+         @keyframes nbnotchin{
+           0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-top) var(--fluid-inset-right) var(--fluid-inset-bottom) var(--fluid-inset-left) round var(--fluid-radius, 999px))}
+           15%{transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(calc(var(--fluid-inset-top) * .84) calc(var(--fluid-inset-right) * .84) calc(var(--fluid-inset-bottom) * .84) calc(var(--fluid-inset-left) * .84) round var(--fluid-radius, 999px))}
+           35%{transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(calc(var(--fluid-inset-top) * .48) calc(var(--fluid-inset-right) * .48) calc(var(--fluid-inset-bottom) * .48) calc(var(--fluid-inset-left) * .48) round var(--fluid-target-radius, 24px))}
           100%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px 0px 0px round var(--fluid-target-radius, 24px))}
         }
         /* The sheet assembles itself rather than appearing.

@@ -2,6 +2,17 @@ function finite(value, fallback = 0) {
   return Number.isFinite(value) ? value : fallback;
 }
 
+/* CSS resolves a large nominal radius against the box it clips. Keep that
+ * normalization in the pure geometry layer so every source (including wide
+ * timeline cards) gets the same physical radius and the portal regression is
+ * testable without mounting a Sheet. */
+export function effectiveFluidSourceRadius(triggerRect = {}, sourceRadius = 999) {
+  const width = Math.max(0, finite(triggerRect.width));
+  const height = Math.max(0, finite(triggerRect.height));
+  const sourceBoxLimit = Math.min(width, height) / 2;
+  return Math.min(Math.max(0, finite(sourceRadius, 999)), sourceBoxLimit);
+}
+
 export function fluidPillBox(containerRect, activeRect) {
   return {
     left: finite(activeRect.left) - finite(containerRect.left),
@@ -77,16 +88,30 @@ export function anchoredFluidMorphFromRects(
     insetRight: anchorX === "right" ? 0 : horizontalInset,
     insetBottom: anchorY === "bottom" ? 0 : verticalInset,
     insetLeft: anchorX === "left" ? 0 : horizontalInset,
-    sourceRadius: Math.max(0, finite(sourceRadius, 999)),
+    sourceRadius: effectiveFluidSourceRadius(
+      { width: triggerWidth, height: triggerHeight },
+      sourceRadius,
+    ),
     targetRadius: Math.max(0, finite(targetRadius, 24)),
     anchorX,
     anchorY,
   };
 }
 
-/* Keep the old name as a compatibility export for composition-root imports. It
- * intentionally delegates to the one production implementation rather than
- * retaining a second symmetric geometry path. */
-export function fluidMorphFromRects(triggerRect, panelRect, options) {
-  return anchoredFluidMorphFromRects(triggerRect, panelRect, options);
+/* Ordinary trigger-origin Sheets retain the centered reveal they had before the
+ * anchored notch track. Plan #004 changes the Composer only; inspectors and
+ * detail surfaces must not inherit its directional choreography by accident. */
+export function fluidMorphFromRects(triggerRect = {}, panelRect = {}) {
+  const triggerCenterX = finite(triggerRect.left) + finite(triggerRect.width) / 2;
+  const triggerCenterY = finite(triggerRect.top) + finite(triggerRect.height) / 2;
+  const panelCenterX = finite(panelRect.left) + finite(panelRect.width) / 2;
+  const panelCenterY = finite(panelRect.top) + finite(panelRect.height) / 2;
+  const inset = (from, to) => Math.max(0, (finite(to) - finite(from)) / 2);
+
+  return {
+    translateX: triggerCenterX - panelCenterX,
+    translateY: triggerCenterY - panelCenterY,
+    insetX: inset(triggerRect.width, panelRect.width),
+    insetY: inset(triggerRect.height, panelRect.height),
+  };
 }

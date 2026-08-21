@@ -12,6 +12,11 @@
    as a resize rather than a morph. */
 export const MORPH_MS = 380;
 
+/* Ordinary trigger-origin Sheets retain their established CSS entrance. Keep
+   this beside the notch dial so JS guards and the stylesheet cannot drift apart
+   when either path is retuned. */
+export const SHEET_ENTRY_MS = 420;
+
 /* Fractions of MORPH_MS. Content starts a third of the way through the container's
    travel, each group is a step behind the last, and each takes its own share of the
    duration to arrive.

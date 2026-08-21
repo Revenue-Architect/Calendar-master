@@ -404,6 +404,56 @@ test.describe("the notch morph", () => {
     await expect(sheet).toHaveCount(0, { timeout: 3000 });
   });
 
+  for (const fraction of [.25, .5, .75]) {
+    test(`Escape reverses a Composer opened ${Math.round(fraction * 100)}%`, async ({ page }) => {
+      await openPlanner(page);
+      await page.getByTestId("new-entry").click();
+      const sheet = page.getByTestId("sheet");
+      await sheet.evaluate((node, progress) => {
+        const entry = node.getAnimations().find((animation) => animation.animationName === "nbnotchin");
+        entry?.pause();
+        if (entry?.effect) entry.currentTime = Number(entry.effect.getTiming().duration) * progress;
+      }, fraction);
+
+      await page.keyboard.press("Escape");
+      await expect(sheet).toHaveAttribute("data-fluid-reverse", "true");
+      await expect(sheet).toHaveCount(0, { timeout: 3000 });
+    });
+  }
+
+  test("a backdrop dismissal during entry reverses instead of snapping", async ({ page }) => {
+    await openPlanner(page);
+    await page.getByTestId("new-entry").click();
+    const sheet = page.getByTestId("sheet");
+    await sheet.evaluate((node) => {
+      const entry = node.getAnimations().find((animation) => animation.animationName === "nbnotchin");
+      entry?.pause();
+      if (entry?.effect) entry.currentTime = Number(entry.effect.getTiming().duration) * .75;
+    });
+    /* The backdrop guard intentionally ignores the opener's same-tap click. At
+       355ms the guard has elapsed while the animation is deliberately held in
+       flight, which exercises a real backdrop close without weakening that
+       protection. */
+    await page.waitForTimeout(355);
+    await page.locator(".nb-scrim").first().click({ position: { x: 4, y: 4 } });
+    await expect(sheet).toHaveAttribute("data-fluid-reverse", "true");
+    await expect(sheet).toHaveCount(0, { timeout: 3000 });
+  });
+
+  test("a quick close followed by reopen leaves one settled Composer", async ({ page }) => {
+    await openPlanner(page);
+    const trigger = page.getByTestId("new-entry");
+    await trigger.click();
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(sheet).toHaveCount(0, { timeout: 3000 });
+
+    await trigger.click();
+    await expect(page.getByTestId("sheet")).toHaveAttribute("data-fluid-origin", "notch");
+    await expect(page.getByTestId("sheet")).toHaveCount(1);
+  });
+
   test("the form leaves before the sheet finishes folding", async ({ page }) => {
     await openPlanner(page);
     await page.getByTestId("new-entry").click();
@@ -756,12 +806,18 @@ test.describe("the shape a sheet grows from", () => {
       const start = read();
       entry.currentTime = duration * .1;
       const early = read();
+      entry.currentTime = duration * .15;
+      const anchored15 = read();
+      entry.currentTime = duration * .35;
+      const anchored35 = read();
+      entry.currentTime = duration * .6;
+      const anchored60 = read();
       entry.currentTime = duration * .5;
       const mid = read();
       entry.currentTime = duration;
       const end = read();
       entry.play();
-      return { start, early, mid, end };
+      return { start, early, anchored15, anchored35, anchored60, mid, end };
     });
 
     expect(samples).not.toBeNull();
@@ -771,6 +827,12 @@ test.describe("the shape a sheet grows from", () => {
     expect(Math.abs(samples.start.height - source.height)).toBeLessThan(2);
     expect(samples.start.radius).toBeLessThanOrEqual(Math.min(source.width, source.height) / 2 + 1);
     expect(samples.early.radius).toBeLessThan(Math.min(samples.early.width, samples.early.height) * .75);
+    expect(Math.abs(samples.anchored15.right - samples.start.right), "the top/right source corner stays pinned during the first clip reveal").toBeLessThan(2);
+    expect(Math.abs(samples.anchored15.top - samples.start.top), "the top/right source corner stays pinned during the first clip reveal").toBeLessThan(2);
+    expect(Math.abs(samples.anchored35.right - samples.start.right), "the right source edge stays pinned through the radius handoff").toBeLessThan(2);
+    expect(Math.abs(samples.anchored35.top - samples.start.top), "the top source edge stays pinned through the radius handoff").toBeLessThan(2);
+    expect(Math.abs(samples.anchored60.right - samples.start.right), "the anchored edge drifts less than the expanding opposite edge").toBeLessThan(Math.abs(samples.anchored60.left - samples.start.left));
+    expect(Math.abs(samples.anchored60.top - samples.start.top), "the anchored edge drifts less than the expanding opposite edge").toBeLessThan(Math.abs(samples.anchored60.bottom - samples.start.bottom));
     expect(samples.mid.left, "the opposite horizontal edge should expand left").toBeLessThan(samples.start.left);
     expect(samples.mid.bottom, "the opposite vertical edge should expand down").toBeGreaterThan(samples.start.bottom);
     expect(samples.end.width).toBeGreaterThan(samples.start.width);

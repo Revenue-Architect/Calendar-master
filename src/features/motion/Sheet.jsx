@@ -7,10 +7,19 @@ import {
   snapshotAncestorScroll,
   trapDialogTab,
 } from "../accessibility/dialogFocus.js";
-import { anchoredFluidMorphFromRects } from "./fluidGeometry.js";
+import {
+  anchoredFluidMorphFromRects,
+  effectiveFluidSourceRadius,
+  fluidMorphFromRects,
+} from "./fluidGeometry.js";
 import { recentFluidTriggerRadius, recentFluidTriggerRect } from "./fluidTrigger.js";
 import { MONO } from "../../design/typography.js";
-import { MORPH_MS, MORPH_STAGE_CONTENT, MORPH_STAGE_REVEAL } from "./morphTiming.js";
+import {
+  MORPH_MS,
+  MORPH_STAGE_CONTENT,
+  MORPH_STAGE_REVEAL,
+  SHEET_ENTRY_MS,
+} from "./morphTiming.js";
 import { CloseIcon } from "../planner/icons.jsx";
 
 /* Kept in step with Planner deliberately: this is the copy that runs.
@@ -70,7 +79,7 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
       window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
       || (panel && window.getComputedStyle(panel).animationName === "none")
     );
-    let closeDuration = morphRef.current === "notch" ? 240 : 240;
+    let closeDuration = morphRef.current === "notch" ? 240 : 300;
     /* If someone dismisses while the source is still opening, reverse the same
        animation from its rendered position. Restarting a separate exit keyframe
        at a full-size sheet was the subtle snap behind the old close regression. */
@@ -189,7 +198,8 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
        kinds—not only notch sheets—wait for their entry animation to finish. */
     const readyFrame = reduced ? window.requestAnimationFrame(finishEntry) : null;
     /* A belt for a backgrounded tab or cancelled CSS animation. */
-    const fallback = reduced ? null : window.setTimeout(finishEntry, MORPH_MS + 120);
+    const entryDuration = morphRef.current === "notch" ? MORPH_MS : SHEET_ENTRY_MS;
+    const fallback = reduced ? null : window.setTimeout(finishEntry, entryDuration + 120);
     return () => {
       panel.removeEventListener("animationend", done);
       window.clearTimeout(fallback);
@@ -318,39 +328,49 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
          A real zero radius stays zero; only a missing snapshot uses the safe
          source-box bound. */
       const measuredRadius = Number.parseFloat(recentFluidTriggerRadius());
-      const sourceRadiusLimit = Math.max(0, Math.min(triggerRect.width, triggerRect.height) / 2);
-      const sourceRadius = Math.min(
-        Number.isFinite(measuredRadius) ? Math.max(0, measuredRadius) : 999,
-        sourceRadiusLimit,
+      const sourceRadius = effectiveFluidSourceRadius(
+        triggerRect,
+        Number.isFinite(measuredRadius) ? measuredRadius : 999,
       );
-      const geometry = anchoredFluidMorphFromRects(triggerRect, panelRect, {
-        sourceRadius,
-        targetRadius: 24,
-      });
-      panel.dataset.fluidOrigin = morphRef.current === "notch" ? "notch" : "trigger";
-      panel.dataset.morphAnchorX = geometry.anchorX;
-      panel.dataset.morphAnchorY = geometry.anchorY;
+      const isNotch = morphRef.current === "notch";
+      const geometry = isNotch
+        ? anchoredFluidMorphFromRects(triggerRect, panelRect, { sourceRadius, targetRadius: 24 })
+        : fluidMorphFromRects(triggerRect, panelRect);
+      panel.dataset.fluidOrigin = isNotch ? "notch" : "trigger";
+      if (isNotch) {
+        panel.dataset.morphAnchorX = geometry.anchorX;
+        panel.dataset.morphAnchorY = geometry.anchorY;
+      } else {
+        delete panel.dataset.morphAnchorX;
+        delete panel.dataset.morphAnchorY;
+      }
       panel.style.setProperty("--fluid-x", `${geometry.translateX}px`);
       panel.style.setProperty("--fluid-y", `${geometry.translateY}px`);
       /* The shape the reveal starts from, not a scale to grow the panel by:
          animating a scale magnifies everything inside the panel — see
          fluidGeometry.js. */
-      panel.style.setProperty("--fluid-inset-top", `${geometry.insetTop}px`);
-      panel.style.setProperty("--fluid-inset-right", `${geometry.insetRight}px`);
-      panel.style.setProperty("--fluid-inset-bottom", `${geometry.insetBottom}px`);
-      panel.style.setProperty("--fluid-inset-left", `${geometry.insetLeft}px`);
-      panel.style.setProperty("--fluid-source-width", `${Math.max(0, triggerRect.width)}px`);
-      panel.style.setProperty("--fluid-source-height", `${Math.max(0, triggerRect.height)}px`);
-      /* The corner the reveal starts from is the trigger's own corner.
-         It used to be a flat 999px, which is right for a pill — the NEW button is
-         one — and badly wrong for anything wide and low. On a full-width event card
-         a nominal 999px radius makes the intermediate clip an enormous ellipse, so
-         what the eye actually sees is a soft circular hole opening in the middle of
-         the screen with a finished sheet behind it. The effective radius is the
-         measured corner bounded by the source box, so the opening remains a pill
-         until the planned panel-radius handoff. */
-      panel.style.setProperty("--fluid-radius", `${geometry.sourceRadius}px`);
-      panel.style.setProperty("--fluid-target-radius", `${geometry.targetRadius}px`);
+      if (isNotch) {
+        panel.style.setProperty("--fluid-inset-top", `${geometry.insetTop}px`);
+        panel.style.setProperty("--fluid-inset-right", `${geometry.insetRight}px`);
+        panel.style.setProperty("--fluid-inset-bottom", `${geometry.insetBottom}px`);
+        panel.style.setProperty("--fluid-inset-left", `${geometry.insetLeft}px`);
+        panel.style.setProperty("--fluid-source-width", `${Math.max(0, triggerRect.width)}px`);
+        panel.style.setProperty("--fluid-source-height", `${Math.max(0, triggerRect.height)}px`);
+        panel.style.setProperty("--fluid-radius", `${geometry.sourceRadius}px`);
+        panel.style.setProperty("--fluid-target-radius", `${geometry.targetRadius}px`);
+      } else {
+        /* Keep the symmetric pair as the ordinary keyframe contract, while
+           exposing equivalent four-sided values for diagnostics and close-path
+           tooling that reads the source window generically. */
+        panel.style.setProperty("--fluid-inset-x", `${geometry.insetX}px`);
+        panel.style.setProperty("--fluid-inset-y", `${geometry.insetY}px`);
+        panel.style.setProperty("--fluid-inset-top", `${geometry.insetY}px`);
+        panel.style.setProperty("--fluid-inset-right", `${geometry.insetX}px`);
+        panel.style.setProperty("--fluid-inset-bottom", `${geometry.insetY}px`);
+        panel.style.setProperty("--fluid-inset-left", `${geometry.insetX}px`);
+        panel.style.setProperty("--fluid-radius", `${sourceRadius}px`);
+        panel.style.setProperty("--fluid-target-radius", "24px");
+      }
     }
     const frame = window.requestAnimationFrame(() => {
       focusDialogOnOpen(dialogRef.current);
@@ -361,7 +381,8 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
     const restorePageScroll = () => applyScrollSnapshot(pageScrollRef.current);
     restorePageScroll();
     window.addEventListener("scroll", restorePageScroll, true);
-    const unlock = window.setTimeout(() => window.removeEventListener("scroll", restorePageScroll, true), MORPH_MS);
+    const scrollGuardMs = morphRef.current === "notch" ? MORPH_MS : SHEET_ENTRY_MS;
+    const unlock = window.setTimeout(() => window.removeEventListener("scroll", restorePageScroll, true), scrollGuardMs);
     /* `nb-sheet-h` transitions height, and it used to switch on one frame into
        the notch's own 360ms morph — two curves animating the same box, which is
        the bounce. The height transition waits until the shape has finished
