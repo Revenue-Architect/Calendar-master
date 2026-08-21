@@ -37,23 +37,56 @@ export function fluidPillStretch(previousBox, nextBox) {
  * size, and never resampled. The clip is also the content reveal, so there is no
  * independent fade that can disconnect the panel from the card it came from.
  *
- * `insetX`/`insetY` are the distance from each edge of the panel to that starting
+ * The asymmetric insets are the distances from each panel edge to that starting
  * rectangle. They are clamped at zero: a trigger wider than the panel it opens
- * has nothing to inset, and a negative inset would grow the clip beyond the box.
+ * has no extra clip area on that axis, and a negative inset would grow the clip
+ * beyond the true-size box.
  */
-export function fluidMorphFromRects(triggerRect, panelRect) {
-  const triggerCenterX = finite(triggerRect.left) + finite(triggerRect.width) / 2;
-  const triggerCenterY = finite(triggerRect.top) + finite(triggerRect.height) / 2;
-  const panelCenterX = finite(panelRect.left) + finite(panelRect.width) / 2;
-  const panelCenterY = finite(panelRect.top) + finite(panelRect.height) / 2;
-  /* The clip is centred in the panel and the panel is centred on the trigger, so
-     one inset per axis describes both edges. */
-  const inset = (from, to) => Math.max(0, (finite(to) - finite(from)) / 2);
+export function anchoredFluidMorphFromRects(
+  triggerRect = {},
+  panelRect = {},
+  { sourceRadius = 999, targetRadius = 24 } = {},
+) {
+  const triggerLeft = finite(triggerRect.left);
+  const triggerTop = finite(triggerRect.top);
+  const triggerWidth = Math.max(0, finite(triggerRect.width));
+  const triggerHeight = Math.max(0, finite(triggerRect.height));
+  const panelLeft = finite(panelRect.left);
+  const panelTop = finite(panelRect.top);
+  const panelWidth = Math.max(0, finite(panelRect.width));
+  const panelHeight = Math.max(0, finite(panelRect.height));
+  const triggerRight = triggerLeft + triggerWidth;
+  const triggerBottom = triggerTop + triggerHeight;
+  const panelRight = panelLeft + panelWidth;
+  const panelBottom = panelTop + panelHeight;
+  const triggerCenterX = triggerLeft + triggerWidth / 2;
+  const triggerCenterY = triggerTop + triggerHeight / 2;
+  const panelCenterX = panelLeft + panelWidth / 2;
+  const panelCenterY = panelTop + panelHeight / 2;
+  const anchorX = triggerCenterX > panelCenterX ? "right" : "left";
+  const anchorY = triggerCenterY < panelCenterY ? "top" : "bottom";
+  const visibleWidth = Math.min(triggerWidth, panelWidth);
+  const visibleHeight = Math.min(triggerHeight, panelHeight);
+  const horizontalInset = Math.max(0, panelWidth - visibleWidth);
+  const verticalInset = Math.max(0, panelHeight - visibleHeight);
 
   return {
-    translateX: triggerCenterX - panelCenterX,
-    translateY: triggerCenterY - panelCenterY,
-    insetX: inset(triggerRect.width, panelRect.width),
-    insetY: inset(triggerRect.height, panelRect.height),
+    translateX: anchorX === "right" ? triggerRight - panelRight : triggerLeft - panelLeft,
+    translateY: anchorY === "top" ? triggerTop - panelTop : triggerBottom - panelBottom,
+    insetTop: anchorY === "top" ? 0 : verticalInset,
+    insetRight: anchorX === "right" ? 0 : horizontalInset,
+    insetBottom: anchorY === "bottom" ? 0 : verticalInset,
+    insetLeft: anchorX === "left" ? 0 : horizontalInset,
+    sourceRadius: Math.max(0, finite(sourceRadius, 999)),
+    targetRadius: Math.max(0, finite(targetRadius, 24)),
+    anchorX,
+    anchorY,
   };
+}
+
+/* Keep the old name as a compatibility export for composition-root imports. It
+ * intentionally delegates to the one production implementation rather than
+ * retaining a second symmetric geometry path. */
+export function fluidMorphFromRects(triggerRect, panelRect, options) {
+  return anchoredFluidMorphFromRects(triggerRect, panelRect, options);
 }
