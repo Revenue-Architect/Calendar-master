@@ -568,18 +568,30 @@ export function plannerStyles({ T, preferences }) {
           0%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px 0px 0px round var(--fluid-target-radius, 24px))}
           100%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-top) var(--fluid-inset-right) var(--fluid-inset-bottom) var(--fluid-inset-left) round var(--fluid-radius, 999px))}
         }
-        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-notch-body,
-        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-notch-cascade>*,
-        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-notch-body>:first-child{
-          animation:none;
-          opacity:0;
+        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-notch-body{
+          animation:nbnotchbodyout var(--nb-morph-close,${MORPH_CLOSE_MS}ms) cubic-bezier(.22,1,.36,1) both;
           pointer-events:none;
-          transition:opacity 80ms cubic-bezier(.4,0,.3,1);
+        }
+        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-notch-cascade>* ,
+        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-notch-body>:first-child{
+          animation:none!important;
+          pointer-events:none;
         }
         .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-morph-source-label{
-          animation:none;
-          opacity:1;
-          transition:opacity 80ms cubic-bezier(.4,0,.3,1);
+          animation:nbnotchlabelin var(--nb-morph-close,${MORPH_CLOSE_MS}ms) cubic-bezier(.22,1,.36,1) both;
+          pointer-events:none;
+        }
+        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"][data-fluid-reverse="true"] .nb-notch-body,
+        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"][data-fluid-reverse="true"] .nb-morph-source-label{
+          animation:none!important;
+        }
+        @keyframes nbnotchbodyout{
+          0%{opacity:1;transform:translateX(0) scale(1);filter:blur(0)}
+          64%,100%{opacity:0;transform:translateX(var(--nb-morph-slide)) scale(var(--nb-morph-content-scale));filter:blur(var(--nb-morph-content-blur))}
+        }
+        @keyframes nbnotchlabelin{
+          0%{opacity:0;transform:translateX(calc(-1 * var(--nb-morph-slide))) scale(var(--nb-morph-content-scale));filter:blur(var(--nb-morph-content-blur))}
+          64%,100%{opacity:1;transform:translateX(0) scale(1);filter:blur(0)}
         }
                 .nb-composer-ask{animation:nbask 180ms cubic-bezier(.23,1,.32,1)}
         @keyframes nbask{from{clip-path:inset(100% 0 0 0);transform:translateY(6px)}to{clip-path:inset(0 0 0 0);transform:none}}
@@ -593,7 +605,7 @@ export function plannerStyles({ T, preferences }) {
            in with it, so it costs one blur instead of eighteen and looks the same. */
         .nb-scrim{animation:nbscrim 260ms cubic-bezier(.23,1,.32,1) forwards;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
         @keyframes nbscrim{from{opacity:0}to{opacity:1}}
-        .nb-scrim.nb-fluid-closing{animation:nbscrimout 240ms ease forwards}
+        .nb-scrim.nb-fluid-closing{animation:nbscrimout ${MORPH_CLOSE_MS}ms ease forwards}
         @keyframes nbscrimout{0%,25%{opacity:1}100%{opacity:0}}
         .nb-sheet-h{transition:height 320ms cubic-bezier(.2,.8,.25,1)}
         .nb-edit-actions{transition:width 360ms cubic-bezier(.23,1,.32,1),background-color 260ms ease,box-shadow 260ms ease}

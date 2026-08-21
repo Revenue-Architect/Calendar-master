@@ -496,14 +496,50 @@ test.describe("the notch morph", () => {
       await openPlanner(page);
       await page.getByTestId("new-entry").click();
       const sheet = page.getByTestId("sheet");
-      await sheet.evaluate((node, progress) => {
+      const opening = await sheet.evaluate((node, progress) => {
         const entry = node.getAnimations().find((animation) => animation.animationName === "nbnotchin");
-        entry?.pause();
-        if (entry?.effect) entry.currentTime = Number(entry.effect.getTiming().duration) * progress;
+        if (!entry?.effect) return null;
+        const clock = Number(entry.effect.getTiming().duration) * progress;
+        for (const animation of node.getAnimations({ subtree: true })) {
+          animation.pause();
+          animation.currentTime = clock;
+        }
+        const read = (element) => {
+          const style = getComputedStyle(element);
+          const matrix = new DOMMatrixReadOnly(style.transform === "none"
+            ? "matrix(1,0,0,1,0,0)"
+            : style.transform);
+          return { x: matrix.e, y: matrix.f, opacity: Number(style.opacity), filter: style.filter };
+        };
+        return {
+          source: read(node.querySelector(".nb-morph-source-label")),
+          body: read(node.querySelector(".nb-notch-body")),
+        };
       }, fraction);
+      expect(opening).not.toBeNull();
 
       await page.keyboard.press("Escape");
       await expect(sheet).toHaveAttribute("data-fluid-reverse", "true");
+      const firstClosing = await sheet.evaluate((node) => {
+        const readAtStart = (element) => {
+          const animation = element.getAnimations()[0];
+          animation?.pause();
+          if (animation) animation.currentTime = 0;
+          const style = getComputedStyle(element);
+          const matrix = new DOMMatrixReadOnly(style.transform === "none"
+            ? "matrix(1,0,0,1,0,0)"
+            : style.transform);
+          return { x: matrix.e, y: matrix.f, opacity: Number(style.opacity), filter: style.filter };
+        };
+        return {
+          source: readAtStart(node.querySelector(".nb-morph-source-label")),
+          body: readAtStart(node.querySelector(".nb-notch-body")),
+        };
+      });
+      for (const key of ["x", "y", "opacity"]) {
+        expect(Math.abs(firstClosing.source[key] - opening.source[key]), `source ${key} snapped at ${fraction * 100}%`).toBeLessThan(.5);
+        expect(Math.abs(firstClosing.body[key] - opening.body[key]), `body ${key} snapped at ${fraction * 100}%`).toBeLessThan(.5);
+      }
       await expect(sheet).toHaveCount(0, { timeout: 3000 });
     });
   }
@@ -541,6 +577,38 @@ test.describe("the notch morph", () => {
     await expect(page.getByTestId("sheet")).toHaveCount(1);
   });
 
+  test("an interrupted entry can unmount and reopen with a fresh handoff", async ({ page }) => {
+    await openPlanner(page);
+    const trigger = page.getByTestId("new-entry");
+    await trigger.click();
+    const sheet = page.getByTestId("sheet");
+    await sheet.evaluate((node) => {
+      const entry = node.getAnimations().find((animation) => animation.animationName === "nbnotchin");
+      if (!entry?.effect) return;
+      for (const animation of node.getAnimations({ subtree: true })) {
+        animation.pause();
+        animation.currentTime = Number(entry.effect.getTiming().duration) * .45;
+      }
+    });
+    await page.keyboard.press("Escape");
+    await expect(sheet).toHaveCount(0, { timeout: 3000 });
+
+    await trigger.click();
+    const reopened = page.getByTestId("sheet");
+    await expect(reopened).toHaveAttribute("data-fluid-origin", "notch");
+    await expect(reopened).toHaveAttribute("data-morph-stage", "source");
+    const handoff = await reopened.evaluate((node) => ({
+      source: getComputedStyle(node.querySelector(".nb-morph-source-label")).transform,
+      body: getComputedStyle(node.querySelector(".nb-notch-body")).transform,
+      sourceFilter: getComputedStyle(node.querySelector(".nb-morph-source-label")).filter,
+      bodyFilter: getComputedStyle(node.querySelector(".nb-notch-body")).filter,
+    }));
+    expect(handoff.source).toMatch(/matrix\(1, 0, 0, 1, 0, 0\)|none/);
+    expect(handoff.body).not.toMatch(/matrix\([^)]*NaN/);
+    expect(handoff.sourceFilter).toMatch(/none|blur\(0(px)?\)/);
+    expect(handoff.bodyFilter).not.toContain("NaN");
+  });
+
   test("the form leaves before the sheet finishes folding", async ({ page }) => {
     await openPlanner(page);
     await page.getByTestId("new-entry").click();
@@ -550,14 +618,15 @@ test.describe("the notch morph", () => {
     await page.keyboard.press("Escape");
     await expect(sheet).toHaveAttribute("data-fluid-origin", "notch");
 
-    /* One clock for the fold and for the group exits alike. Seeking only `nbnotchout`
-       left the groups' 80ms opacity transitions running on the wall clock, so what
-       this asserted was really "the round trip to the browser took longer than 80ms" —
-       it passed for years on that, and broke the moment the entry animation stopped
-       leaving an animated opacity behind for the exit to transition from. Half way
-       through a 240ms fold is a real instant, and the 80ms exit is genuinely over. */
+    /* The destination plane now leaves as one handoff, in lockstep with the
+       shrinking surface. Scrub the real fold and body animation together so the
+       assertion observes the rendered midpoint rather than a wall-clock guess. */
     const mid = await sheet.evaluate((node) => {
       const fold = node.getAnimations().find((animation) => animation.animationName === "nbnotchout");
+      const bodyOut = node.querySelector(".nb-notch-body")?.getAnimations()
+        .find((animation) => animation.animationName === "nbnotchbodyout");
+      const labelIn = node.querySelector(".nb-morph-source-label")?.getAnimations()
+        .find((animation) => animation.animationName === "nbnotchlabelin");
       const duration = Number(fold?.effect?.getTiming().duration || 0);
       const delay = Number(fold?.effect?.getTiming().delay || 0)
         || (parseFloat(getComputedStyle(node).animationDelay) || 0) * 1000;
@@ -567,17 +636,19 @@ test.describe("the notch morph", () => {
           animation.currentTime = delay + duration * 0.5;
         }
       }
-      const groups = [...node.querySelectorAll(".nb-notch-cascade > *, .nb-notch-body > :first-child")]
-        .map((el) => Number(getComputedStyle(el).opacity));
       return {
-        body: groups.length ? Math.max(...groups) : Number(getComputedStyle(node.querySelector(".nb-notch-body")).opacity),
+        body: Number(getComputedStyle(node.querySelector(".nb-notch-body")).opacity),
         label: Number(getComputedStyle(node.querySelector('[data-test="morph-source-label"]')).opacity),
         foldDelay: delay,
+        bodyDuration: Number(bodyOut?.effect?.getTiming().duration || 0),
+        labelDuration: Number(labelIn?.effect?.getTiming().duration || 0),
       };
     });
 
     expect(mid.body, "form groups must be gone while the clip is still folding").toBeLessThan(0.2);
     expect(mid.label, "NEW returns as the visible material of the fold").toBeGreaterThan(0.8);
+    expect(mid.bodyDuration, "destination plane close uses the v3 close token").toBe(250);
+    expect(mid.labelDuration, "source return uses the v3 close token").toBe(250);
   });
 
   test("a sheet opened from the keyboard arrives on its own terms", async ({ page }) => {
