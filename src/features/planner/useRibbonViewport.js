@@ -10,9 +10,18 @@ import {
   RIBBON_SHIFT_DAYS,
   nextRibbonRetry,
   ribbonIntersection,
+  ribbonLogicalCenter,
   ribbonRevealTarget,
+  ribbonScrollLeftForLogicalCenter,
 } from "./ribbonViewport.js";
 import { addDaysToKey, diffDays } from "../../shared/time/dateKey.js";
+
+const RIBBON_SMOOTH_RELEASE_MS = 600;
+const GEOMETRY_RETRY_REASONS = new Set([
+  "nonzero-resize",
+  "visibility-restored",
+  "fonts-ready",
+]);
 
 /* Owns only the ribbon viewport lifecycle. Planner still owns dates and the
  * virtual range; this hook owns the DOM transaction that makes the selected
@@ -39,7 +48,9 @@ export default function useRibbonViewport({
   const ribbonCenterPendingRef = useRef(false);
   const ribbonVirtualWindowLockRef = useRef(false);
   const ribbonScrollLockRef = useRef(null);
+  const ribbonLogicalCenterRef = useRef(null);
   const ribbonPositionRunRef = useRef(0);
+  const ribbonPositionedDateRef = useRef(null);
   const ribbonPositionRequestRef = useRef(null);
   const ribbonPositionAttemptFrameRef = useRef(null);
   const ribbonPositionRetryTimerRef = useRef(null);
@@ -49,6 +60,28 @@ export default function useRibbonViewport({
   const [ribbonActiveNode, setRibbonActiveNode] = useState(null);
   const [positionState, setPositionState] = useState(ribbonPositionStateRef.current);
   const [edges, setEdges] = useState({ start: false, end: false });
+
+  const rememberLogicalCenter = useCallback((strip = stripRef.current) => {
+    if (!strip || strip.clientWidth <= 0) return ribbonLogicalCenterRef.current;
+    const cell = strip.querySelector("[data-day]");
+    const cellWidth = cell?.getBoundingClientRect?.().width || cell?.offsetWidth || 0;
+    const logicalCenter = ribbonLogicalCenter({
+      scrollLeft: strip.scrollLeft,
+      clientWidth: strip.clientWidth,
+      cellWidth,
+    });
+    if (logicalCenter != null) ribbonLogicalCenterRef.current = logicalCenter;
+    return logicalCenter;
+  }, []);
+
+  const cancelScrollLock = useCallback(() => {
+    const lock = ribbonScrollLockRef.current;
+    if (!lock) return;
+    if (lock.fallbackFirst != null) cancelAnimationFrame(lock.fallbackFirst);
+    if (lock.fallbackSecond != null) cancelAnimationFrame(lock.fallbackSecond);
+    if (lock.fallbackTimer != null) clearTimeout(lock.fallbackTimer);
+    ribbonScrollLockRef.current = null;
+  }, []);
 
   useEffect(() => {
     ribbonWindowStartRef.current = ribbonWindowStart;
@@ -76,22 +109,23 @@ export default function useRibbonViewport({
   const releaseScroll = useCallback((run) => {
     const lock = ribbonScrollLockRef.current;
     if (!lock || lock.run !== run) return;
-    if (lock.fallbackFirst != null) cancelAnimationFrame(lock.fallbackFirst);
-    if (lock.fallbackSecond != null) cancelAnimationFrame(lock.fallbackSecond);
-    ribbonScrollLockRef.current = null;
+    const preserveLogicalCenter = lock.preserveLogicalCenter === true;
+    cancelScrollLock();
     const result = ribbonIntersection(stripRef.current, activeRef.current);
-    if (result.ok) {
+    if (result.ok || preserveLogicalCenter) {
+      rememberLogicalCenter();
       updatePositionState((current) => current.run === run
         ? { ...current, status: RIBBON_POSITION_STATES.settled, reason: "scroll-settled" }
         : current);
       return;
     }
     ribbonRetryPositionRef.current?.("post-scroll-intersection", { run });
-  }, [updatePositionState]);
+  }, [cancelScrollLock, rememberLogicalCenter, updatePositionState]);
 
   const attachRibbon = useCallback((node) => {
     stripRef.current = node;
     if (ribbonNodeRef.current === node) return;
+    cancelScrollLock();
     ribbonNodeRef.current = node;
     setRibbonNode(node);
     ribbonPositionRequestRef.current = null;
@@ -99,7 +133,7 @@ export default function useRibbonViewport({
     ribbonPositionStateRef.current = idle;
     setPositionState(idle);
     setEdges({ start: false, end: false });
-  }, []);
+  }, [cancelScrollLock]);
 
   const attachActiveRibbon = useCallback((node) => {
     activeRef.current = node;
@@ -110,16 +144,46 @@ export default function useRibbonViewport({
     const strip = stripRef.current;
     const cell = activeRef.current;
     const request = ribbonPositionRequestRef.current;
+    const preserveLogicalCenter = request?.preserveLogicalCenter === true
+      && ribbonLogicalCenterRef.current != null;
     if (run != null && (!request || request.run !== run)) return { status: "stale-run", run };
-    if (!strip || !cell || strip.isConnected === false || cell.isConnected === false) return { status: "missing-node", run };
-    const target = ribbonRevealTarget(strip, cell, { center, inset: 24 });
+    if (!strip || strip.isConnected === false
+      || (!cell && !preserveLogicalCenter)
+      || (cell && cell.isConnected === false)) return { status: "missing-node", run };
+    let target;
+    if (preserveLogicalCenter) {
+      const firstCell = strip.querySelector("[data-day]");
+      const cellWidth = firstCell?.getBoundingClientRect?.().width || firstCell?.offsetWidth || 0;
+      const maxScrollLeft = Math.max(0, strip.scrollWidth - strip.clientWidth);
+      const logicalTarget = ribbonScrollLeftForLogicalCenter({
+        logicalCenter: ribbonLogicalCenterRef.current,
+        clientWidth: strip.clientWidth,
+        cellWidth,
+        maxScrollLeft,
+      });
+      if (logicalTarget == null) {
+        updatePositionState((current) => current.run === run
+          ? { ...current, status: RIBBON_POSITION_STATES.blockedZeroWidth, reason: "logical-center-unavailable" }
+          : current);
+        return { status: RIBBON_POSITION_STATES.blockedZeroWidth, target: null, changed: false, run };
+      }
+      const current = Number(strip.scrollLeft) || 0;
+      target = {
+        status: "outside-viewport",
+        ok: true,
+        target: logicalTarget,
+        changed: Math.abs(logicalTarget - current) >= 1,
+      };
+    } else {
+      target = ribbonRevealTarget(strip, cell, { center, inset: 24 });
+    }
     if (target.status === "blocked-zero-width" || target.status === "missing-node") {
       updatePositionState((current) => current.run === run
         ? { ...current, status: target.status, reason: "zero-width-or-disconnected" }
         : current);
       return { ...target, run };
     }
-    if (!target.changed && target.ok) {
+    if (!target.changed && (target.ok || preserveLogicalCenter)) {
       updatePositionState((current) => current.run === run
         ? { ...current, status: RIBBON_POSITION_STATES.settled, reason: "intersection-confirmed" }
         : current);
@@ -134,7 +198,14 @@ export default function useRibbonViewport({
     const previous = ribbonPositionStateRef.current;
     const existingLock = ribbonScrollLockRef.current;
     if (existingLock && existingLock.run === run) return { ...target, status: RIBBON_POSITION_STATES.positioning, run };
-    const lock = { run, supportsScrollEnd: "onscrollend" in strip, fallbackFirst: null, fallbackSecond: null };
+    const lock = {
+      run,
+      supportsScrollEnd: "onscrollend" in strip,
+      preserveLogicalCenter,
+      fallbackFirst: null,
+      fallbackSecond: null,
+      fallbackTimer: null,
+    };
     ribbonScrollLockRef.current = lock;
     updatePositionState((current) => current.run === run
       ? { ...current, status: RIBBON_POSITION_STATES.positioning, reason: "programmatic-scroll" }
@@ -142,7 +213,9 @@ export default function useRibbonViewport({
     const scrollBehavior = behavior === "smooth" && previous.status === RIBBON_POSITION_STATES.settled ? "smooth" : "auto";
     if (typeof strip.scrollTo === "function") strip.scrollTo({ left: target.target, behavior: scrollBehavior });
     else strip.scrollLeft = target.target;
-    if (!lock.supportsScrollEnd) {
+    if (scrollBehavior === "smooth") {
+      lock.fallbackTimer = setTimeout(() => releaseScroll(run), RIBBON_SMOOTH_RELEASE_MS);
+    } else {
       lock.fallbackFirst = requestAnimationFrame(() => {
         lock.fallbackSecond = requestAnimationFrame(() => releaseScroll(run));
       });
@@ -169,16 +242,26 @@ export default function useRibbonViewport({
     });
   }, [runAttempt]);
 
-  const beginPosition = useCallback((reason, { center = false, behavior = "auto" } = {}) => {
-    const oldLock = ribbonScrollLockRef.current;
-    if (oldLock) releaseScroll(oldLock.run);
+  const beginPosition = useCallback((reason, {
+    center = false,
+    behavior = "auto",
+    preserveLogicalCenter = false,
+  } = {}) => {
+    cancelScrollLock();
     const run = ribbonPositionRunRef.current + 1;
     ribbonPositionRunRef.current = run;
-    ribbonPositionRequestRef.current = { run, retries: 0, center, behavior, reason };
+    ribbonPositionRequestRef.current = {
+      run,
+      retries: 0,
+      center,
+      behavior,
+      preserveLogicalCenter,
+      reason,
+    };
     updatePositionState({ status: RIBBON_POSITION_STATES.positioning, run, retries: 0, reason });
     scheduleAttempt();
     return run;
-  }, [releaseScroll, scheduleAttempt, updatePositionState]);
+  }, [cancelScrollLock, scheduleAttempt, updatePositionState]);
 
   const retryPosition = useCallback((reason, { run = null, center = null } = {}) => {
     const current = ribbonPositionRequestRef.current;
@@ -188,7 +271,15 @@ export default function useRibbonViewport({
       return;
     }
     if (ribbonPositionStateRef.current.run === current.run
-      && ribbonPositionStateRef.current.status === RIBBON_POSITION_STATES.settled) return;
+      && ribbonPositionStateRef.current.status === RIBBON_POSITION_STATES.settled) {
+      if (!GEOMETRY_RETRY_REASONS.has(reason) || ribbonLogicalCenterRef.current == null) return;
+      beginPosition(reason, {
+        center: false,
+        behavior: "auto",
+        preserveLogicalCenter: true,
+      });
+      return;
+    }
     const retries = nextRibbonRetry(current.retries, RIBBON_MAX_POSITION_RETRIES);
     if (retries == null) {
       updatePositionState((value) => value.run === current.run
@@ -201,6 +292,7 @@ export default function useRibbonViewport({
       retries,
       center: center == null ? current.center : center,
       behavior: "auto",
+      preserveLogicalCenter: current.preserveLogicalCenter === true,
       reason,
     };
     updatePositionState((value) => value.run === current.run
@@ -216,10 +308,13 @@ export default function useRibbonViewport({
     const clamped = Math.max(0, Math.min(ribbonSpan - RIBBON_RENDER_WINDOW_DAYS, Math.round(proposed)));
     if (clamped === ribbonWindowStartRef.current) return;
     ribbonVirtualWindowLockRef.current = true;
-    requestAnimationFrame(() => requestAnimationFrame(() => { ribbonVirtualWindowLockRef.current = false; }));
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      ribbonVirtualWindowLockRef.current = false;
+      rememberLogicalCenter();
+    }));
     ribbonWindowStartRef.current = clamped;
     setRibbonWindowStart(clamped);
-  }, [ribbonSpan, setRibbonWindowStart]);
+  }, [rememberLogicalCenter, ribbonSpan, setRibbonWindowStart]);
 
   const shift = useCallback((direction) => {
     if (ribbonShiftPendingRef.current) return;
@@ -242,13 +337,14 @@ export default function useRibbonViewport({
     const strip = stripRef.current;
     measureEdges();
     if (!strip || ribbonShiftPendingRef.current || ribbonScrollLockRef.current || ribbonVirtualWindowLockRef.current) return;
+    rememberLogicalCenter(strip);
     const cell = strip.querySelector("[data-day]");
     const width = cell?.getBoundingClientRect().width || RIBBON_FALLBACK_CELL_WIDTH;
     const edge = Math.max(160, width * RIBBON_EDGE_BUFFER_DAYS);
     if (strip.scrollLeft <= edge) { shift("before"); return; }
     if (strip.scrollLeft + strip.clientWidth >= strip.scrollWidth - edge) { shift("after"); return; }
     setWindow(Math.floor(strip.scrollLeft / width) - RIBBON_RENDER_BUFFER_DAYS);
-  }, [measureEdges, setWindow, shift]);
+  }, [measureEdges, rememberLogicalCenter, setWindow, shift]);
 
   const ensureDateVisible = useCallback((key) => {
     if (!enabled || (zoom !== "week" && zoom !== "day")) return;
@@ -272,8 +368,11 @@ export default function useRibbonViewport({
     stripRef.current.scrollLeft = Math.max(0, stripRef.current.scrollLeft + anchor);
     ribbonScrollAnchorRef.current = null;
     ribbonShiftPendingRef.current = false;
-    requestAnimationFrame(() => requestAnimationFrame(() => { ribbonVirtualWindowLockRef.current = false; }));
-  }, [ribbonRange.startKey, ribbonRange.endKey]);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      ribbonVirtualWindowLockRef.current = false;
+      rememberLogicalCenter();
+    }));
+  }, [rememberLogicalCenter, ribbonRange.startKey, ribbonRange.endKey]);
 
   useLayoutEffect(() => {
     if (!enabled || !ready || !ribbonNode || !ribbonActiveNode) return;
@@ -285,10 +384,14 @@ export default function useRibbonViewport({
        state for first mount and recenter by one whole cell. A remounted strip
        has no request yet, so it still receives the initial placement policy. */
     const initial = ribbonPositionRequestRef.current == null;
+    const selectedDateChanged = ribbonPositionedDateRef.current !== selectedDateKey;
+    const centerForWindow = initial || ribbonCenterPendingRef.current;
+    if (!initial && !selectedDateChanged && !ribbonCenterPendingRef.current) return;
     beginPosition("view-ready", {
-      center: initial || ribbonCenterPendingRef.current,
-      behavior: initial || ribbonCenterPendingRef.current ? "auto" : "smooth",
+      center: centerForWindow,
+      behavior: centerForWindow ? "auto" : "smooth",
     });
+    ribbonPositionedDateRef.current = selectedDateKey;
     ribbonCenterPendingRef.current = false;
   }, [beginPosition, enabled, ready, ribbonActiveNode, ribbonNode, selectedDateKey]);
 
@@ -303,7 +406,7 @@ export default function useRibbonViewport({
     let live = true;
     const onScrollEnd = () => {
       const lock = ribbonScrollLockRef.current;
-      if (lock?.supportsScrollEnd) releaseScroll(lock.run);
+      if (lock) releaseScroll(lock.run);
     };
     const retryIfVisible = (reason) => {
       if (!live || document.visibilityState === "hidden") return;
@@ -326,6 +429,12 @@ export default function useRibbonViewport({
       : null;
     return () => {
       live = false;
+      cancelScrollLock();
+      if (ribbonPositionAttemptFrameRef.current != null) {
+        cancelAnimationFrame(ribbonPositionAttemptFrameRef.current);
+        ribbonPositionAttemptFrameRef.current = null;
+      }
+      clearTimeout(ribbonPositionRetryTimerRef.current);
       ribbonNode.removeEventListener("scrollend", onScrollEnd);
       ribbonNode.removeEventListener("scroll", measureEdges);
       window.removeEventListener("resize", onResize);
@@ -333,7 +442,7 @@ export default function useRibbonViewport({
       observer?.disconnect();
       void fontPromise;
     };
-  }, [measureEdges, releaseScroll, retryPosition, ribbonNode]);
+  }, [cancelScrollLock, measureEdges, releaseScroll, retryPosition, ribbonNode]);
 
   return {
     attachRibbon,

@@ -21,6 +21,42 @@ export const RIBBON_FALLBACK_CELL_WIDTH = 80;
 export const RIBBON_RENDER_BUFFER_DAYS = 18;
 export const RIBBON_RENDER_WINDOW_DAYS = 56;
 
+function finitePositive(value) {
+  return Number.isFinite(Number(value)) && Number(value) > 0;
+}
+
+/**
+ * Returns the fractional day coordinate at the visual centre of a ribbon.
+ * This is deliberately independent of the rendered window: a cell-width
+ * change must preserve the date under the user's eyes, not the old pixels.
+ */
+export function ribbonLogicalCenter({ scrollLeft, clientWidth, cellWidth } = {}) {
+  if (!finitePositive(clientWidth) || !finitePositive(cellWidth)) return null;
+  const scroll = Number(scrollLeft);
+  if (!Number.isFinite(scroll)) return null;
+  return (scroll + Number(clientWidth) / 2) / Number(cellWidth);
+}
+
+/**
+ * Converts a logical ribbon centre back into pixels for the new geometry.
+ * The result is clamped so a responsive transition can never overscroll.
+ */
+export function ribbonScrollLeftForLogicalCenter({
+  logicalCenter,
+  clientWidth,
+  cellWidth,
+  maxScrollLeft,
+} = {}) {
+  if (!Number.isFinite(Number(logicalCenter))
+    || !finitePositive(clientWidth)
+    || !finitePositive(cellWidth)) return null;
+  const raw = Number(logicalCenter) * Number(cellWidth) - Number(clientWidth) / 2;
+  const max = Number.isFinite(Number(maxScrollLeft))
+    ? Math.max(0, Number(maxScrollLeft))
+    : Number.POSITIVE_INFINITY;
+  return Math.max(0, Math.min(max, raw));
+}
+
 function connected(node) {
   return Boolean(node && (node.isConnected !== false));
 }
