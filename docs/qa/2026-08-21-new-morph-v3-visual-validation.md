@@ -180,3 +180,7 @@ than folded into the morph change.
 3. If a future visual pass changes the handoff cadence, retain the shared-clock
    sampler and the 25/50/75% interruption matrix so a pleasing midpoint cannot
    regress reversal behavior.
+
+## Review
+
+Pull request: https://github.com/Revenue-Architect/Calendar-master/pull/6
