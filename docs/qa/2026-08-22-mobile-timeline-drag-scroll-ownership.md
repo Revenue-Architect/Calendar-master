@@ -28,25 +28,38 @@ production wiring:
   on base, documenting the existing fallback behavior rather than inventing a
   mobile-only sheet flow.
 
+The follow-up review also produced three RED regressions before its production
+changes:
+
+- an immediate mouse drag from the centre of an eligible Event's semantic grip
+  did not move the Event with its duration preserved, because the touch marker's
+  pointer handler intercepted the desktop path;
+- introducing a stationary second touch without another move left the active
+  Event rendered and owned by the stream;
+- ending a foreign touch identifier left the active Event rendered and locked
+  when the compatibility pointer-up/cancel path was isolated, because the
+  native terminal guard returned without cancelling the existing sequence.
+
 ## Automated evidence
 
 All browser runs use an isolated Playwright preview port and Chromium CDP
 `Input.dispatchTouchEvent` sequences.
 
-- Focused unit, architecture, target, and lock tests: 54/54 passed.
+- Focused gesture/ownership units plus architecture, target, and lock tests:
+  55/55 passed.
 - Focused Event/timeline browser suite (`timeline-touch.spec.js` and
-  `timeline-gestures.spec.js`): 35/35 passed on port 48816.
-- Focused Action browser suite, including the external-origin characterization:
-  20/20 passed on port 48815.
-- Mobile ownership repeat gate: 33/33 passed three consecutive times on ports
-  48809, 48810, and 48811.
-- Adjacent gesture/contract suite: 17/17 passed on port 48812.
-- Adjacent recurrence/JOIN suite: 15/15 passed on port 48813.
-- Adjacent Week/chrome/navigation suite: 29/29 passed on port 48814.
-- Full unit suite: 644/644 passed.
+  `timeline-gestures.spec.js`): 38/38 passed on port 48834.
+- Full Action browser suite, including the external-origin characterization:
+  45/45 passed on port 48835.
+- Mobile ownership repeat gate: 4/4 passed three consecutive times on ports
+  48836, 48837, and 48838.
+- Adjacent gesture/contract suite: 17/17 passed on port 48839.
+- Adjacent recurrence/JOIN suite: 15/15 passed on port 48840.
+- Adjacent Week/chrome/navigation suite: 29/29 passed on port 48841.
+- Full unit suite: 645/645 passed.
 - Production build: passed (`vite`, 187 modules; existing chunk-size warning
   only).
-- Full Chromium browser suite: 350/350 passed on isolated port 48817.
+- Full Chromium browser suite: 353/353 passed on isolated port 48842.
 
 Covered behaviors include ordinary upper/lower Event moves, eligible semantic
 start/end resize, short-card move-first classification, pre-lift scroll, forced
@@ -74,7 +87,10 @@ Required viewports:
 The interaction assertions for Event/Action lift, pre-lift scroll, post-lift
 lock, resize, completion, and cancellation are provided by the CDP browser
 gates above; screenshots were temporary inspection captures and are not kept
-as source artifacts.
+as source artifacts. The follow-up removed handlers from semantic touch markers
+only; it changed no geometry or style, and the existing Windows Chrome visual
+pass remains applicable. The desktop grip regression is additionally covered
+by the 1280px browser matrix above.
 
 ## Physical-device release gate
 
