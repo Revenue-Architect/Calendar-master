@@ -13,6 +13,7 @@ import {
   commitInteraction,
   createIdleInteraction,
   createScrollSession,
+  settleInteraction,
   timelineChromeIntent,
   rubberBand,
   shouldCommitSwipe,
@@ -75,6 +76,19 @@ test("a normal release with no proposal change produces no persist", () => {
   const { shouldPersist, state } = commitInteraction(activateInteraction(armed(), before));
   assert.equal(shouldPersist, false);
   assert.equal(state.phase, INTERACTION_PHASES.idle);
+});
+
+test("settling an active change returns to click-suppressed idle and is persistence-idempotent", () => {
+  const active = activateWithMovement(armed(), { start: 615, duration: 30, date: "2026-08-13" });
+  const settled = settleInteraction(active);
+  assert.equal(settled.phase, INTERACTION_PHASES.idle);
+  assert.equal(settled.sequence, active.sequence);
+  assert.equal(clickFollowsCancelledArm(settled), true);
+
+  const repeated = settleInteraction(settled);
+  assert.equal(repeated.phase, INTERACTION_PHASES.idle);
+  assert.equal(repeated.sequence, settled.sequence);
+  assert.equal(commitInteraction(repeated).shouldPersist, false);
 });
 
 test("a changed proposal commits exactly once even if a fallback observes the same release", () => {

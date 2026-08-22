@@ -16,13 +16,13 @@ const today = keyOf(new Date());
 const LINK = "https://meet.example.com/abc-defg";
 const HOUR_PX = 68;
 
-function seeded({ link = null } = {}) {
+function seeded({ link = null, startLocal = `${today}T10:00`, endLocal = `${today}T11:00` } = {}) {
   return createEvent(createBlankPlannerState({}), {
     calendarId: "calendar-default", title: "Standup", category: "PEOPLE",
     ...(link ? { link } : {}),
     timing: {
       kind: "timed", timeZoneMode: "floating",
-      startLocal: `${today}T10:00`, endLocal: `${today}T11:00`,
+      startLocal, endLocal,
     },
   }, { id: "evt-standup" }).state;
 }
@@ -115,6 +115,60 @@ test.describe("moving an event on the timeline", () => {
     expect(moved.startLocal).toBe(`${today}T12:00`);
     /* Moving is not resizing: the hour it lasts is the hour it lasted. */
     expect(moved.endLocal).toBe(`${today}T13:00`);
+  });
+
+  test("a desktop drag from the semantic start grip changes only the start", async ({ page }) => {
+    await seedPlanner(page, seeded({ startLocal: `${today}T10:00`, endLocal: `${today}T12:00` }));
+    const event = card(page);
+    await event.scrollIntoViewIfNeeded();
+    const grip = event.locator('[data-touch-resize="start"]');
+    await expect(grip, "the eligible Event is missing its semantic start grip").toHaveCount(1);
+    const box = await grip.boundingBox();
+
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 - HOUR_PX, { steps: 12 });
+    await page.mouse.up();
+
+    const resized = await timing(page, (t) => !t.startLocal.endsWith("10:00"), "a mouse drag from the semantic start grip did not resize the start");
+    expect(resized.startLocal < `${today}T10:00`, "the semantic start grip must move the start earlier").toBe(true);
+    expect(resized.endLocal, "resizing from the semantic start grip must keep the end fixed").toBe(`${today}T12:00`);
+  });
+
+  test("a desktop drag from the semantic end grip changes only the end", async ({ page }) => {
+    await seedPlanner(page, seeded({ startLocal: `${today}T10:00`, endLocal: `${today}T12:00` }));
+    const event = card(page);
+    await event.scrollIntoViewIfNeeded();
+    const grip = event.locator('[data-touch-resize="end"]');
+    await expect(grip, "the eligible Event is missing its semantic end grip").toHaveCount(1);
+    const box = await grip.boundingBox();
+
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + HOUR_PX, { steps: 12 });
+    await page.mouse.up();
+
+    const resized = await timing(page, (t) => !t.endLocal.endsWith("12:00"), "a mouse drag from the semantic end grip did not resize the end");
+    expect(resized.startLocal, "resizing from the semantic end grip must keep the start fixed").toBe(`${today}T10:00`);
+    expect(resized.endLocal > `${today}T12:00`, "the semantic end grip must move the end later").toBe(true);
+  });
+
+  test("a desktop drag outside the centered grips moves an eligible Event without resizing", async ({ page }) => {
+    await seedPlanner(page, seeded({ startLocal: `${today}T10:00`, endLocal: `${today}T12:00` }));
+    const event = card(page);
+    await event.scrollIntoViewIfNeeded();
+    const box = await event.boundingBox();
+    const x = box.x + 12;
+    const y = box.y + box.height / 2;
+
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x, y + HOUR_PX, { steps: 12 });
+    await page.mouse.up();
+
+    const moved = await timing(page, (t) => t.startLocal.endsWith("11:00"), "a body drag outside the centered grips did not move the Event");
+    expect(moved.startLocal).toBe(`${today}T11:00`);
+    expect(moved.endLocal, "a desktop body move must preserve the eligible Event duration").toBe(`${today}T13:00`);
   });
 
   test("a stationary desktop Event hold stays a click candidate", async ({ page }) => {
@@ -343,10 +397,10 @@ test.describe("touch Event resize", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 
   test("a held touch on the bottom edge extends an Event without moving its start", async ({ page }) => {
-    await seedPlanner(page, seeded());
+    await seedPlanner(page, seeded({ startLocal: `${today}T10:00`, endLocal: `${today}T12:00` }));
     const event = card(page);
     await event.scrollIntoViewIfNeeded();
-    const handle = event.locator('[data-resize-edge="end"]');
+    const handle = event.locator('[data-touch-resize="end"]');
     const box = await handle.boundingBox();
     const x = box.x + box.width / 2;
     const y = box.y + box.height / 2;

@@ -118,12 +118,16 @@ import {
   clickFollowsCancelledArm,
   createIdleInteraction,
   createScrollSession,
+  settleInteraction,
   timelineChromeIntent,
   rubberBand,
   shouldCommitSwipe,
   restoreCancelledInteraction,
   resolveShortEventEdge,
+  updateInteractionProposal,
 } from "./features/planner/timelineInteractionState.js";
+import { canExposeEventTouchResize, classifyTimelineTouchTarget, TOUCH_TARGET_KINDS } from "./features/planner/timelineTouchTarget.js";
+import { acquireTimelineTouchScrollLock, createTimelineTouchScrollLock, releaseTimelineTouchScrollLock } from "./features/planner/timelineTouchScrollLock.js";
 import { loadBackupRecord, saveBackupRecord } from "./platform/persistence/backupStore.js";
 import { textToNoteBlocks } from "./features/notes/noteText.js";
 import { eventNoteLink, taskNoteLink } from "./features/notes/contextLink.js";
@@ -814,11 +818,17 @@ export default function Planner() {
   const timelineUserScrollRef = useRef(false);
   const timelineScrollSessionRef = useRef(createScrollSession());
   const interactionRef = useRef(createIdleInteraction());
+  const timelineTouchScrollLockRef = useRef(createTimelineTouchScrollLock());
   const [streamNode, setStreamNode] = useState(null);
   const [dayHourHeight, setDayHourHeight] = useState(HOUR_H);
   const dayHeight = dayHourHeight * 24;
   const nowLabelClearanceMin = Math.round((18 / dayHourHeight) * 60);
   const attachStream = useCallback((node) => {
+    const previous = streamRef.current;
+    if (previous && previous !== node) {
+      const lock = timelineTouchScrollLockRef.current.snapshot();
+      if (lock?.node === previous) timelineTouchScrollLockRef.current.releaseNode(lock.sequence, previous);
+    }
     streamRef.current = node;
     timelineScrollTopRef.current = node?.scrollTop ?? 0;
     setStreamNode(node);
@@ -880,7 +890,6 @@ export default function Planner() {
       }) : current);
     }
   }, []);
-
   useEffect(() => { gestureRef.current = gesture; }, [gesture]);
   /* The last shared event/action lane layout computed while nothing was being
      transformed — see `timelineLayout`. */
@@ -888,7 +897,6 @@ export default function Planner() {
   const [anyTimeRef, anyTimeFade] = useEdgeFade();
   const startGesture = (g) => { gestureRef.current = g; setGesture(g); };
   const endGesture = () => { gestureRef.current = null; setGesture(null); };
-
   useEffect(() => {
     let dead = false;
     (async () => {
@@ -2662,6 +2670,10 @@ export default function Planner() {
     }
     const g = gestureRef.current;
     if (!g) return;
+    if (g.touchId != null && g.owner === INTERACTION_OWNERS.dayStream) {
+      const lock = timelineTouchScrollLockRef.current;
+      if (!lock.enforce(g.interactionSequence, { node: streamRef.current, touchId: g.touchId })) return;
+    }
     const overDay = hitAttr(x, y, "data-day");
     const overTask = hitAttr(x, y, "data-task");
     const m = minutesAt(y);
@@ -2699,8 +2711,14 @@ export default function Planner() {
     }
     gestureRef.current = next;
     setGesture(next);
+    if (g.touchId != null && interactionRef.current.phase === "active") {
+      interactionRef.current = updateInteractionProposal(interactionRef.current, {
+        start: next.start,
+        duration: next.dur,
+        date: dateKeyRef.current,
+      });
+    }
   };
-
   /* Day and week timelines have different scroll nodes, but focus mode is one
      piece of navigation. Keep the direction/restore rule here so the two views
      cannot drift: a small move away from midnight collapses the chrome, and only
@@ -2753,6 +2771,8 @@ export default function Planner() {
   }, [dayHourHeight, viewMode, zoom, timelineFocusSource]);
 
   const abortGesture = () => {
+    const lock = timelineTouchScrollLockRef.current.snapshot();
+    if (lock) timelineTouchScrollLockRef.current.release(lock.sequence, { node: lock.node, touchId: lock.touchId });
     const cancelled = cancelActiveInteraction(interactionRef.current);
     interactionRef.current = restoreCancelledInteraction(cancelled);
     gestureEndedAt.current = Date.now();
@@ -2771,6 +2791,10 @@ export default function Planner() {
     const finishedDraft = g?.mode === "draft"
       ? { date: dateKeyRef.current, start: g.start, dur: g.dur }
       : null;
+    if (g?.touchId != null) {
+      releaseTimelineTouchScrollLock(timelineTouchScrollLockRef.current, g.interactionSequence, g.touchId);
+      interactionRef.current = settleInteraction(interactionRef.current);
+    }
     endGesture();
     if (!g) return;
     /* A drag that ends inside the control it began in still produces a click.
@@ -3105,11 +3129,18 @@ export default function Planner() {
       start: proposal.start,
       duration: proposal.duration,
     });
-    startGesture({
+    const g = {
       mode, kind: armed.kind, id: armed.ev.id, start: proposal.start, dur: proposal.duration,
       was: { start: armed.ev.start, dur: armed.ev.dur },
       x: clientX ?? armed.x, y: clientY ?? armed.y,
-    });
+      ...(armed.touchId != null ? {
+        touchId: armed.touchId,
+        owner: INTERACTION_OWNERS.dayStream,
+        interactionSequence: interactionRef.current.sequence,
+      } : {}),
+    };
+    startGesture(g);
+    if (armed.touchId != null) acquireTimelineTouchScrollLock(timelineTouchScrollLockRef.current, streamRef.current, interactionRef.current.sequence, armed.touchId);
   };
   beginResizeRef.current = beginArmedResize;
 
@@ -3134,55 +3165,67 @@ export default function Planner() {
       if (!press.t) return;
       clearPressTimer(press.t);
       press.t.cancelled = true;
+      if (interactionRef.current.phase === "armed") {
+        interactionRef.current = cancelArmedInteraction(interactionRef.current);
+      }
     };
-
+    const cancelTouchSequence = () => {
+      if (gestureRef.current || interactionRef.current.phase === "active") finishRef.current(0, 0, { cancelled: true });
+      else cancelPress();
+      disarm(); setTaskSwipe(null);
+    };
     const onStart = (e) => {
-      if (e.touches.length !== 1 || gestureRef.current) return;
+      if (e.touches.length !== 1) { cancelTouchSequence(); return; }
+      if (gestureRef.current) return;
       /* A scroll event can arrive after the finger moves outside the stream (or
          after a device compositor applies the offset), so establish intent at
          touch start. A tap alone never changes focus; it only authorizes a
          following scroll event to do so. */
       timelineScrollSessionRef.current.begin();
       timelineUserScrollRef.current = timelineScrollSessionRef.current.isActive();
-      if (e.target.closest?.("[data-timeline-complete]")) return;
+      const target = classifyTimelineTouchTarget(e.target);
+      if (target.kind === TOUCH_TARGET_KINDS.complete) return;
       /* JOIN is an action inside an event card, not a card gesture. The native
          listener owns touch intent before React's synthetic click reaches the
          anchor, so opt links out here as well as at the JSX boundary below.
          Without this guard a mobile tap first arms the event and the delegated
          touchend opens its edit sheet even though the browser is also following
          the meeting URL. */
-      if (e.target.closest?.("a[href]")) return;
+      if (target.kind === TOUCH_TARGET_KINDS.link) return;
       const t = e.touches[0];
-      const hit = e.target.closest ? e.target.closest("[data-event-id],[data-resize],[data-task-chip]") : null;
-      /* A grip is part of the card it sits on, not a target of its own.
-         Touching one used to begin the resize on the spot, with no hold and no
-         movement, and that one line cost two things. A tap that landed on a grip
-         opened and finished a gesture that changed nothing, so the card did not
-         open — and since the grips are the top 8px and bottom 12px of every card,
-         a third of a short card was dead to the touch, including the strip the
-         title sits on. Worse, a finger that began a scroll on a card's bottom
-         edge resized the event instead of scrolling the day: a two-hour block
-         became thirty minutes, silently, while the day scrolled underneath.
-         A grip now arms like everything else on this surface, and the rule is the
-         same everywhere: hold to begin a gesture, move to scroll, tap to open. */
-      const handle = hit && hit.hasAttribute("data-resize") ? hit : null;
-      const node = handle ? handle.closest("[data-event-id],[data-task-chip]") : hit;
+      const node = target.node?.closest?.("[data-event-id],[data-task-chip]")
+        ?? (target.node?.matches?.("[data-event-id],[data-task-chip]") ? target.node : null);
       const m = minutesAt(t.clientY);
       const chipId = node && node.getAttribute("data-task-chip");
       const id = node && node.getAttribute("data-event-id");
       const ev = id ? eventsRef.current.find((x) => x.id === id) : null;
       const chip = chipId ? plannedRef.current.find((x) => x.id === chipId) : null;
-      const resizing = handle && (ev || chip)
-        ? { edge: handle.getAttribute("data-resize-edge") || "end", kind: ev ? "event" : "task" }
-        : null;
+      const resizing = target.kind === TOUCH_TARGET_KINDS.eventResize && ev
+        ? { edge: target.edge, kind: "event" }
+        : target.kind === TOUCH_TARGET_KINDS.actionEstimate && chip
+          ? { edge: "end", kind: "task" }
+          : null;
       const targetKind = resizing ? "resize" : (ev || chipId ? "card" : "empty");
       const p = {
         x: t.clientX, y: t.clientY, ev, chipId, resizing,
         startMin: snapTo(m),
         grab: ev ? m - ev.start : chip?.planned?.startMinute != null ? m - chip.planned.startMinute : 0,
         startScrollTop: el.scrollTop, held: false, cancelled: false, swiping: false,
-        lastX: t.clientX, lastY: t.clientY, timer: null,
+        lastX: t.clientX, lastY: t.clientY, touchId: t.identifier, timer: null,
       };
+      if (ev || chip) {
+        const before = ev ? { start: ev.start, duration: ev.dur, date: dateKeyRef.current }
+          : { start: chip.planned.startMinute, duration: chip.planned.estimateMinutes ?? 30, date: chip.planned.date ?? dateKeyRef.current };
+        interactionRef.current = armInteraction(interactionRef.current, {
+          owner: INTERACTION_OWNERS.dayStream, surface: "day", input: "touch",
+          origin: ev
+            ? (resizing?.edge === "start" ? INTERACTION_ORIGINS.eventStart : resizing?.edge === "end" ? INTERACTION_ORIGINS.eventEnd : INTERACTION_ORIGINS.eventBody)
+            : (resizing ? INTERACTION_ORIGINS.actionResize : INTERACTION_ORIGINS.actionBody),
+          mode: resizing ? (resizing.kind === "task" ? "task-resize" : `resize-${resizing.edge}`) : ev ? "move" : "task",
+          id: ev?.id ?? chipId,
+          before,
+        });
+      }
       p.timer = setTimeout(() => {
         if (!press.t || press.t.cancelled) return;
         press.t.timer = null;
@@ -3192,22 +3235,34 @@ export default function Planner() {
           const block = ev
             ? { start: ev.start, dur: ev.dur }
             : { start: chip.planned.startMinute, dur: chip.planned.estimateMinutes };
+          const active = activateWithMovement(interactionRef.current, { start: block.start, duration: block.dur, date: dateKeyRef.current });
+          interactionRef.current = active;
           startGesture({
             mode: p.resizing.kind === "task" ? "task-resize" : `resize-${p.resizing.edge}`,
             kind: p.resizing.kind,
             id: ev ? ev.id : chipId, ...block, was: { ...block }, x: p.x, y: p.y,
+            touchId: p.touchId, owner: INTERACTION_OWNERS.dayStream, interactionSequence: active.sequence,
           });
+          acquireTimelineTouchScrollLock(timelineTouchScrollLockRef.current, streamRef.current, active.sequence, p.touchId);
         }
-        else if (p.ev) startGesture({ mode: "move", kind: "event", id: p.ev.id, start: p.ev.start, dur: p.ev.dur, grab: p.grab, was: { start: p.ev.start, dur: p.ev.dur }, x: p.x, y: p.y });
+        else if (p.ev) {
+          const active = activateWithMovement(interactionRef.current, { start: p.ev.start, duration: p.ev.dur, date: dateKeyRef.current });
+          interactionRef.current = active;
+          startGesture({ mode: "move", kind: "event", id: p.ev.id, start: p.ev.start, dur: p.ev.dur, grab: p.grab, was: { start: p.ev.start, dur: p.ev.dur }, x: p.x, y: p.y, touchId: p.touchId, owner: INTERACTION_OWNERS.dayStream, interactionSequence: active.sequence });
+          acquireTimelineTouchScrollLock(timelineTouchScrollLockRef.current, streamRef.current, active.sequence, p.touchId);
+        }
         else if (p.chipId) {
           const task = plannedRef.current.find((item) => item.id === p.chipId);
           const start = task?.planned?.startMinute ?? p.startMin;
           const dur = task?.planned?.estimateMinutes ?? 30;
+          const active = activateWithMovement(interactionRef.current, { start, duration: dur, date: task?.planned?.date ?? dateKeyRef.current });
+          interactionRef.current = active;
           startGesture({
             mode: "task", kind: "task", id: p.chipId, start, dur, grab: p.grab,
             originStart: start, originY: p.y, originScrollTop: el.scrollTop,
-            was: { start, dur }, x: p.x, y: p.y,
+            was: { start, dur }, x: p.x, y: p.y, touchId: p.touchId, owner: INTERACTION_OWNERS.dayStream, interactionSequence: active.sequence,
           });
+          acquireTimelineTouchScrollLock(timelineTouchScrollLockRef.current, streamRef.current, active.sequence, p.touchId);
         }
         else startGesture({ mode: "draft", start: p.startMin, dur: 30, x: p.x, y: p.y });
       }, liftDelayForTimelineTarget(targetKind));
@@ -3215,10 +3270,19 @@ export default function Planner() {
     };
 
     const onMove = (e) => {
-      if (gestureRef.current) {
-        e.preventDefault();
+      const g = gestureRef.current;
+      if (g) {
         const t = e.touches[0];
-        if (t) applyRef.current(t.clientX, t.clientY);
+        if (e.touches.length !== 1 || !t || (g.touchId != null && t.identifier !== g.touchId)) {
+          e.preventDefault();
+          e.stopPropagation();
+          cancelTouchSequence();
+          return;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        timelineTouchScrollLockRef.current.enforce(g.interactionSequence, { node: el, touchId: g.touchId });
+        applyRef.current(t.clientX, t.clientY);
         return;
       }
       const p = press.t;
@@ -3252,13 +3316,14 @@ export default function Planner() {
             ev: { id: task.id, start: task.planned.startMinute, dur: task.planned.estimateMinutes ?? 30 },
             edge: p.resizing.edge,
             kind: "task",
+            touchId: p.touchId,
           };
           if (e.cancelable) e.preventDefault();
           beginResizeRef.current(t.clientX, t.clientY);
           return;
         }
       }
-      if (Math.abs(t.clientX - p.x) > 12 || Math.abs(t.clientY - p.y) > 12) cancelPress();
+      if (movedEnoughToCancelHold(p, { x: t.clientX, y: t.clientY })) cancelPress();
       if (Math.abs(t.clientY - p.y) > 4) {
         timelineScrollSessionRef.current.begin();
         timelineUserScrollRef.current = true;
@@ -3266,6 +3331,8 @@ export default function Planner() {
     };
 
     const onScroll = () => {
+      const lock = timelineTouchScrollLockRef.current.snapshot();
+      if (lock && lock.node === el && timelineTouchScrollLockRef.current.enforce(lock.sequence, { node: el, touchId: lock.touchId })) return;
       onTimelineScrollPosition(el.scrollTop);
       const p = press.t;
       if (!p) return;
@@ -3280,8 +3347,11 @@ export default function Planner() {
     const onEnd = (e) => {
       const g = gestureRef.current;
       const p = press.t;
-      disarm();
       const t = e.changedTouches && e.changedTouches[0];
+      const touchId = t?.identifier;
+      if ((g?.touchId != null && touchId !== g.touchId)
+        || (p?.touchId != null && touchId != null && touchId !== p.touchId)) { cancelTouchSequence(); return; }
+      disarm();
       if (p?.swiping) {
         if (e.cancelable) e.preventDefault();
         e.stopPropagation();
@@ -3294,9 +3364,7 @@ export default function Planner() {
       }
       if (g) { finishRef.current(t ? t.clientX : g.x, t ? t.clientY : g.y); return; }
       if (p && !p.held && !p.cancelled) {
-        /* A tap handled here opens a sheet. Without this the browser still emits its
-           compatibility click ~300ms later, which lands on the freshly-opened sheet's
-           backdrop and closes it again — the card appeared not to open at all. */
+        interactionRef.current = cancelArmedInteraction(interactionRef.current);
         if (e.cancelable) e.preventDefault();
         if (p.ev) { beep("click"); setInspect({ kind: "event", id: p.ev.id }); }
         else if (p.chipId) { beep("click"); setInspect({ kind: "task", id: p.chipId }); }
@@ -3305,10 +3373,7 @@ export default function Planner() {
     };
 
     const onCancel = () => {
-      disarm();
-      setTaskSwipe(null);
-      if (gestureRef.current) finishRef.current(0, 0, { cancelled: true });
-      else interactionRef.current = cancelArmedInteraction(interactionRef.current);
+      cancelTouchSequence();
     };
 
     el.addEventListener("touchstart", onStart, { passive: true });
@@ -3318,6 +3383,9 @@ export default function Planner() {
     el.addEventListener("scroll", onScroll, { passive: true });
     el.addEventListener("wheel", onWheel, { passive: true });
     return () => {
+      const lock = timelineTouchScrollLockRef.current.snapshot();
+      if (lock?.node === el) timelineTouchScrollLockRef.current.releaseNode(lock.sequence, el);
+      if (gestureRef.current?.owner === INTERACTION_OWNERS.dayStream) finishRef.current(0, 0, { cancelled: true });
       el.removeEventListener("touchstart", onStart);
       el.removeEventListener("touchmove", onMove);
       el.removeEventListener("touchend", onEnd);
@@ -3327,42 +3395,23 @@ export default function Planner() {
     };
   }, [streamNode, ready, viewMode, zoom, dayHourHeight, onTimelineScrollPosition]);
 
-  /* mouse / pen tracking, plus touch tracking for drags that begin outside the stream */
+  /* mouse / pen tracking for drags that begin outside the stream */
   useEffect(() => {
     if (!gesture) return;
     const move = (e) => applyRef.current(e.clientX, e.clientY, e);
     const up = (e) => finishRef.current(e.clientX, e.clientY);
-    const tmove = (e) => {
-      if (!gestureRef.current) return;
-      e.preventDefault();
-      const t = e.touches[0];
-      if (t) applyRef.current(t.clientX, t.clientY);
-    };
-    const tend = (e) => {
-      const t = e.changedTouches && e.changedTouches[0];
-      const g = gestureRef.current;
-      if (g) finishRef.current(t ? t.clientX : g.x, t ? t.clientY : g.y);
-    };
-    const tcancel = () => {
-      if (gestureRef.current) finishRef.current(0, 0, { cancelled: true });
-    };
+    const tcancel = () => gestureRef.current && finishRef.current(0, 0, { cancelled: true });
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", tcancel);
     window.addEventListener("mousemove", move);
     window.addEventListener("mouseup", up);
-    document.addEventListener("touchmove", tmove, { passive: false });
-    document.addEventListener("touchend", tend);
-    document.addEventListener("touchcancel", tcancel);
     return () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", tcancel);
       window.removeEventListener("mousemove", move);
       window.removeEventListener("mouseup", up);
-      document.removeEventListener("touchmove", tmove);
-      document.removeEventListener("touchend", tend);
-      document.removeEventListener("touchcancel", tcancel);
     };
   }, [gesture && gesture.mode, gesture && gesture.id]);
 
@@ -3689,7 +3738,8 @@ export default function Planner() {
       onInspect={(id) => setInspect({ kind: "task", id })} onToggleSub={toggleSub} onAddSub={addSub} onRemoveSub={removeSub}
       onDragStart={(id, x, y) => {
         if (viewMode === "actions") return;
-        startGesture({ mode: "task", kind: "task", id, x, y }); setSheet(false); buzz(6); beep("lift");
+        startGesture({ mode: "task", kind: "task", id, x, y });
+        setSheet(false); buzz(6); beep("lift");
       }}
       hidingAdd={composer?.morphSource?.id === "actions-add"}
       onAddTask={(source) => {
@@ -4265,6 +4315,12 @@ export default function Planner() {
                        from the minimum itself. The old ordering turned the stated
                        22px floor into 19px — shorter than one line of title text. */
                     const h = Math.max(22, (e.dur / 1440) * dayHeight - 3);
+                    const laneWidth = streamNode
+                      ? (Math.max(0, streamNode.clientWidth - 72) / Math.max(1, e.cols)) - 6
+                      : 0;
+                     const touchResizeHeld = gesture?.touchId != null && gesture.id === e.id
+                       && (gesture.mode === "resize-end" || gesture.mode === "resize-start");
+                     const touchResizeEligible = canExposeEventTouchResize({ height: h, width: laneWidth }) || touchResizeHeld;
                     const live = isToday && nowMin >= e.start && nowMin < e.start + e.dur;
                     const past = isToday && nowMin >= e.start + e.dur;
                     const pct = live ? ((nowMin - e.start) / e.dur) * 100 : 0;
@@ -4366,6 +4422,16 @@ export default function Planner() {
                           <div data-resize={e.id} data-resize-edge="end" onPointerDown={(ev) => resizeDown(ev, e, "end")} className="absolute inset-x-0 bottom-0 flex items-end justify-center" style={{ height: 12, cursor: "ns-resize", touchAction: "pan-y" }}>
                             <span style={{ background: T.faint, width: 22, height: 2, marginBottom: 3, borderRadius: 2 }} />
                           </div>
+                          {touchResizeEligible && (
+                            <>
+                              <div aria-hidden="true" tabIndex={-1} data-touch-resize="start" data-resize-edge="start" onPointerDown={(ev) => resizeDown(ev, e, "start")}
+                                className="absolute top-0 left-1/2 z-10"
+                                style={{ width: 44, height: 44, transform: "translateX(-50%)", cursor: "ns-resize", touchAction: "pan-y" }} />
+                              <div aria-hidden="true" tabIndex={-1} data-touch-resize="end" data-resize-edge="end" onPointerDown={(ev) => resizeDown(ev, e, "end")}
+                                className="absolute bottom-0 left-1/2 z-10"
+                                style={{ width: 44, height: 44, transform: "translateX(-50%)", cursor: "ns-resize", touchAction: "pan-y" }} />
+                            </>
+                          )}
                         </div>
                         {joinUrl && (
                           <a href={joinUrl} target="_blank" rel="noopener noreferrer" draggable={false} data-join={e.id}

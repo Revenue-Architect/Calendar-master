@@ -986,6 +986,39 @@ test.describe("touch Action ownership in the timeline", () => {
     expect(state.tasks[0].planned.startMinute).toBe(11 * 60);
   });
 
+  test("the active Action owns the Day scroll position after lift", async ({ page }) => {
+    await seedPlanner(page, scheduledAction({ id: "task-touch-lock", title: "Lock the brief while moving" }));
+    const chip = page.locator('[data-task-chip="task-touch-lock"]');
+    await chip.scrollIntoViewIfNeeded();
+    const stream = page.getByTestId("day-stream");
+    const before = (await storedState(page)).tasks[0].planned;
+    const box = await chip.boundingBox();
+    const x = box.x + box.width / 2;
+    const y = box.y + Math.min(box.height / 2, 18);
+    const session = await page.context().newCDPSession(page);
+
+    await dispatchTouch(session, "touchStart", x, y);
+    await page.waitForTimeout(340);
+    const beforeLock = await stream.evaluate((node) => node.scrollTop);
+    await stream.evaluate((node) => {
+      node.scrollTop += 120;
+      node.dispatchEvent(new Event("scroll"));
+    });
+    await expect.poll(() => stream.evaluate((node) => node.scrollTop), {
+      message: "active Action ownership must restore forced Day scroll drift",
+    }).toBe(beforeLock);
+    await dispatchTouch(session, "touchMove", x, y + 68);
+    await dispatchTouch(session, "touchEnd", x, y + 68);
+    await session.detach();
+
+    const state = await settledState(page, (stored) => stored.tasks[0]?.planned.startMinute === 11 * 60, "the active Action never committed after the scroll-lock check");
+    expect(state.tasks[0].planned.date).toBe(before.date);
+    expect(state.tasks[0].planned.estimateMinutes).toBe(before.estimateMinutes);
+    await expect.poll(() => stream.evaluate((node) => node.scrollTop), {
+      message: "the Day stream moved underneath the active Action",
+    }).toBe(beforeLock);
+  });
+
   test("a held touch on the estimate resizes an Action without moving its start", async ({ page }) => {
     await seedPlanner(page, scheduledAction({ id: "task-touch-resize", title: "Resize the brief by touch" }));
     const chip = page.locator('[data-task-chip="task-touch-resize"]');
@@ -1005,6 +1038,37 @@ test.describe("touch Action ownership in the timeline", () => {
     const state = await settledState(page, (stored) => stored.tasks[0]?.planned.estimateMinutes > 60, "the held touch Action resize did not change its estimate");
     expect(state.tasks[0].planned.startMinute).toBe(10 * 60);
     expect(state.tasks[0].planned.estimateMinutes).toBeGreaterThan(60);
+  });
+
+});
+
+test.describe("document fallback touch origin", () => {
+  test.use({ viewport: { width: 1280, height: 900 }, hasTouch: true, isMobile: false });
+
+  test("a touch drag that starts in the Actions column reaches the Day stream through the external fallback", async ({ page }) => {
+    await seedPlanner(page, scheduledAction({ id: "task-external-desktop-touch", title: "Move from the Actions column" }));
+    const stream = page.getByTestId("day-stream");
+    const before = (await settledState(page, () => true, "the notebook never settled")).tasks[0].planned;
+    const action = page.locator('[data-task="task-external-desktop-touch"]:visible');
+    await expect(action).toBeVisible();
+    const dragHandle = action.getByRole("button", { name: "Drag to schedule, reorder, or move to another day" });
+    const from = await dragHandle.boundingBox();
+    const target = await stream.boundingBox();
+    const x = from.x + from.width / 2;
+    const y = from.y + from.height / 2;
+    const dropX = target.x + target.width / 2;
+    const dropY = target.y + target.height / 2;
+    const session = await page.context().newCDPSession(page);
+
+    await dispatchTouch(session, "touchStart", x, y);
+    await page.waitForTimeout(80);
+    await dispatchTouch(session, "touchMove", dropX, dropY);
+    await dispatchTouch(session, "touchEnd", dropX, dropY);
+    await session.detach();
+
+    const state = await settledState(page, (stored) => stored.tasks[0]?.planned.startMinute !== before.startMinute, "an externally-originated touch drag did not reach the Day stream");
+    expect(state.tasks[0].planned.date).toBe(before.date);
+    expect(state.tasks[0].planned.estimateMinutes).toBe(before.estimateMinutes);
   });
 });
 

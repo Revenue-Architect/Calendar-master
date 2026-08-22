@@ -195,7 +195,7 @@ test.describe("a resize grip is part of the card it sits on", () => {
     await seedPlanner(page, seeded());
     await card(page).scrollIntoViewIfNeeded();
     await page.waitForTimeout(200);
-    const box = await card(page).boundingBox();
+    const box = await card(page).locator('[data-touch-resize="end"]').boundingBox();
 
     await finger(page, {
       x: box.x + box.width / 2,
@@ -214,19 +214,238 @@ test.describe("a resize grip is part of the card it sits on", () => {
     await seedPlanner(page, seeded());
     await card(page).scrollIntoViewIfNeeded();
     await page.waitForTimeout(200);
-    const box = await card(page).boundingBox();
+    const box = await card(page).locator('[data-touch-resize="start"]').boundingBox();
 
-    await finger(page, {
-      x: box.x + box.width / 2,
-      y: box.y + 3,
-      holdMs: 500,
-      to: { x: box.x + box.width / 2, y: box.y + 3 + HOUR_PX },
-    });
+    const session = await page.context().newCDPSession(page);
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    await session.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+    await page.waitForTimeout(500);
+    await session.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y: y + HOUR_PX }] });
+    await session.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await session.detach();
 
     const timing = (await stored(page, (t) => t.startLocal !== `${today}T10:00`, "the hold never moved the start")).events[0].timing;
     expect(timing.endLocal, "resizing the start moved the end").toBe(`${today}T12:00`);
     expect(minutesInto(timing.startLocal), "the start did not follow the finger by about an hour")
       .toBeGreaterThan(minutesInto(`${today}T10:45`));
+  });
+
+  test("a held upper-card touch outside the centered grip moves the Event", async ({ page }) => {
+    await seedPlanner(page, seeded());
+    await card(page).scrollIntoViewIfNeeded();
+    await page.waitForTimeout(200);
+    const box = await card(page).boundingBox();
+    const session = await page.context().newCDPSession(page);
+    const x = box.x + 12;
+    const y = box.y + 4;
+    await session.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+    await page.waitForTimeout(340);
+    await session.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y: y + HOUR_PX }] });
+    await session.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await session.detach();
+
+    const timing = (await settledState(page, (state) => state.events[0].timing.startLocal !== `${today}T10:00`, "the upper body touch did not move the Event")).events[0].timing;
+    expect(timing.startLocal).toBe(`${today}T11:00`);
+    expect(timing.endLocal, "an upper body move must preserve duration").toBe(`${today}T13:00`);
+  });
+
+  test("a held lower-card touch outside the centered grip moves the Event", async ({ page }) => {
+    await seedPlanner(page, seeded());
+    await card(page).scrollIntoViewIfNeeded();
+    await page.waitForTimeout(200);
+    const box = await card(page).boundingBox();
+    const session = await page.context().newCDPSession(page);
+    const x = box.x + 12;
+    const y = box.y + box.height - 4;
+    await session.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+    await page.waitForTimeout(340);
+    await session.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y: y + HOUR_PX }] });
+    await session.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await session.detach();
+
+    const timing = (await settledState(page, (state) => state.events[0].timing.startLocal !== `${today}T10:00`, "the lower body touch did not move the Event")).events[0].timing;
+    expect(timing.startLocal).toBe(`${today}T11:00`);
+    expect(timing.endLocal, "a lower body move must preserve duration").toBe(`${today}T13:00`);
+  });
+
+  test("eligible Events expose disjoint semantic touch resize controls", async ({ page }) => {
+    await seedPlanner(page, seeded());
+    await card(page).scrollIntoViewIfNeeded();
+    const start = card(page).locator('[data-touch-resize="start"]');
+    const end = card(page).locator('[data-touch-resize="end"]');
+    await expect(start, "an eligible Event needs an explicit start touch grip").toHaveCount(1);
+    await expect(end, "an eligible Event needs an explicit end touch grip").toHaveCount(1);
+    await expect(start).toHaveAttribute("aria-hidden", "true");
+    await expect(end).toHaveAttribute("aria-hidden", "true");
+    const boxes = await Promise.all([start.boundingBox(), end.boundingBox()]);
+    expect(boxes[0].y + boxes[0].height).toBeLessThanOrEqual(boxes[1].y);
+  });
+
+  test("the active Event owns the Day scroll position after lift", async ({ page }) => {
+    await seedPlanner(page, seeded());
+    const event = card(page);
+    await event.scrollIntoViewIfNeeded();
+    const stream = page.getByTestId("day-stream");
+    const box = await event.boundingBox();
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    const session = await page.context().newCDPSession(page);
+
+    await session.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+    await page.waitForTimeout(340);
+    const beforeLock = await stream.evaluate((node) => node.scrollTop);
+    await stream.evaluate((node) => {
+      node.scrollTop += 120;
+      node.dispatchEvent(new Event("scroll"));
+    });
+    await expect.poll(() => stream.evaluate((node) => node.scrollTop), {
+      message: "active Event ownership must restore forced Day scroll drift",
+    }).toBe(beforeLock);
+    await session.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y: y + HOUR_PX }] });
+    await session.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await session.detach();
+
+    const timing = (await settledState(page, (state) => state.events[0].timing.startLocal !== `${today}T10:00`, "the active Event never committed after the scroll-lock check")).events[0].timing;
+    expect(timing.startLocal).toBe(`${today}T11:00`);
+    expect(timing.endLocal).toBe(`${today}T13:00`);
+    await expect.poll(() => stream.evaluate((node) => node.scrollTop), {
+      message: "the Day stream moved underneath the active Event",
+    }).toBe(beforeLock);
+  });
+
+  test("a second finger cancels the active Event and unlocks the stream", async ({ page }) => {
+    await seedPlanner(page, seeded());
+    const event = card(page);
+    await event.scrollIntoViewIfNeeded();
+    const stream = page.getByTestId("day-stream");
+    const before = (await settledState(page, () => true, "the notebook never settled")).events[0].timing;
+    const box = await event.boundingBox();
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    const session = await page.context().newCDPSession(page);
+
+    await session.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ id: 0, x, y }] });
+    await page.waitForTimeout(340);
+    const beforeLock = await stream.evaluate((node) => node.scrollTop);
+    await session.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [{ id: 0, x, y: y + 12 }, { id: 1, x: x + 24, y: y + 12 }],
+    });
+    await session.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await session.detach();
+
+    const state = await settledState(page, (stored) => stored.events[0].timing.startLocal === before.startLocal, "a second finger must cancel without persisting the Event");
+    expect(state.events[0].timing).toEqual(before);
+    await expect.poll(() => stream.evaluate((node) => node.scrollTop), {
+      message: "the cancelled Event must release the Day stream lock",
+    }).toBe(beforeLock);
+    await expect(event).not.toHaveClass(/nb-timeline-lane-active/);
+  });
+
+  test("a stationary second touch cancels immediately without a follow-up move", async ({ page }) => {
+    await seedPlanner(page, seeded());
+    const event = card(page);
+    await event.scrollIntoViewIfNeeded();
+    const stream = page.getByTestId("day-stream");
+    const before = (await settledState(page, () => true, "the notebook never settled")).events[0].timing;
+    const box = await event.boundingBox();
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    const session = await page.context().newCDPSession(page);
+
+    await session.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ id: 0, x, y }] });
+    await page.waitForTimeout(340);
+    const beforeLock = await stream.evaluate((node) => node.scrollTop);
+    /* This is deliberately a stationary second touch. There is no touchmove
+       after it, so touchstart must terminate the existing owner itself. */
+    await session.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [{ id: 0, x, y }, { id: 1, x: x + 24, y }],
+    });
+
+    await expect(event, "a second touch must clear the rendered active state immediately").not.toHaveClass(/nb-timeline-lane-active/);
+    const state = await settledState(page, (stored) => stored.events[0].timing.startLocal === before.startLocal, "a stationary second touch must not persist the Event");
+    expect(state.events[0].timing).toEqual(before);
+    const movedScroll = await stream.evaluate((node) => {
+      node.scrollTop += 40;
+      node.dispatchEvent(new Event("scroll"));
+      return node.scrollTop;
+    });
+    expect(movedScroll, "the cancelled Event must release the Day stream lock").toBeGreaterThan(beforeLock);
+
+    await session.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await event.scrollIntoViewIfNeeded();
+    const next = await event.boundingBox();
+    await session.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ id: 2, x: next.x + next.width / 2, y: next.y + next.height / 2 }] });
+    await page.waitForTimeout(340);
+    await session.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ id: 2, x: next.x + next.width / 2, y: next.y + next.height / 2 + HOUR_PX }] });
+    await session.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await session.detach();
+    const moved = (await settledState(page, (stored) => stored.events[0].timing.startLocal === `${today}T11:00`, "the next touch interaction did not work after second-touch cancellation")).events[0].timing;
+    expect(moved.endLocal).toBe(`${today}T13:00`);
+  });
+
+  test("a non-owner terminal touch cancels without committing the active Event", async ({ page }) => {
+    await seedPlanner(page, seeded());
+    const event = card(page);
+    await event.scrollIntoViewIfNeeded();
+    const stream = page.getByTestId("day-stream");
+    const before = (await settledState(page, () => true, "the notebook never settled")).events[0].timing;
+    const box = await event.boundingBox();
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    const session = await page.context().newCDPSession(page);
+    await page.evaluate(() => {
+      /* Chromium may emit a compatibility pointercancel when a second contact
+         appears. Block that separate path so this CDP case proves the native
+         touchend foreign-identifier cleanup on its own. */
+      const block = (event) => event.stopImmediatePropagation();
+      window.__blockTouchPointerCompatibility = block;
+      window.addEventListener("pointercancel", block, true);
+      window.addEventListener("pointerup", block, true);
+    });
+
+    await session.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ id: 0, x, y }] });
+    await page.waitForTimeout(340);
+    await session.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ id: 0, x, y: y + HOUR_PX }] });
+    /* Keep the owner stationary in the protocol while ending only a foreign
+       touch. This exercises the terminal identifier guard without a later
+       move to accidentally make cancellation look successful. */
+    await session.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [{ id: 0, x, y: y + HOUR_PX }, { id: 1, x: x + 24, y: y + HOUR_PX }],
+    });
+    await session.send("Input.dispatchTouchEvent", {
+      type: "touchEnd",
+      touchPoints: [{ id: 1, x: x + 24, y: y + HOUR_PX }],
+    });
+
+    await expect(event, "a non-owner terminal touch must clear the rendered active state").not.toHaveClass(/nb-timeline-lane-active/);
+    const state = await settledState(page, (stored) => stored.events[0].timing.startLocal === before.startLocal, "a non-owner end must not persist the active Event");
+    expect(state.events[0].timing).toEqual(before);
+    const beforeLock = await stream.evaluate((node) => node.scrollTop);
+    const movedScroll = await stream.evaluate((node) => {
+      node.scrollTop += 40;
+      node.dispatchEvent(new Event("scroll"));
+      return node.scrollTop;
+    });
+    expect(movedScroll, "the non-owner end must release the Day stream lock").toBeGreaterThan(beforeLock);
+
+    await session.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await page.evaluate(() => {
+      window.removeEventListener("pointercancel", window.__blockTouchPointerCompatibility, true);
+      window.removeEventListener("pointerup", window.__blockTouchPointerCompatibility, true);
+    });
+    await event.scrollIntoViewIfNeeded();
+    const next = await event.boundingBox();
+    await session.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ id: 2, x: next.x + next.width / 2, y: next.y + next.height / 2 }] });
+    await page.waitForTimeout(340);
+    await session.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ id: 2, x: next.x + next.width / 2, y: next.y + next.height / 2 + HOUR_PX }] });
+    await session.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await session.detach();
+    const moved = (await settledState(page, (stored) => stored.events[0].timing.startLocal === `${today}T11:00`, "the next touch interaction did not work after non-owner cancellation")).events[0].timing;
+    expect(moved.endLocal).toBe(`${today}T13:00`);
   });
 });
 
