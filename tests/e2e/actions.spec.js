@@ -135,6 +135,46 @@ test.describe("the actions column", () => {
     expect(state.tasks[0].planned.startMinute).toBe(11 * 60);
   });
 
+  test("a stationary desktop Action hold stays a click candidate", async ({ page }) => {
+    await seedPlanner(page, scheduledAction({ id: "task-stationary", title: "Open the brief" }));
+    const chip = page.locator('[data-task-chip="task-stationary"]');
+    await chip.scrollIntoViewIfNeeded();
+    const lane = page.getByTestId("timeline-action-lane");
+    const box = await chip.boundingBox();
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    const before = (await storedState(page)).tasks[0].planned;
+
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.waitForTimeout(360);
+    await expect(lane, "a stationary mouse press must not auto-lift an Action").not.toHaveClass(/nb-timeline-lane-active/);
+    await page.mouse.up();
+
+    const after = await settledState(page, (state) => state.tasks.length === 1);
+    expect(after.tasks[0].planned).toEqual(before);
+    await expect(page.getByTestId("sheet"), "a stationary Action release remains a click").toBeVisible();
+  });
+
+  test("a tiny desktop Action tremor remains a click and opens the inspector", async ({ page }) => {
+    await seedPlanner(page, scheduledAction({ id: "task-jitter", title: "Read the brief" }));
+    const chip = page.locator('[data-task-chip="task-jitter"]');
+    await chip.scrollIntoViewIfNeeded();
+    const box = await chip.boundingBox();
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    const before = (await storedState(page)).tasks[0].planned;
+
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + 1, y + 1);
+    await page.mouse.up();
+
+    const after = await settledState(page, (state) => state.tasks.length === 1);
+    expect(after.tasks[0].planned).toEqual(before);
+    await expect(page.getByTestId("sheet"), "a tiny Action tremor remains a click").toBeVisible();
+  });
+
   test("cancelling an Action drag leaves it unchanged and the next drag still works", async ({ page }) => {
     await seedPlanner(page, scheduledAction({ id: "task-cancel", title: "Cancel the brief" }));
     const chip = page.locator('[data-task-chip="task-cancel"]');
@@ -905,6 +945,8 @@ test.describe("touch Action ownership in the timeline", () => {
     await seedPlanner(page, scheduledAction({ id: "task-touch-scroll", title: "Scroll the brief" }));
     const chip = page.locator('[data-task-chip="task-touch-scroll"]');
     await chip.scrollIntoViewIfNeeded();
+    const stream = page.getByTestId("day-stream");
+    const beforeScroll = await stream.evaluate((node) => node.scrollTop);
     const before = (await storedState(page)).tasks[0].planned;
     const box = await chip.boundingBox();
     const x = box.x + box.width / 2;
@@ -913,6 +955,9 @@ test.describe("touch Action ownership in the timeline", () => {
 
     await dispatchTouch(session, "touchStart", x, y);
     await dispatchTouch(session, "touchMove", x, y + 80);
+    await expect.poll(() => stream.evaluate((node, initial) => Math.abs(node.scrollTop - initial), beforeScroll), {
+      message: "vertical Action touch should physically scroll the Day timeline",
+    }).toBeGreaterThan(1);
     await dispatchTouch(session, "touchMove", x, y + 150);
     await dispatchTouch(session, "touchEnd", x, y + 150);
     await session.detach();

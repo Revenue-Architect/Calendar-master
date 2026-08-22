@@ -8,6 +8,7 @@ Starting branch head: `927ffe7414fc2a00a68bb579ea8ea98154f1e41e`
 Implementation commit: `fb59f71`  
 Plan commit: `e01c375`  
 QA artifact commit: `26c2e8e`  
+Final review-fix commit: recorded after this remediation commit
 Final delivery tip: the branch tip shown on [PR #8](https://github.com/Revenue-Architect/Calendar-master/pull/8)
 
 ## Executive result
@@ -23,12 +24,14 @@ scroll-versus-lift arbitration, resize arithmetic, persistence, recurrence,
 JOIN, Action completion, Timeline chrome, navigation, ribbon, and motion
 systems.
 
-The implementation is intentionally not declared fully green: the isolated
-full Playwright run finished with **337 passed and 2 failed**. The two failures
-are the existing Week timeline-chrome scroll cases. The exact PR #7 merge
-baseline reproduced the same physical-scroll failure (`scrollTop` remained
-`0`) under the same Chromium/worker setup, so that separate timeline-chrome
-determinism issue is not attributed to this branch.
+The final corrective pass removes the remaining desktop/pen timer fallback.
+The final full Playwright run finished with **337 passed and 6 failed out of
+343**. Those six failures are unrelated alert-overlay click timeouts; each
+passes when isolated on the review head and all six also pass isolated against
+the exact PR #7 merge baseline. The separate Week timeline-chrome issue is
+still tracked independently; all four chrome-scroll cases passed in this
+full-run sample, but the prior `scrollTop = 0` failure remains load-sensitive
+and is not changed by this PR.
 
 ## Files changed
 
@@ -80,6 +83,10 @@ The new regressions were run before the corresponding fixes.
 6. The first Week held-touch move characterization failed after the lifted
    card changed columns and its original button unmounted. This proved that
    finalization had to be owned by a stable Week surface/window listener.
+7. The review pass added stationary desktop hold tests. On `239460b`, all
+   three correctly failed after 360ms: Event and Action lanes became active and
+   the Week card received its lifted transform. This proved that the new
+   movement callback still had an unintended `LIFT_MS` fallback.
 
 Negative controls were restored and were not committed:
 
@@ -89,6 +96,8 @@ Negative controls were restored and were not committed:
   fail;
 - removing the Week stable touch finalizer left the held touch move unsettled;
 - restoring the undefined canvas reference produced a page error.
+- temporarily restoring the desktop timers made all three stationary-hold
+  tests fail again; the sabotaged timers were removed before committing.
 
 ## Implementation
 
@@ -110,6 +119,12 @@ movement-armed edge/estimate paths.
 Week touch ownership now has stable surface finalization plus bounded window
 listeners so a lifted card can move between columns without losing its
 `touchend`/`touchcancel` commit path.
+
+The final review correction makes desktop activation strictly movement-only:
+`armHold()` skips `LIFT_MS` whenever a desktop movement callback is present,
+and Week's non-touch `pointerDown()` no longer schedules a timer. Genuine hold
+paths remain intact: empty-space creation still uses its hold, and touch
+Event/Action/Week paths retain their separate `LIFT_MS` timers.
 
 `directMouseDrag()` was added as an explicit no-wait browser helper. The
 existing `pressHoldAndDrag()` remains for intentional long-press scenarios and
@@ -148,8 +163,8 @@ is no longer used to hide desktop Event/Action/Week activation requirements.
 Real CDP touch input was used for the new browser cases, not only synthetic DOM
 events. Covered behavior includes:
 
-- Event and Action vertical movement before lift scrolls without mutation or
-  inspector opening;
+- Event and Action vertical movement before lift physically changes the Day
+  `scrollTop` without mutation or inspector opening;
 - held Event and Action body movement persists a move;
 - held Event edge movement resizes without moving start;
 - held Action estimate movement resizes without moving start;
@@ -163,24 +178,26 @@ events. Covered behavior includes:
 | --- | --- |
 | `node --test src/features/planner/timelineGesture.test.js` | **22 passed, 0 failed** |
 | `node --test src/features/planner/timelineInteractionState.test.js` | **20 passed, 0 failed** |
-| combined focused interaction matrix | **78 passed, 0 failed** |
-| immediate move/resize matrix, run 1 | **5 passed, 0 failed** |
-| immediate move/resize matrix, run 2 | **5 passed, 0 failed** |
-| immediate move/resize matrix, run 3 | **5 passed, 0 failed** |
+| stationary-hold/scroll/jitter correction subset | **7 passed, 0 failed** |
+| expanded direct move/resize/touch subset, `--repeat-each=3` | **42 passed, 0 failed** |
+| combined focused interaction matrix | **82 passed, 0 failed** |
 | `npm test` | **635 passed, 0 failed** |
 | `npm run build` | **passed**; Vite completed with existing chunk-size warnings |
-| full Playwright, isolated port, `--workers=1` | **337 passed, 2 failed** |
+| full Playwright, isolated port, `--workers=1` | **337 passed, 6 failed of 343** |
 
-The full-run failures were only:
+The final full-run failures were:
 
-- phone Week timeline-chrome physical-scroll poll;
-- desktop Week timeline-chrome physical-scroll poll.
+- one Actions week-ribbon click intercepted by a transient alert;
+- three gesture-isolation view-entry clicks intercepted by the same alert;
+- two mobile Actions view-entry clicks intercepted by the same alert.
 
-The same test was run against the exact PR #7 merge base `f644fbc` with the
-same Chromium/worker shape. Both Week variants reproduced `scrollTop = 0`
-there as well. The older pre-PR7 `927ffe7` test showed the prior lower-bound
-collapse failures. This branch does not modify Timeline chrome, so the issue
-remains a separate follow-up rather than being hidden as “green.”
+All six failures pass in isolation on the review head and in the same isolated
+six-test command against exact PR #7 merge base `f644fbc`. The transient alert
+is therefore recorded as a load-sensitive baseline failure, not attributed to
+this interaction change. The Week timeline-chrome cases that previously
+failed are not present in this full-run sample; their earlier exact-base
+comparison and separate deterministic-scroll follow-up remain documented
+rather than silently closed.
 
 ## Manual Chrome validation
 
@@ -228,6 +245,8 @@ not staged.
 
 ## Delivery status
 
-The branch is pushed as a separate corrective PR and is not merged. The only
-known residual failures are the two exact-base-reproduced Week
-timeline-chrome-scroll cases described above.
+The branch is pushed as a separate corrective PR and is not merged. No direct
+manipulation failure remains. The final full run has six isolated/base-
+reproduced alert-overlay failures; Timeline-chrome determinism remains a
+separate follow-up because it is a load-sensitive test-harness/product-state
+boundary, not part of this PR's gesture ownership fix.

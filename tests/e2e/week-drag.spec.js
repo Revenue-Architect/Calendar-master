@@ -136,6 +136,29 @@ test.describe("dragging in the week view", () => {
     expect(minutes(after.events[0].timing.endLocal) - minutes(after.events[0].timing.startLocal)).toBe(30);
   });
 
+  test("a stationary desktop Week Event hold stays a click candidate", async ({ page }) => {
+    await openPlanner(page);
+    await quickAdd(page, "Standup today 10am 30m");
+    await openWeek(page);
+
+    const card = page.getByTestId("week-event").first();
+    await card.scrollIntoViewIfNeeded();
+    const box = await card.boundingBox();
+    const x = box.x + box.width / 2;
+    const y = box.y + Math.min(8, box.height / 2);
+    const before = await settledState(page, (s) => s.events.length === 1);
+
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.waitForTimeout(360);
+    await expect(card, "a stationary mouse press must not auto-lift a Week Event").toHaveCSS("transform", "none");
+    await page.mouse.up();
+
+    const after = await settledState(page, (s) => s.events.length === 1);
+    expect(after.events[0].timing).toEqual(before.events[0].timing);
+    await expect(page.getByTestId("sheet"), "a stationary Week Event release remains a click").toBeVisible();
+  });
+
   test("a tap on a card opens it instead of moving it", async ({ page }) => {
     await openPlanner(page);
     await quickAdd(page, "Standup today 10am 30m");

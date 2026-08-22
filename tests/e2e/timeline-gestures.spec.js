@@ -117,6 +117,26 @@ test.describe("moving an event on the timeline", () => {
     expect(moved.endLocal).toBe(`${today}T13:00`);
   });
 
+  test("a stationary desktop Event hold stays a click candidate", async ({ page }) => {
+    await seedPlanner(page, seeded());
+    await card(page).scrollIntoViewIfNeeded();
+    const event = card(page);
+    const box = await event.boundingBox();
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    const before = (await storedState(page)).events[0].timing;
+
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.waitForTimeout(360);
+    await expect(event, "a stationary mouse press must not auto-lift an Event").not.toHaveClass(/nb-timeline-lane-active/);
+    await page.mouse.up();
+
+    const after = await settledState(page, (state) => state.events.length === 1);
+    expect(after.events[0].timing).toEqual(before);
+    await expect(page.getByTestId("sheet"), "a stationary Event release remains a click").toBeVisible();
+  });
+
   test("pointer cancellation leaves an active Event unchanged", async ({ page }) => {
     await seedPlanner(page, seeded());
     await card(page).scrollIntoViewIfNeeded();
@@ -169,6 +189,8 @@ test.describe("moving an event on the timeline", () => {
       await seedPlanner(page, seeded());
       const event = card(page);
       await event.scrollIntoViewIfNeeded();
+      const stream = page.getByTestId("day-stream");
+      const beforeScroll = await stream.evaluate((node) => node.scrollTop);
       const before = (await storedState(page)).events[0].timing;
       const box = await event.boundingBox();
       const x = box.x + box.width / 2;
@@ -177,6 +199,9 @@ test.describe("moving an event on the timeline", () => {
 
       await touchAt(session, "touchStart", x, y);
       await touchAt(session, "touchMove", x, y + 80);
+      await expect.poll(() => stream.evaluate((node, initial) => Math.abs(node.scrollTop - initial), beforeScroll), {
+        message: "vertical Event touch should physically scroll the Day timeline",
+      }).toBeGreaterThan(1);
       await touchAt(session, "touchMove", x, y + 150);
       await touchAt(session, "touchEnd", x, y + 150);
       await session.detach();

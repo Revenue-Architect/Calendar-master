@@ -2877,6 +2877,10 @@ export default function Planner() {
   const armHold = (x, y, fire, activateOnMove = null) => {
     disarmHold();
     armedRef.current = { x, y, activateOnMove };
+    /* A desktop card candidate is movement-only. The timer belongs to genuine
+       hold interactions such as empty-space creation; giving it to a card
+       would auto-lift a stationary mouse press and swallow the click. */
+    if (activateOnMove) return;
     holdRef.current = setTimeout(() => {
       const armed = armedRef.current;
       if (!armed) return;

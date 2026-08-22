@@ -388,12 +388,8 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
         updateDrag(nextX, nextY);
       },
     };
-    holdRef.current = setTimeout(() => {
-      const armed = armedRef.current;
-      if (!armed) return;
-      armedRef.current = null;
-      beginDrag(event, day, armed.x, armed.y, grab);
-    }, LIFT_MS);
+    /* Mouse/pen cards are movement-only. Touch uses touchStart()'s separate
+       LIFT_MS timer so vertical scrolling cannot be stolen by a card. */
   };
   const pointerUp = (e, event, day) => {
     if (e.pointerType === "touch") return;
