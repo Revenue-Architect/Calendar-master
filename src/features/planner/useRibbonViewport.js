@@ -375,7 +375,14 @@ export default function useRibbonViewport({
   }, [rememberLogicalCenter, ribbonRange.startKey, ribbonRange.endKey]);
 
   useLayoutEffect(() => {
-    if (!enabled || !ready || !ribbonNode || !ribbonActiveNode) return;
+    if (!enabled || !ready || !ribbonNode) return;
+    /* A missing active cell has two meanings: a fresh strip whose virtual
+       window has not rendered the selected date yet, or a user scrolling the
+       same strip far enough that selection leaves the 56-day window. Only the
+       former has no position request yet and needs semantic-remount window
+       preparation; the latter must remain a manual browse. */
+    if (ribbonPositionRequestRef.current == null) ensureDateVisible(selectedDateKey);
+    if (!ribbonActiveNode) return;
     /* Readiness is scoped to the mounted strip, not to whether the previous
        scroll transaction happened to emit `scrollend` yet. Chromium can omit
        that event for an instant `scrollTo`, leaving the state as positioning
@@ -393,7 +400,7 @@ export default function useRibbonViewport({
     });
     ribbonPositionedDateRef.current = selectedDateKey;
     ribbonCenterPendingRef.current = false;
-  }, [beginPosition, enabled, ready, ribbonActiveNode, ribbonNode, selectedDateKey]);
+  }, [beginPosition, enabled, ensureDateVisible, ready, ribbonActiveNode, ribbonNode, selectedDateKey]);
 
   useLayoutEffect(() => {
     if (!ribbonCenterPendingRef.current || !ribbonNode || !ribbonActiveNode) return;
