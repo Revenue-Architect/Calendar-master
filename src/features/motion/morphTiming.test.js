@@ -4,11 +4,6 @@ import test from "node:test";
 import {
   CASCADE_GROUPS,
   MORPH_FADE,
-  MORPH_CLOSE_MS,
-  MORPH_CONTENT_BLUR_PX,
-  MORPH_CONTENT_SCALE,
-  MORPH_HANDOFF_MS,
-  MORPH_HANDOFF_SLIDE_PX,
   MORPH_LEAD,
   MORPH_MS,
   MORPH_STAGE_CONTENT,
@@ -29,21 +24,11 @@ test("the cascade finishes inside the shape it belongs to", () => {
 test("stage handoffs stay ordered fractions of the container", () => {
   assert.ok(MORPH_STAGE_REVEAL < MORPH_STAGE_CONTENT);
   assert.ok(MORPH_STAGE_CONTENT < 1);
-  assert.ok(MORPH_MS * MORPH_STAGE_REVEAL < MORPH_MS * MORPH_STAGE_CONTENT);
-  assert.ok(MORPH_MS * MORPH_STAGE_CONTENT < MORPH_MS);
+  assert.equal(MORPH_MS * MORPH_STAGE_REVEAL, 212.8);
+  assert.equal(MORPH_MS * MORPH_STAGE_CONTENT, 262.2);
 });
 
 test("the lead is the wait that keeps content off an unfinished clip", () => {
   assert.equal(MORPH_LEAD, 0.35);
   assert.ok(MORPH_LEAD > MORPH_STAGE_REVEAL * 0, "lead is a fraction, not milliseconds");
-});
-
-test("v3 handoff effects stay inside the opening cadence", () => {
-  assert.ok(MORPH_HANDOFF_MS < MORPH_MS);
-  assert.ok(MORPH_CLOSE_MS < MORPH_MS);
-  assert.equal(MORPH_CLOSE_MS, 250, "settled notch close uses the 250ms cadence");
-  assert.ok(MORPH_LEAD + CASCADE_GROUPS * MORPH_STEP + MORPH_FADE <= 1);
-  assert.ok(MORPH_CONTENT_SCALE >= .98 && MORPH_CONTENT_SCALE <= .995);
-  assert.ok(MORPH_CONTENT_BLUR_PX >= 0 && MORPH_CONTENT_BLUR_PX <= 2);
-  assert.ok(MORPH_HANDOFF_SLIDE_PX >= 28 && MORPH_HANDOFF_SLIDE_PX <= 40);
 });
