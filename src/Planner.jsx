@@ -3169,9 +3169,14 @@ export default function Planner() {
         interactionRef.current = cancelArmedInteraction(interactionRef.current);
       }
     };
-
+    const cancelTouchSequence = () => {
+      if (gestureRef.current || interactionRef.current.phase === "active") finishRef.current(0, 0, { cancelled: true });
+      else cancelPress();
+      disarm(); setTaskSwipe(null);
+    };
     const onStart = (e) => {
-      if (e.touches.length !== 1 || gestureRef.current) return;
+      if (e.touches.length !== 1) { cancelTouchSequence(); return; }
+      if (gestureRef.current) return;
       /* A scroll event can arrive after the finger moves outside the stream (or
          after a device compositor applies the offset), so establish intent at
          touch start. A tap alone never changes focus; it only authorizes a
@@ -3271,7 +3276,7 @@ export default function Planner() {
         if (e.touches.length !== 1 || !t || (g.touchId != null && t.identifier !== g.touchId)) {
           e.preventDefault();
           e.stopPropagation();
-          finishRef.current(0, 0, { cancelled: true });
+          cancelTouchSequence();
           return;
         }
         e.preventDefault();
@@ -3344,8 +3349,8 @@ export default function Planner() {
       const p = press.t;
       const t = e.changedTouches && e.changedTouches[0];
       const touchId = t?.identifier;
-      if (g?.touchId != null && touchId !== g.touchId) return;
-      if (p?.touchId != null && touchId != null && touchId !== p.touchId) return;
+      if ((g?.touchId != null && touchId !== g.touchId)
+        || (p?.touchId != null && touchId != null && touchId !== p.touchId)) { cancelTouchSequence(); return; }
       disarm();
       if (p?.swiping) {
         if (e.cancelable) e.preventDefault();
@@ -3368,10 +3373,7 @@ export default function Planner() {
     };
 
     const onCancel = () => {
-      disarm();
-      setTaskSwipe(null);
-      if (gestureRef.current) finishRef.current(0, 0, { cancelled: true });
-      else interactionRef.current = cancelArmedInteraction(interactionRef.current);
+      cancelTouchSequence();
     };
 
     el.addEventListener("touchstart", onStart, { passive: true });
@@ -4423,11 +4425,9 @@ export default function Planner() {
                           {touchResizeEligible && (
                             <>
                               <div aria-hidden="true" tabIndex={-1} data-touch-resize="start" data-resize-edge="start"
-                                onPointerDown={(ev) => resizeDown(ev, e, "start")}
                                 className="absolute top-0 left-1/2 z-10"
                                 style={{ width: 44, height: 44, transform: "translateX(-50%)", cursor: "ns-resize", touchAction: "pan-y" }} />
                               <div aria-hidden="true" tabIndex={-1} data-touch-resize="end" data-resize-edge="end"
-                                onPointerDown={(ev) => resizeDown(ev, e, "end")}
                                 className="absolute bottom-0 left-1/2 z-10"
                                 style={{ width: 44, height: 44, transform: "translateX(-50%)", cursor: "ns-resize", touchAction: "pan-y" }} />
                             </>

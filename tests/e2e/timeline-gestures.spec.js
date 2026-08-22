@@ -117,6 +117,23 @@ test.describe("moving an event on the timeline", () => {
     expect(moved.endLocal).toBe(`${today}T13:00`);
   });
 
+  test("an immediate desktop drag from a semantic touch grip still moves an eligible Event", async ({ page }) => {
+    await seedPlanner(page, seeded({ startLocal: `${today}T10:00`, endLocal: `${today}T12:00` }));
+    const event = card(page);
+    await event.scrollIntoViewIfNeeded();
+    const grip = event.locator('[data-touch-resize="end"]');
+    await expect(grip, "the eligible Event is missing its semantic touch grip").toHaveCount(1);
+    const box = await grip.boundingBox();
+
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + HOUR_PX, { steps: 12 });
+    await page.mouse.up();
+
+    const moved = await timing(page, (t) => t.startLocal.endsWith("11:00"), "a mouse drag from the semantic grip did not move the Event");
+    expect(moved.endLocal, "a desktop move must preserve the eligible Event duration").toBe(`${today}T13:00`);
+  });
+
   test("a stationary desktop Event hold stays a click candidate", async ({ page }) => {
     await seedPlanner(page, seeded());
     await card(page).scrollIntoViewIfNeeded();
