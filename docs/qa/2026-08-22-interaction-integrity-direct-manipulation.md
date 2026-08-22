@@ -5,7 +5,10 @@ Branch: `fix/timeline-direct-drag-resize`
 Origin baseline: `927ffe7414fc2a00a68bb579ea8ea98154f1e41e`  
 PR #7 merge baseline: `f644fbc`  
 Starting branch head: `927ffe7414fc2a00a68bb579ea8ea98154f1e41e`  
-Final implementation/doc SHA: recorded by the final commit on this branch
+Implementation commit: `fb59f71`  
+Plan commit: `e01c375`  
+QA artifact commit: `26c2e8e`  
+Final delivery tip: the branch tip shown on [PR #8](https://github.com/Revenue-Architect/Calendar-master/pull/8)
 
 ## Executive result
 
