@@ -8,7 +8,7 @@ Starting branch head: `927ffe7414fc2a00a68bb579ea8ea98154f1e41e`
 Implementation commit: `fb59f71`  
 Plan commit: `e01c375`  
 QA artifact commit: `26c2e8e`  
-Final review-fix commit: recorded after this remediation commit
+Final review-fix commit: `1b1a0dc`
 Final delivery tip: the branch tip shown on [PR #8](https://github.com/Revenue-Architect/Calendar-master/pull/8)
 
 ## Executive result
