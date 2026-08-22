@@ -531,7 +531,7 @@ export function plannerStyles({ T, preferences }) {
            passed. This is deliberately scoped to the settled state: it repairs
            a stalled body animation without stealing the opening interpolation
            or the reversible closing animation. */
-        .nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-notch-body{animation:none!important;opacity:1!important;transform:none!important;filter:none!important}
+        .nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-notch-body{animation:none!important;opacity:1!important;transform:none!important;filter:none!important;will-change:auto!important}
         .nb-fluid[data-fluid-origin="notch"] .nb-notch-body>:last-child:not(:has(.nb-notch-cascade)){--nb-stage:1}
         ${Array.from({ length: 8 }, (_, n) => `.nb-fluid[data-fluid-origin="notch"] .nb-notch-cascade>*:nth-child(${n + 1}){--nb-stage:${n + 1}}`).join("")}
         .nb-fluid[data-fluid-origin="notch"] .nb-notch-cascade>*:nth-child(n+9){--nb-stage:8}
@@ -541,6 +541,17 @@ export function plannerStyles({ T, preferences }) {
           animation:nbnotchgroupin var(--nb-morph-fade) cubic-bezier(.22,.85,.28,1) backwards;
           animation-delay:calc(var(--nb-morph-lead) + var(--nb-stage,0) * var(--nb-morph-step));
           will-change:clip-path;
+        }
+        /* Notch entry is owned by the single body plane. Once the wall-clock
+           stage reaches open, the legacy cascade descendants are explicitly
+           idle too; otherwise the later generic rule above can leave a dead
+           clip-path compositor hint promoted for the lifetime of the sheet. */
+        .nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-notch-body>:first-child,
+        .nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-notch-cascade>*,
+        .nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-notch-body>:last-child:not(:has(.nb-notch-cascade)){
+          animation:none!important;
+          clip-path:none!important;
+          will-change:auto!important;
         }
         /* Each group is uncovered, not faded in. This was the last fade left on the
            composer and the one the eye actually catches, because eight of them finish
@@ -567,7 +578,7 @@ export function plannerStyles({ T, preferences }) {
            filter rather than leaving the animation's fill value on a hidden
            node. Closing sheets enter a separate "closing" stage, so their
            reversible label-in animation still owns these properties. */
-        .nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-morph-source-label{animation:none!important;opacity:0;transform:none!important;filter:none!important}
+        .nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-morph-source-label{animation:none!important;opacity:0;transform:none!important;filter:none!important;will-change:auto!important}
         /* Close spends the existing lead *inside* MORPH_MS: the form leaves for
            --nb-morph-lead, then the lime object folds for the rest. Adding a
            133ms lead on top of 350 would fail the fortieth-time test. In-flight
@@ -736,9 +747,9 @@ export function plannerStyles({ T, preferences }) {
         .nb-day-heading.is-focused{padding-top:.45rem;padding-bottom:.45rem;border-bottom:1px solid ${T.line}}
         .nb-day-heading.is-focused .nb-display{font-size:2rem;line-height:2rem}
 
-        @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.nb-fluid,.nb-view-track,.nb-msheet,.nb-timeline-chrome,.nb-timeline-chrome-inner,.nb-morph-source-label,.nb-up,.nb-list-enter{animation:none!important;transform:none!important}.nb-fluid,.nb-msheet,.nb-timeline-chrome-inner,.nb-morph-source-label{transition:opacity 160ms ease!important}.nb-fluid[data-fluid-origin="notch"] .nb-notch-body{animation:none!important;transition:none!important;opacity:1!important;transform:none!important;filter:none!important}.nb-fluid[data-fluid-origin="notch"] .nb-morph-source-label{animation:none!important;transition:none!important;opacity:0!important;transform:none!important;filter:none!important;pointer-events:none!important}.nb-view-track.is-sliding,.nb-app-surface,.nb-nav-viewport,.nb-nav-carrier,.nb-nav-motion-viewport,.nb-nav-motion-carrier,.nb-mobile-calendar-return,.nb-mobile-calendar-return::after,.nb-navigation,.nb-nav-brand,.nb-nav-item,.nb-nav-membership{transition:none!important;animation:none!important}
+        @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.nb-fluid,.nb-view-track,.nb-msheet,.nb-timeline-chrome,.nb-timeline-chrome-inner,.nb-morph-source-label,.nb-up,.nb-list-enter{animation:none!important;transform:none!important}.nb-fluid,.nb-msheet,.nb-timeline-chrome-inner,.nb-morph-source-label{transition:opacity 160ms ease!important}.nb-fluid[data-fluid-origin="notch"] .nb-notch-body{animation:none!important;transition:none!important;opacity:1!important;transform:none!important;filter:none!important;will-change:auto!important}.nb-fluid[data-fluid-origin="notch"] .nb-morph-source-label{animation:none!important;transition:none!important;opacity:0!important;transform:none!important;filter:none!important;pointer-events:none!important;will-change:auto!important}.nb-fluid[data-fluid-origin="notch"] .nb-notch-cascade>*,.nb-fluid[data-fluid-origin="notch"] .nb-notch-body>:first-child,.nb-fluid[data-fluid-origin="notch"] .nb-notch-body>:last-child:not(:has(.nb-notch-cascade)){will-change:auto!important}.nb-view-track.is-sliding,.nb-app-surface,.nb-nav-viewport,.nb-nav-carrier,.nb-nav-motion-viewport,.nb-nav-motion-carrier,.nb-mobile-calendar-return,.nb-mobile-calendar-return::after,.nb-navigation,.nb-nav-brand,.nb-nav-item,.nb-nav-membership{transition:none!important;animation:none!important}
           button:active,[role="button"]:active,a[href]:active,[data-event-id]:active,[data-task-chip]:active{scale:1!important}}
-        ${preferences?.display.reducedMotion ? `.nb-fluid,.nb-view-track,.nb-msheet,.nb-timeline-chrome,.nb-timeline-chrome-inner,.nb-morph-source-label{animation:none!important;transform:none!important}.nb-fluid,.nb-msheet,.nb-timeline-chrome-inner,.nb-morph-source-label{transition:opacity 160ms ease!important}.nb-fluid[data-fluid-origin="notch"] .nb-notch-body{animation:none!important;transition:none!important;opacity:1!important;transform:none!important;filter:none!important}.nb-fluid[data-fluid-origin="notch"] .nb-morph-source-label{animation:none!important;transition:none!important;opacity:0!important;transform:none!important;filter:none!important;pointer-events:none!important}.nb-view-track.is-sliding,.nb-app-surface,.nb-nav-viewport,.nb-nav-carrier,.nb-nav-motion-viewport,.nb-nav-motion-carrier,.nb-mobile-calendar-return,.nb-mobile-calendar-return::after,.nb-navigation,.nb-nav-brand,.nb-nav-item,.nb-nav-membership{transition:none!important;animation:none!important}
+        ${preferences?.display.reducedMotion ? `.nb-fluid,.nb-view-track,.nb-msheet,.nb-timeline-chrome,.nb-timeline-chrome-inner,.nb-morph-source-label{animation:none!important;transform:none!important}.nb-fluid,.nb-msheet,.nb-timeline-chrome-inner,.nb-morph-source-label{transition:opacity 160ms ease!important}.nb-fluid[data-fluid-origin="notch"] .nb-notch-body{animation:none!important;transition:none!important;opacity:1!important;transform:none!important;filter:none!important;will-change:auto!important}.nb-fluid[data-fluid-origin="notch"] .nb-morph-source-label{animation:none!important;transition:none!important;opacity:0!important;transform:none!important;filter:none!important;pointer-events:none!important;will-change:auto!important}.nb-fluid[data-fluid-origin="notch"] .nb-notch-cascade>*,.nb-fluid[data-fluid-origin="notch"] .nb-notch-body>:first-child,.nb-fluid[data-fluid-origin="notch"] .nb-notch-body>:last-child:not(:has(.nb-notch-cascade)){will-change:auto!important}.nb-view-track.is-sliding,.nb-app-surface,.nb-nav-viewport,.nb-nav-carrier,.nb-nav-motion-viewport,.nb-nav-motion-carrier,.nb-mobile-calendar-return,.nb-mobile-calendar-return::after,.nb-navigation,.nb-nav-brand,.nb-nav-item,.nb-nav-membership{transition:none!important;animation:none!important}
           button:active,[role="button"]:active,a[href]:active,[data-event-id]:active,[data-task-chip]:active{scale:1!important}` : ""}
       `;
 }

@@ -74,12 +74,19 @@ const readHandoffRestState = async (sheet) => sheet.evaluate((node) => {
       opacity: Number(style.opacity),
       transform: style.transform,
       filter: style.filter,
+      willChange: style.willChange,
       animations: element.getAnimations().map((animation) => animation.animationName),
     };
   };
+  const cascade = [
+    ...node.querySelectorAll(
+      ".nb-notch-cascade > *, .nb-notch-body > :first-child, .nb-notch-body > :last-child:not(:has(.nb-notch-cascade))",
+    ),
+  ].map((element) => getComputedStyle(element).willChange);
   return {
     source: read(node.querySelector(".nb-morph-source-label")),
     body: read(node.querySelector(".nb-notch-body")),
+    cascade,
   };
 });
 
@@ -226,6 +233,12 @@ test.describe("the notch morph", () => {
       .toMatch(/none|matrix\(1, 0, 0, 1, 0, 0\)/);
     expect(settledSourceStyle.filter, "source identity must not retain a blur at rest").toMatch(/none|blur\(0(px)?\)/);
 
+    const rest = await readHandoffRestState(page.getByTestId("sheet"));
+    expect(rest.body.willChange, "settled Composer body must release its compositor hint").toBe("auto");
+    expect(rest.source.willChange, "settled source clone must release its compositor hint").toBe("auto");
+    expect(rest.cascade, "settled notch cascade descendants must release clip-path hints").not.toContain("clip-path");
+    expect(rest.cascade.every((value) => value === "auto"), "settled notch cascade descendants must be idle").toBe(true);
+
     /* Richer handoff motion must never alter the true-size layout box or the
        scrollable form geometry. */
     const width = zero.panelOffsetWidth;
@@ -337,9 +350,12 @@ test.describe("the notch morph", () => {
     expect(rest.body.opacity).toBeGreaterThanOrEqual(.99);
     expect(rest.body.transform).toMatch(/none|matrix\(1, 0, 0, 1, 0, 0\)/);
     expect(rest.body.filter).toMatch(/none|blur\(0(px)?\)/);
+    expect(rest.body.willChange).toBe("auto");
     expect(rest.source.opacity).toBeLessThanOrEqual(.01);
     expect(rest.source.transform).toMatch(/none|matrix\(1, 0, 0, 1, 0, 0\)/);
     expect(rest.source.filter).toMatch(/none|blur\(0(px)?\)/);
+    expect(rest.source.willChange).toBe("auto");
+    expect(rest.cascade.every((value) => value === "auto")).toBe(true);
   });
 
   test("NEW grows the composer out of the button, and folds it back", async ({ page }) => {
@@ -507,6 +523,74 @@ test.describe("the notch morph", () => {
     expect(rest.source.opacity).toBeLessThanOrEqual(.01);
     expect(rest.source.transform).toMatch(/none|matrix\(1, 0, 0, 1, 0, 0\)/);
     expect(rest.source.filter).toMatch(/none|blur\(0(px)?\)/);
+    expect(rest.body.willChange).toBe("auto");
+    expect(rest.source.willChange).toBe("auto");
+    expect(rest.cascade.every((value) => value === "auto")).toBe(true);
+  });
+
+  test("the Composer body holds through its delayed handoff before entering", async ({ page }) => {
+    await openPlanner(page);
+    await page.getByTestId("new-entry").click();
+    const sheet = page.getByTestId("sheet");
+    const frames = await sheet.evaluate((node) => {
+      const body = node.querySelector(".nb-notch-body");
+      const bodyAnimation = node.getAnimations({ subtree: true })
+        .find((animation) => animation.animationName === "nbnotchbodyin");
+      if (!body || !bodyAnimation?.effect) return null;
+
+      const panelStyle = getComputedStyle(node);
+      const morphMs = Number.parseFloat(panelStyle.getPropertyValue("--nb-morph-dur"));
+      const handoffMs = Number.parseFloat(panelStyle.getPropertyValue("--nb-morph-handoff"));
+      const timing = bodyAnimation.effect.getTiming();
+      const delay = Number(timing.delay);
+      const duration = Number(timing.duration);
+      const matrixValues = (value) => {
+        const matrix = new DOMMatrixReadOnly(value === "none" ? "matrix(1,0,0,1,0,0)" : value);
+        return { x: matrix.e, scaleX: matrix.a };
+      };
+      const readAt = (clock) => {
+        for (const animation of node.getAnimations({ subtree: true })) {
+          animation.pause();
+          animation.currentTime = clock;
+        }
+        const style = getComputedStyle(body);
+        return {
+          opacity: Number(style.opacity),
+          transform: matrixValues(style.transform),
+          filter: style.filter,
+        };
+      };
+      const twenty = readAt(morphMs * .2);
+      const twentyFive = readAt(morphMs * .25);
+      const forty = readAt(morphMs * .4);
+      for (const animation of node.getAnimations({ subtree: true })) animation.play();
+      return {
+        morphMs,
+        handoffMs,
+        delay,
+        duration,
+        twenty,
+        twentyFive,
+        forty,
+      };
+    });
+
+    expect(frames, "the delayed Composer body animation must be present").not.toBeNull();
+    expect(Math.abs(frames.delay - frames.morphMs * .28), "body delay must be 28% of the opening cadence").toBeLessThanOrEqual(1);
+    expect(frames.duration, "body handoff must use the handoff token").toBe(frames.handoffMs);
+
+    for (const [label, frame] of [["20%", frames.twenty], ["25%", frames.twentyFive]]) {
+      expect(frame.opacity, `body must remain hidden at ${label}`).toBeLessThanOrEqual(.01);
+      expect(frame.transform.x, `body must remain translated from the right at ${label}`).toBeGreaterThan(30);
+      expect(frame.transform.scaleX, `body must retain its handoff scale at ${label}`).toBeGreaterThanOrEqual(.98);
+      expect(frame.transform.scaleX, `body must not be settled at ${label}`).toBeLessThanOrEqual(.99);
+      expect(frame.filter, `body must retain its transient blur at ${label}`).toMatch(/blur\(1\.5px\)/);
+    }
+    expect(frames.forty.opacity, "body must become visible after its delay").toBeGreaterThan(.05);
+    expect(frames.forty.transform.x, "body must still be travelling in from the right after its delay").toBeGreaterThan(0);
+    expect(frames.forty.transform.x, "body must be closer to rest after its delay").toBeLessThan(36);
+    expect(frames.forty.transform.scaleX, "body must be resolving toward identity after its delay").toBeGreaterThan(.985);
+    expect(frames.forty.transform.scaleX, "body must not settle before the handoff completes").toBeLessThan(1);
   });
 
   /* Reported from a phone three times before it was reproduced, because it needs a
@@ -751,9 +835,12 @@ test.describe("the notch morph", () => {
     expect(rest.body.opacity).toBeGreaterThanOrEqual(.99);
     expect(rest.body.transform).toMatch(/none|matrix\(1, 0, 0, 1, 0, 0\)/);
     expect(rest.body.filter).toMatch(/none|blur\(0(px)?\)/);
+    expect(rest.body.willChange).toBe("auto");
     expect(rest.source.opacity).toBeLessThanOrEqual(.01);
     expect(rest.source.transform).toMatch(/none|matrix\(1, 0, 0, 1, 0, 0\)/);
     expect(rest.source.filter).toMatch(/none|blur\(0(px)?\)/);
+    expect(rest.source.willChange).toBe("auto");
+    expect(rest.cascade.every((value) => value === "auto")).toBe(true);
     await expect(trigger).toHaveCSS("visibility", "hidden");
 
     await page.keyboard.press("Escape");
