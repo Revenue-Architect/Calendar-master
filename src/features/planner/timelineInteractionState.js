@@ -194,6 +194,10 @@ export function finishCommittedInteraction(state) {
   };
 }
 
+export function settleInteraction(state) {
+  return finishCommittedInteraction(commitInteraction(state).state);
+}
+
 export function interactionOwnerAllows(state, owner) {
   if (!state || state.phase === INTERACTION_PHASES.idle) return true;
   return state.owner === owner;
