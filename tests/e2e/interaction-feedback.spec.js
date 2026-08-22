@@ -45,6 +45,8 @@ test.describe("semantic interaction feedback", () => {
     expect(await newEntry.evaluate((node) => Number.parseFloat(getComputedStyle(node).outlineWidth))).toBeGreaterThanOrEqual(2);
 
     await newEntry.click();
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).toHaveAttribute("data-morph-stage", "open");
     const submit = page.getByRole("button", { name: "ADD TO TIMELINE", exact: true });
     await expect(submit).toBeDisabled();
     const before = await paint(submit);
