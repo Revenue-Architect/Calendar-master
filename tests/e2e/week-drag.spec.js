@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { openPlanner, quickAdd, seedPlanner, settledState, pressHoldAndDrag } from "./helpers.js";
+import { directMouseDrag, openPlanner, quickAdd, seedPlanner, settledState } from "./helpers.js";
 import { createBlankPlannerState } from "../../src/platform/persistence/plannerStateImport.js";
 
 /* Dragging a card in the week view moves it on both axes at once — a different
@@ -88,7 +88,7 @@ test.describe("dragging in the week view", () => {
     const targetKey = keys.find((key) => key !== originalDay);
     expect(targetKey, "the week should hold a day other than the event's").toBeTruthy();
 
-    await pressHoldAndDrag(page, card, columnFor(page, targetKey));
+    await directMouseDrag(page, card, columnFor(page, targetKey));
 
     const state = await settledState(
       page,
@@ -102,7 +102,7 @@ test.describe("dragging in the week view", () => {
     expect(minutes(endLocal) - minutes(startLocal)).toBe(30);
   });
 
-  test("a press without a hold does not move anything", async ({ page }) => {
+  test("an immediate desktop drag moves a Week Event without a hold", async ({ page }) => {
     await openPlanner(page);
     await quickAdd(page, "Standup today 10am 30m");
     await openWeek(page);
@@ -113,16 +113,27 @@ test.describe("dragging in the week view", () => {
     const originalDay = before.events[0].timing.startLocal.slice(0, 10);
     const targetKey = keys.find((key) => key !== originalDay);
 
-    /* Same movement, no hold: the week must stay readable by dragging across it.
-       `steps` is deliberately large so the travel outlasts the lift threshold —
-       the pending lift has to be cancelled by the movement, not merely outrun by
-       a short gesture. Without that cancellation the card lifts mid-travel under
-       a cursor that has already left it. */
-    await pressHoldAndDrag(page, card, columnFor(page, targetKey), { holdMs: 40, steps: 40 });
-    await page.waitForTimeout(600);
+    await card.scrollIntoViewIfNeeded();
+    const from = await card.boundingBox();
+    const target = await columnFor(page, targetKey).boundingBox();
+    expect(from).toBeTruthy();
+    expect(target).toBeTruthy();
+    const grabY = from.y + Math.min(8, from.height / 2);
+    const dropY = Math.min(Math.max(grabY, target.y + 4), target.y + target.height - 4);
 
-    const after = await settledState(page, (s) => s.events.length === 1);
-    expect(after.events[0].timing.startLocal).toBe(before.events[0].timing.startLocal);
+    await page.mouse.move(from.x + from.width / 2, grabY);
+    await page.mouse.down();
+    await page.mouse.move(target.x + target.width / 2, dropY, { steps: 20 });
+    await page.mouse.up();
+
+    const after = await settledState(
+      page,
+      (s) => s.events[0].timing.startLocal.slice(0, 10) !== originalDay,
+      "the immediate Week drag never persisted",
+    );
+    expect(after.events[0].timing.startLocal.slice(0, 10)).toBe(targetKey);
+    const minutes = (value) => Number(value.slice(11, 13)) * 60 + Number(value.slice(14, 16));
+    expect(minutes(after.events[0].timing.endLocal) - minutes(after.events[0].timing.startLocal)).toBe(30);
   });
 
   test("a tap on a card opens it instead of moving it", async ({ page }) => {
@@ -143,7 +154,7 @@ test.describe("dragging in the week view", () => {
 
     const before = await settledState(page, (s) => s.events.length === 1);
     const card = page.getByTestId("week-event").first();
-    await pressHoldAndDrag(page, card, card);
+    await directMouseDrag(page, card, card);
     await page.waitForTimeout(400);
 
     const after = await settledState(page, (s) => s.events.length === 1);
@@ -200,5 +211,76 @@ test.describe("empty week touch intent", () => {
     await expect(page.getByTestId("week-draft-preview")).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.getByTestId("week-draft-preview")).toBeHidden();
+  });
+});
+
+test.describe("Week Event touch ownership", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test("vertical movement from a Week Event scrolls instead of rescheduling", async ({ page }) => {
+    await openPlanner(page);
+    await quickAdd(page, "Standup today 10am 30m");
+    await openWeek(page);
+
+    const card = page.getByTestId("week-event").first();
+    const stream = page.getByTestId("week-grid").locator(".nb-s").first();
+    await card.scrollIntoViewIfNeeded();
+    const box = await card.boundingBox();
+    const before = await settledState(page, (s) => s.events.length === 1);
+    const beforeScroll = await stream.evaluate((node) => node.scrollTop);
+    const session = await page.context().newCDPSession(page);
+
+    await touchAt(session, "touchStart", box.x + box.width / 2, box.y + box.height / 2);
+    await touchAt(session, "touchMove", box.x + box.width / 2, box.y + 120);
+    await expect.poll(() => stream.evaluate((node, initial) => Math.abs(node.scrollTop - initial), beforeScroll), {
+      message: "vertical Week Event touch should move the timeline before lift",
+    }).toBeGreaterThan(1);
+    await touchAt(session, "touchEnd", box.x + box.width / 2, box.y + 120);
+    await session.detach();
+
+    const after = await settledState(page, (s) => s.events.length === 1);
+    expect(after.events[0].timing).toEqual(before.events[0].timing);
+    await expect(page.getByTestId("sheet")).toHaveCount(0);
+  });
+
+  test("a held Week Event touch moves after the lift threshold", async ({ page }) => {
+    await openPlanner(page);
+    await quickAdd(page, "Standup today 10am 30m");
+    await openWeek(page);
+
+    const card = page.getByTestId("week-event").first();
+    await card.scrollIntoViewIfNeeded();
+    const box = await card.boundingBox();
+    const before = await settledState(page, (s) => s.events.length === 1);
+    const originalDay = before.events[0].timing.startLocal.slice(0, 10);
+    const targetKey = await page.locator("[data-week-day]").evaluateAll((nodes, original) => {
+      const viewport = { left: 0, right: window.innerWidth };
+      return nodes
+        .map((node) => ({ key: node.getAttribute("data-week-day"), rect: node.getBoundingClientRect() }))
+        .find(({ key, rect }) => key !== original
+          && (rect.left + rect.width / 2) > 52
+          && (rect.left + rect.width / 2) < viewport.right)?.key;
+    }, originalDay);
+    expect(targetKey, "a second Week column must be visible for the touch move").toBeTruthy();
+    const target = await columnFor(page, targetKey).boundingBox();
+    const x = box.x + box.width / 2;
+    const y = box.y + Math.min(8, box.height / 2);
+    const dropX = target.x + target.width / 2;
+    const session = await page.context().newCDPSession(page);
+
+    await touchAt(session, "touchStart", x, y);
+    await page.waitForTimeout(340);
+    await touchAt(session, "touchMove", dropX, y);
+    await touchAt(session, "touchEnd", dropX, y);
+    await session.detach();
+
+    const after = await settledState(
+      page,
+      (s) => s.events[0].timing.startLocal.slice(0, 10) !== originalDay,
+      "held Week Event touch never persisted a move",
+    );
+    expect(after.events[0].timing.startLocal.slice(0, 10)).toBe(targetKey);
+    const minutes = (value) => Number(value.slice(11, 13)) * 60 + Number(value.slice(14, 16));
+    expect(minutes(after.events[0].timing.endLocal) - minutes(after.events[0].timing.startLocal)).toBe(30);
   });
 });

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   ACTION_SWIPE_COMMIT_PX,
+  DIRECT_DRAG_ACTIVATION_PX,
   EMPTY_SPACE_LIFT_MS,
   HOLD_CANCEL_PX,
   LIFT_MS,
@@ -13,6 +14,7 @@ import {
   liftDelayForTimelineTarget,
   minimumFor,
   movedEnoughToCancelHold,
+  movedEnoughToActivateDirectDrag,
   pointerButtonsHeld,
   proposeGesture,
   proposeMove,
@@ -48,6 +50,16 @@ test("a press that has not travelled is still a press", () => {
   assert.equal(movedEnoughToCancelHold(origin, { x: 104, y: 104 }), false, "within the threshold");
   assert.equal(movedEnoughToCancelHold(origin, { x: 100, y: 100 + HOLD_CANCEL_PX + 1 }), true);
   assert.equal(movedEnoughToCancelHold(null, { x: 0, y: 0 }), false);
+});
+
+test("desktop direct manipulation has its own small movement threshold", () => {
+  const origin = { x: 100, y: 100 };
+  assert.equal(movedEnoughToActivateDirectDrag(origin, origin), false);
+  assert.equal(movedEnoughToActivateDirectDrag(origin, { x: 102, y: 100 }), false);
+  assert.equal(movedEnoughToActivateDirectDrag(origin, { x: 103, y: 100 }), true);
+  assert.equal(movedEnoughToActivateDirectDrag(origin, { x: 103, y: 102 }), true);
+  assert.equal(movedEnoughToActivateDirectDrag(origin, { x: 100, y: 100 }, DIRECT_DRAG_ACTIVATION_PX), false);
+  assert.equal(movedEnoughToActivateDirectDrag(null, { x: 0, y: 0 }), false);
 });
 
 test("empty space waits longer than a card before becoming a timeline gesture", () => {

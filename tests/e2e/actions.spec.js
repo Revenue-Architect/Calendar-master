@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { openPlanner, quickAdd, seedPlanner, settledState, storedState } from "./helpers.js";
+import { cancelCurrentPointer, openPlanner, quickAdd, seedPlanner, settledState, storedState } from "./helpers.js";
 import { createBlankPlannerState } from "../../src/platform/persistence/plannerStateImport.js";
 import { createEvent } from "../../src/domains/calendar/index.js";
 import { createTask } from "../../src/domains/tasks/index.js";
@@ -116,7 +116,7 @@ test.describe("the actions column", () => {
     await expect(page.locator('[role="status"]').filter({ hasText: "Completed" }), "reopening must clear the stale completion toast").toHaveCount(0);
   });
 
-  test("a held desktop Action card follows the pointer and reschedules on drop", async ({ page }) => {
+  test("an immediate desktop Action drag follows the pointer and reschedules on drop", async ({ page }) => {
     await seedPlanner(page, scheduledAction({ id: "task-drag", title: "Move the brief" }));
     const chip = page.locator('[data-task-chip="task-drag"]');
     await chip.scrollIntoViewIfNeeded();
@@ -127,13 +127,68 @@ test.describe("the actions column", () => {
 
     await page.mouse.move(x, y);
     await page.mouse.down();
-    await page.waitForTimeout(360);
     await page.mouse.move(x, y + hourPx, { steps: 8 });
     await expect.poll(async () => (await chip.boundingBox()).y).toBeGreaterThan(before.y + 30);
     await page.mouse.up();
 
     const state = await settledState(page, (stored) => stored.tasks[0]?.planned.startMinute === 11 * 60, "the Action drag did not reschedule the task");
     expect(state.tasks[0].planned.startMinute).toBe(11 * 60);
+  });
+
+  test("cancelling an Action drag leaves it unchanged and the next drag still works", async ({ page }) => {
+    await seedPlanner(page, scheduledAction({ id: "task-cancel", title: "Cancel the brief" }));
+    const chip = page.locator('[data-task-chip="task-cancel"]');
+    await chip.scrollIntoViewIfNeeded();
+    const before = await storedState(page);
+    const box = await chip.boundingBox();
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x, y + 68, { steps: 8 });
+    await cancelCurrentPointer(page, "pointer");
+    await page.mouse.up();
+
+    const cancelled = await storedState(page);
+    expect(cancelled.tasks.find((task) => task.id === "task-cancel").planned)
+      .toEqual(before.tasks.find((task) => task.id === "task-cancel").planned);
+    await expect(page.getByTestId("sheet")).toHaveCount(0);
+
+    await chip.scrollIntoViewIfNeeded();
+    const next = await chip.boundingBox();
+    await page.mouse.move(next.x + next.width / 2, next.y + next.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(next.x + next.width / 2, next.y + next.height / 2 + 68, { steps: 8 });
+    await page.mouse.up();
+    const recovered = await settledState(page, (stored) => stored.tasks[0]?.planned.startMinute === 11 * 60, "the next Action drag did not recover after cancellation");
+    expect(recovered.tasks[0].planned.startMinute).toBe(11 * 60);
+  });
+
+  test("an estimated Action resizes immediately without moving its start", async ({ page }) => {
+    await seedPlanner(page, scheduledAction({ id: "task-resize", title: "Resize the brief" }));
+    const chip = page.locator('[data-task-chip="task-resize"]');
+    await chip.scrollIntoViewIfNeeded();
+    const handle = chip.getByTestId("timeline-action-resize");
+    await expect(handle).toBeVisible();
+    const box = await handle.boundingBox();
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x, y + 68, { steps: 8 });
+    await expect(page.getByTestId("timeline-action-lane")).toHaveClass(/nb-timeline-lane-active/);
+    await page.mouse.up();
+
+    const state = await settledState(
+      page,
+      (stored) => stored.tasks[0]?.planned.estimateMinutes > 60,
+      "the Action resize did not update its estimate",
+    );
+    expect(state.tasks[0].planned.startMinute).toBe(10 * 60);
+    expect(state.tasks[0].planned.estimateMinutes).toBeGreaterThan(60);
+    expect(state.tasks[0].planned.date).toBe(keyOf(new Date()));
   });
 
   test("a live estimated Action carries the NOW rule through its card", async ({ page }) => {
@@ -216,7 +271,6 @@ test.describe("the actions column", () => {
 
     await page.mouse.move(x, y);
     await page.mouse.down();
-    await page.waitForTimeout(360);
     await page.mouse.move(x, y + 56, { steps: 8 });
 
     const ghost = page.getByTestId("timeline-drag-ghost");
@@ -841,6 +895,71 @@ test.describe("scheduled action completion in the mobile timeline", () => {
     const state = await storedState(page);
     expect(state.tasks[0].status).toBe("open");
     await expect(chip).toHaveCSS("transform", "none");
+  });
+});
+
+test.describe("touch Action ownership in the timeline", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test("touch scrolling from an Action does not reschedule or inspect it", async ({ page }) => {
+    await seedPlanner(page, scheduledAction({ id: "task-touch-scroll", title: "Scroll the brief" }));
+    const chip = page.locator('[data-task-chip="task-touch-scroll"]');
+    await chip.scrollIntoViewIfNeeded();
+    const before = (await storedState(page)).tasks[0].planned;
+    const box = await chip.boundingBox();
+    const x = box.x + box.width / 2;
+    const y = box.y + Math.min(box.height / 2, 18);
+    const session = await page.context().newCDPSession(page);
+
+    await dispatchTouch(session, "touchStart", x, y);
+    await dispatchTouch(session, "touchMove", x, y + 80);
+    await dispatchTouch(session, "touchMove", x, y + 150);
+    await dispatchTouch(session, "touchEnd", x, y + 150);
+    await session.detach();
+
+    const after = (await settledState(page, (state) => state.tasks.length === 1)).tasks[0].planned;
+    expect(after, "scrolling from an Action must not write its plan").toEqual(before);
+    await expect(page.getByTestId("sheet"), "scrolling from an Action must not inspect it").toHaveCount(0);
+  });
+
+  test("a held touch Action moves after the lift threshold", async ({ page }) => {
+    await seedPlanner(page, scheduledAction({ id: "task-touch-move", title: "Move the brief by touch" }));
+    const chip = page.locator('[data-task-chip="task-touch-move"]');
+    await chip.scrollIntoViewIfNeeded();
+    const box = await chip.boundingBox();
+    const x = box.x + box.width / 2;
+    const y = box.y + Math.min(box.height / 2, 18);
+    const session = await page.context().newCDPSession(page);
+
+    await dispatchTouch(session, "touchStart", x, y);
+    await page.waitForTimeout(340);
+    await dispatchTouch(session, "touchMove", x, y + 68);
+    await dispatchTouch(session, "touchEnd", x, y + 68);
+    await session.detach();
+
+    const state = await settledState(page, (stored) => stored.tasks[0]?.planned.startMinute === 11 * 60, "the held touch Action did not move");
+    expect(state.tasks[0].planned.startMinute).toBe(11 * 60);
+  });
+
+  test("a held touch on the estimate resizes an Action without moving its start", async ({ page }) => {
+    await seedPlanner(page, scheduledAction({ id: "task-touch-resize", title: "Resize the brief by touch" }));
+    const chip = page.locator('[data-task-chip="task-touch-resize"]');
+    await chip.scrollIntoViewIfNeeded();
+    const handle = chip.getByTestId("timeline-action-resize");
+    const box = await handle.boundingBox();
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    const session = await page.context().newCDPSession(page);
+
+    await dispatchTouch(session, "touchStart", x, y);
+    await page.waitForTimeout(340);
+    await dispatchTouch(session, "touchMove", x, y + 68);
+    await dispatchTouch(session, "touchEnd", x, y + 68);
+    await session.detach();
+
+    const state = await settledState(page, (stored) => stored.tasks[0]?.planned.estimateMinutes > 60, "the held touch Action resize did not change its estimate");
+    expect(state.tasks[0].planned.startMinute).toBe(10 * 60);
+    expect(state.tasks[0].planned.estimateMinutes).toBeGreaterThan(60);
   });
 });
 

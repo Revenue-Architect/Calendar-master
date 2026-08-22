@@ -162,9 +162,9 @@ async function droppablePoint(page, target, preferredY) {
   return { x: box.x + box.width / 2, y };
 }
 
-/* A press-and-hold that lifts, then a move, then a drop. The app deliberately
-   requires a hold before a drag so reading a column never turns into moving an
-   event, so a plain `dragTo` would never lift anything. */
+/* An intentional long press followed by a move. Keep this helper for touch-like
+   or explicitly hold-based scenarios; ordinary desktop object manipulation uses
+   directMouseDrag below and must not inherit a hidden activation delay. */
 export async function pressHoldAndDrag(page, source, target, { holdMs = 600, steps = 12 } = {}) {
   /* The week grid opens scrolled to the current hour, so a card at another hour
      starts outside the visible strip. Bring it in before measuring: a press at a
@@ -185,6 +185,21 @@ export async function pressHoldAndDrag(page, source, target, { holdMs = 600, ste
   await page.waitForTimeout(80);
   await page.mouse.up();
   await page.waitForTimeout(250);
+}
+
+/* Desktop mouse/pen direct manipulation: movement, not elapsed time, activates
+   the object. The helper deliberately has no down-to-move wait. */
+export async function directMouseDrag(page, source, target, { steps = 12 } = {}) {
+  await source.scrollIntoViewIfNeeded();
+  const from = await source.boundingBox();
+  if (!from) throw new Error("cannot drag: the source has no box");
+  const grabY = from.y + Math.min(8, from.height / 2);
+  const to = await droppablePoint(page, target, grabY);
+
+  await page.mouse.move(from.x + from.width / 2, grabY);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps });
+  await page.mouse.up();
 }
 
 /* Seed a notebook directly.
