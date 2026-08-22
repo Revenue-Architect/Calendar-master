@@ -4424,10 +4424,10 @@ export default function Planner() {
                           </div>
                           {touchResizeEligible && (
                             <>
-                              <div aria-hidden="true" tabIndex={-1} data-touch-resize="start" data-resize-edge="start"
+                              <div aria-hidden="true" tabIndex={-1} data-touch-resize="start" data-resize-edge="start" onPointerDown={(ev) => resizeDown(ev, e, "start")}
                                 className="absolute top-0 left-1/2 z-10"
                                 style={{ width: 44, height: 44, transform: "translateX(-50%)", cursor: "ns-resize", touchAction: "pan-y" }} />
-                              <div aria-hidden="true" tabIndex={-1} data-touch-resize="end" data-resize-edge="end"
+                              <div aria-hidden="true" tabIndex={-1} data-touch-resize="end" data-resize-edge="end" onPointerDown={(ev) => resizeDown(ev, e, "end")}
                                 className="absolute bottom-0 left-1/2 z-10"
                                 style={{ width: 44, height: 44, transform: "translateX(-50%)", cursor: "ns-resize", touchAction: "pan-y" }} />
                             </>
