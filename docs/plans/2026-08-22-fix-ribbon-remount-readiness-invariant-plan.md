@@ -148,7 +148,7 @@ Verify Actions remains ribbon-free, Calendar return works, data-day gesture targ
 
 ```powershell
 $env:PLAYWRIGHT_PORT='48930'
-npx playwright test tests/e2e/ribbon-readiness.spec.js --project=chromium --workers=1 --grep "Actions|Month" --repeat-each=10
+npx playwright test tests/e2e/ribbon-readiness.spec.js --project=chromium --workers=1 --grep "Day re-entry|Week re-entry|Month return" --repeat-each=10
 node --test src/features/planner/ribbonViewport.test.js
 npm test
 npm run build

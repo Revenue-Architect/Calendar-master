@@ -31,12 +31,24 @@ staging. No Planner, WeekGrid, gesture/touch, Timeline chrome, navigation,
 motion, Sheet, Composer, domain, persistence, recurrence, or JOIN source files
 were changed. git diff --check was clean before the docs edit.
 
+### Provenance note
+
+The implementation plan was authored by the controller before Task 1 and was a
+pre-existing untracked plan artifact in this worktree. Task 1’s implementation
+and tests were committed at 7a13fd696d0eec755a5e30182ff80bae8cdd56db; Task 2
+committed that plan alongside this QA record only to record verified checklist
+status. Task 2 made no production-logic changes.
+
 ## Task 1 RED/GREEN/negative-control evidence
 
 The complete Task 1 report is at
 .superpowers/sdd/2026-08-22-fix-ribbon-remount-readiness-invariant-plan/task-1-report.md.
 The evidence below is transcribed from that report; it is not presented as a
 new Task 2 sabotage run.
+
+The exact Task 1 negative-control commands and immutable snapshot values remain
+in that plan-scoped, gitignored SDD report. This QA record summarizes that
+evidence; the SDD report retains the exact commands and values.
 
 With only the three browser regressions added and the original active-node gate
 still present, the exact base (b5b67ce...) run was:
