@@ -20,7 +20,12 @@ import { DISPLAY, MONO } from "../../design/typography.js";
 import {
   MORPH_FADE,
   MORPH_LEAD,
+  MORPH_HANDOFF_MS,
+  MORPH_HANDOFF_SLIDE_PX,
+  MORPH_CONTENT_BLUR_PX,
+  MORPH_CONTENT_SCALE,
   MORPH_MS,
+  MORPH_CLOSE_MS,
   MORPH_STEP,
   SHEET_ENTRY_MS,
   VIEW_SLIDE_MS,
@@ -414,9 +419,15 @@ export function plannerStyles({ T, preferences }) {
            the physical move has established the new space. */
         .nb-fluid[data-fluid-origin="notch"]{
           --nb-morph-dur:${MORPH_MS}ms;
+          --nb-morph-close:${MORPH_CLOSE_MS}ms;
+          --nb-morph-handoff:${MORPH_HANDOFF_MS}ms;
+          --nb-morph-slide:${MORPH_HANDOFF_SLIDE_PX}px;
+          --nb-morph-content-scale:${MORPH_CONTENT_SCALE};
+          --nb-morph-content-blur:${MORPH_CONTENT_BLUR_PX}px;
           --nb-morph-lead:calc(var(--nb-morph-dur) * ${MORPH_LEAD});
           --nb-morph-step:calc(var(--nb-morph-dur) * ${MORPH_STEP});
           --nb-morph-fade:calc(var(--nb-morph-dur) * ${MORPH_FADE});
+          overflow-x:clip;
           animation-name:nbnotchin,nbnotchwash;animation-duration:var(--nb-morph-dur);
           animation-timing-function:cubic-bezier(.22,.85,.28,1),cubic-bezier(.4,0,.6,1);
           transition:background-color 210ms cubic-bezier(.22,.85,.28,1);
@@ -434,7 +445,7 @@ export function plannerStyles({ T, preferences }) {
            already-visible content. That is a colour flash, not a material carry. The
            surface now finishes becoming the card before the first group arrives, so
            content lands on the sheet rather than on the button. */
-        @keyframes nbnotchwash{0%,16%{background-color:var(--morph-accent)}46%,100%{background-color:var(--morph-card)}}
+        @keyframes nbnotchwash{0%,10%{background-color:var(--morph-accent)}32%,100%{background-color:var(--morph-card)}}
         /* The wall clock has the last word on the resting paint.
            A CSS animation in the running state outranks the inline background whether
            or not its clock is advancing, so an animation that stalls — a backgrounded
@@ -468,11 +479,14 @@ export function plannerStyles({ T, preferences }) {
            came from. The window keeps the button's own corner through the first
            15%, then becomes card-cornered by 35% and stays there for the rest of
            the travel. */
-         @keyframes nbnotchin{
-           0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-top) var(--fluid-inset-right) var(--fluid-inset-bottom) var(--fluid-inset-left) round var(--fluid-radius, 999px))}
-           15%{transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(calc(var(--fluid-inset-top) * .84) calc(var(--fluid-inset-right) * .84) calc(var(--fluid-inset-bottom) * .84) calc(var(--fluid-inset-left) * .84) round var(--fluid-radius, 999px))}
-           35%{transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(calc(var(--fluid-inset-top) * .48) calc(var(--fluid-inset-right) * .48) calc(var(--fluid-inset-bottom) * .48) calc(var(--fluid-inset-left) * .48) round var(--fluid-target-radius, 24px))}
-          100%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px 0px 0px round var(--fluid-target-radius, 24px))}
+        @keyframes nbnotchin{
+          0%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-top) var(--fluid-inset-right) var(--fluid-inset-bottom) var(--fluid-inset-left) round var(--fluid-radius, 999px))}
+          10%{transform:translate(calc(var(--fluid-x) * .86),calc(var(--fluid-y) * .86));clip-path:inset(calc(var(--fluid-inset-top) * .86) calc(var(--fluid-inset-right) * .86) calc(var(--fluid-inset-bottom) * .86) calc(var(--fluid-inset-left) * .86) round var(--fluid-radius, 999px))}
+          20%{transform:translate(calc(var(--fluid-x) * .72),calc(var(--fluid-y) * .72));clip-path:inset(calc(var(--fluid-inset-top) * .72) calc(var(--fluid-inset-right) * .72) calc(var(--fluid-inset-bottom) * .72) calc(var(--fluid-inset-left) * .72) round var(--fluid-radius, 999px))}
+          32%{transform:translate(calc(var(--fluid-x) * .48),calc(var(--fluid-y) * .48));clip-path:inset(calc(var(--fluid-inset-top) * .48) calc(var(--fluid-inset-right) * .48) calc(var(--fluid-inset-bottom) * .48) calc(var(--fluid-inset-left) * .48) round var(--fluid-target-radius, 24px))}
+          45%{transform:translate(calc(var(--fluid-x) * .34),calc(var(--fluid-y) * .34));clip-path:inset(calc(var(--fluid-inset-top) * .34) calc(var(--fluid-inset-right) * .34) calc(var(--fluid-inset-bottom) * .34) calc(var(--fluid-inset-left) * .34) round var(--fluid-target-radius, 24px))}
+          72%{transform:translate(calc(var(--fluid-x) * .08),calc(var(--fluid-y) * .08));clip-path:inset(calc(var(--fluid-inset-top) * .08) calc(var(--fluid-inset-right) * .08) calc(var(--fluid-inset-bottom) * .08) calc(var(--fluid-inset-left) * .08) round var(--fluid-target-radius, 24px))}
+          88%,100%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px 0px 0px round var(--fluid-target-radius, 24px))}
         }
         /* The sheet assembles itself rather than appearing.
            The body used to fade as a single block from 60% of the morph, which
@@ -486,8 +500,38 @@ export function plannerStyles({ T, preferences }) {
            inside a .nb-notch-cascade root follows. A sheet that does not opt in
            keeps the old single-block behaviour on the new timing, which is why
            the :has() guard is here rather than a second class on every sheet. */
-        .nb-fluid[data-fluid-origin="notch"] .nb-notch-body{pointer-events:none}
+        /* V3 treats the Composer as one destination plane. The existing cascade
+           markup stays in place for structure and non-notch surfaces, but its
+           notch-entry animations are suppressed so eight independent wipes do
+           not fight the single reference-like handoff below. */
+        .nb-fluid[data-fluid-origin="notch"] .nb-notch-body{
+          pointer-events:none;
+          transform-origin:top right;
+          animation:nbnotchbodyin var(--nb-morph-handoff) cubic-bezier(.34,1.15,.64,1) both;
+          /* The body is hidden until this point, then resolves during the
+             source's exit window so the two identities briefly overlap. */
+          animation-delay:calc(var(--nb-morph-dur) * .28);
+          will-change:transform,opacity,filter;
+        }
+        .nb-fluid[data-fluid-origin="notch"] .nb-notch-body > :first-child,
+        .nb-fluid[data-fluid-origin="notch"] .nb-notch-cascade > *,
+        .nb-fluid[data-fluid-origin="notch"] .nb-notch-body > :last-child:not(:has(.nb-notch-cascade)){
+          animation:none!important;
+          clip-path:none!important;
+          will-change:auto;
+        }
+        @keyframes nbnotchbodyin{
+          0%{opacity:0;transform:translateX(calc(var(--nb-morph-slide) * 1.125)) scale(var(--nb-morph-content-scale));filter:blur(var(--nb-morph-content-blur))}
+          18%{opacity:.32}
+          46%{opacity:.9}
+          64%,100%{opacity:1;transform:translateX(0) scale(1);filter:blur(0)}
+        }
         .nb-fluid[data-fluid-origin="notch"][data-morph-stage="content"] .nb-notch-body,.nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-notch-body{pointer-events:auto}
+        /* The wall-clock stage is authoritative once the morph deadline has
+           passed. This is deliberately scoped to the settled state: it repairs
+           a stalled body animation without stealing the opening interpolation
+           or the reversible closing animation. */
+        .nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-notch-body{animation:none!important;opacity:1!important;transform:none!important;filter:none!important;will-change:auto!important}
         .nb-fluid[data-fluid-origin="notch"] .nb-notch-body>:last-child:not(:has(.nb-notch-cascade)){--nb-stage:1}
         ${Array.from({ length: 8 }, (_, n) => `.nb-fluid[data-fluid-origin="notch"] .nb-notch-cascade>*:nth-child(${n + 1}){--nb-stage:${n + 1}}`).join("")}
         .nb-fluid[data-fluid-origin="notch"] .nb-notch-cascade>*:nth-child(n+9){--nb-stage:8}
@@ -497,6 +541,17 @@ export function plannerStyles({ T, preferences }) {
           animation:nbnotchgroupin var(--nb-morph-fade) cubic-bezier(.22,.85,.28,1) backwards;
           animation-delay:calc(var(--nb-morph-lead) + var(--nb-stage,0) * var(--nb-morph-step));
           will-change:clip-path;
+        }
+        /* Notch entry is owned by the single body plane. Once the wall-clock
+           stage reaches open, the legacy cascade descendants are explicitly
+           idle too; otherwise the later generic rule above can leave a dead
+           clip-path compositor hint promoted for the lifetime of the sheet. */
+        .nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-notch-body>:first-child,
+        .nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-notch-cascade>*,
+        .nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-notch-body>:last-child:not(:has(.nb-notch-cascade)){
+          animation:none!important;
+          clip-path:none!important;
+          will-change:auto!important;
         }
         /* Each group is uncovered, not faded in. This was the last fade left on the
            composer and the one the eye actually catches, because eight of them finish
@@ -511,38 +566,55 @@ export function plannerStyles({ T, preferences }) {
            delay and then released entirely -- a group left permanently clipped to its
            own box would cut off anything it later opens. */
         @keyframes nbnotchgroupin{from{clip-path:inset(-14px -14px 100% -14px)}to{clip-path:inset(-14px -14px -14px -14px)}}
-        .nb-morph-source-label{position:absolute;left:var(--fluid-inset-left,0px);top:var(--fluid-inset-top,0px);width:var(--fluid-source-width,100%);height:var(--fluid-source-height,100%);box-sizing:border-box;z-index:8;display:flex;align-items:center;justify-content:center;pointer-events:none;font-size:.75rem;font-weight:700;letter-spacing:.1em;opacity:1;animation:nbnotchlabelout var(--nb-morph-dur,320ms) cubic-bezier(.23,1,.32,1) both;transition:opacity 100ms cubic-bezier(.23,1,.32,1);will-change:opacity}
+        .nb-morph-source-label{position:absolute;left:var(--fluid-inset-left,0px);top:var(--fluid-inset-top,0px);width:var(--fluid-source-width,100%);height:var(--fluid-source-height,100%);box-sizing:border-box;z-index:8;display:flex;align-items:center;justify-content:center;pointer-events:none;font-size:.75rem;font-weight:700;letter-spacing:.1em;opacity:1;animation:nbnotchlabelout var(--nb-morph-handoff,200ms) cubic-bezier(.34,1.15,.64,1) both;transition:opacity 100ms cubic-bezier(.23,1,.32,1);will-change:transform,opacity,filter}
         /* The label is the button's own word, so it leaves with the button's own
            colour. It occupies the measured source window rather than the full
            destination panel; an edge-anchored clip must not hide the identity in
            the middle of the true-size Sheet at frame zero. It remains decorative
            and non-interactive, then hands off as the first content group arrives. */
-        @keyframes nbnotchlabelout{0%,16%{opacity:1}38%,100%{opacity:0}}
-        .nb-fluid[data-fluid-origin="notch"][data-morph-stage="reveal"] .nb-morph-source-label,.nb-fluid[data-fluid-origin="notch"][data-morph-stage="content"] .nb-morph-source-label,.nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-morph-source-label{opacity:0}
+        @keyframes nbnotchlabelout{0%,18%{opacity:1;transform:translateX(0) scale(1);filter:blur(0)}58%{opacity:.28;transform:translateX(calc(var(--nb-morph-slide) * -.72)) scale(var(--nb-morph-content-scale));filter:blur(var(--nb-morph-content-blur))}100%{opacity:0;transform:translateX(calc(-1 * var(--nb-morph-slide))) scale(var(--nb-morph-content-scale));filter:blur(var(--nb-morph-content-blur))}}
+        .nb-fluid[data-fluid-origin="notch"][data-morph-stage="reveal"] .nb-morph-source-label,.nb-fluid[data-fluid-origin="notch"][data-morph-stage="content"] .nb-morph-source-label{opacity:0}
+        /* Once the handoff is settled, remove the transient label transform and
+           filter rather than leaving the animation's fill value on a hidden
+           node. Closing sheets enter a separate "closing" stage, so their
+           reversible label-in animation still owns these properties. */
+        .nb-fluid[data-fluid-origin="notch"][data-morph-stage="open"] .nb-morph-source-label{animation:none!important;opacity:0;transform:none!important;filter:none!important;will-change:auto!important}
         /* Close spends the existing lead *inside* MORPH_MS: the form leaves for
            --nb-morph-lead, then the lime object folds for the rest. Adding a
-           133ms lead on top of 380 would fail the fortieth-time test. In-flight
+           133ms lead on top of 350 would fail the fortieth-time test. In-flight
            reverse (data-fluid-reverse) does not take this delay — the form is
            mid-arrival and leaves with the shape. Unmount stays at MORPH_MS. */
         .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"]:not([data-fluid-reverse="true"]){
-          animation:nbnotchout 240ms cubic-bezier(.4,0,.3,1) forwards;
+          animation:nbnotchout var(--nb-morph-close,${MORPH_CLOSE_MS}ms) cubic-bezier(.4,0,.3,1) forwards;
         }
         @keyframes nbnotchout{
           0%{opacity:1;transform:translate(0,0);clip-path:inset(0px 0px 0px 0px round var(--fluid-target-radius, 24px))}
           100%{opacity:1;transform:translate(var(--fluid-x),var(--fluid-y));clip-path:inset(var(--fluid-inset-top) var(--fluid-inset-right) var(--fluid-inset-bottom) var(--fluid-inset-left) round var(--fluid-radius, 999px))}
         }
-        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-notch-body,
-        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-notch-cascade>*,
-        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-notch-body>:first-child{
-          animation:none;
-          opacity:0;
+        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-notch-body{
+          animation:nbnotchbodyout var(--nb-morph-close,${MORPH_CLOSE_MS}ms) cubic-bezier(.22,1,.36,1) both;
           pointer-events:none;
-          transition:opacity 80ms cubic-bezier(.4,0,.3,1);
+        }
+        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-notch-cascade>* ,
+        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-notch-body>:first-child{
+          animation:none!important;
+          pointer-events:none;
         }
         .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"] .nb-morph-source-label{
-          animation:none;
-          opacity:1;
-          transition:opacity 80ms cubic-bezier(.4,0,.3,1);
+          animation:nbnotchlabelin var(--nb-morph-close,${MORPH_CLOSE_MS}ms) cubic-bezier(.22,1,.36,1) both;
+          pointer-events:none;
+        }
+        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"][data-fluid-reverse="true"] .nb-notch-body,
+        .nb-fluid.nb-fluid-closing[data-fluid-origin="notch"][data-fluid-reverse="true"] .nb-morph-source-label{
+          animation:none!important;
+        }
+        @keyframes nbnotchbodyout{
+          0%{opacity:1;transform:translateX(0) scale(1);filter:blur(0)}
+          64%,100%{opacity:0;transform:translateX(var(--nb-morph-slide)) scale(var(--nb-morph-content-scale));filter:blur(var(--nb-morph-content-blur))}
+        }
+        @keyframes nbnotchlabelin{
+          0%{opacity:0;transform:translateX(calc(-1 * var(--nb-morph-slide))) scale(var(--nb-morph-content-scale));filter:blur(var(--nb-morph-content-blur))}
+          64%,100%{opacity:1;transform:translateX(0) scale(1);filter:blur(0)}
         }
                 .nb-composer-ask{animation:nbask 180ms cubic-bezier(.23,1,.32,1)}
         @keyframes nbask{from{clip-path:inset(100% 0 0 0);transform:translateY(6px)}to{clip-path:inset(0 0 0 0);transform:none}}
@@ -557,6 +629,7 @@ export function plannerStyles({ T, preferences }) {
         .nb-scrim{animation:nbscrim 260ms cubic-bezier(.23,1,.32,1) forwards;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
         @keyframes nbscrim{from{opacity:0}to{opacity:1}}
         .nb-scrim.nb-fluid-closing{animation:nbscrimout 240ms ease forwards}
+        .nb-scrim.nb-fluid-closing:has(> .nb-fluid[data-fluid-origin="notch"]){animation:nbscrimout var(--nb-morph-close,${MORPH_CLOSE_MS}ms) ease forwards}
         @keyframes nbscrimout{0%,25%{opacity:1}100%{opacity:0}}
         .nb-sheet-h{transition:height 320ms cubic-bezier(.2,.8,.25,1)}
         .nb-edit-actions{transition:width 360ms cubic-bezier(.23,1,.32,1),background-color 260ms ease,box-shadow 260ms ease}
@@ -674,9 +747,9 @@ export function plannerStyles({ T, preferences }) {
         .nb-day-heading.is-focused{padding-top:.45rem;padding-bottom:.45rem;border-bottom:1px solid ${T.line}}
         .nb-day-heading.is-focused .nb-display{font-size:2rem;line-height:2rem}
 
-        @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.nb-fluid,.nb-view-track,.nb-msheet,.nb-timeline-chrome,.nb-timeline-chrome-inner,.nb-morph-source-label,.nb-up,.nb-list-enter{animation:none!important;transform:none!important}.nb-fluid,.nb-msheet,.nb-timeline-chrome-inner,.nb-morph-source-label{transition:opacity 160ms ease!important}.nb-view-track.is-sliding,.nb-app-surface,.nb-nav-viewport,.nb-nav-carrier,.nb-nav-motion-viewport,.nb-nav-motion-carrier,.nb-mobile-calendar-return,.nb-mobile-calendar-return::after,.nb-navigation,.nb-nav-brand,.nb-nav-item,.nb-nav-membership{transition:none!important;animation:none!important}
+        @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.nb-fluid,.nb-view-track,.nb-msheet,.nb-timeline-chrome,.nb-timeline-chrome-inner,.nb-morph-source-label,.nb-up,.nb-list-enter{animation:none!important;transform:none!important}.nb-fluid,.nb-msheet,.nb-timeline-chrome-inner,.nb-morph-source-label{transition:opacity 160ms ease!important}.nb-fluid[data-fluid-origin="notch"] .nb-notch-body{animation:none!important;transition:none!important;opacity:1!important;transform:none!important;filter:none!important;will-change:auto!important}.nb-fluid[data-fluid-origin="notch"] .nb-morph-source-label{animation:none!important;transition:none!important;opacity:0!important;transform:none!important;filter:none!important;pointer-events:none!important;will-change:auto!important}.nb-fluid[data-fluid-origin="notch"] .nb-notch-cascade>*,.nb-fluid[data-fluid-origin="notch"] .nb-notch-body>:first-child,.nb-fluid[data-fluid-origin="notch"] .nb-notch-body>:last-child:not(:has(.nb-notch-cascade)){will-change:auto!important}.nb-view-track.is-sliding,.nb-app-surface,.nb-nav-viewport,.nb-nav-carrier,.nb-nav-motion-viewport,.nb-nav-motion-carrier,.nb-mobile-calendar-return,.nb-mobile-calendar-return::after,.nb-navigation,.nb-nav-brand,.nb-nav-item,.nb-nav-membership{transition:none!important;animation:none!important}
           button:active,[role="button"]:active,a[href]:active,[data-event-id]:active,[data-task-chip]:active{scale:1!important}}
-        ${preferences?.display.reducedMotion ? `.nb-fluid,.nb-view-track,.nb-msheet,.nb-timeline-chrome,.nb-timeline-chrome-inner,.nb-morph-source-label{animation:none!important;transform:none!important}.nb-fluid,.nb-msheet,.nb-timeline-chrome-inner,.nb-morph-source-label{transition:opacity 160ms ease!important}.nb-view-track.is-sliding,.nb-app-surface,.nb-nav-viewport,.nb-nav-carrier,.nb-nav-motion-viewport,.nb-nav-motion-carrier,.nb-mobile-calendar-return,.nb-mobile-calendar-return::after,.nb-navigation,.nb-nav-brand,.nb-nav-item,.nb-nav-membership{transition:none!important;animation:none!important}
+        ${preferences?.display.reducedMotion ? `.nb-fluid,.nb-view-track,.nb-msheet,.nb-timeline-chrome,.nb-timeline-chrome-inner,.nb-morph-source-label{animation:none!important;transform:none!important}.nb-fluid,.nb-msheet,.nb-timeline-chrome-inner,.nb-morph-source-label{transition:opacity 160ms ease!important}.nb-fluid[data-fluid-origin="notch"] .nb-notch-body{animation:none!important;transition:none!important;opacity:1!important;transform:none!important;filter:none!important;will-change:auto!important}.nb-fluid[data-fluid-origin="notch"] .nb-morph-source-label{animation:none!important;transition:none!important;opacity:0!important;transform:none!important;filter:none!important;pointer-events:none!important;will-change:auto!important}.nb-fluid[data-fluid-origin="notch"] .nb-notch-cascade>*,.nb-fluid[data-fluid-origin="notch"] .nb-notch-body>:first-child,.nb-fluid[data-fluid-origin="notch"] .nb-notch-body>:last-child:not(:has(.nb-notch-cascade)){will-change:auto!important}.nb-view-track.is-sliding,.nb-app-surface,.nb-nav-viewport,.nb-nav-carrier,.nb-nav-motion-viewport,.nb-nav-motion-carrier,.nb-mobile-calendar-return,.nb-mobile-calendar-return::after,.nb-navigation,.nb-nav-brand,.nb-nav-item,.nb-nav-membership{transition:none!important;animation:none!important}
           button:active,[role="button"]:active,a[href]:active,[data-event-id]:active,[data-task-chip]:active{scale:1!important}` : ""}
       `;
 }
