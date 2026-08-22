@@ -42,4 +42,3 @@ test("release restores inline state, accepts node replacement cleanup, and is id
   assert.equal(lock.release(9, { node: stream, touchId: 3 }), false);
   assert.equal(lock.snapshot(), null);
 });
-
