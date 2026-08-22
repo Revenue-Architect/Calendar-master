@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { pressHoldAndDrag, seedPlanner, settledState } from "./helpers.js";
+import { directMouseDrag, seedPlanner, settledState } from "./helpers.js";
 import { createBlankPlannerState } from "../../src/platform/persistence/plannerStateImport.js";
 import { createEvent } from "../../src/domains/calendar/index.js";
 import { keyOf, addDaysToKey } from "../../src/shared/time/dateKey.js";
@@ -51,7 +51,7 @@ test.describe("a repeating event in the week view", () => {
     const target = page.locator(`[data-week-day="${targetKey}"]`);
     await expect(target).toBeVisible();
 
-    await pressHoldAndDrag(page, card, target);
+    await directMouseDrag(page, card, target);
 
     const after = await settledState(
       page,

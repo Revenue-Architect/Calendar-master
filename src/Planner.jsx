@@ -101,6 +101,7 @@ import {
   EMPTY_SPACE_LIFT_MS,
   isResizable,
   liftDelayForTimelineTarget,
+  movedEnoughToActivateDirectDrag,
   movedEnoughToCancelHold,
   pointerButtonsHeld,
   proposeGesture,
@@ -2864,21 +2865,28 @@ export default function Planner() {
   /* mouse / pen only — touch is handled by the delegated listeners below,
      because a scroll container fires pointercancel the instant the browser
      claims the gesture, which would kill every long press. */
-  /* A press that travels before it lifts was never a press. Without this the hold
-     timer keeps running while the pointer moves, so pressing a card and dragging
-     across the timeline lifts it 300ms later under a cursor that has already left
-     it — the same defect the week grid had. Both surfaces now arm on press and
-     disarm on movement, so they behave identically. */
+  /* A card press is a click candidate until desktop movement makes intent clear.
+     Touch keeps its separate hold/scroll arbitration below; mouse/pen cards
+     activate from movement and apply that same frame immediately. */
   const armedRef = useRef(null);
   const disarmHold = useCallback(() => {
     clearTimeout(holdRef.current);
     holdRef.current = null;
     armedRef.current = null;
   }, []);
-  const armHold = (x, y, fire) => {
+  const armHold = (x, y, fire, activateOnMove = null) => {
     disarmHold();
-    armedRef.current = { x, y };
-    holdRef.current = setTimeout(() => { armedRef.current = null; fire(); }, LIFT_MS);
+    armedRef.current = { x, y, activateOnMove };
+    /* A desktop card candidate is movement-only. The timer belongs to genuine
+       hold interactions such as empty-space creation; giving it to a card
+       would auto-lift a stationary mouse press and swallow the click. */
+    if (activateOnMove) return;
+    holdRef.current = setTimeout(() => {
+      const armed = armedRef.current;
+      if (!armed) return;
+      armedRef.current = null;
+      fire();
+    }, LIFT_MS);
   };
   useEffect(() => {
     const move = (e) => {
@@ -2892,6 +2900,17 @@ export default function Planner() {
       }
       const armed = armedRef.current;
       if (!armed) return;
+      if (armed.activateOnMove && !pointerButtonsHeld(e)) {
+        disarmHold();
+        tappedRef.current = false;
+        return;
+      }
+      if (armed.activateOnMove && movedEnoughToActivateDirectDrag(armed, { x: e.clientX, y: e.clientY })) {
+        disarmHold();
+        tappedRef.current = false;
+        armed.activateOnMove(e.clientX, e.clientY, e);
+        return;
+      }
       if (movedEnoughToCancelHold(armed, { x: e.clientX, y: e.clientY })) {
         disarmHold();
         tappedRef.current = false;
@@ -2944,8 +2963,8 @@ export default function Planner() {
         abortGesture();
         tappedRef.current = false;
         e.stopPropagation();
-        beep("click");
-        setInspect({ kind: "event", id: ev.id });
+        /* The canvas owns draft gestures, not Events. An unchanged draft is
+           cancelled on release; there is no Event identity to inspect here. */
         return;
       }
       finishGesture(e.clientX, e.clientY);
@@ -2963,12 +2982,17 @@ export default function Planner() {
     e.stopPropagation();
     const grab = minutesAt(e.clientY) - ev.start;
     const { clientX, clientY } = e;
+    const target = e.currentTarget;
+    const pointerId = e.pointerId;
     tappedRef.current = true;
-    armHold(clientX, clientY, () => {
+    const beginMove = (x = clientX, y = clientY, pointerEvent = null) => {
       tappedRef.current = false;
+      if (pointerId != null) target.setPointerCapture?.(pointerId);
       beep("lift"); buzz(14);
-      startGesture({ mode: "move", kind: "event", id: ev.id, start: ev.start, dur: ev.dur, grab, was: { start: ev.start, dur: ev.dur }, x: clientX, y: clientY });
-    });
+      startGesture({ mode: "move", kind: "event", id: ev.id, start: ev.start, dur: ev.dur, grab, was: { start: ev.start, dur: ev.dur }, x, y });
+      if (pointerEvent) applyRef.current(x, y, pointerEvent);
+    };
+    armHold(clientX, clientY, () => beginMove(), beginMove);
   };
   const eventUp = (e, ev) => {
     if (e.pointerType === "touch") return;
@@ -3006,16 +3030,18 @@ export default function Planner() {
     const target = e.currentTarget;
     const pointerId = e.pointerId;
     tappedRef.current = true;
-    armHold(e.clientX, e.clientY, () => {
+    const beginMove = (x = e.clientX, y = e.clientY, pointerEvent = null) => {
       tappedRef.current = false;
       if (pointerId != null) target.setPointerCapture?.(pointerId);
       beep("lift"); buzz(14);
       startGesture({
         mode: "task", kind: "task", id: task.id, start, dur: duration, grab,
         originStart: start, originY: e.clientY, originScrollTop: streamRef.current?.scrollTop ?? 0,
-        was: { start, dur: duration }, x: e.clientX, y: e.clientY,
+        was: { start, dur: duration }, x, y,
       });
-    });
+      if (pointerEvent) applyRef.current(x, y, pointerEvent);
+    };
+    armHold(e.clientX, e.clientY, () => beginMove(), beginMove);
   };
   const taskUp = (e, task) => {
     if (e.pointerType === "touch") return;

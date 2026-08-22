@@ -10,17 +10,27 @@ import { openPlanner } from "./helpers.js";
  * true only if the wheel is delivered without the pointer over the scroller;
  * moving onto the node first scrolls it for real, which these tests rely on. */
 
-const collapsed = (page) => page.locator(".nb-timeline-chrome").first()
-  .evaluate((node) => node.classList.contains("is-collapsed"));
+const chrome = (page) => page.getByTestId("timeline-chrome");
 
 /* Day and week keep their hours in different scroll nodes. */
-async function wheel(page, dy) {
+async function timelineScroller(page) {
   const day = page.getByTestId("day-stream");
-  const target = (await day.count()) ? day.first() : page.locator('[data-test="week-grid"] .nb-s').first();
-  const box = await target.boundingBox();
+  if (await day.count()) return day.first();
+  return page.locator('[data-test="week-grid"] .nb-s').first();
+}
+
+async function movePointerOverScroller(page, scroller) {
+  const box = await scroller.boundingBox();
+  if (!box) throw new Error("timeline scroller is not visible");
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.wheel(0, dy);
-  await page.waitForTimeout(500);
+}
+
+async function normalizeToMidnight(scroller) {
+  await scroller.evaluate((node) => { node.scrollTop = 0; });
+  await expect.poll(
+    () => scroller.evaluate((node) => node.scrollTop),
+    { message: "timeline must be normalized to midnight before testing collapse" },
+  ).toBeLessThanOrEqual(1);
 }
 
 for (const tier of [
@@ -35,18 +45,36 @@ for (const tier of [
         await openPlanner(page);
         if (surface === "week") {
           await page.getByTestId("zoom-out").click();
-          await page.waitForTimeout(400);
+          await expect(page.getByTestId("week-grid")).toBeVisible();
         }
 
-        expect(await collapsed(page), "the chrome starts open").toBe(false);
+        const scroller = await timelineScroller(page);
+        await expect(scroller).toBeVisible();
+        await normalizeToMidnight(scroller);
 
-        await wheel(page, 500);
-        expect(await collapsed(page),
-          "scrolling away from midnight must collapse the chrome").toBe(true);
+        await expect(chrome(page), "the chrome starts open at midnight")
+          .toHaveAttribute("data-collapsed", "false");
 
-        await wheel(page, -6000);
-        expect(await collapsed(page),
-          "arriving back at midnight must return the heading").toBe(false);
+        const before = await scroller.evaluate((node) => node.scrollTop);
+        await movePointerOverScroller(page, scroller);
+        await page.mouse.wheel(0, 500);
+        await expect.poll(
+          () => scroller.evaluate((node) => node.scrollTop),
+          { message: "real wheel input must move the timeline away from midnight" },
+        ).toBeGreaterThan(before + 1);
+        await expect(chrome(page),
+          "scrolling away from midnight must collapse the chrome")
+          .toHaveAttribute("data-collapsed", "true");
+
+        await movePointerOverScroller(page, scroller);
+        await page.mouse.wheel(0, -6000);
+        await expect.poll(
+          () => scroller.evaluate((node) => node.scrollTop),
+          { message: "timeline must return to midnight" },
+        ).toBeLessThanOrEqual(24);
+        await expect(chrome(page),
+          "arriving back at midnight must return the heading")
+          .toHaveAttribute("data-collapsed", "false");
       });
     }
   });

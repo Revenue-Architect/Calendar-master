@@ -82,17 +82,33 @@ test.describe("empty timeline touch intent", () => {
   });
 });
 
+test("a stationary desktop draft release aborts cleanly", async ({ page }) => {
+  const pageErrors = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await seedPlanner(page, createBlankPlannerState({}));
+  const stream = page.getByTestId("day-stream");
+  const box = await stream.boundingBox();
+  const x = box.x + 90;
+  const y = box.y + Math.min(180, box.height / 2);
+
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.waitForTimeout(360);
+  await page.mouse.up();
+
+  await expect(page.getByTestId("sheet"), "an unchanged empty draft should be aborted").toHaveCount(0);
+  expect(pageErrors, "canvas release must not throw while aborting an unchanged draft").toEqual([]);
+});
+
 test.describe("moving an event on the timeline", () => {
-  test("press, hold, and drag moves it to the hour it was dropped on", async ({ page }) => {
+  test("an immediate desktop drag moves it to the hour it was dropped on", async ({ page }) => {
     await seedPlanner(page, seeded());
     await card(page).scrollIntoViewIfNeeded();
     const box = await card(page).boundingBox();
 
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await page.mouse.down();
-    await page.waitForTimeout(600); /* past the lift threshold */
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + HOUR_PX * 2, { steps: 15 });
-    await page.waitForTimeout(80);
     await page.mouse.up();
 
     const moved = await timing(page, (t) => t.startLocal.endsWith("12:00"), "the drag never moved the event");
@@ -101,20 +117,120 @@ test.describe("moving an event on the timeline", () => {
     expect(moved.endLocal).toBe(`${today}T13:00`);
   });
 
-  test("a press with no hold leaves it where it was", async ({ page }) => {
+  test("a stationary desktop Event hold stays a click candidate", async ({ page }) => {
+    await seedPlanner(page, seeded());
+    await card(page).scrollIntoViewIfNeeded();
+    const event = card(page);
+    const box = await event.boundingBox();
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    const before = (await storedState(page)).events[0].timing;
+
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.waitForTimeout(360);
+    await expect(event, "a stationary mouse press must not auto-lift an Event").not.toHaveClass(/nb-timeline-lane-active/);
+    await page.mouse.up();
+
+    const after = await settledState(page, (state) => state.events.length === 1);
+    expect(after.events[0].timing).toEqual(before);
+    await expect(page.getByTestId("sheet"), "a stationary Event release remains a click").toBeVisible();
+  });
+
+  test("pointer cancellation leaves an active Event unchanged", async ({ page }) => {
+    await seedPlanner(page, seeded());
+    await card(page).scrollIntoViewIfNeeded();
+    const box = await card(page).boundingBox();
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    const before = (await storedState(page)).events[0].timing;
+
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x, y + HOUR_PX, { steps: 4 });
+    await page.evaluate(() => window.dispatchEvent(new PointerEvent("pointercancel", {
+      bubbles: true, cancelable: true, pointerId: 1, pointerType: "mouse",
+    })));
+    await page.mouse.up();
+
+    const after = (await settledState(page, (state) => state.events.length === 1)).events[0].timing;
+    expect(after, "pointer cancellation must not persist an Event move").toEqual(before);
+    await expect(page.getByTestId("sheet")).toHaveCount(0);
+
+    const nextCard = card(page);
+    await nextCard.scrollIntoViewIfNeeded();
+    const next = await nextCard.boundingBox();
+    await page.mouse.move(next.x + next.width / 2, next.y + next.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(next.x + next.width / 2, next.y + next.height / 2 + HOUR_PX, { steps: 8 });
+    await page.mouse.up();
+    const recovered = await settledState(page, (state) => state.events[0].timing.startLocal === `${today}T11:00`, "the next Event drag did not recover after cancellation");
+    expect(recovered.events[0].timing.startLocal).toBe(`${today}T11:00`);
+  });
+
+  test("a tiny desktop tremor remains a click and opens the inspector", async ({ page }) => {
     await seedPlanner(page, seeded());
     await card(page).scrollIntoViewIfNeeded();
     const box = await card(page).boundingBox();
 
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await page.mouse.down();
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + HOUR_PX * 2, { steps: 20 });
+    await page.mouse.move(box.x + box.width / 2 + 1, box.y + box.height / 2 + 1);
     await page.mouse.up();
-    await page.waitForTimeout(700);
-
+    await expect(page.getByTestId("sheet")).toBeVisible();
     const still = (await settledState(page, (s) => s.events.length === 1)).events[0].timing;
     expect(still.startLocal).toBe(`${today}T10:00`);
   });
+
+  test.describe("touch ownership", () => {
+    test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+    test("touch scrolling from an Event does not reschedule or inspect it", async ({ page }) => {
+      await seedPlanner(page, seeded());
+      const event = card(page);
+      await event.scrollIntoViewIfNeeded();
+      const stream = page.getByTestId("day-stream");
+      const beforeScroll = await stream.evaluate((node) => node.scrollTop);
+      const before = (await storedState(page)).events[0].timing;
+      const box = await event.boundingBox();
+      const x = box.x + box.width / 2;
+      const y = box.y + box.height / 2;
+      const session = await page.context().newCDPSession(page);
+
+      await touchAt(session, "touchStart", x, y);
+      await touchAt(session, "touchMove", x, y + 80);
+      await expect.poll(() => stream.evaluate((node, initial) => Math.abs(node.scrollTop - initial), beforeScroll), {
+        message: "vertical Event touch should physically scroll the Day timeline",
+      }).toBeGreaterThan(1);
+      await touchAt(session, "touchMove", x, y + 150);
+      await touchAt(session, "touchEnd", x, y + 150);
+      await session.detach();
+
+      const after = (await settledState(page, (state) => state.events.length === 1)).events[0].timing;
+      expect(after, "scrolling from an Event must not write its timing").toEqual(before);
+      await expect(page.getByTestId("sheet"), "scrolling from an Event must not inspect it").toHaveCount(0);
+    });
+
+    test("a held touch Event moves after the lift threshold", async ({ page }) => {
+      await seedPlanner(page, seeded());
+      const event = card(page);
+      await event.scrollIntoViewIfNeeded();
+      const box = await event.boundingBox();
+      const x = box.x + box.width / 2;
+      const y = box.y + box.height / 2;
+      const session = await page.context().newCDPSession(page);
+
+      await touchAt(session, "touchStart", x, y);
+      await page.waitForTimeout(340);
+      await touchAt(session, "touchMove", x, y + HOUR_PX * 2);
+      await touchAt(session, "touchEnd", x, y + HOUR_PX * 2);
+      await session.detach();
+
+      const moved = await timing(page, (value) => value.startLocal.endsWith("12:00"), "the held touch Event did not move");
+      expect(moved.endLocal).toBe(`${today}T13:00`);
+    });
+  });
+
   test("opening an event detaches it from the pointer so a later click cannot reschedule it", async ({ page }) => {
     await seedPlanner(page, seeded());
     await card(page).scrollIntoViewIfNeeded();
@@ -157,7 +273,6 @@ test.describe("resizing an event on the timeline", () => {
     const hb = await handle.boundingBox();
     await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
     await page.mouse.down();
-    await page.waitForTimeout(120);
     await page.mouse.move(hb.x + hb.width / 2, hb.y + HOUR_PX, { steps: 12 });
     await page.mouse.up();
 
@@ -174,7 +289,6 @@ test.describe("resizing an event on the timeline", () => {
 
     await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
     await page.mouse.down();
-    await page.waitForTimeout(120);
     await page.mouse.move(hb.x + hb.width / 2, hb.y - HOUR_PX / 2, { steps: 12 });
     await page.mouse.up();
 
@@ -198,7 +312,6 @@ test.describe("resizing from the top edge", () => {
     const hb = await handle.boundingBox();
     await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
     await page.mouse.down();
-    await page.waitForTimeout(120);
     await page.mouse.move(hb.x + hb.width / 2, hb.y - HOUR_PX / 2, { steps: 12 });
     await page.mouse.up();
 
@@ -218,12 +331,36 @@ test.describe("resizing from the top edge", () => {
 
     await page.mouse.move(box.x + box.width / 2, box.y + 14);
     await page.mouse.down();
-    await page.waitForTimeout(600);
     await page.mouse.move(box.x + box.width / 2, box.y + 14 + HOUR_PX, { steps: 15 });
     await page.mouse.up();
 
     const moved = await timing(page, (t) => t.startLocal.endsWith("11:00"), "pressing near the title resized instead of moving");
     expect(moved.endLocal, "a move keeps the length").toBe(`${today}T12:00`);
+  });
+});
+
+test.describe("touch Event resize", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test("a held touch on the bottom edge extends an Event without moving its start", async ({ page }) => {
+    await seedPlanner(page, seeded());
+    const event = card(page);
+    await event.scrollIntoViewIfNeeded();
+    const handle = event.locator('[data-resize-edge="end"]');
+    const box = await handle.boundingBox();
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    const session = await page.context().newCDPSession(page);
+
+    await touchAt(session, "touchStart", x, y);
+    await page.waitForTimeout(340);
+    await touchAt(session, "touchMove", x, y + HOUR_PX);
+    await touchAt(session, "touchEnd", x, y + HOUR_PX);
+    await session.detach();
+
+    const resized = await timing(page, (value) => !value.endLocal.endsWith("11:00"), "the held touch Event resize did not change duration");
+    expect(resized.startLocal).toBe(`${today}T10:00`);
+    expect(resized.endLocal > `${today}T11:00`).toBe(true);
   });
 });
 

@@ -21,7 +21,8 @@ export const MINUTES_PER_DAY = 1440;
 /* Five minutes: fine enough to land on a real time, coarse enough that a hand
    moving a few pixels does not produce 11:07. */
 export const SNAP_MINUTES = 5;
-/* How long a press has to sit still before it becomes a drag. */
+/* Touch/hold affordances still use a short stationary lift; mouse/pen cards
+   activate from movement via DIRECT_DRAG_ACTIVATION_PX below. */
 export const LIFT_MS = 300;
 /* Empty canvas is different from an existing object: the same press creates a
    new record, so it waits through the pause that naturally happens at the end
@@ -30,6 +31,11 @@ export const EMPTY_SPACE_LIFT_MS = 500;
 /* How far a press may travel before it stops being a press. Below this a hand
    is holding still; above it, the surface is being scrolled. */
 export const HOLD_CANCEL_PX = 8;
+/* Desktop direct manipulation begins after a small, intentional movement. This
+   is separate from HOLD_CANCEL_PX: the latter belongs to touch/empty-space
+   press cancellation, while this threshold distinguishes a mouse click from a
+   mouse drag. */
+export const DIRECT_DRAG_ACTIVATION_PX = 3;
 export const ACTION_SWIPE_COMMIT_PX = 64;
 /* Floors, per kind. An event shorter than ten minutes is almost always a
    mis-drag; an action's estimate is a unit of work and rounds coarser. */
@@ -60,6 +66,18 @@ export function pointerButtonsHeld(event) {
 export function movedEnoughToCancelHold(origin, point, threshold = HOLD_CANCEL_PX) {
   if (!origin || !point) return false;
   return Math.hypot(finite(point.x) - finite(origin.x), finite(point.y) - finite(origin.y)) > threshold;
+}
+
+/** Has a desktop pointer moved far enough to become direct manipulation? */
+export function movedEnoughToActivateDirectDrag(
+  origin,
+  point,
+  threshold = DIRECT_DRAG_ACTIVATION_PX,
+) {
+  if (!origin || !point) return false;
+  const distance = Math.hypot(finite(point.x) - finite(origin.x), finite(point.y) - finite(origin.y));
+  const size = Number.isFinite(threshold) && threshold > 0 ? threshold : DIRECT_DRAG_ACTIVATION_PX;
+  return distance >= size;
 }
 
 export function liftDelayForTimelineTarget(targetKind) {

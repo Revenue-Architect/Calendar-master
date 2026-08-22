@@ -15,6 +15,10 @@ import {
 import { recentFluidTriggerRadius, recentFluidTriggerRect } from "./fluidTrigger.js";
 import { MONO } from "../../design/typography.js";
 import {
+  MORPH_CLOSE_MS,
+  MORPH_CONTENT_BLUR_PX,
+  MORPH_CONTENT_SCALE,
+  MORPH_HANDOFF_SLIDE_PX,
   MORPH_MS,
   MORPH_STAGE_CONTENT,
   MORPH_STAGE_REVEAL,
@@ -79,7 +83,7 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
       window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
       || (panel && window.getComputedStyle(panel).animationName === "none")
     );
-    let closeDuration = morphRef.current === "notch" ? 240 : 300;
+    let closeDuration = morphRef.current === "notch" ? MORPH_CLOSE_MS : 300;
     /* If someone dismisses while the source is still opening, reverse the same
        animation from its rendered position. Restarting a separate exit keyframe
        at a full-size sheet was the subtle snap behind the old close regression. */
@@ -117,11 +121,54 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
             clipPath: `inset(${insetTop} ${insetRight} ${insetBottom} ${insetLeft} round var(--fluid-radius, 999px))`,
           },
         ], {
-          duration: boundedTime == null ? MORPH_MS : (boundedTime / duration) * MORPH_MS,
+          duration: boundedTime == null ? MORPH_CLOSE_MS : (boundedTime / duration) * MORPH_CLOSE_MS,
           easing: "cubic-bezier(.4,0,.3,1)",
           fill: "forwards",
         });
-        closeDuration = boundedTime == null ? MORPH_MS : (boundedTime / duration) * MORPH_MS;
+        closeDuration = boundedTime == null ? MORPH_CLOSE_MS : (boundedTime / duration) * MORPH_CLOSE_MS;
+
+        /* The source label and destination body are independent CSS animations,
+           so cancelling only the panel animation makes either identity pop to a
+           fully-open/closed state for one frame. Freeze their actual computed
+           values before cancellation, then hand those values to a matching
+           WAAPI exit. No React state is updated per frame. */
+        const freezeHandoff = (element, animationName, target) => {
+          if (!element || typeof element.animate !== "function") return;
+          const computed = window.getComputedStyle(element);
+          const from = {
+            opacity: computed.opacity,
+            transform: computed.transform,
+            filter: computed.filter,
+          };
+          element.style.opacity = from.opacity;
+          element.style.transform = from.transform;
+          element.style.filter = from.filter;
+          element.getAnimations().filter((animation) => animation.animationName === animationName)
+            .forEach((animation) => animation.cancel());
+          element.animate([from, target], {
+            duration: closeDuration,
+            easing: "cubic-bezier(.22,1,.36,1)",
+            fill: "forwards",
+          });
+        };
+        freezeHandoff(
+          panel.querySelector(".nb-notch-body"),
+          "nbnotchbodyin",
+          {
+            opacity: "0",
+            transform: `translateX(${MORPH_HANDOFF_SLIDE_PX}px) scale(${MORPH_CONTENT_SCALE})`,
+            filter: `blur(${MORPH_CONTENT_BLUR_PX}px)`,
+          },
+        );
+        freezeHandoff(
+          panel.querySelector(".nb-morph-source-label"),
+          "nbnotchlabelout",
+          {
+            opacity: "1",
+            transform: "translateX(0) scale(1)",
+            filter: "blur(0px)",
+          },
+        );
       }
     }
     closingRef.current = true;

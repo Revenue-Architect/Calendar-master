@@ -11,6 +11,85 @@ import { openPlanner } from "./helpers.js";
 
 const filters = (page, prefix) => page.locator(`filter[id^="${prefix}"]`);
 
+/* Read the running notch choreography at one shared production clock. The
+ * sampler deliberately scrubs the CSS/WAAPI animations themselves rather than
+ * recreating their interpolation in test code; the assertions below therefore
+ * describe the current browser-rendered contract and can catch a choreography
+ * that changes without making the test's model stale. */
+const sampleNotchFrames = async (sheet, fractions) => sheet.evaluate((node, requestedFractions) => {
+  const entry = node.getAnimations().find((animation) => animation.animationName === "nbnotchin");
+  if (!entry?.effect) return null;
+  const morphMs = Number(entry.effect.getTiming().duration);
+  const source = node.querySelector('[data-test="morph-source-label"]');
+  const body = node.querySelector(".nb-notch-body");
+  if (!source || !body || !Number.isFinite(morphMs) || morphMs <= 0) return null;
+
+  const matrixValues = (value) => {
+    const matrix = new DOMMatrixReadOnly(value === "none" ? "matrix(1, 0, 0, 1, 0, 0)" : value);
+    return {
+      x: matrix.e,
+      y: matrix.f,
+      scaleX: matrix.a,
+      scaleY: matrix.d,
+      raw: value,
+    };
+  };
+  const read = (fraction) => {
+    for (const animation of node.getAnimations({ subtree: true })) {
+      animation.pause();
+      animation.currentTime = morphMs * fraction;
+    }
+    const panelStyle = getComputedStyle(node);
+    const sourceStyle = getComputedStyle(source);
+    const bodyStyle = getComputedStyle(body);
+    return {
+      fraction,
+      panelTransform: matrixValues(panelStyle.transform),
+      panelClip: panelStyle.clipPath,
+      panelOffsetWidth: node.offsetWidth,
+      panelOffsetHeight: node.offsetHeight,
+      panelClientWidth: node.clientWidth,
+      panelScrollWidth: node.scrollWidth,
+      panelOverflowX: panelStyle.overflowX,
+      panelBackground: panelStyle.backgroundColor,
+      sourceOpacity: Number(sourceStyle.opacity),
+      sourceTransform: matrixValues(sourceStyle.transform),
+      sourceFilter: sourceStyle.filter,
+      bodyOpacity: Number(bodyStyle.opacity),
+      bodyTransform: matrixValues(bodyStyle.transform),
+      bodyFilter: bodyStyle.filter,
+      bodyScrollHeight: body.scrollHeight,
+    };
+  };
+
+  const frames = requestedFractions.map(read);
+  for (const animation of node.getAnimations({ subtree: true })) animation.play();
+  return frames;
+}, fractions);
+
+const readHandoffRestState = async (sheet) => sheet.evaluate((node) => {
+  const read = (element) => {
+    const style = getComputedStyle(element);
+    return {
+      opacity: Number(style.opacity),
+      transform: style.transform,
+      filter: style.filter,
+      willChange: style.willChange,
+      animations: element.getAnimations().map((animation) => animation.animationName),
+    };
+  };
+  const cascade = [
+    ...node.querySelectorAll(
+      ".nb-notch-cascade > *, .nb-notch-body > :first-child, .nb-notch-body > :last-child:not(:has(.nb-notch-cascade))",
+    ),
+  ].map((element) => getComputedStyle(element).willChange);
+  return {
+    source: read(node.querySelector(".nb-morph-source-label")),
+    body: read(node.querySelector(".nb-notch-body")),
+    cascade,
+  };
+});
+
 test.describe("the liquid pill", () => {
   test("slides without a filter at all", () => {
     /* A trailing droplet plus a goo filter was tried and removed. The droplet
@@ -104,6 +183,76 @@ test.describe("adjacent weekdays", () => {
 });
 
 test.describe("the notch morph", () => {
+  test("characterizes the production surface, source handoff, and destination handoff", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await openPlanner(page);
+    await page.getByTestId("new-entry").click();
+
+    const frames = await sampleNotchFrames(page.getByTestId("sheet"), [0, .2, .4, .6, .8, 1]);
+    expect(frames, "the production notch must expose a running nbnotchin animation").not.toBeNull();
+    const [zero, twenty, forty, sixty, eighty, end] = frames;
+
+    /* The surface must travel from the first fifth. v2 deliberately held its
+       transform until the radius handoff, so this is expected to be RED on the
+       baseline and becomes the guard against recreating that split choreography. */
+    expect.soft(Math.abs(twenty.panelTransform.x), "panel X translation must progress by 20%")
+      .toBeLessThan(Math.abs(zero.panelTransform.x) * .9);
+    expect.soft(Math.abs(twenty.panelTransform.y), "panel Y translation must progress by 20%")
+      .toBeLessThan(Math.abs(zero.panelTransform.y) * .9);
+
+    /* The source identity must visibly leave in the reference's lateral
+       direction, not only disappear through opacity. */
+    expect.soft(forty.sourceTransform.x, "source identity must travel left by 40%").toBeLessThan(-8);
+    expect.soft(forty.sourceOpacity, "source identity must soften during its departure").toBeLessThan(.9);
+    expect.soft(sixty.sourceOpacity, "source identity must be gone before the settle").toBeLessThanOrEqual(.1);
+
+    /* The real Composer body is the destination plane. At 40% it should still
+       be arriving from the right; by 65% it should be effectively settled. */
+    expect.soft(forty.bodyTransform.x, "destination body must enter from the right").toBeGreaterThanOrEqual(8);
+    expect.soft(forty.bodyOpacity, "destination body must not be fully present at 40%")
+      .toBeGreaterThan(.1);
+    expect.soft(forty.bodyOpacity, "destination body must not win before its handoff")
+      .toBeLessThan(.95);
+    expect.soft(Math.abs(sixty.bodyTransform.x), "destination body must settle by 60%").toBeLessThanOrEqual(2);
+    expect.soft(sixty.bodyOpacity, "destination body must be readable by 60%").toBeGreaterThanOrEqual(.95);
+    expect.soft(Math.abs(end.bodyTransform.x), "destination body must be at rest at 100%").toBeLessThanOrEqual(0.01);
+    expect.soft(end.bodyOpacity).toBeGreaterThanOrEqual(.99);
+    expect.soft(end.bodyFilter, "destination body must have no filter at rest").toMatch(/none|blur\(0(px)?\)/);
+    /* Frame scrubbing intentionally holds the stage machine at "source"; the
+       settled cleanup is a separate, wall-clock contract. Verify it after the
+       production stage reaches open so this cannot accidentally bless a filled
+       animation value as the resting state. */
+    const settledSource = page.getByTestId("sheet").locator('[data-test="morph-source-label"]');
+    await expect(page.getByTestId("sheet")).toHaveAttribute("data-morph-stage", "open");
+    const settledSourceStyle = await settledSource.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return { opacity: Number(style.opacity), transform: style.transform, filter: style.filter };
+    });
+    expect(settledSourceStyle.opacity, "source identity must remain hidden at rest").toBeLessThanOrEqual(.01);
+    expect(settledSourceStyle.transform, "source identity must clear its transient transform at rest")
+      .toMatch(/none|matrix\(1, 0, 0, 1, 0, 0\)/);
+    expect(settledSourceStyle.filter, "source identity must not retain a blur at rest").toMatch(/none|blur\(0(px)?\)/);
+
+    const rest = await readHandoffRestState(page.getByTestId("sheet"));
+    expect(rest.body.willChange, "settled Composer body must release its compositor hint").toBe("auto");
+    expect(rest.source.willChange, "settled source clone must release its compositor hint").toBe("auto");
+    expect(rest.cascade, "settled notch cascade descendants must release clip-path hints").not.toContain("clip-path");
+    expect(rest.cascade.every((value) => value === "auto"), "settled notch cascade descendants must be idle").toBe(true);
+
+    /* Richer handoff motion must never alter the true-size layout box or the
+       scrollable form geometry. */
+    const width = zero.panelOffsetWidth;
+    const height = zero.panelOffsetHeight;
+    const scrollHeight = zero.bodyScrollHeight;
+    for (const frame of frames) {
+      expect.soft(frame.panelOffsetWidth, `Sheet width changed at ${frame.fraction * 100}%`).toBe(width);
+      expect.soft(frame.panelOffsetHeight, `Sheet height changed at ${frame.fraction * 100}%`).toBe(height);
+      expect.soft(Math.abs(frame.bodyScrollHeight - scrollHeight), `body scrollHeight changed at ${frame.fraction * 100}%`).toBeLessThanOrEqual(1);
+      expect.soft(frame.panelOverflowX, `horizontal scrolling stayed exposed at ${frame.fraction * 100}%`)
+        .not.toMatch(/auto|scroll/);
+    }
+  });
+
   test("creation carries the trigger material until the composer content can arrive", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await openPlanner(page);
@@ -152,6 +301,7 @@ test.describe("the notch morph", () => {
           .map((animation) => getComputedStyle(animation.effect.target).clipPath);
         return {
           source: Number(getComputedStyle(node.querySelector('[data-test="morph-source-label"]')).opacity),
+          body: Number(getComputedStyle(node.querySelector(".nb-notch-body")).opacity),
           groups: groups.length,
           started: groups.filter((clip) => clip === "none" || !clip.includes("100%")).length,
           fill: getComputedStyle(node).backgroundColor,
@@ -163,16 +313,13 @@ test.describe("the notch morph", () => {
     expect(sample, "the notch entry animation must still be running").not.toBeNull();
     expect(sample.early.fill, "the window is still the trigger's own paint while it has nowhere to land").toBe(accent);
     expect(sample.early.source, "the trigger's label is the material it carries out").toBeGreaterThanOrEqual(.9);
-    /* Codex's constraint, kept: content waits for the clip to have somewhere to land.
-       What changed is only that it is uncovered rather than faded, so the same
-       question is now asked of the wipe. */
-    expect(sample.quarter.started, "form content must wait until the move has established the new space").toBe(0);
-    /* And the complaint that prompted the retiming: the wash used to hold accent to
-       55% and finish at 100%, so the form arrived part-opaque over a lime slab and
-       the surface turned dark underneath content that was already there. The surface
-       must finish becoming itself before the first group is uncovered. */
+    /* The body plane starts after the surface has begun its move, so the source
+       remains the only readable identity during the first quarter. */
+    expect(sample.quarter.body, "destination content must wait for the handoff").toBeLessThan(.95);
+    expect(sample.quarter.started, "the legacy cascade must not create a second arrival path").toBe(0);
+    /* The wash finishes becoming the card before the body plane is readable. */
     expect(sample.mid.fill, "the surface has become the sheet's own before content lands on it").not.toBe(accent);
-    expect(sample.end.started, "every group is uncovered by the time the shape settles").toBe(sample.end.groups);
+    expect(sample.end.groups, "notch entry uses one destination plane, not eight arrivals").toBe(0);
   });
 
   test("the notch lands on the composer's own surface", async ({ page }) => {
@@ -198,6 +345,17 @@ test.describe("the notch morph", () => {
     const sheet = page.getByTestId("sheet");
     await expect(sheet).toHaveAttribute("data-morph-stage", "open");
     await expect(sheet.getByTestId("morph-source-label")).toHaveCSS("opacity", "0");
+    const rest = await readHandoffRestState(sheet);
+    expect(rest.body.animations).not.toContain("nbnotchbodyin");
+    expect(rest.body.opacity).toBeGreaterThanOrEqual(.99);
+    expect(rest.body.transform).toMatch(/none|matrix\(1, 0, 0, 1, 0, 0\)/);
+    expect(rest.body.filter).toMatch(/none|blur\(0(px)?\)/);
+    expect(rest.body.willChange).toBe("auto");
+    expect(rest.source.opacity).toBeLessThanOrEqual(.01);
+    expect(rest.source.transform).toMatch(/none|matrix\(1, 0, 0, 1, 0, 0\)/);
+    expect(rest.source.filter).toMatch(/none|blur\(0(px)?\)/);
+    expect(rest.source.willChange).toBe("auto");
+    expect(rest.cascade.every((value) => value === "auto")).toBe(true);
   });
 
   test("NEW grows the composer out of the button, and folds it back", async ({ page }) => {
@@ -269,17 +427,18 @@ test.describe("the notch morph", () => {
     await expect(sheet.getByTestId("notch-surface")).toHaveCount(0);
     await expect(trigger).toHaveCSS("visibility", "hidden");
 
-    /* The body is no longer one faded block — its groups arrive on a stagger, so
-       what has to be true is that each group animates opacity and nothing that
-       costs layout. Reading `.nb-notch-body`'s own transition would now report
-       the wrapper, which is deliberately inert. */
+    /* V3 intentionally replaces the old eight-group notch cascade with one
+       destination-plane handoff. The Composer markup remains unchanged; only
+       its entry choreography is owned by `.nb-notch-body`. */
     const transitions = await sheet.evaluate((node) => {
       const groups = node.getAnimations({ subtree: true })
         .filter((animation) => animation.animationName === "nbnotchgroupin");
-      /* Read the shape's own duration rather than hardcoding it, so the bound below
-         still means "inside the shape" if MORPH_MS is ever retuned. */
+      const body = node.getAnimations({ subtree: true })
+        .filter((animation) => animation.animationName === "nbnotchbodyin");
+      /* Read production timing rather than hardcoding it, so the bound still means
+         "inside the shape" if the reference cadence is retuned. */
       const morphMs = parseFloat(getComputedStyle(node).getPropertyValue("--nb-morph-dur"));
-      const arrivals = groups.map((animation) => {
+      const bodyTiming = body.map((animation) => {
         const timing = animation.effect.getTiming();
         return Math.round(Number(timing.delay) + Number(timing.duration));
       });
@@ -287,37 +446,19 @@ test.describe("the notch morph", () => {
         panel: getComputedStyle(node).transitionProperty,
         morphMs,
         groupCount: groups.length,
-        lastArrival: arrivals.length ? Math.max(...arrivals) : null,
-        groupDelays: groups.map((animation) => Math.round(Number(animation.effect.getTiming().delay))).sort((a, b) => a - b),
-        groupProps: [...new Set(groups.flatMap((animation) => (
+        bodyCount: body.length,
+        bodyLastArrival: bodyTiming.length ? Math.max(...bodyTiming) : null,
+        bodyProps: [...new Set(body.flatMap((animation) => (
           animation.effect.getKeyframes().flatMap((frame) => Object.keys(frame))
         )))],
       };
     });
     expect(transitions.panel, "the shared panel must transition from the trigger accent to its own surface").toContain("background-color");
-    expect(transitions.groupCount, "the composer's content must arrive as staggered groups, not one block").toBeGreaterThan(2);
-    /* Uncovered, not faded. Eight groups finishing their fade together against a
-       surface that was still washing was the one part of this morph a person
-       actually noticed, so the groups now wipe open on the same stagger. `transform`
-       is banned alongside the layout properties for its own reason: a transformed
-       descendant extends the scroller's overflow, which sizes the sheet taller than
-       its content and breaks the clip's match to the button it grew from. */
-    expect(transitions.groupProps, "form content should be uncovered after geometry, never faded").toContain("clipPath");
-    expect(transitions.groupProps, "the cascade must not reintroduce the fade it replaced").not.toContain("opacity");
-    for (const property of ["transform", "width", "height", "top", "left", "margin", "padding"]) {
-      expect(transitions.groupProps, `content groups must not animate ${property}`).not.toContain(property);
-    }
-    /* The bound this suite never had. The cascade used to finish at 1176ms against a
-       480ms shape, so content kept arriving long after the sheet had settled and the
-       whole gesture read as a fade laid over a morph. Nothing caught it, because every
-       assertion here described the stagger's shape and none described its end. */
-    expect(transitions.lastArrival,
-      "content must finish arriving inside the shape it belongs to").toBeLessThanOrEqual(transitions.morphMs);
-    const [first, second] = transitions.groupDelays;
-    /* Loosened from 50ms deliberately, not incidentally: the step shrank to ~19ms when
-       the tail was cut. What still has to be true is that the groups are staggered at
-       all, not that they are slow. */
-    expect(second - first, "each group must wait a beat behind the one before it").toBeGreaterThan(8);
+    expect(transitions.groupCount, "notch entry must not create eight independent arrivals").toBe(0);
+    expect(transitions.bodyCount, "the Composer must enter as one destination plane").toBe(1);
+    expect(transitions.bodyProps).toEqual(expect.arrayContaining(["opacity", "transform", "filter"]));
+    expect(transitions.bodyLastArrival,
+      "destination content must finish arriving inside the primary morph").toBeLessThanOrEqual(transitions.morphMs);
 
     await page.keyboard.press("Escape");
     await expect(sheet).toHaveCount(0, { timeout: 3000 });
@@ -357,6 +498,99 @@ test.describe("the notch morph", () => {
 
     expect(settled.fill, "a stalled wash must not leave the sheet painted as its trigger").not.toBe(accent);
     expect(settled.clipped, "a stalled cascade must not leave the form clipped away").toBe(0);
+  });
+
+  test("a stalled Composer body is repaired when the wall-clock stage opens", async ({ page }) => {
+    await openPlanner(page);
+    await page.getByTestId("new-entry").click();
+    const sheet = page.getByTestId("sheet");
+    const stalled = await sheet.evaluate((node) => {
+      const bodyAnimation = node.getAnimations({ subtree: true })
+        .find((animation) => animation.animationName === "nbnotchbodyin");
+      if (!bodyAnimation?.effect) return false;
+      bodyAnimation.pause();
+      bodyAnimation.currentTime = Number(bodyAnimation.effect.getTiming().duration) * .1;
+      return true;
+    });
+    expect(stalled, "the body handoff must be running before the stall").toBe(true);
+
+    await expect(sheet).toHaveAttribute("data-morph-stage", "open");
+    const rest = await readHandoffRestState(sheet);
+    expect(rest.body.opacity).toBeGreaterThanOrEqual(.99);
+    expect(rest.body.transform).toMatch(/none|matrix\(1, 0, 0, 1, 0, 0\)/);
+    expect(rest.body.filter).toMatch(/none|blur\(0(px)?\)/);
+    expect(rest.body.animations).not.toContain("nbnotchbodyin");
+    expect(rest.source.opacity).toBeLessThanOrEqual(.01);
+    expect(rest.source.transform).toMatch(/none|matrix\(1, 0, 0, 1, 0, 0\)/);
+    expect(rest.source.filter).toMatch(/none|blur\(0(px)?\)/);
+    expect(rest.body.willChange).toBe("auto");
+    expect(rest.source.willChange).toBe("auto");
+    expect(rest.cascade.every((value) => value === "auto")).toBe(true);
+  });
+
+  test("the Composer body holds through its delayed handoff before entering", async ({ page }) => {
+    await openPlanner(page);
+    await page.getByTestId("new-entry").click();
+    const sheet = page.getByTestId("sheet");
+    const frames = await sheet.evaluate((node) => {
+      const body = node.querySelector(".nb-notch-body");
+      const bodyAnimation = node.getAnimations({ subtree: true })
+        .find((animation) => animation.animationName === "nbnotchbodyin");
+      if (!body || !bodyAnimation?.effect) return null;
+
+      const panelStyle = getComputedStyle(node);
+      const morphMs = Number.parseFloat(panelStyle.getPropertyValue("--nb-morph-dur"));
+      const handoffMs = Number.parseFloat(panelStyle.getPropertyValue("--nb-morph-handoff"));
+      const timing = bodyAnimation.effect.getTiming();
+      const delay = Number(timing.delay);
+      const duration = Number(timing.duration);
+      const matrixValues = (value) => {
+        const matrix = new DOMMatrixReadOnly(value === "none" ? "matrix(1,0,0,1,0,0)" : value);
+        return { x: matrix.e, scaleX: matrix.a };
+      };
+      const readAt = (clock) => {
+        for (const animation of node.getAnimations({ subtree: true })) {
+          animation.pause();
+          animation.currentTime = clock;
+        }
+        const style = getComputedStyle(body);
+        return {
+          opacity: Number(style.opacity),
+          transform: matrixValues(style.transform),
+          filter: style.filter,
+        };
+      };
+      const twenty = readAt(morphMs * .2);
+      const twentyFive = readAt(morphMs * .25);
+      const forty = readAt(morphMs * .4);
+      for (const animation of node.getAnimations({ subtree: true })) animation.play();
+      return {
+        morphMs,
+        handoffMs,
+        delay,
+        duration,
+        twenty,
+        twentyFive,
+        forty,
+      };
+    });
+
+    expect(frames, "the delayed Composer body animation must be present").not.toBeNull();
+    expect(Math.abs(frames.delay - frames.morphMs * .28), "body delay must be 28% of the opening cadence").toBeLessThanOrEqual(1);
+    expect(frames.duration, "body handoff must use the handoff token").toBe(frames.handoffMs);
+
+    for (const [label, frame] of [["20%", frames.twenty], ["25%", frames.twentyFive]]) {
+      expect(frame.opacity, `body must remain hidden at ${label}`).toBeLessThanOrEqual(.01);
+      expect(frame.transform.x, `body must remain translated from the right at ${label}`).toBeGreaterThan(30);
+      expect(frame.transform.scaleX, `body must retain its handoff scale at ${label}`).toBeGreaterThanOrEqual(.98);
+      expect(frame.transform.scaleX, `body must not be settled at ${label}`).toBeLessThanOrEqual(.99);
+      expect(frame.filter, `body must retain its transient blur at ${label}`).toMatch(/blur\(1\.5px\)/);
+    }
+    expect(frames.forty.opacity, "body must become visible after its delay").toBeGreaterThan(.05);
+    expect(frames.forty.transform.x, "body must still be travelling in from the right after its delay").toBeGreaterThan(0);
+    expect(frames.forty.transform.x, "body must be closer to rest after its delay").toBeLessThan(36);
+    expect(frames.forty.transform.scaleX, "body must be resolving toward identity after its delay").toBeGreaterThan(.985);
+    expect(frames.forty.transform.scaleX, "body must not settle before the handoff completes").toBeLessThan(1);
   });
 
   /* Reported from a phone three times before it was reproduced, because it needs a
@@ -409,14 +643,50 @@ test.describe("the notch morph", () => {
       await openPlanner(page);
       await page.getByTestId("new-entry").click();
       const sheet = page.getByTestId("sheet");
-      await sheet.evaluate((node, progress) => {
+      const opening = await sheet.evaluate((node, progress) => {
         const entry = node.getAnimations().find((animation) => animation.animationName === "nbnotchin");
-        entry?.pause();
-        if (entry?.effect) entry.currentTime = Number(entry.effect.getTiming().duration) * progress;
+        if (!entry?.effect) return null;
+        const clock = Number(entry.effect.getTiming().duration) * progress;
+        for (const animation of node.getAnimations({ subtree: true })) {
+          animation.pause();
+          animation.currentTime = clock;
+        }
+        const read = (element) => {
+          const style = getComputedStyle(element);
+          const matrix = new DOMMatrixReadOnly(style.transform === "none"
+            ? "matrix(1,0,0,1,0,0)"
+            : style.transform);
+          return { x: matrix.e, y: matrix.f, opacity: Number(style.opacity), filter: style.filter };
+        };
+        return {
+          source: read(node.querySelector(".nb-morph-source-label")),
+          body: read(node.querySelector(".nb-notch-body")),
+        };
       }, fraction);
+      expect(opening).not.toBeNull();
 
       await page.keyboard.press("Escape");
       await expect(sheet).toHaveAttribute("data-fluid-reverse", "true");
+      const firstClosing = await sheet.evaluate((node) => {
+        const readAtStart = (element) => {
+          const animation = element.getAnimations()[0];
+          animation?.pause();
+          if (animation) animation.currentTime = 0;
+          const style = getComputedStyle(element);
+          const matrix = new DOMMatrixReadOnly(style.transform === "none"
+            ? "matrix(1,0,0,1,0,0)"
+            : style.transform);
+          return { x: matrix.e, y: matrix.f, opacity: Number(style.opacity), filter: style.filter };
+        };
+        return {
+          source: readAtStart(node.querySelector(".nb-morph-source-label")),
+          body: readAtStart(node.querySelector(".nb-notch-body")),
+        };
+      });
+      for (const key of ["x", "y", "opacity"]) {
+        expect(Math.abs(firstClosing.source[key] - opening.source[key]), `source ${key} snapped at ${fraction * 100}%`).toBeLessThan(.5);
+        expect(Math.abs(firstClosing.body[key] - opening.body[key]), `body ${key} snapped at ${fraction * 100}%`).toBeLessThan(.5);
+      }
       await expect(sheet).toHaveCount(0, { timeout: 3000 });
     });
   }
@@ -454,6 +724,38 @@ test.describe("the notch morph", () => {
     await expect(page.getByTestId("sheet")).toHaveCount(1);
   });
 
+  test("an interrupted entry can unmount and reopen with a fresh handoff", async ({ page }) => {
+    await openPlanner(page);
+    const trigger = page.getByTestId("new-entry");
+    await trigger.click();
+    const sheet = page.getByTestId("sheet");
+    await sheet.evaluate((node) => {
+      const entry = node.getAnimations().find((animation) => animation.animationName === "nbnotchin");
+      if (!entry?.effect) return;
+      for (const animation of node.getAnimations({ subtree: true })) {
+        animation.pause();
+        animation.currentTime = Number(entry.effect.getTiming().duration) * .45;
+      }
+    });
+    await page.keyboard.press("Escape");
+    await expect(sheet).toHaveCount(0, { timeout: 3000 });
+
+    await trigger.click();
+    const reopened = page.getByTestId("sheet");
+    await expect(reopened).toHaveAttribute("data-fluid-origin", "notch");
+    await expect(reopened).toHaveAttribute("data-morph-stage", "source");
+    const handoff = await reopened.evaluate((node) => ({
+      source: getComputedStyle(node.querySelector(".nb-morph-source-label")).transform,
+      body: getComputedStyle(node.querySelector(".nb-notch-body")).transform,
+      sourceFilter: getComputedStyle(node.querySelector(".nb-morph-source-label")).filter,
+      bodyFilter: getComputedStyle(node.querySelector(".nb-notch-body")).filter,
+    }));
+    expect(handoff.source).toMatch(/matrix\(1, 0, 0, 1, 0, 0\)|none/);
+    expect(handoff.body).not.toMatch(/matrix\([^)]*NaN/);
+    expect(handoff.sourceFilter).toMatch(/none|blur\(0(px)?\)/);
+    expect(handoff.bodyFilter).not.toContain("NaN");
+  });
+
   test("the form leaves before the sheet finishes folding", async ({ page }) => {
     await openPlanner(page);
     await page.getByTestId("new-entry").click();
@@ -463,14 +765,17 @@ test.describe("the notch morph", () => {
     await page.keyboard.press("Escape");
     await expect(sheet).toHaveAttribute("data-fluid-origin", "notch");
 
-    /* One clock for the fold and for the group exits alike. Seeking only `nbnotchout`
-       left the groups' 80ms opacity transitions running on the wall clock, so what
-       this asserted was really "the round trip to the browser took longer than 80ms" —
-       it passed for years on that, and broke the moment the entry animation stopped
-       leaving an animated opacity behind for the exit to transition from. Half way
-       through a 240ms fold is a real instant, and the 80ms exit is genuinely over. */
+    /* The destination plane now leaves as one handoff, in lockstep with the
+       shrinking surface. Scrub the real fold and body animation together so the
+       assertion observes the rendered midpoint rather than a wall-clock guess. */
     const mid = await sheet.evaluate((node) => {
       const fold = node.getAnimations().find((animation) => animation.animationName === "nbnotchout");
+      const bodyOut = node.querySelector(".nb-notch-body")?.getAnimations()
+        .find((animation) => animation.animationName === "nbnotchbodyout");
+      const labelIn = node.querySelector(".nb-morph-source-label")?.getAnimations()
+        .find((animation) => animation.animationName === "nbnotchlabelin");
+      const scrimOut = node.parentElement?.getAnimations()
+        .find((animation) => animation.animationName === "nbscrimout");
       const duration = Number(fold?.effect?.getTiming().duration || 0);
       const delay = Number(fold?.effect?.getTiming().delay || 0)
         || (parseFloat(getComputedStyle(node).animationDelay) || 0) * 1000;
@@ -480,17 +785,24 @@ test.describe("the notch morph", () => {
           animation.currentTime = delay + duration * 0.5;
         }
       }
-      const groups = [...node.querySelectorAll(".nb-notch-cascade > *, .nb-notch-body > :first-child")]
-        .map((el) => Number(getComputedStyle(el).opacity));
       return {
-        body: groups.length ? Math.max(...groups) : Number(getComputedStyle(node.querySelector(".nb-notch-body")).opacity),
+        body: Number(getComputedStyle(node.querySelector(".nb-notch-body")).opacity),
         label: Number(getComputedStyle(node.querySelector('[data-test="morph-source-label"]')).opacity),
         foldDelay: delay,
+        foldDuration: duration,
+        closeDuration: parseFloat(getComputedStyle(node).getPropertyValue("--nb-morph-close")),
+        bodyDuration: Number(bodyOut?.effect?.getTiming().duration || 0),
+        labelDuration: Number(labelIn?.effect?.getTiming().duration || 0),
+        scrimDuration: Number(scrimOut?.effect?.getTiming().duration || 0),
       };
     });
 
     expect(mid.body, "form groups must be gone while the clip is still folding").toBeLessThan(0.2);
     expect(mid.label, "NEW returns as the visible material of the fold").toBeGreaterThan(0.8);
+    expect(mid.foldDuration, "panel fold uses the v3 close token").toBe(mid.closeDuration);
+    expect(mid.bodyDuration, "destination plane close uses the v3 close token").toBe(mid.closeDuration);
+    expect(mid.labelDuration, "source return uses the v3 close token").toBe(mid.closeDuration);
+    expect(mid.scrimDuration, "notch scrim close uses the v3 close token").toBe(mid.closeDuration);
   });
 
   test("a sheet opened from the keyboard arrives on its own terms", async ({ page }) => {
@@ -516,7 +828,19 @@ test.describe("the notch morph", () => {
 
     const sheet = page.getByTestId("sheet");
     await expect(sheet).toBeVisible();
+    await expect(sheet).toHaveAttribute("data-morph-stage", "open");
     await expect(sheet.getByTestId("morph-source-label")).toHaveCSS("opacity", "0");
+    const rest = await readHandoffRestState(sheet);
+    expect(rest.body.animations).not.toContain("nbnotchbodyin");
+    expect(rest.body.opacity).toBeGreaterThanOrEqual(.99);
+    expect(rest.body.transform).toMatch(/none|matrix\(1, 0, 0, 1, 0, 0\)/);
+    expect(rest.body.filter).toMatch(/none|blur\(0(px)?\)/);
+    expect(rest.body.willChange).toBe("auto");
+    expect(rest.source.opacity).toBeLessThanOrEqual(.01);
+    expect(rest.source.transform).toMatch(/none|matrix\(1, 0, 0, 1, 0, 0\)/);
+    expect(rest.source.filter).toMatch(/none|blur\(0(px)?\)/);
+    expect(rest.source.willChange).toBe("auto");
+    expect(rest.cascade.every((value) => value === "auto")).toBe(true);
     await expect(trigger).toHaveCSS("visibility", "hidden");
 
     await page.keyboard.press("Escape");
@@ -580,6 +904,35 @@ test.describe("the notch morph", () => {
 });
 
 test.describe("sheet exits", () => {
+  test("ordinary Settings stays on the generic Sheet and scrim cadence", async ({ page }) => {
+    await openPlanner(page);
+    await page.getByRole("button", { name: "Settings" }).click();
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).not.toHaveAttribute("data-fluid-origin", "notch");
+    const opening = await sheet.evaluate((node) => {
+      const animation = node.getAnimations().find((item) => item.effect?.target === node);
+      return {
+        name: animation?.animationName,
+        duration: Number(animation?.effect?.getTiming().duration || 0),
+        descendants: node.getAnimations({ subtree: true }).map((item) => item.animationName),
+      };
+    });
+    expect(opening.name).toBe("nbfluidorigin");
+    expect(opening.duration).toBe(420);
+    expect(opening.descendants).not.toContain("nbnotchbodyin");
+    expect(opening.descendants).not.toContain("nbnotchlabelout");
+
+    await page.keyboard.press("Escape");
+    await expect(sheet).toHaveClass(/nb-fluid-closing/);
+    const closing = await page.locator(".nb-scrim").first().evaluate((node) => {
+      const animation = node.getAnimations()[0];
+      return { name: animation?.animationName, duration: Number(animation?.effect?.getTiming().duration || 0) };
+    });
+    expect(closing.name).toBe("nbscrimout");
+    expect(closing.duration).toBe(240);
+    await expect(sheet).toHaveCount(0, { timeout: 3000 });
+  });
+
   test("a trigger morph approaches rest without bouncing past it", async ({ page }) => {
     await openPlanner(page, { keepSample: true });
     await page.getByRole("tab", { name: "AGENDA", exact: true }).click();
@@ -608,6 +961,9 @@ test.describe("sheet exits", () => {
 
     const sheet = page.getByTestId("sheet");
     await expect(sheet).toHaveAttribute("data-fluid-origin", "trigger");
+    const entryNames = await sheet.evaluate((node) => node.getAnimations({ subtree: true }).map((animation) => animation.animationName));
+    expect(entryNames).not.toContain("nbnotchbodyin");
+    expect(entryNames).not.toContain("nbnotchlabelout");
 
     /* Sample the rendered animation itself. A class-name assertion passed while
        the body independently faded from zero, which is exactly why the previous
@@ -664,6 +1020,10 @@ test.describe("sheet exits", () => {
 
     const sheet = page.getByTestId("sheet");
     await expect(sheet).toHaveAttribute("data-sheet-title", "ACTION");
+    await expect(sheet).toHaveAttribute("data-fluid-origin", "trigger");
+    const entryNames = await sheet.evaluate((node) => node.getAnimations({ subtree: true }).map((animation) => animation.animationName));
+    expect(entryNames).not.toContain("nbnotchbodyin");
+    expect(entryNames).not.toContain("nbnotchlabelout");
     await sheet.getByRole("button", { name: "MARK COMPLETE" }).click();
 
     await expect(sheet).toHaveClass(/nb-fluid-closing/);
@@ -827,12 +1187,16 @@ test.describe("the shape a sheet grows from", () => {
     expect(Math.abs(samples.start.height - source.height)).toBeLessThan(2);
     expect(samples.start.radius).toBeLessThanOrEqual(Math.min(source.width, source.height) / 2 + 1);
     expect(samples.early.radius).toBeLessThan(Math.min(samples.early.width, samples.early.height) * .75);
-    expect(Math.abs(samples.anchored15.right - samples.start.right), "the top/right source corner stays pinned during the first clip reveal").toBeLessThan(2);
-    expect(Math.abs(samples.anchored15.top - samples.start.top), "the top/right source corner stays pinned during the first clip reveal").toBeLessThan(2);
-    expect(Math.abs(samples.anchored35.right - samples.start.right), "the right source edge stays pinned through the radius handoff").toBeLessThan(2);
-    expect(Math.abs(samples.anchored35.top - samples.start.top), "the top source edge stays pinned through the radius handoff").toBeLessThan(2);
-    expect(Math.abs(samples.anchored60.right - samples.start.right), "the anchored edge drifts less than the expanding opposite edge").toBeLessThan(Math.abs(samples.anchored60.left - samples.start.left));
-    expect(Math.abs(samples.anchored60.top - samples.start.top), "the anchored edge drifts less than the expanding opposite edge").toBeLessThan(Math.abs(samples.anchored60.bottom - samples.start.bottom));
+    /* V3 deliberately removes v2's early transform hold: translation and clip
+       both progress from the first fifth, so the source corner is allowed to
+       travel continuously while the visible window expands. */
+    expect(samples.anchored15.left, "the visible window must already expand left by 15%").toBeLessThan(samples.start.left);
+    expect(samples.anchored15.bottom, "the visible window must already expand down by 15%").toBeGreaterThan(samples.start.bottom);
+    expect(samples.anchored35.left, "the visible window keeps expanding left").toBeLessThan(samples.anchored15.left);
+    expect(samples.anchored35.bottom, "the visible window keeps expanding down").toBeGreaterThan(samples.anchored15.bottom);
+    expect(samples.anchored60.left, "the visible window continues toward the final left edge").toBeLessThan(samples.anchored35.left);
+    expect(samples.anchored60.bottom, "the visible window continues toward the final bottom edge").toBeGreaterThan(samples.anchored35.bottom);
+    expect(samples.anchored35.radius).toBeCloseTo(24, 0);
     expect(samples.mid.left, "the opposite horizontal edge should expand left").toBeLessThan(samples.start.left);
     expect(samples.mid.bottom, "the opposite vertical edge should expand down").toBeGreaterThan(samples.start.bottom);
     expect(samples.end.width).toBeGreaterThan(samples.start.width);
@@ -843,7 +1207,7 @@ test.describe("the shape a sheet grows from", () => {
     expect(samples.mid.scaleY).toBeCloseTo(1, 5);
   });
 
-  test("source identity occupies the measured window until Composer content arrives", async ({ page }) => {
+  test("source and destination identities exchange without a gap", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await openPlanner(page);
     const trigger = page.getByTestId("new-entry");
@@ -854,20 +1218,23 @@ test.describe("the shape a sheet grows from", () => {
     const samples = await sheet.evaluate((node) => {
       const entry = node.getAnimations().find((animation) => animation.animationName === "nbnotchin");
       const label = node.querySelector('[data-test="morph-source-label"]');
-      if (!entry?.effect || !label) return null;
+      const body = node.querySelector(".nb-notch-body");
+      if (!entry?.effect || !label || !body) return null;
       const duration = Number(entry.effect.getTiming().duration);
       const at = (fraction) => {
         for (const animation of node.getAnimations({ subtree: true })) {
           animation.pause();
           animation.currentTime = duration * fraction;
         }
-        const groups = node.getAnimations({ subtree: true })
-          .filter((animation) => animation.animationName === "nbnotchgroupin")
-          .map((animation) => getComputedStyle(animation.effect.target).clipPath);
         const labelRect = label.getBoundingClientRect();
+        const bodyStyle = getComputedStyle(body);
+        const bodyMatrix = new DOMMatrixReadOnly(bodyStyle.transform === "none"
+          ? "matrix(1,0,0,1,0,0)"
+          : bodyStyle.transform);
         return {
           labelOpacity: Number(getComputedStyle(label).opacity),
-          started: groups.filter((clip) => !clip.includes("100%")).length,
+          bodyOpacity: Number(bodyStyle.opacity),
+          bodyTransformX: bodyMatrix.e,
           labelRect: { x: labelRect.x, y: labelRect.y, width: labelRect.width, height: labelRect.height },
         };
       };
@@ -880,8 +1247,10 @@ test.describe("the shape a sheet grows from", () => {
     expect(Math.abs(samples.zero.labelRect.width - source.width)).toBeLessThan(2);
     expect(Math.abs(samples.zero.labelRect.height - source.height)).toBeLessThan(2);
     expect(samples.zero.labelOpacity).toBeGreaterThan(.9);
-    expect(samples.quarter.labelOpacity > .05 || samples.quarter.started > 0).toBe(true);
-    expect(samples.handoff.labelOpacity > .05 || samples.handoff.started > 0).toBe(true);
+    expect(Math.max(samples.quarter.labelOpacity, samples.quarter.bodyOpacity), "source and destination must never both disappear").toBeGreaterThan(.05);
+    expect(samples.handoff.bodyOpacity).toBeGreaterThan(.1);
+    expect(samples.handoff.bodyTransformX).toBeGreaterThan(0);
+    expect(samples.handoff.labelOpacity).toBeLessThan(.9);
   });
 
   test("the morph is measured from the panel, not from the panel mid-animation", async ({ page }) => {

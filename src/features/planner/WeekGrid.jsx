@@ -20,6 +20,7 @@ import { normalizeMeetingLink } from "./meetingLink.js";
 import {
   EMPTY_SPACE_LIFT_MS,
   gestureChangedAnything,
+  movedEnoughToActivateDirectDrag,
   movedEnoughToCancelHold,
   pointerButtonsHeld,
   proposeGesture,
@@ -47,9 +48,8 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
      the day. Both are read from the pointer rather than from the card, so a drop
      lands where the cursor is and not where the grab started.
 
-     Press-and-hold to lift, the same as the day timeline — a week column is
-     narrow enough that an immediate drag would fight the vertical scroll on every
-     attempt to read it. */
+     Mouse/pen movement activates directly; touch retains a hold-to-lift guard so
+     vertical movement can remain a Timeline scroll. */
   const [drag, setDrag] = useState(null);
   const dragRef = useRef(null);
   const holdRef = useRef(null);
@@ -228,12 +228,12 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
     };
   }, [Boolean(draft)]);
 
-  const beginDrag = (event, day, clientX, clientY) => {
+  const beginDrag = (event, day, clientX, clientY, grabOverride = null) => {
     tapRef.current = false;
     beep?.("lift"); buzz?.(14);
     const next = {
       id: event.id, event, dur: event.dur,
-      grab: minuteAt(clientY) - event.start,
+      grab: grabOverride ?? (minuteAt(clientY) - event.start),
       fromDate: day, fromStart: event.start,
       date: day, start: event.start,
       x: clientX, y: clientY,
@@ -275,13 +275,35 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
       dragRef.current = null;
       setDrag(null);
     };
+    /* Once a lifted card changes columns, the original button is unmounted
+       under the finger. Keep the active touch owned by the Week surface so the
+       next move/end still updates and commits the live gesture. */
+    const touchMove = (e) => {
+      if (!dragRef.current) return;
+      const point = e.touches?.[0];
+      if (!point) return;
+      if (e.cancelable) e.preventDefault();
+      updateDrag(point.clientX, point.clientY);
+    };
+    const touchEnd = () => { if (dragRef.current) { disarm(); endDrag(); } };
+    const touchCancel = () => {
+      disarm();
+      dragRef.current = null;
+      setDrag(null);
+    };
     window.addEventListener("pointermove", move, { passive: false });
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", cancel);
+    window.addEventListener("touchmove", touchMove, { passive: false });
+    window.addEventListener("touchend", touchEnd);
+    window.addEventListener("touchcancel", touchCancel);
     return () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", cancel);
+      window.removeEventListener("touchmove", touchMove);
+      window.removeEventListener("touchend", touchEnd);
+      window.removeEventListener("touchcancel", touchCancel);
     };
   }, [dragging]);
 
@@ -328,6 +350,15 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
     const move = (e) => {
       const armed = armedRef.current;
       if (!armed || dragRef.current) return;
+      if (armed.activateOnMove && !pointerButtonsHeld(e)) {
+        disarm();
+        tapRef.current = false;
+        return;
+      }
+      if (armed.activateOnMove && movedEnoughToActivateDirectDrag(armed, { x: e.clientX, y: e.clientY })) {
+        armed.activateOnMove(e.clientX, e.clientY, e);
+        return;
+      }
       if (movedEnoughToCancelHold(armed, { x: e.clientX, y: e.clientY })) { disarm(); tapRef.current = false; }
     };
     window.addEventListener("pointermove", move);
@@ -341,11 +372,24 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
     tapRef.current = true;
     const { clientX, clientY } = e;
     disarm();
-    armedRef.current = { x: clientX, y: clientY };
-    holdRef.current = setTimeout(() => {
-      armedRef.current = null;
-      beginDrag(event, day, clientX, clientY);
-    }, LIFT_MS);
+    const grab = minuteAt(clientY) - event.start;
+    armedRef.current = {
+      x: clientX,
+      y: clientY,
+      activateOnMove: (nextX, nextY, moveEvent) => {
+        disarm();
+        moveEvent.preventDefault();
+        if (moveEvent.currentTarget?.setPointerCapture && moveEvent.pointerId != null) {
+          try { moveEvent.currentTarget.setPointerCapture(moveEvent.pointerId); } catch { /* capture is best effort */ }
+        }
+        beginDrag(event, day, nextX, nextY, grab);
+        /* The movement that crosses the threshold is also the first visible
+           drag frame; do not wait for a second pointermove to catch up. */
+        updateDrag(nextX, nextY);
+      },
+    };
+    /* Mouse/pen cards are movement-only. Touch uses touchStart()'s separate
+       LIFT_MS timer so vertical scrolling cannot be stolen by a card. */
   };
   const pointerUp = (e, event, day) => {
     if (e.pointerType === "touch") return;
@@ -439,7 +483,10 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
             ))}
           </div>
         )}
-        <div ref={scrollRef} onTouchStartCapture={() => onTimelineIntent?.()} onWheel={() => onTimelineIntent?.()} onScroll={(event) => {
+        <div ref={scrollRef} onTouchStartCapture={() => onTimelineIntent?.()}
+          onTouchEndCapture={() => { if (dragRef.current) { disarm(); endDrag(); } }}
+          onTouchCancelCapture={() => { if (dragRef.current) { disarm(); dragRef.current = null; setDrag(null); } }}
+          onWheel={() => onTimelineIntent?.()} onScroll={(event) => {
           /* The scroll container is the reliable cancellation signal on touch:
              a finger can move only a few pixels before the browser starts
              scrolling, which is still a scroll rather than an intentional

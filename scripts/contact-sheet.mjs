@@ -45,12 +45,12 @@ const WIDTHS = [
    value is being cheap enough to run on every visual change. */
 const SURFACES = [
   { id: "day", reach: async () => {} },
-  { id: "week", reach: async (page) => { await page.locator('[data-test="zoom-out"]').click(); await page.waitForTimeout(650); } },
-  { id: "month", reach: async (page) => { await page.locator('[data-test="zoom-out"]').click(); await page.waitForTimeout(650); } },
+  { id: "week", reach: async (page) => { await page.locator('[data-test="zoom-out"]').click(); } },
+  { id: "month", reach: async (page) => { await page.locator('[data-test="zoom-out"]').click(); } },
   { id: "sheet", reach: async (page) => {
-      await page.locator('[data-test="zoom-in"]').click(); await page.waitForTimeout(350);
-      await page.locator('[data-test="zoom-in"]').click(); await page.waitForTimeout(450);
-      await page.locator('[data-test="new-entry"]').click(); await page.waitForTimeout(900);
+      await page.locator('[data-test="zoom-in"]').click();
+      await page.locator('[data-test="zoom-in"]').click();
+      await page.locator('[data-test="new-entry"]').click();
     } },
 ];
 
@@ -85,66 +85,257 @@ function notebook() {
   };
 }
 
+function errorMessage(error) {
+  return String(error?.message ?? error).replace(/\s+/g, " ").trim();
+}
+
+function surfaceMatches(state, surfaceId) {
+  if (surfaceId === "day") return state.zoom === "day" && !state.sheetVisible;
+  if (surfaceId === "week") return state.zoom === "week" && !state.sheetVisible;
+  if (surfaceId === "month") return state.zoom === "month" && !state.sheetVisible;
+  if (surfaceId === "sheet") {
+    return state.sheetVisible
+      && state.composerVisible
+      && state.sheetOrigin === "notch"
+      && state.sheetSource === "new-entry"
+      && state.sheetStage === "open";
+  }
+  return false;
+}
+
+function describeSurfaceState(state) {
+  const details = [
+    `zoom=${state.zoom}`,
+    `day=${state.dayStreamVisible}`,
+    `week=${state.weekGridVisible}`,
+    `month=${state.monthNavigatorVisible}`,
+    `sheet=${state.sheetVisible}`,
+  ];
+  if (state.sheetVisible) details.push(`origin=${state.sheetOrigin ?? "none"}`, `source=${state.sheetSource ?? "none"}`, `stage=${state.sheetStage ?? "none"}`);
+  return details.join(", ");
+}
+
+/* Read the state the product is actually rendering. This deliberately uses the
+   same stable DOM contracts as the E2E suite instead of inferring a view from
+   the requested filename or from elapsed animation time. */
+async function readSurfaceState(page) {
+  return page.evaluate(() => {
+    const visible = (node) => {
+      if (!node) return false;
+      const style = window.getComputedStyle(node);
+      const rect = node.getBoundingClientRect();
+      return style.display !== "none" && style.visibility !== "hidden"
+        && Number(style.opacity) > 0 && rect.width > 0 && rect.height > 0;
+    };
+    const dayStream = document.querySelector('[data-test="day-stream"]');
+    const weekGrid = document.querySelector('[data-test="week-grid"]');
+    const monthNavigator = document.querySelector(".nb-month-navigator.is-month");
+    const ribbon = document.querySelector('[data-test="day-ribbon"]');
+    const sheet = document.querySelector('[data-test="sheet"]');
+    const composer = document.querySelector('[data-test="composer"]');
+    const weekDays = [...document.querySelectorAll("[data-week-day]")].filter(visible).length;
+    const monthCells = monthNavigator
+      ? [...document.querySelectorAll("button[data-day]")].filter(visible).length
+      : 0;
+    const dayStreamVisible = visible(dayStream);
+    const weekGridVisible = visible(weekGrid) && weekDays >= 7;
+    const monthNavigatorVisible = visible(monthNavigator) && monthCells >= 28;
+    const sheetVisible = visible(sheet);
+    const composerVisible = visible(composer);
+    const zoom = monthNavigatorVisible ? "month"
+      : weekGridVisible ? "week"
+        : dayStreamVisible ? "day" : "unknown";
+    return {
+      zoom,
+      dayStreamVisible,
+      weekGridVisible,
+      monthNavigatorVisible,
+      ribbonVisible: visible(ribbon),
+      weekDays,
+      monthCells,
+      sheetVisible,
+      composerVisible,
+      sheetOrigin: sheet?.getAttribute("data-fluid-origin") ?? null,
+      sheetSource: sheet?.getAttribute("data-morph-source") ?? null,
+      sheetStage: sheet?.getAttribute("data-morph-stage") ?? null,
+    };
+  });
+}
+
+/* Waiting is only a synchronization aid; success still requires the positive
+   state predicate below. A screenshot is never allowed to stand in for state. */
+async function verifySurface(page, surfaceId) {
+  try {
+    await page.waitForFunction((expected) => {
+      const visible = (node) => {
+        if (!node) return false;
+        const style = window.getComputedStyle(node);
+        const rect = node.getBoundingClientRect();
+        return style.display !== "none" && style.visibility !== "hidden"
+          && Number(style.opacity) > 0 && rect.width > 0 && rect.height > 0;
+      };
+      const dayStream = document.querySelector('[data-test="day-stream"]');
+      const weekGrid = document.querySelector('[data-test="week-grid"]');
+      const monthNavigator = document.querySelector(".nb-month-navigator.is-month");
+      const ribbon = document.querySelector('[data-test="day-ribbon"]');
+      const sheet = document.querySelector('[data-test="sheet"]');
+      const composer = document.querySelector('[data-test="composer"]');
+      const weekVisible = visible(weekGrid)
+        && [...document.querySelectorAll("[data-week-day]")].filter(visible).length >= 7;
+      const monthVisible = visible(monthNavigator)
+        && [...document.querySelectorAll("button[data-day]")].filter(visible).length >= 28;
+      const dayVisible = visible(dayStream) && !weekVisible && !monthVisible;
+      const sheetVisible = visible(sheet);
+      const composerVisible = visible(composer);
+      if (expected === "day") return dayVisible && !sheetVisible;
+      if (expected === "week") return weekVisible && !sheetVisible;
+      if (expected === "month") return monthVisible && !sheetVisible;
+      return sheetVisible && composerVisible
+        && sheet.getAttribute("data-fluid-origin") === "notch"
+        && sheet.getAttribute("data-morph-source") === "new-entry"
+        && sheet.getAttribute("data-morph-stage") === "open"
+        && Boolean(ribbon || dayVisible || weekVisible || monthVisible);
+    }, surfaceId, { timeout: 5_000 });
+  } catch (error) {
+    const state = await readSurfaceState(page);
+    throw new Error(`expected ${surfaceId} state; current state was ${describeSurfaceState(state)}`, { cause: error });
+  }
+  const state = await readSurfaceState(page);
+  if (!surfaceMatches(state, surfaceId)) {
+    throw new Error(`expected ${surfaceId} state; current state was ${describeSurfaceState(state)}`);
+  }
+  return state;
+}
+
+function recordFor(size, theme, surface) {
+  return {
+    viewport: size.id,
+    width: size.width,
+    height: size.height,
+    theme: theme.id,
+    surface: surface.id,
+    status: "failed",
+  };
+}
+
+async function writeManifest(out, records, expected) {
+  const passed = records.filter((record) => record.status === "passed").length;
+  const failed = records.filter((record) => record.status === "failed").length;
+  await writeFile(path.join(out, "manifest.json"), JSON.stringify({
+    schemaVersion: 1,
+    generatedAt: new Date().toISOString(),
+    expected,
+    frames: records.length,
+    passed,
+    failed,
+    records,
+  }, null, 2), "utf8");
+}
+
+async function diagnostic(page, out, record) {
+  const name = `${record.viewport}-${record.theme}-${record.surface}-FAILED.png`;
+  try {
+    await page.screenshot({ path: path.join(out, name) });
+    record.diagnosticFile = name;
+  } catch (error) {
+    record.diagnosticError = errorMessage(error);
+  }
+}
+
 async function main() {
   await rm(OUT, { recursive: true, force: true });
   await mkdir(OUT, { recursive: true });
 
+  const expected = THEMES.length * WIDTHS.length * SURFACES.length;
+  const records = [];
+  await writeManifest(OUT, records, expected);
+
   const browser = await chromium.launch({ executablePath: EXECUTABLE });
   const state = notebook();
-  const frames = [];
 
   for (const size of WIDTHS) {
     for (const theme of THEMES) {
-      const context = await browser.newContext({
-        viewport: { width: size.width, height: size.height },
-        hasTouch: size.mobile,
-        isMobile: size.mobile,
-        deviceScaleFactor: 2,
-      });
-      const page = await context.newPage();
-      await page.goto(BASE);
-      await page.evaluate(([sk, pk, s, id]) => {
-        window.localStorage.clear();
-        window.localStorage.setItem(sk, JSON.stringify(s));
-        window.localStorage.setItem(pk, JSON.stringify({
-          schemaVersion: 1,
-          display: { themeId: id, clock: "12", weekStart: 0, reducedMotion: false },
-          feedback: { sound: false, haptics: false },
-        }));
-      }, [STATE_KEY, PREFS_KEY, state, theme.id]);
-      await page.reload();
-      await page.waitForSelector('[data-test="day-stream"]');
-      await page.waitForTimeout(500);
+      let context = null;
+      let page = null;
+      try {
+        context = await browser.newContext({
+          viewport: { width: size.width, height: size.height },
+          hasTouch: size.mobile,
+          isMobile: size.mobile,
+          deviceScaleFactor: 2,
+        });
+        page = await context.newPage();
+        await page.goto(BASE);
+        await page.evaluate(([sk, pk, s, id]) => {
+          window.localStorage.clear();
+          window.localStorage.setItem(sk, JSON.stringify(s));
+          window.localStorage.setItem(pk, JSON.stringify({
+            schemaVersion: 1,
+            display: { themeId: id, clock: "12", weekStart: 0, reducedMotion: false },
+            feedback: { sound: false, haptics: false },
+          }));
+        }, [STATE_KEY, PREFS_KEY, state, theme.id]);
+        await page.reload();
+        await verifySurface(page, "day");
 
-      for (const surface of SURFACES) {
-        try {
-          await surface.reach(page);
-        } catch {
-          /* A surface that cannot be reached at this width is worth seeing as a
-             gap in the sheet rather than a crashed run. */
+        for (const surface of SURFACES) {
+          const record = recordFor(size, theme, surface);
+          try {
+            await surface.reach(page);
+            await verifySurface(page, surface.id);
+            const name = `${size.id}-${theme.id}-${surface.id}.png`;
+            await page.screenshot({ path: path.join(OUT, name) });
+            record.status = "passed";
+            record.file = name;
+          } catch (error) {
+            record.error = errorMessage(error);
+            if (page) await diagnostic(page, OUT, record);
+          }
+          records.push(record);
+          await writeManifest(OUT, records, expected);
+          process.stdout.write(`  ${size.id} · ${theme.id} · ${surface.id} · ${record.status}\n`);
         }
-        const name = `${size.id}-${theme.id}-${surface.id}.png`;
-        await page.screenshot({ path: path.join(OUT, name) });
-        frames.push({ file: name, width: size.id, theme: theme.id, label: theme.name, surface: surface.id });
+      } catch (error) {
+        const message = `setup failed: ${errorMessage(error)}`;
+        for (const surface of SURFACES) {
+          const record = recordFor(size, theme, surface);
+          record.error = message;
+          if (page) await diagnostic(page, OUT, record);
+          records.push(record);
+          await writeManifest(OUT, records, expected);
+          process.stdout.write(`  ${size.id} · ${theme.id} · ${surface.id} · failed\n`);
+        }
+      } finally {
+        await context?.close();
       }
-      await context.close();
-      process.stdout.write(`  ${size.id} · ${theme.id}\n`);
     }
   }
 
-  await writeFile(path.join(OUT, "index.html"), sheet(frames), "utf8");
   await browser.close();
-  console.log(`\n${frames.length} frames → ${path.join(OUT, "index.html")}`);
+  const passed = records.filter((record) => record.status === "passed").length;
+  const failed = records.filter((record) => record.status === "failed").length;
+  await writeManifest(OUT, records, expected);
+  await writeFile(path.join(OUT, "index.html"), sheet(records, expected), "utf8");
+  console.log(`\n${records.length} requested · ${passed} verified · ${failed} failed → ${path.join(OUT, "index.html")}`);
+  if (records.length !== expected || passed !== expected || failed !== 0) {
+    throw new Error(`visual matrix failed: expected ${expected} records and passes, got ${records.length} records, ${passed} passes, ${failed} failures`);
+  }
 }
 
-function sheet(frames) {
-  const byWidth = (w) => frames.filter((f) => f.width === w);
+function sheet(frames, expected) {
+  const byWidth = (w) => frames.filter((f) => f.viewport === w);
   const group = (w) => {
     const themes = [...new Set(byWidth(w).map((f) => f.theme))];
     return themes.map((id) => {
       const rows = byWidth(w).filter((f) => f.theme === id);
-      return `<section><h2>${rows[0].label}<span>${id}</span></h2><div class="row">${
-        rows.map((f) => `<figure><img src="${f.file}" loading="lazy" alt="${f.theme} ${f.surface}"><figcaption>${f.surface}</figcaption></figure>`).join("")
+      return `<section><h2>${id}<span>${rows[0]?.width ?? ""}×${rows[0]?.height ?? ""}</span></h2><div class="row">${
+        rows.map((f) => {
+          const asset = f.file ?? f.diagnosticFile;
+          const image = asset
+            ? `<img src="${asset}" loading="lazy" alt="${f.theme} ${f.surface} ${f.status}">`
+            : `<div class="failed">NO CAPTURE</div>`;
+          return `<figure class="${f.status}">${image}<figcaption>${f.surface} · ${f.status}</figcaption></figure>`;
+        }).join("")
       }</div></section>`;
     }).join("");
   };
@@ -162,10 +353,13 @@ function sheet(frames) {
   figure{margin:0;flex:none}
   img{display:block;height:420px;width:auto;border-radius:6px;background:#000;
       box-shadow:0 2px 10px rgb(0 0 0 / .5)}
+  figure.failed img{outline:3px solid #ff405e}
+  .failed{height:420px;width:280px;display:grid;place-items:center;border:3px solid #ff405e;color:#ff8092;background:#2b1018}
   figcaption{color:#6b7079;font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;margin-top:.4rem}
+  figure.failed figcaption{color:#ff8092}
 </style>
 <h1>Contact sheet</h1>
-<p class="meta">${frames.length} frames · ${new Date().toISOString()} · look for illegible dim text, shadows that vanish or smear, and capitals that should not be capitals</p>
+<p class="meta">${frames.length}/${expected} requested · ${frames.filter((f) => f.status === "passed").length} positively verified · ${frames.filter((f) => f.status === "failed").length} failed · ${new Date().toISOString()} · look for illegible dim text, shadows that vanish or smear, and capitals that should not be capitals</p>
 <h3>Phone · 393px</h3>${group("phone")}
 <h3>Desktop · 1280px</h3>${group("desk")}`;
 }
