@@ -141,7 +141,7 @@ export default function TimelineActionCard({
             )}
           </button>
           {block && (
-            <span data-resize={task.id} data-resize-edge="end" data-test="timeline-action-resize"
+            <span data-resize={task.id} data-resize-edge="end" data-action-estimate={task.id} data-test="timeline-action-resize"
               onPointerDown={(event) => {
                 event.stopPropagation();
                 onResizePointerDown(event, task, estimate);

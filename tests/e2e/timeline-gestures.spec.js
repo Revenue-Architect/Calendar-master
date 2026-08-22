@@ -16,13 +16,13 @@ const today = keyOf(new Date());
 const LINK = "https://meet.example.com/abc-defg";
 const HOUR_PX = 68;
 
-function seeded({ link = null } = {}) {
+function seeded({ link = null, startLocal = `${today}T10:00`, endLocal = `${today}T11:00` } = {}) {
   return createEvent(createBlankPlannerState({}), {
     calendarId: "calendar-default", title: "Standup", category: "PEOPLE",
     ...(link ? { link } : {}),
     timing: {
       kind: "timed", timeZoneMode: "floating",
-      startLocal: `${today}T10:00`, endLocal: `${today}T11:00`,
+      startLocal, endLocal,
     },
   }, { id: "evt-standup" }).state;
 }
@@ -343,10 +343,10 @@ test.describe("touch Event resize", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 
   test("a held touch on the bottom edge extends an Event without moving its start", async ({ page }) => {
-    await seedPlanner(page, seeded());
+    await seedPlanner(page, seeded({ startLocal: `${today}T10:00`, endLocal: `${today}T12:00` }));
     const event = card(page);
     await event.scrollIntoViewIfNeeded();
-    const handle = event.locator('[data-resize-edge="end"]');
+    const handle = event.locator('[data-touch-resize="end"]');
     const box = await handle.boundingBox();
     const x = box.x + box.width / 2;
     const y = box.y + box.height / 2;
