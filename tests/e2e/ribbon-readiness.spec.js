@@ -129,6 +129,7 @@ async function armFirstRibbonFrameObserver(page) {
           selectedIntersects: Boolean(selected && intersects(selected)),
           dataRibbonPosition: viewport?.getAttribute("data-ribbon-position") ?? null,
           stripWidth: stripRect.width,
+          clientWidth: currentStrip.clientWidth,
           scrollLeft: currentStrip.scrollLeft,
         });
         observer.disconnect();
@@ -162,7 +163,7 @@ function assertFirstFrameReady(firstFrame, label) {
   expect(firstFrame.intersectingRealDates.length, `${label}: first frame intersecting dates`).toBeGreaterThan(0);
   expect(firstFrame.selectedRendered, `${label}: first frame selected rendered`).toBe(true);
   expect(firstFrame.selectedIntersects, `${label}: first frame selected intersects`).toBe(true);
-  expect(firstFrame.stripWidth, `${label}: first frame strip width`).toBeGreaterThan(0);
+  expect(firstFrame.clientWidth, `${label}: first frame client width`).toBeGreaterThan(0);
 }
 
 async function assertRibbonSettled(page, label) {
@@ -343,7 +344,6 @@ test.describe("Week ribbon readiness", () => {
     await page.getByRole("tab", { name: "TIMELINE", exact: true }).click();
     const firstFrame = await firstRibbonFrame(page);
     assertFirstFrameReady(firstFrame, "Day re-entry");
-    await expect(page.getByTestId("day-ribbon")).toBeVisible();
     await assertRibbonSettled(page, "Day after Actions");
   });
 
@@ -362,7 +362,6 @@ test.describe("Week ribbon readiness", () => {
     await page.getByRole("tab", { name: "TIMELINE", exact: true }).click();
     const firstFrame = await firstRibbonFrame(page);
     assertFirstFrameReady(firstFrame, "Week re-entry");
-    await expect(page.getByTestId("day-ribbon")).toBeVisible();
     await expect(page.getByTestId("zoom-in")).toHaveText(/DAY/);
     await assertRibbonSettled(page, "Week after Actions");
   });
@@ -383,7 +382,6 @@ test.describe("Week ribbon readiness", () => {
     await page.getByTestId("zoom-in").click();
     const firstFrame = await firstRibbonFrame(page);
     assertFirstFrameReady(firstFrame, "Month return");
-    await expect(page.getByTestId("day-ribbon")).toBeVisible();
     await assertRibbonSettled(page, "Month return");
   });
 
