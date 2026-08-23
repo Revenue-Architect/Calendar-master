@@ -279,4 +279,3 @@ Negative controls must remain uncommitted:
 - `src/Planner.jsx:3109-3358` owns delegated Day touch activation and post-lift scroll locking.
 - `docs/plans/2026-08-22-1052-fix-mobile-timeline-drag-scroll-ownership-plan.md` records the prior broad-edge failure and the current centered-grip contract.
 - `docs/qa/2026-08-22-interaction-integrity-direct-manipulation.md` records movement-driven desktop activation and the remaining physical-device gate.
-
