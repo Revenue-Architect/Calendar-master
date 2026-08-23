@@ -95,6 +95,30 @@ unconditionally.
 - Keep both device paint gates open.
 - **Commit** — `docs: correct 23 Aug evidence and handoff state`.
 
+## Task 6 — Pre-merge review of Task 1's own evidence
+
+Raised against this branch after Tasks 1–5 landed, and both points checked before
+accepting.
+
+| Claim | Verdict |
+| --- | --- |
+| The Task 1 `Tab` test never presses `Tab` | **Reviewer right.** `day-ribbon.previousElementSibling` is `null` — the strip is the first child of `ribbon-viewport`, and `Previous day` is a sibling of the viewport. The fallback focused the anchor, and the loop broke on iteration 0 because `activeElement` already had a `data-day`. Instrumented press count: **0**. Rewritten to focus `Previous day`, assert that focus landed, press `Tab` once, assert the anchor is focused. No loop, no fallback. |
+| `keyboardAnchorIndex` starts `null`, so frame 1 has no stop | **Reviewer right about the code, and I could not produce a RED.** Every input is a prop, so the initializer is now seeded synchronously — the contract holds by construction. But `Planner` never unmounts in the re-entry flow, so the hook's state survives the strip: the first-frame test passes identically with `useState(null)`. Landed as hardening, documented in the test as *not* covering the initializer. |
+
+The re-entry first-frame test is kept for what it does guard — the anchor *policy*
+across a strip remount: 0 stops if the anchor names an unrendered day, 2 if
+selection and fallback both claim it.
+
+**Gate.** The negative control targets the `Tab` line itself, not merely something
+earlier in the test: starting focus on a non-adjacent control (`nav-toggle`) leaves
+the anchor `inactive` after one hop → **RED at the focus assertion**; restoring
+`Previous day` → green. Both keyboard tests `--repeat-each=50` → **100/100**, no
+retries.
+
+That distinction is the whole lesson of this task. The original test's 50/50 was a
+measure of how reliably it avoided testing anything, and a control that fires on an
+earlier line would have looked just as convincing.
+
 ## Task 5 — Verification
 
 Focused suites, `--repeat-each=10` on the ribbon case, `npm test`, `npm run

@@ -124,6 +124,7 @@ async function armFirstRibbonFrameObserver(page) {
         const intersecting = Object.freeze(intersectingRealDates);
         window.__ribbonFirstFrame = Object.freeze({
           renderedDayCount: cells.length,
+          tabbableDayCount: cells.filter((node) => node.tabIndex === 0).length,
           intersectingRealDates: intersecting,
           selectedRendered: Boolean(selected),
           selectedIntersects: Boolean(selected && intersects(selected)),
@@ -308,18 +309,17 @@ test.describe("Week ribbon readiness", () => {
     expect(anchorDate, "a browsed-out ribbon must expose an anchor to focus").not.toBeNull();
     expect(anchorDate).not.toBe(selected);
 
-    /* Enter the strip the way a keyboard user would rather than calling focus():
-       a programmatic focus would pass even on a cell the tab order skips. */
-    await page.getByTestId("day-ribbon").evaluate((node) => {
-      const previous = node.previousElementSibling?.querySelector?.("button") ?? null;
-      (previous ?? node.querySelector("button[data-day][tabindex='0']")).focus();
-    });
-    for (let hop = 0; hop < 4; hop += 1) {
-      const onAnchor = await page.evaluate(() => document.activeElement
-        ?.getAttribute?.("data-day") ?? null);
-      if (onAnchor) break;
-      await page.keyboard.press("Tab");
-    }
+    /* Start on the real control before the strip and press Tab once. The first
+       version of this test focused the anchor itself when it could not find that
+       control — `day-ribbon` is the first child of `ribbon-viewport`, so its
+       previousElementSibling is null — and then broke out of its own loop before
+       pressing anything. It passed 50/50 while proving only that Enter activates
+       a focused button. No loop and no fallback here: if one Tab does not reach
+       the anchor, the tab order is wrong and this must fail. */
+    const previousDay = page.getByRole("button", { name: "Previous day", exact: true });
+    await previousDay.focus();
+    await expect(previousDay).toBeFocused();
+    await page.keyboard.press("Tab");
     await expect(page.locator(`[data-test="day-ribbon"] button[data-day="${anchorDate}"]`)).toBeFocused();
 
     await page.keyboard.press("Enter");
@@ -402,6 +402,28 @@ test.describe("Week ribbon readiness", () => {
     const snapshot = await ribbonSnapshot(page);
     expect(snapshot.state, "missing scrollend should not leave a positioning lock").toBe("settled");
     assertUsable(snapshot, "missing scrollend");
+  });
+
+  /* Exactly one tab stop on the frame a re-entry commits, before anything has
+     settled. This guards the anchor policy across a remount — 0 stops if the
+     anchor names an unrendered day, 2 if selection and fallback both claim it.
+     It does NOT guard the hook's initial state: Planner never unmounts here, so
+     the anchor survives the strip. Seeding that initializer synchronously is
+     construction rather than timing, and no test in this suite can fail for it. */
+  test("a re-entered ribbon frame owns exactly one keyboard entry point", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await boot(page);
+    await dismissWelcome(page);
+    await assertRibbonSettled(page, "Day before Actions");
+
+    await page.getByRole("tab", { name: "ACTIONS", exact: true }).click();
+    await expect(page.getByTestId("day-ribbon")).toHaveCount(0);
+    await armFirstRibbonFrameObserver(page);
+    await page.getByRole("tab", { name: "TIMELINE", exact: true }).click();
+
+    const frame = await firstRibbonFrame(page);
+    expect(frame.renderedDayCount, "the re-entered frame must render days").toBeGreaterThan(0);
+    expect(frame.tabbableDayCount, "the re-entered frame must own exactly one tab stop").toBe(1);
   });
 
   test("Day re-entry renders the browsed-out selection on its first frame", async ({ page }) => {

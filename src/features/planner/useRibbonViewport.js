@@ -61,7 +61,19 @@ export default function useRibbonViewport({
   const [ribbonActiveNode, setRibbonActiveNode] = useState(null);
   const [positionState, setPositionState] = useState(ribbonPositionStateRef.current);
   const [edges, setEdges] = useState({ start: false, end: false });
-  const [keyboardAnchorIndex, setKeyboardAnchorIndex] = useState(null);
+  /* Seeded synchronously rather than left null until the first effect runs: the
+     contract is that a rendered ribbon always owns exactly one tab stop, and an
+     anchor that arrives after paint makes that true by timing instead of by
+     construction. Every input here is a prop, so no measurement is needed —
+     `logicalCenter` is null on a cold mount and the helper falls back to the
+     rendered middle, which the selected day supersedes as soon as it is in
+     range. */
+  const [keyboardAnchorIndex, setKeyboardAnchorIndex] = useState(() => ribbonKeyboardAnchorIndex({
+    selectedIndex: diffDays(selectedDateKey, ribbonRange.startKey),
+    windowStart: ribbonWindowStart,
+    windowLength: Math.min(RIBBON_RENDER_WINDOW_DAYS, Math.max(0, ribbonSpan - ribbonWindowStart)),
+    logicalCenter: null,
+  }));
 
   const rememberLogicalCenter = useCallback((strip = stripRef.current) => {
     if (!strip || strip.clientWidth <= 0) return ribbonLogicalCenterRef.current;
