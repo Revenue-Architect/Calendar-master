@@ -151,6 +151,7 @@ import {
   RIBBON_RENDER_WINDOW_DAYS,
 } from "./features/planner/ribbonViewport.js";
 import useRibbonViewport from "./features/planner/useRibbonViewport.js";
+import useEdgeFade from "./features/planner/useEdgeFade.js";
 import {
   busyFractionForDay, busyFractionsForRange, monthDensitiesForRange, projectDayPeek, projectPlannerWeek,
 } from "./features/planner/weekProjection.js";
@@ -435,46 +436,6 @@ const repeatLabel = (r) => {
 };
 
 /* ═══════════════════════ SOUND ═══════════════════════ */
-
-/* A row that scrolls sideways with no scrollbar and no cue does not look like a
-   row that scrolls — it looks like a row that is broken, because the chip at the
-   edge is simply cut in half against the panel's corner. This reports which ends
-   still have something beyond them, so the row can fade there and only there: a
-   fade on a row that already fits would just be a chip with a dimmed corner. */
-function useEdgeFade(externalRef = null) {
-  const ownRef = useRef(null);
-  const ref = externalRef ?? ownRef;
-  const [edges, setEdges] = useState({ start: false, end: false });
-  const measure = useCallback(() => {
-    const el = ref.current;
-    if (!el) return;
-    const max = el.scrollWidth - el.clientWidth;
-    setEdges((current) => {
-      const next = { start: el.scrollLeft > 2, end: max > 2 && el.scrollLeft < max - 2 };
-      return current.start === next.start && current.end === next.end ? current : next;
-    });
-  }, []);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return undefined;
-    el.addEventListener("scroll", measure, { passive: true });
-    window.addEventListener("resize", measure);
-    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
-    observer?.observe(el);
-    return () => {
-      el.removeEventListener("scroll", measure);
-      window.removeEventListener("resize", measure);
-      observer?.disconnect();
-    };
-  }, [measure]);
-  /* No dependency list: the row's contents change without its box changing, and
-     an observer watching the box would never hear about it. */
-  useEffect(measure);
-  if (!edges.start && !edges.end) return [ref, {}];
-  const mask = `linear-gradient(to right, transparent 0, #000 ${edges.start ? 18 : 0}px,`
-    + ` #000 calc(100% - ${edges.end ? 22 : 0}px), transparent 100%)`;
-  return [ref, { maskImage: mask, WebkitMaskImage: mask }];
-}
 
 function useSynth(enabled) {
   const ref = useRef(null);
@@ -3954,8 +3915,13 @@ export default function Planner() {
                 const on = k === dateKey;
                 const n = ribbonDensities.get(k) ?? 0;
                 const target = gesture && gesture.overDay === k;
+                /* Roving tab stop. The strip is a virtual window over two years, and
+                   tabbing it moved one day at a time while the scroll refilled the
+                   window behind you — 32 stops deep and still going. The rail gets
+                   one stop; the day changes with the arrow keys it already answers to. */
                 return (
                   <button key={k} data-day={k} ref={on ? attachActiveRibbon : null} onClick={() => jumpTo(k)}
+                    tabIndex={on ? 0 : -1}
                     className="nb-cell nb-tap relative w-16 sm:w-20 lg:w-24 shrink-0 py-2.5"
                     style={{ transitionDelay: `${Math.min(i, 10) * 14}ms`, boxShadow: target ? `inset 0 0 0 2px ${T.accent}` : "none" }}>
                     {/* Selection is a filled cell and today is an outlined one. Washing
@@ -4985,7 +4951,7 @@ export default function Planner() {
             <div className="flex-1 text-center py-3" style={{ background: surface, borderRadius: CARD_R }}>
               <span className="block text-2xl font-semibold tracking-tight">
                 {inspect.kind === "event"
-                  ? (inspectDraft.allDay ? "—" : countdownLabel(dateKey, inspectDraft.start, todayKey, nowMin))
+                  ? (inspectDraft.allDay ? "—" : countdownLabel(dateKey, inspectDraft.start, todayKey, nowMin, inspectDraft.dur))
                   : `${(inspectDraft.checklist ?? []).filter((x) => x.done).length}/${(inspectDraft.checklist ?? []).length}`}
               </span>
               <span style={{ fontFamily: MONO, color: T.dimText }} className="block nb-data mt-0.5">
@@ -5094,16 +5060,24 @@ export default function Planner() {
           </>
           )}
 
+          {/* The accent is the sheet's one loud voice, and it belongs to the action
+              you opened the sheet to take. On an Action that is complete/reopen. On
+              an Event it is not DUPLICATE — a rare errand that was outshouting the
+              EDIT EVENT pill — so events get a quiet control instead. */}
           {!detailEditing && <>
             <EntityNotes T={T} notes={linkedNotes} kind={inspect.kind}
               onNew={newContextualNote}
               onOpen={(note) => { beep("click"); setInspect(null); setNoteEdit(note); }} />
             <button
+              data-test="inspect-primary"
               onClick={() => {
                 if (inspect.kind === "event") duplicateEvent(inspect.id);
                 else { inspectDraft.status === "completed" ? reopenTask(inspect.id) : completeTask(inspect.id); requestSheetClose("inspect"); }
               }}
-              style={{ fontFamily: MONO, background: T.accent, color: T.on }} className="nb-tap nb-liquid nb-hover-control w-full py-3 mt-5 text-xs font-bold tracking-widest">
+              style={inspect.kind === "event"
+                ? { fontFamily: MONO, color: T.text, border: `1px solid ${T.line}` }
+                : { fontFamily: MONO, background: T.accent, color: T.on }}
+              className={`nb-tap nb-hover-control w-full py-3 mt-5 text-xs font-bold tracking-widest${inspect.kind === "event" ? "" : " nb-liquid"}`}>
               {inspect.kind === "event" ? "DUPLICATE" : inspectDraft.status === "completed" ? "REOPEN" : "MARK COMPLETE"}
             </button>
             <button onClick={() => removeItem(inspect.kind, inspect.id)} style={{ fontFamily: MONO, color: NOW_RED, border: `1px solid ${T.line}` }} className="nb-tap nb-hover-danger w-full py-3 mt-2 nb-label">DELETE</button>

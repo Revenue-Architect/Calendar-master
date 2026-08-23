@@ -11,6 +11,7 @@ import { NOW_RED } from "../../design/themes.js";
 import { MONO, SERIF } from "../../design/typography.js";
 import { plainText } from "../../domains/notes/index.js";
 import { SMART_VIEWS } from "../../domains/tasks/index.js";
+import useEdgeFade from "./useEdgeFade.js";
 import { fmtTime } from "../../shared/time/clockFormat.js";
 import { diffDays } from "../../shared/time/dateKey.js";
 import { dur } from "../../shared/time/duration.js";
@@ -24,6 +25,7 @@ import { NoteBlock, orderedIndex } from "./notes.jsx";
 
 function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, onOpenDeadline, overdue, deadlines, showOverdue, todayKey, gesture, blockersFor, subtasksFor, onPromoteSub, smartView, viewCounts, onSmartView, lists, onManageLists, clock = "12", selection, onToggleSelect, onStartSelect, onCancelSelect, onBulk, onPullOverdue, onAskPlan, beep, buzz, onComplete, onReopen, onDefer, onInspect, onToggleSub, onAddSub, onRemoveSub, onDragStart, onAddTask, onEditNote, onUnschedule, onJump, onCollapse = null, hidingAdd = false }) {
   const [overdueReviewOpen, setOverdueReviewOpen] = useState(false);
+  const [smartViewFadeRef, smartViewFade] = useEdgeFade();
   const smartViewRef = useRef(smartView);
   const smartViewRevealTimer = useRef(null);
   /* The panel measures itself through its own ref, not the one the parent lends
@@ -119,7 +121,11 @@ function ActionsPanel({ T, listRef, tasks, notes, onToggleNoteCheck, onExtract, 
         </div>
       )}
 
-      <div data-owns-swipe="scroller" className="nb-x flex gap-1 overflow-x-auto mb-3 -mx-1 px-1">
+      {/* Ten named views do not fit this column at 1280 — COMPLETED was cut in
+          half against the edge and ALL was off-screen entirely, on a row that
+          scrolls but said nothing about it. Same cue the any-time row already
+          uses, for the same reason. */}
+      <div ref={smartViewFadeRef} style={smartViewFade} data-test="smart-view-row" data-owns-swipe="scroller" className="nb-x flex gap-1 overflow-x-auto mb-3 -mx-1 px-1">
         {SMART_VIEWS.map((view) => {
           const on = view.id === smartView;
           const count = viewCounts?.[view.id] ?? 0;
