@@ -3,7 +3,8 @@
 Date: 2026-08-23  
 Branch: `fix/navigation-shell-compositor-travel`  
 Authored base: `e5c243e5b7e5baeceae73dd9fed4dbb6e6d5cc4e`  
-Implementation source head: `fd4203e` (`fix(nav): move shell framing to browser transforms`)
+Implementation source head: `fd4203e` (`fix(nav): move shell framing to browser transforms`)  
+Protection-test head: `253be84` (`test(nav): isolate progress telemetry from geometry`)
 
 This record separates automated/headless evidence, headed Windows Chrome evidence,
 and the still-pending physical-device gate. It does not claim that device paint
@@ -122,6 +123,8 @@ Additional protection tests verify that:
 
 - active framing has no viewport clip animation and the edge/corner animations
   are browser-owned;
+- progress telemetry can advance while the observed visual inline styles remain
+  unchanged;
 - mobile walls meet the final `navMobileMotion()` frame and rail at both 390 px
   heights, and all eight walls have `pointer-events:none`;
 - reversal keeps the stage unclipped, restarts mask channels, and does not pop
@@ -140,7 +143,7 @@ the same test returned GREEN. No sabotage remains in the branch.
 | --- | --- |
 | `npm test` at exact base | 645 passed |
 | exact-base focused nav/motion/mobile/shell/reveal, Chromium, 1 worker | 79 passed |
-| final focused nav/motion/mobile/shell/reveal, Chromium, 1 worker | 83 passed |
+| final focused nav/motion/mobile/shell/reveal, Chromium, 1 worker | 84 passed |
 | final `npx playwright test --project=chromium --workers=1` | 362 passed |
 
 The focused run includes open/close, mid-open and mid-close reversal, mobile
@@ -173,4 +176,3 @@ applies when Option 1 keeps an animated clip path. No physical Android or iOS
 device was available.
 
 **implementation complete; physical-device paint gate pending**
-
