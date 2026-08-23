@@ -47,7 +47,8 @@ The interaction correction and the CALENDAR-rail continuity correction were inte
 - The one grouped `motion.spec.js` setup miss was rerun alone on the same head and passed; the final full suite also passed that exact test.
 - `npm test` — **651 passed**.
 - `npm run build` — passed (190 modules transformed).
-- `npx playwright test --project=chromium --workers=1` on isolated port 49430 — **380 passed** in 11.7 minutes.
+- After rebasing onto main `61903cef715e3d2b99ce209f6a7c0100f0426e6d`, the four directly affected specs (`navigation-shell`, `actions`, `timeline-touch`, and `timeline-polish`) — **117 passed**.
+- `npx playwright test --project=chromium --workers=1` on the exact final tree and isolated port 49432 — **381 passed** in 12.0 minutes.
 - Final independent diff review — **PASS**, with no remaining P1/P2/P3 finding.
 
 ### Visible Windows Chrome product review

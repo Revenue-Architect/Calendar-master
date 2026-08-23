@@ -303,7 +303,10 @@ Evidence:
   expected computed top-left `0px`, received `16px`.
 - `navigation-shell.spec.js` — **22 passed** after the final correction.
 - The combined focused integration suite — **156 passed**.
-- The final full Chromium suite — **380 passed**.
+- After rebasing over the upstream closed-drawer-rule correction, the complete
+  `navigation-shell.spec.js` — **23 passed** and the combined directly affected
+  final-tree specs — **117 passed**.
+- The exact final-tree full Chromium suite — **381 passed**.
 - Connected Windows Chrome at 390x844 reported the same computed radii during
   opening, settled open, and closing: `0px 16px 16px 0px`. The rail retained its
   rounded exposed ends without a settle/close-start pop.
