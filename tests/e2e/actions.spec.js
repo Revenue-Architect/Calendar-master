@@ -13,13 +13,26 @@ import { addDaysToKey, keyOf } from "../../src/shared/time/dateKey.js";
  * notebook), and that pressing on an action to read it does not start a drag —
  * the panel's press-and-hold is the same gesture as "I am scrolling this list". */
 
-function scheduledAction({ id = "task-timeline", title = "Review launch brief" } = {}) {
+function scheduledAction({ id = "task-timeline", title = "Review launch brief", estimateMinutes = 60 } = {}) {
   const state = createBlankPlannerState({});
   const result = createTask(state.tasks, {
     id, title,
-    planned: { date: keyOf(new Date()), startMinute: 10 * 60, estimateMinutes: 60 },
+    planned: { date: keyOf(new Date()), startMinute: 10 * 60, estimateMinutes },
   });
   return { ...state, tasks: result.tasks };
+}
+
+function narrowScheduledActions() {
+  let state = createBlankPlannerState({});
+  for (let index = 0; index < 3; index += 1) {
+    const result = createTask(state.tasks, {
+      id: `task-narrow-${index}`,
+      title: `Narrow lane ${index}`,
+      planned: { date: keyOf(new Date()), startMinute: 10 * 60, estimateMinutes: 60 },
+    });
+    state = { ...state, tasks: result.tasks };
+  }
+  return state;
 }
 
 function liveActionAt(now, { id = "task-live", title = "Live Action", estimateMinutes = 60 } = {}) {
@@ -135,6 +148,22 @@ test.describe("the actions column", () => {
     expect(state.tasks[0].planned.startMinute).toBe(11 * 60);
   });
 
+  test("a narrow collision lane stays move-first instead of exposing an overlapping estimate resize", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await seedPlanner(page, narrowScheduledActions());
+    const cards = page.locator('[data-task-chip^="task-narrow-"]');
+    await expect(cards).toHaveCount(3);
+    for (let index = 0; index < 3; index += 1) {
+      const card = cards.nth(index);
+      await card.scrollIntoViewIfNeeded();
+      await expect(card.getByTestId("timeline-action-resize"), "a narrow Action must not advertise a resize owner").toHaveCount(0);
+      const move = card.getByTestId("timeline-action-move");
+      const moveBox = await move.boundingBox();
+      expect(moveBox, "a narrow Action must retain a measurable body move lane").not.toBeNull();
+      expect(moveBox.width, "the move lane must remain at least one coarse-pointer gutter").toBeGreaterThanOrEqual(44);
+    }
+  });
+
   test("a stationary desktop Action hold stays a click candidate", async ({ page }) => {
     await seedPlanner(page, scheduledAction({ id: "task-stationary", title: "Open the brief" }));
     const chip = page.locator('[data-task-chip="task-stationary"]');
@@ -206,11 +235,28 @@ test.describe("the actions column", () => {
   });
 
   test("an estimated Action resizes immediately without moving its start", async ({ page }) => {
-    await seedPlanner(page, scheduledAction({ id: "task-resize", title: "Resize the brief" }));
+    await seedPlanner(page, scheduledAction({ id: "task-resize", title: "Resize the brief", estimateMinutes: 90 }));
     const chip = page.locator('[data-task-chip="task-resize"]');
     await chip.scrollIntoViewIfNeeded();
     const handle = chip.getByTestId("timeline-action-resize");
     await expect(handle).toBeVisible();
+    await expect(handle.getByTestId("timeline-action-resize-cue"), "the estimate resize owner needs a visible cue").toBeVisible();
+    const railGeometry = await handle.evaluate((node) => {
+      const rail = node.getBoundingClientRect();
+      const cue = node.querySelector('[data-test="timeline-action-resize-cue"]')?.getBoundingClientRect();
+      const duration = node.querySelector(".nb-data")?.getBoundingClientRect();
+      return {
+        rail: { left: rail.left, right: rail.right, width: rail.width },
+        cue: cue && { left: cue.left, right: cue.right, width: cue.width },
+        duration: duration && { left: duration.left, right: duration.right, width: duration.width },
+      };
+    });
+    expect(railGeometry.rail.width, "the Action estimate owner must retain its 48px rail").toBe(48);
+    expect(railGeometry.cue, "the estimate cue must fit in the owner rail").not.toBeNull();
+    expect(railGeometry.duration, "the estimate text must fit in the owner rail").not.toBeNull();
+    expect(railGeometry.cue.left).toBeGreaterThanOrEqual(railGeometry.rail.left - 1);
+    expect(railGeometry.duration.right).toBeLessThanOrEqual(railGeometry.rail.right + 1);
+    expect(railGeometry.cue.right).toBeLessThanOrEqual(railGeometry.duration.left + 1);
     const box = await handle.boundingBox();
     const x = box.x + box.width / 2;
     const y = box.y + box.height / 2;

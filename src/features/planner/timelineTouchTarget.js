@@ -17,13 +17,25 @@ export const TOUCH_TARGET_KINDS = Object.freeze({
 export const EVENT_TOUCH_GRIP_SIZE = 44;
 export const EVENT_TOUCH_GRIP_MIN_HEIGHT = EVENT_TOUCH_GRIP_SIZE * 2;
 export const EVENT_TOUCH_GRIP_MIN_WIDTH = EVENT_TOUCH_GRIP_SIZE * 3;
+export const EVENT_JOIN_LANE = 56;
+export const EVENT_JOIN_INSET = 4;
+export const EVENT_JOIN_RESERVATION = EVENT_JOIN_LANE + EVENT_JOIN_INSET;
+export const ACTION_COMPLETION_LANE = 32;
+export const ACTION_ESTIMATE_LANE = 48;
+export const ACTION_MOVE_MIN_WIDTH = 44;
 
 const finite = (value) => Number.isFinite(value) ? value : 0;
 
-/** Whether two disjoint 44px edge grips can leave a 44px body gutter. */
-export function canExposeEventTouchResize({ height, width } = {}) {
+/** Whether disjoint 44px corner grips can leave a 44px body gutter. */
+export function canExposeEventTouchResize({ height, width, hasJoin = false } = {}) {
   return finite(height) >= EVENT_TOUCH_GRIP_MIN_HEIGHT
-    && finite(width) >= EVENT_TOUCH_GRIP_MIN_WIDTH;
+    && finite(width) >= EVENT_TOUCH_GRIP_MIN_WIDTH + (hasJoin ? EVENT_JOIN_RESERVATION : 0);
+}
+
+/** A directly resizable Action must leave a real coarse-pointer body lane. */
+export function canExposeActionTouchResize({ width, hasEstimate } = {}) {
+  return Boolean(hasEstimate)
+    && finite(width) >= ACTION_COMPLETION_LANE + ACTION_ESTIMATE_LANE + ACTION_MOVE_MIN_WIDTH;
 }
 
 function closest(node, selector) {

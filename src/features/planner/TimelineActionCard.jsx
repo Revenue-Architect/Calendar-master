@@ -1,5 +1,19 @@
 import { useEffect, useRef } from "react";
 
+function resizeCueStyle(theme) {
+  return {
+    width: 8,
+    height: 8,
+    borderRadius: 2,
+    border: `1px solid ${theme.accent}`,
+    background: `${theme.accent}26`,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  };
+}
+
 export default function TimelineActionCard({
   task,
   top,
@@ -9,6 +23,7 @@ export default function TimelineActionCard({
   estimate,
   block,
   sizing,
+  resizeEligible = block,
   dragging = false,
   reducedMotion = false,
   live = false,
@@ -116,8 +131,9 @@ export default function TimelineActionCard({
             </span>
           )}
           <button type="button" data-test="timeline-action-move" onClick={open} onKeyDown={keyOpen}
-            className="nb-tap absolute inset-y-0 left-8 right-12 min-w-0 overflow-hidden text-left"
+            className="nb-tap absolute inset-y-0 left-8 min-w-0 overflow-hidden text-left"
             style={{
+              right: resizeEligible ? 48 : 0,
               display: "flex", flexDirection: "column", justifyContent: "flex-start",
               background: "transparent",
               borderRadius: 0,
@@ -140,15 +156,18 @@ export default function TimelineActionCard({
               </span>
             )}
           </button>
-          {block && (
+          {resizeEligible && (
             <span data-resize={task.id} data-resize-edge="end" data-action-estimate={task.id} data-test="timeline-action-resize"
               onPointerDown={(event) => {
                 event.stopPropagation();
                 onResizePointerDown(event, task, estimate);
               }}
-              className="absolute inset-y-0 right-0 z-30 flex w-12 items-center justify-center"
+              className="absolute inset-y-0 right-0 z-30 flex w-12 items-center justify-center gap-0"
               style={{ cursor: "ns-resize", touchAction: "pan-y", fontFamily: mono, color: sizing ? theme.accent : theme.dim }}>
-              <span className="nb-data shrink-0">{formatDuration(estimate)}</span>
+              <span data-test="timeline-action-resize-cue" aria-hidden="true" style={resizeCueStyle(theme)}>
+                <span style={{ width: 4, height: 1.5, background: theme.accent }} />
+              </span>
+              <span className="nb-data shrink-0" style={{ fontSize: 9 }}>{formatDuration(estimate)}</span>
             </span>
           )}
         </div>

@@ -33,6 +33,33 @@ function seeded() {
   }, { id: "evt-standup" }).state;
 }
 
+function denseEvents() {
+  let state = createBlankPlannerState({});
+  for (let index = 0; index < 4; index += 1) {
+    const result = createEvent(state, {
+      calendarId: "calendar-default", title: index === 0 ? "Center body move target" : `Dense overlap ${index}`,
+      category: "PEOPLE",
+      timing: {
+        kind: "timed", timeZoneMode: "floating",
+        startLocal: `${today}T10:00`, endLocal: `${today}T12:00`,
+      },
+    }, { id: `evt-dense-${index}` });
+    state = result.state;
+  }
+  return state;
+}
+
+function linkedSeeded() {
+  return createEvent(createBlankPlannerState({}), {
+    calendarId: "calendar-default", title: "Linked planning session", category: "PEOPLE",
+    link: "https://meet.example.test/planning",
+    timing: {
+      kind: "timed", timeZoneMode: "floating",
+      startLocal: `${today}T10:00`, endLocal: `${today}T12:00`,
+    },
+  }, { id: "evt-linked" }).state;
+}
+
 function compactAction() {
   const state = createBlankPlannerState({});
   const planned = createTask(state.tasks, {
@@ -231,14 +258,14 @@ test.describe("a resize grip is part of the card it sits on", () => {
       .toBeGreaterThan(minutesInto(`${today}T10:45`));
   });
 
-  test("a held upper-card touch outside the centered grip moves the Event", async ({ page }) => {
+  test("a held upper-card body touch moves the Event", async ({ page }) => {
     await seedPlanner(page, seeded());
     await card(page).scrollIntoViewIfNeeded();
     await page.waitForTimeout(200);
-    const box = await card(page).boundingBox();
+    const titleBox = await card(page).locator("span[title]").first().boundingBox();
     const session = await page.context().newCDPSession(page);
-    const x = box.x + 12;
-    const y = box.y + 4;
+    const x = titleBox.x + titleBox.width / 2;
+    const y = titleBox.y + titleBox.height / 2;
     await session.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
     await page.waitForTimeout(340);
     await session.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y: y + HOUR_PX }] });
@@ -250,13 +277,13 @@ test.describe("a resize grip is part of the card it sits on", () => {
     expect(timing.endLocal, "an upper body move must preserve duration").toBe(`${today}T13:00`);
   });
 
-  test("a held lower-card touch outside the centered grip moves the Event", async ({ page }) => {
+  test("a held lower-card body touch moves the Event", async ({ page }) => {
     await seedPlanner(page, seeded());
     await card(page).scrollIntoViewIfNeeded();
     await page.waitForTimeout(200);
     const box = await card(page).boundingBox();
     const session = await page.context().newCDPSession(page);
-    const x = box.x + 12;
+    const x = box.x + box.width / 2;
     const y = box.y + box.height - 4;
     await session.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
     await page.waitForTimeout(340);
@@ -278,8 +305,129 @@ test.describe("a resize grip is part of the card it sits on", () => {
     await expect(end, "an eligible Event needs an explicit end touch grip").toHaveCount(1);
     await expect(start).toHaveAttribute("aria-hidden", "true");
     await expect(end).toHaveAttribute("aria-hidden", "true");
-    const boxes = await Promise.all([start.boundingBox(), end.boundingBox()]);
-    expect(boxes[0].y + boxes[0].height).toBeLessThanOrEqual(boxes[1].y);
+    const [cardBox, startBox, endBox] = await Promise.all([card(page).boundingBox(), start.boundingBox(), end.boundingBox()]);
+    expect(cardBox).not.toBeNull();
+    expect(startBox).not.toBeNull();
+    expect(endBox).not.toBeNull();
+    expect(startBox.x).toBeCloseTo(cardBox.x, 0);
+    expect(endBox.x + endBox.width).toBeCloseTo(cardBox.x + cardBox.width, 0);
+    expect(startBox.y + startBox.height).toBeLessThanOrEqual(endBox.y);
+  });
+
+  test("the Event point grid exposes visible resize ownership without hiding body content", async ({ page }) => {
+    await seedPlanner(page, seeded());
+    const event = card(page);
+    await event.scrollIntoViewIfNeeded();
+    const controls = event.locator('[data-touch-resize]');
+    await expect(controls, "an eligible Event needs two semantic controls").toHaveCount(2);
+    const cues = event.locator('[data-test^="timeline-event-resize-cue-"]');
+    await expect(cues, "resize ownership must have a rendered cue").toHaveCount(2);
+
+    const pointGrid = await event.evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      const title = node.querySelector("span[title]");
+      const titleRect = title?.getBoundingClientRect() ?? rect;
+      const points = [
+        ["title", titleRect.left + titleRect.width / 2, titleRect.top + titleRect.height / 2],
+        ["center", rect.left + rect.width / 2, rect.top + rect.height / 2],
+        ["lower-body", rect.left + rect.width / 2, rect.bottom - Math.min(20, rect.height / 3)],
+      ];
+      return points.map(([label, x, y]) => {
+        const hit = document.elementFromPoint(x, y);
+        return {
+          label,
+          resize: hit?.closest?.("[data-touch-resize]")?.getAttribute("data-touch-resize") ?? null,
+          event: hit?.closest?.("[data-event-id]")?.getAttribute("data-event-id") ?? null,
+        };
+      });
+    });
+
+    for (const point of pointGrid) {
+      expect(point.event, `${point.label} must remain inside the Event`).toBe("evt-standup");
+      expect(point.resize, `${point.label} must remain a move surface`).toBeNull();
+    }
+    const cueStyles = await cues.evaluateAll((nodes) => nodes.map((node) => {
+      const style = getComputedStyle(node);
+      return { background: style.backgroundColor, border: style.borderTopColor, opacity: style.opacity };
+    }));
+    for (const style of cueStyles) {
+      expect(style.opacity, "the resize cue must not be transparent").not.toBe("0");
+      expect(style.background === "rgba(0, 0, 0, 0)" && style.border === "rgba(0, 0, 0, 0)", "the semantic resize target cannot be invisible").toBe(false);
+    }
+  });
+
+  test("a dense Event title point remains move-owned at human touch speed", async ({ page }) => {
+    await page.setViewportSize({ width: 800, height: 900 });
+    await seedPlanner(page, denseEvents());
+    const event = page.locator('[data-event-id="evt-dense-0"]');
+    await event.scrollIntoViewIfNeeded();
+    const geometry = await event.evaluate((node) => {
+      const card = node.getBoundingClientRect();
+      const title = node.querySelector("span[title]");
+      const titleRect = title?.getBoundingClientRect();
+      const hit = titleRect
+        ? document.elementFromPoint(titleRect.left + titleRect.width / 2, titleRect.top + titleRect.height / 2)
+        : null;
+      return {
+        card,
+        title: titleRect,
+        laneWidth: card.width,
+        hitEvent: hit?.closest?.("[data-event-id]")?.getAttribute("data-event-id") ?? null,
+        hitResize: hit?.closest?.("[data-touch-resize]")?.getAttribute("data-touch-resize") ?? null,
+      };
+    });
+    expect(geometry.laneWidth, "the fixture must exercise a dense lane, not a full-width card").toBeLessThan(220);
+    expect(geometry.laneWidth, "the dense lane must still qualify for the coarse control geometry").toBeGreaterThanOrEqual(132);
+    expect(geometry.title, "the dense Event title must remain measurable").not.toBeNull();
+    expect(geometry.hitEvent).toBe("evt-dense-0");
+    expect(geometry.hitResize, "a visible title point must remain Event-body owned").toBeNull();
+
+    const before = (await settledState(page, () => true, "the dense fixture never settled")).events.find((item) => item.id === "evt-dense-0").timing;
+    const title = geometry.title;
+    await finger(page, {
+      x: title.left + title.width / 2,
+      y: title.top + title.height / 2,
+      holdMs: 340,
+      to: { x: title.left + title.width / 2, y: title.top + title.height / 2 + HOUR_PX },
+    });
+    const timing = (await settledState(page, (state) => state.events.find((item) => item.id === "evt-dense-0")?.timing.startLocal !== before.startLocal, "the dense Event title did not move the Event")).events.find((item) => item.id === "evt-dense-0").timing;
+    expect(timing.startLocal).toBe(`${today}T11:00`);
+    expect(timing.endLocal, "the dense body move must preserve Event duration").toBe(`${today}T13:00`);
+  });
+
+  test("a linked Event keeps JOIN and end resize controls in separate lanes", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await seedPlanner(page, linkedSeeded());
+    const event = page.locator('[data-event-id="evt-linked"]');
+    const join = event.getByRole("link", { name: "Join Linked planning session" });
+    await event.scrollIntoViewIfNeeded();
+    await expect(join).toBeVisible();
+    const start = event.locator('[data-touch-resize="start"]');
+    const end = event.locator('[data-touch-resize="end"]');
+    await expect(start).toHaveCount(1);
+    await expect(end).toHaveCount(1);
+    const [cardBox, startBox, endBox, joinBox] = await Promise.all([
+      event.boundingBox(), start.boundingBox(), end.boundingBox(), join.boundingBox(),
+    ]);
+    expect(cardBox).not.toBeNull();
+    expect(startBox).not.toBeNull();
+    expect(endBox).not.toBeNull();
+    expect(joinBox).not.toBeNull();
+    expect(startBox.x).toBeCloseTo(cardBox.x, 0);
+    expect(endBox.x + endBox.width).toBeLessThanOrEqual(joinBox.x);
+    expect(joinBox.x + joinBox.width).toBeLessThanOrEqual(cardBox.x + cardBox.width);
+    const titlePoint = await event.locator("span[title]").boundingBox();
+    const ownership = await page.evaluate(({ x, y }) => {
+      const hit = document.elementFromPoint(x, y);
+      return {
+        event: hit?.closest?.("[data-event-id]")?.getAttribute("data-event-id") ?? null,
+        resize: hit?.closest?.("[data-touch-resize]")?.getAttribute("data-touch-resize") ?? null,
+        join: hit?.closest?.("[data-join]")?.getAttribute("data-join") ?? null,
+      };
+    }, { x: titlePoint.x + titlePoint.width / 2, y: titlePoint.y + titlePoint.height / 2 });
+    expect(ownership.event).toBe("evt-linked");
+    expect(ownership.resize).toBeNull();
+    expect(ownership.join).toBeNull();
   });
 
   test("the active Event owns the Day scroll position after lift", async ({ page }) => {

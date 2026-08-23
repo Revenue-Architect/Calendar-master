@@ -1,8 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  ACTION_COMPLETION_LANE,
+  ACTION_ESTIMATE_LANE,
+  ACTION_MOVE_MIN_WIDTH,
+  canExposeActionTouchResize,
   canExposeEventTouchResize,
+  EVENT_JOIN_RESERVATION,
   classifyTimelineTouchTarget,
+  EVENT_JOIN_LANE,
   EVENT_TOUCH_GRIP_MIN_HEIGHT,
   EVENT_TOUCH_GRIP_MIN_WIDTH,
   TOUCH_TARGET_KINDS,
@@ -33,6 +39,17 @@ test("Event touch grip eligibility has exact coarse-pointer boundaries", () => {
   assert.equal(canExposeEventTouchResize({ height: EVENT_TOUCH_GRIP_MIN_HEIGHT, width: EVENT_TOUCH_GRIP_MIN_WIDTH }), true);
   assert.equal(canExposeEventTouchResize({ height: EVENT_TOUCH_GRIP_MIN_HEIGHT + 1, width: EVENT_TOUCH_GRIP_MIN_WIDTH + 1 }), true);
   assert.equal(canExposeEventTouchResize({ height: EVENT_TOUCH_GRIP_MIN_HEIGHT, width: EVENT_TOUCH_GRIP_MIN_WIDTH - 1 }), false);
+  assert.equal(canExposeEventTouchResize({ height: EVENT_TOUCH_GRIP_MIN_HEIGHT, width: EVENT_TOUCH_GRIP_MIN_WIDTH + EVENT_JOIN_RESERVATION - 1, hasJoin: true }), false);
+  assert.equal(canExposeEventTouchResize({ height: EVENT_TOUCH_GRIP_MIN_HEIGHT, width: EVENT_TOUCH_GRIP_MIN_WIDTH + EVENT_JOIN_RESERVATION, hasJoin: true }), true);
+  assert.equal(canExposeEventTouchResize({ height: EVENT_TOUCH_GRIP_MIN_HEIGHT, width: EVENT_TOUCH_GRIP_MIN_WIDTH, hasJoin: true }), false);
+  assert.equal(EVENT_JOIN_RESERVATION, EVENT_JOIN_LANE + 4);
+});
+
+test("Action estimate resize reserves completion and body lanes", () => {
+  const minimum = ACTION_COMPLETION_LANE + ACTION_ESTIMATE_LANE + ACTION_MOVE_MIN_WIDTH;
+  assert.equal(canExposeActionTouchResize({ width: minimum - 1, hasEstimate: true }), false);
+  assert.equal(canExposeActionTouchResize({ width: minimum, hasEstimate: true }), true);
+  assert.equal(canExposeActionTouchResize({ width: minimum, hasEstimate: false }), false);
 });
 
 test("a desktop data-resize overlay without a semantic touch marker remains Event body", () => {

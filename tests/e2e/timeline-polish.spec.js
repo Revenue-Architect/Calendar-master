@@ -587,6 +587,18 @@ test.describe("cards sit where their time is", () => {
   });
 });
 
+test.describe("the Day keeps a stable flexible-work landmark", () => {
+  test("an empty Day still renders ANY TIME without an empty horizontal scroller", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 601 });
+    await seedPlanner(page, createBlankPlannerState({}));
+
+    await expect(page.getByText("ANY TIME", { exact: true }), "the Day landmark must remain findable when no Action is flexible").toBeVisible();
+    await expect(page.getByTestId("any-time-empty"), "the empty shelf needs a compact neutral state").toBeVisible();
+    await expect(page.getByTestId("any-time-row"), "an empty shelf must not claim horizontal scrolling").toHaveCount(0);
+    await expect(page.getByTestId("day-stream"), "the persistent shelf must leave the Timeline mounted").toBeVisible();
+  });
+});
+
 test.describe("rows that scroll sideways say so", () => {
   test("the any-time row fades only when there is more past the edge", async ({ page }) => {
     /* No scrollbar and no cue makes a scrolling row look like a broken one: the

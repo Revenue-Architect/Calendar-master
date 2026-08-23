@@ -126,7 +126,7 @@ import {
   resolveShortEventEdge,
   updateInteractionProposal,
 } from "./features/planner/timelineInteractionState.js";
-import { canExposeEventTouchResize, classifyTimelineTouchTarget, TOUCH_TARGET_KINDS } from "./features/planner/timelineTouchTarget.js";
+import { canExposeActionTouchResize, canExposeEventTouchResize, classifyTimelineTouchTarget, EVENT_JOIN_RESERVATION, TOUCH_TARGET_KINDS } from "./features/planner/timelineTouchTarget.js";
 import { acquireTimelineTouchScrollLock, createTimelineTouchScrollLock, releaseTimelineTouchScrollLock } from "./features/planner/timelineTouchScrollLock.js";
 import { loadBackupRecord, saveBackupRecord } from "./platform/persistence/backupStore.js";
 import { textToNoteBlocks } from "./features/notes/noteText.js";
@@ -248,6 +248,8 @@ import {
 } from "./features/planner/constants.js";
 import { fmtDay, plannedLabel } from "./features/planner/dateLabels.js";
 import TimelineActionCard from "./features/planner/TimelineActionCard.jsx";
+import TimelineEventResizeControls from "./features/planner/TimelineEventResizeControls.jsx";
+import TimelineAnyTimeShelf from "./features/planner/TimelineAnyTimeShelf.jsx";
 import { HAPTIC_PATTERNS, triggerDeviceHaptic } from "./features/feedback/haptics.js";
 import {
   fluidMorphFromRects,
@@ -1334,6 +1336,10 @@ export default function Planner() {
   );
   const scheduledTasks = useMemo(
     () => dayTasks.filter((task) => task.planned.startMinute != null),
+    [dayTasks],
+  );
+  const flexibleTasks = useMemo(
+    () => dayTasks.filter((task) => task.planned.startMinute == null),
     [dayTasks],
   );
   /* Children deliberately stay out of top-level day queries. Keep their compact
@@ -4152,46 +4158,37 @@ export default function Planner() {
               </>
             ) : (
             <>
-            {(allDay.length > 0 || dayTasks.some((task) => task.planned.startMinute == null)) && (
-              <div style={{ background: T.card, borderTopLeftRadius: 16, borderTopRightRadius: 16, borderBottom: `1px solid ${T.line}` }} className="px-3 pt-3 pb-2 flex flex-col gap-1.5">
-                {allDay.length > 0 && <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label">ALL DAY</span>}
-                {allDay.map((e) => {
-                  const span = e.endDate ? diffDays(e.endDate, e.date) + 1 : 1;
-                  const idx = diffDays(dateKey, e.date) + 1;
-                  return (
-                    <RowWithJoin key={e.id} T={T} surface={surface} link={e.link} title={e.title}
-                      padding="px-2.5 py-2"
-                      onOpen={() => { beep("click"); setInspect({ kind: "event", id: e.id }); }}>
-                      <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: catColor(e.cat) }} />
-                      <span className="nb-lead truncate flex-1">{e.title}</span>
-                      {span > 1 && <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data shrink-0">{idx}/{span}</span>}
-                    </RowWithJoin>
-                  );
-                })}
-                {dayTasks.some((task) => task.planned.startMinute == null) && (
-                  <>
-                    <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label mt-1">ANY TIME</span>
-                    <div ref={anyTimeRef} data-test="any-time-row" data-owns-swipe="scroller" style={anyTimeFade} className="flex gap-1.5 overflow-x-auto nb-x pb-0.5">
-                      {dayTasks.filter((task) => task.planned.startMinute == null).map((task) => (
-                        <button key={task.id}
-                          onClick={() => { beep("click"); setInspect({ kind: "task", id: task.id }); }}
-                          onPointerDown={(event) => {
-                            if (event.pointerType === "mouse" && event.button !== 0) return;
-                            startGesture({ mode: "task", kind: "task", id: task.id, x: event.clientX, y: event.clientY });
-                          }}
-                          className="nb-tap nb-hover-tile shrink-0 flex items-center gap-2 px-2.5 py-1.5 text-left"
-                          style={{ background: surface, borderRadius: 999, opacity: task.status === "completed" ? .55 : 1 }}>
-                          <span className="rounded-full shrink-0" style={{ width: 7, height: 7, background: task.status === "completed" ? T.accent : "transparent", boxShadow: `inset 0 0 0 1.5px ${T.accent}` }} />
-                          <span className="text-xs font-semibold max-w-48 truncate" style={{ textDecoration: task.status === "completed" ? "line-through" : "none" }}>{task.title}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
+            <div style={{ background: T.card, borderTopLeftRadius: 16, borderTopRightRadius: 16, borderBottom: `1px solid ${T.line}` }} className="px-3 pt-3 pb-2 flex flex-col gap-1.5">
+              {allDay.length > 0 && <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label">ALL DAY</span>}
+              {allDay.map((e) => {
+                const span = e.endDate ? diffDays(e.endDate, e.date) + 1 : 1;
+                const idx = diffDays(dateKey, e.date) + 1;
+                return (
+                  <RowWithJoin key={e.id} T={T} surface={surface} link={e.link} title={e.title}
+                    padding="px-2.5 py-2"
+                    onOpen={() => { beep("click"); setInspect({ kind: "event", id: e.id }); }}>
+                    <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: catColor(e.cat) }} />
+                    <span className="nb-lead truncate flex-1">{e.title}</span>
+                    {span > 1 && <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data shrink-0">{idx}/{span}</span>}
+                  </RowWithJoin>
+                );
+              })}
+              <TimelineAnyTimeShelf
+                tasks={flexibleTasks}
+                T={T}
+                mono={MONO}
+                surface={surface}
+                anyTimeRef={anyTimeRef}
+                anyTimeFade={anyTimeFade}
+                onOpenTask={(id) => { beep("click"); setInspect({ kind: "task", id }); }}
+                onTaskPointerDown={(event, task) => {
+                  if (event.pointerType === "mouse" && event.button !== 0) return;
+                  startGesture({ mode: "task", kind: "task", id: task.id, x: event.clientX, y: event.clientY });
+                }}
+              />
+            </div>
 
-            <div ref={attachStream} data-test="day-stream" className="nb-s nb-stream overflow-y-auto relative" style={{ background: T.card, borderTopLeftRadius: allDay.length || dayTasks.some((task) => task.planned.startMinute == null) ? 0 : 16, userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}>
+            <div ref={attachStream} data-test="day-stream" className="nb-s nb-stream overflow-y-auto relative" style={{ background: T.card, borderTopLeftRadius: 0, userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}>
               <div className="relative" style={{ height: dayHeight }}>
                 {Array.from({ length: 24 }).map((_, h) => (
                   <div key={h} className="absolute left-0 right-0 flex items-start pointer-events-none"
@@ -4283,15 +4280,15 @@ export default function Planner() {
                     const laneWidth = streamNode
                       ? (Math.max(0, streamNode.clientWidth - 72) / Math.max(1, e.cols)) - 6
                       : 0;
-                     const touchResizeHeld = gesture?.touchId != null && gesture.id === e.id
-                       && (gesture.mode === "resize-end" || gesture.mode === "resize-start");
-                     const touchResizeEligible = canExposeEventTouchResize({ height: h, width: laneWidth }) || touchResizeHeld;
+                    const joinUrl = normalizeMeetingLink(e.link);
+                    const touchResizeHeld = gesture?.touchId != null && gesture.id === e.id
+                      && (gesture.mode === "resize-end" || gesture.mode === "resize-start");
+                    const touchResizeEligible = canExposeEventTouchResize({ height: h, width: laneWidth, hasJoin: Boolean(joinUrl) }) || touchResizeHeld;
                     const live = isToday && nowMin >= e.start && nowMin < e.start + e.dur;
                     const past = isToday && nowMin >= e.start + e.dur;
                     const pct = live ? ((nowMin - e.start) / e.dur) * 100 : 0;
                     const held = gesture && gesture.id === e.id
                       && (gesture.mode === "move" || gesture.mode === "resize-end" || gesture.mode === "resize-start");
-                    const joinUrl = normalizeMeetingLink(e.link);
                     /* A linked card reserves its trailing lane for JOIN. Its padded
                        title line (19.5px), metadata line (17.55px) and gap need just
                        over 51px, so a smaller card must remain one line rather than
@@ -4337,7 +4334,10 @@ export default function Planner() {
                               <span className="absolute inset-y-0" style={{ right: 0, width: 2, background: T.accent }} />
                             </span>
                           )}
-                          <div className={`relative pl-2.5 pr-2.5 ${h < 28 ? "h-full py-0" : "py-1.5"}`} style={{ paddingRight: joinUrl ? 64 : undefined }}>
+                          <div className={`relative pl-2.5 pr-2.5 ${h < 28 ? "h-full py-0" : "py-1.5"}`} style={{
+                            paddingLeft: touchResizeEligible ? 44 : undefined,
+                            paddingRight: touchResizeEligible ? (joinUrl ? 44 + EVENT_JOIN_RESERVATION : 44) : (joinUrl ? 64 : undefined),
+                          }}>
                             <div className={`nb-event-row flex items-center gap-2 ${h < 28 ? "h-full" : ""}`}>
                               {/* the category dot is the card's only colour, so it stays
                                   legible at 22px height where a left rail would vanish */}
@@ -4388,14 +4388,7 @@ export default function Planner() {
                             <span style={{ background: T.faint, width: 22, height: 2, marginBottom: 3, borderRadius: 2 }} />
                           </div>
                           {touchResizeEligible && (
-                            <>
-                              <div aria-hidden="true" tabIndex={-1} data-touch-resize="start" data-resize-edge="start" onPointerDown={(ev) => resizeDown(ev, e, "start")}
-                                className="absolute top-0 left-1/2 z-10"
-                                style={{ width: 44, height: 44, transform: "translateX(-50%)", cursor: "ns-resize", touchAction: "pan-y" }} />
-                              <div aria-hidden="true" tabIndex={-1} data-touch-resize="end" data-resize-edge="end" onPointerDown={(ev) => resizeDown(ev, e, "end")}
-                                className="absolute bottom-0 left-1/2 z-10"
-                                style={{ width: 44, height: 44, transform: "translateX(-50%)", cursor: "ns-resize", touchAction: "pan-y" }} />
-                            </>
+                            <TimelineEventResizeControls event={e} theme={T} hasJoin={Boolean(joinUrl)} onPointerDown={resizeDown} />
                           )}
                         </div>
                         {joinUrl && (
@@ -4434,6 +4427,10 @@ export default function Planner() {
                     const dragging = gesture && gesture.mode === "task" && gesture.id === t.id;
                     const estimate = sizing ? gesture.dur : t.planned.estimateMinutes;
                     const block = isResizable(t, "task");
+                    const laneWidth = streamNode
+                      ? (Math.max(0, streamNode.clientWidth - 72) / Math.max(1, t.cols)) - 6
+                      : 0;
+                    const resizeEligible = canExposeActionTouchResize({ width: laneWidth, hasEstimate: block });
                     const h = block ? Math.max(28, (estimate / 1440) * dayHeight - 3) : 28;
                     const live = liveAction?.id === t.id;
                     const pct = live ? livePct * 100 : 0;
@@ -4441,7 +4438,7 @@ export default function Planner() {
                       <TimelineActionCard key={t.id} task={t}
                         top={((dragging && gesture.start != null ? gesture.start : t.planned.startMinute) / 1440) * dayHeight + 2}
                         height={h} left={`${(t.lane / t.cols) * 100}%`} width={`calc(${100 / t.cols}% - 6px)`}
-                        estimate={estimate} block={block} sizing={sizing} dragging={dragging} reducedMotion={reducedMotion}
+                        estimate={estimate} block={block} resizeEligible={resizeEligible} sizing={sizing} dragging={dragging} reducedMotion={reducedMotion}
                         live={live} livePct={pct}
                         subtaskProgress={subtaskProgressByParent.get(parseTaskOccurrenceId(t.id).seriesId) ?? null}
                         swipeOffset={taskSwipe?.id === t.id ? taskSwipe.offset : 0}

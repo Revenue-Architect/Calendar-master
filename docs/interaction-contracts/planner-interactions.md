@@ -11,11 +11,15 @@ On the Day Timeline, a touch that begins on an Event or Action body remains a
 vertical-pan candidate until the stationary hold threshold is met. Ordinary
 Event body touches move the Event, including the upper and lower card areas;
 the broad desktop resize overlays do not establish touch resize intent. An
-Event exposes centered, disjoint 44px start/end touch grips only when its live
-geometry can host both grips and a body gutter. Short or narrow Events expose
-no touch resize grips; precise start/end editing remains available through the
-Event inspector. The Action estimate control is the explicit touch resize
-region and remains direct; the Action body moves only after lift.
+Event exposes visibly marked, disjoint 44px start/end corner controls only when
+its live geometry can reserve a start lane, a 44px body gutter, and an end lane.
+Linked Events reserve a separate 56px JOIN lane (plus its existing 4px inset)
+before the end control. Their title/body is padded into the remaining lane, so
+the visible cue and the actual
+touch owner cannot disagree. Short or narrow Events expose no touch resize
+controls; precise start/end editing remains available through the Event
+inspector. The Action estimate control is the explicit touch resize region and
+remains direct; the Action body moves only after lift.
 
 After lift, the active Day sequence owns the initiating touch and freezes the
 Day stream's physical `scrollTop` until normal end or cancellation. A forced
@@ -34,7 +38,7 @@ on the first painted frame.
 
 | Surface | Target | Tap/click | Hold + move | Edge drag | Horizontal swipe | Cancel |
 | --- | --- | --- | --- | --- | --- | --- |
-| Day Event | body | Open details | Move in time, including upper/lower card areas | Desktop/pen overlays resize; touch resizes only from eligible semantic 44px start/end grips | None | Abort and restore |
+| Day Event | body | Open details | Move in time, including upper/lower card areas | Desktop/pen overlays resize; touch resizes only from eligible visible corner controls | None | Abort and restore |
 | Day Event | JOIN | Open meeting directly | None | None | None | No Event inspector |
 | Day Action | check | Complete or reopen | None | None | None | No inspector |
 | Day Action | body | Open details | Move in time | None | Complete only from body | Abort and restore |
