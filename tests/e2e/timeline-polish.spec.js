@@ -595,7 +595,22 @@ test.describe("the Day keeps a stable flexible-work landmark", () => {
     await expect(page.getByText("ANY TIME", { exact: true }), "the Day landmark must remain findable when no Action is flexible").toBeVisible();
     await expect(page.getByTestId("any-time-empty"), "the empty shelf needs a compact neutral state").toBeVisible();
     await expect(page.getByTestId("any-time-row"), "an empty shelf must not claim horizontal scrolling").toHaveCount(0);
-    await expect(page.getByTestId("day-stream"), "the persistent shelf must leave the Timeline mounted").toBeVisible();
+    const stream = page.getByTestId("day-stream");
+    await expect(stream, "the persistent shelf must leave the Timeline mounted").toBeVisible();
+    const capacity = await stream.evaluate((node) => {
+      const canvas = node.firstElementChild;
+      const hourHeight = canvas.getBoundingClientRect().height / 24;
+      return {
+        height: node.getBoundingClientRect().height,
+        visibleHours: node.getBoundingClientRect().height / hourHeight,
+      };
+    });
+    expect(capacity.height, "the persistent shelf must leave a real short-viewport Timeline").toBeGreaterThanOrEqual(180);
+    expect(capacity.visibleHours, "the short viewport must retain at least three visible Timeline hours").toBeGreaterThanOrEqual(3);
+
+    await page.getByRole("button", { name: "WEEK", exact: true }).click();
+    await expect(page.getByTestId("week-grid")).toBeVisible();
+    await expect(page.getByText("ANY TIME", { exact: true }), "the flexible-work shelf remains Day-only").toHaveCount(0);
   });
 });
 

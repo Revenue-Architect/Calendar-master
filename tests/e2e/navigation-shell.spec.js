@@ -422,10 +422,10 @@ test.describe("the floating navigation shell", () => {
 
     await expect(shell).toHaveAttribute("data-nav-state", "open");
     const settledOpen = await readRail();
-    expect(settledOpen.borderTopLeft, "settled open rail rounds the outer-right corners").toBe("16px");
-    expect(settledOpen.borderTopRight, "settled open rail keeps the surface edge square").toBe("0px");
-    expect(settledOpen.borderBottomRight, "settled open rail keeps the surface edge square").toBe("0px");
-    expect(settledOpen.borderBottomLeft, "settled open rail rounds the outer-right corners").toBe("16px");
+    expect(settledOpen.borderTopLeft, "settled open rail keeps the surface edge square").toBe("0px");
+    expect(settledOpen.borderTopRight, "settled open rail keeps the visual outer-left corners rounded").toBe("16px");
+    expect(settledOpen.borderBottomRight, "settled open rail keeps the visual outer-left corners rounded").toBe("16px");
+    expect(settledOpen.borderBottomLeft, "settled open rail keeps the surface edge square").toBe("0px");
 
     await rail.click();
     await expect(shell).toHaveAttribute("data-nav-state", "closing");

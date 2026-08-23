@@ -235,7 +235,8 @@ test.describe("the actions column", () => {
   });
 
   test("an estimated Action resizes immediately without moving its start", async ({ page }) => {
-    await seedPlanner(page, scheduledAction({ id: "task-resize", title: "Resize the brief", estimateMinutes: 90 }));
+    const initialEstimate = 90;
+    await seedPlanner(page, scheduledAction({ id: "task-resize", title: "Resize the brief", estimateMinutes: initialEstimate }));
     const chip = page.locator('[data-task-chip="task-resize"]');
     await chip.scrollIntoViewIfNeeded();
     const handle = chip.getByTestId("timeline-action-resize");
@@ -269,11 +270,11 @@ test.describe("the actions column", () => {
 
     const state = await settledState(
       page,
-      (stored) => stored.tasks[0]?.planned.estimateMinutes > 60,
+      (stored) => stored.tasks[0]?.planned.estimateMinutes > initialEstimate,
       "the Action resize did not update its estimate",
     );
     expect(state.tasks[0].planned.startMinute).toBe(10 * 60);
-    expect(state.tasks[0].planned.estimateMinutes).toBeGreaterThan(60);
+    expect(state.tasks[0].planned.estimateMinutes).toBeGreaterThan(initialEstimate);
     expect(state.tasks[0].planned.date).toBe(keyOf(new Date()));
   });
 

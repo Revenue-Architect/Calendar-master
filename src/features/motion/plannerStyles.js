@@ -156,7 +156,7 @@ export function plannerStyles({ T, preferences }) {
           .nb-nav-shell{--nav-width:min(78vw,320px);--nav-gap:11px;--nav-page-scale:.94;--nav-page-radius:16px;--nav-rail-width:44px;--nav-rail-edge-gap:0px}
           .nb-nav-motion-viewport{clip-path:inset(0 0 0 0 round 0)}
           .nb-nav-motion-carrier{transform:translate3d(0,0,0)}
-          .nb-mobile-calendar-return{display:flex;position:absolute;z-index:40;inset:14px auto 14px 0;width:var(--nav-rail-width);align-items:center;justify-content:center;border:0;border-radius:16px 0 0 16px;background:${T.accent};color:${T.on};font-family:${MONO};font-size:10px;font-weight:700;letter-spacing:.12em;writing-mode:vertical-rl;visibility:visible;transform:translate3d(calc(0px - var(--nav-rail-width)),0,0) rotate(180deg);pointer-events:none;touch-action:manipulation;transition:none}
+          .nb-mobile-calendar-return{display:flex;position:absolute;z-index:40;inset:14px auto 14px 0;width:var(--nav-rail-width);align-items:center;justify-content:center;border:0;border-radius:0 16px 16px 0;background:${T.accent};color:${T.on};font-family:${MONO};font-size:10px;font-weight:700;letter-spacing:.12em;writing-mode:vertical-rl;visibility:visible;transform:translate3d(calc(0px - var(--nav-rail-width)),0,0) rotate(180deg);pointer-events:none;touch-action:manipulation;transition:none}
           .nb-mobile-calendar-return::after{content:"";position:absolute;inset:0;border-radius:inherit;background:#000;opacity:0;pointer-events:none;transition:opacity 100ms ease}
           .nb-hud-settings{display:none}
         }

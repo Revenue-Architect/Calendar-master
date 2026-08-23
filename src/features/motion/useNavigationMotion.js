@@ -70,17 +70,6 @@ function maskFrame(targetFit, desktop) {
   };
 }
 
-function railBorderRadius(progress, targetFit, active) {
-  const radius = maskFrame(targetFit, false).radius;
-  /* The rail is rotated 180deg so its CSS left edge is the visual right edge.
-     While travelling, the visual left edge is exposed to the shell and must
-     carry the rounded corners; the settled open frame flips the radius to the
-     outer right edge where the rail meets the viewport boundary. */
-  return active || progress < 1
-    ? `0px ${radius}px ${radius}px 0px`
-    : `${radius}px 0px 0px ${radius}px`;
-}
-
 function maskTransform(progress, targetFit, desktop, name) {
   const p = clamp(progress);
   const frame = maskFrame(targetFit, desktop);
@@ -264,7 +253,6 @@ export function useNavigationMotion({ reducedMotion = false } = {}) {
       const rail = railRef.current;
       if (rail) {
         rail.style.transition = "none";
-        rail.style.borderRadius = railBorderRadius(p, targetFit, active);
         rail.style.visibility = "visible";
         rail.style.transform = `translate3d(${matrixValue(mobile.rail.x)}px, 0, 0) rotate(180deg)`;
         /* Once more than two pixels are revealed the rail is a real action;

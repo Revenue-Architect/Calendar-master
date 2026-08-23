@@ -153,7 +153,7 @@ test.describe("moving an event on the timeline", () => {
     expect(resized.endLocal > `${today}T12:00`, "the semantic end grip must move the end later").toBe(true);
   });
 
-  test("a desktop drag outside the centered grips moves an eligible Event without resizing", async ({ page }) => {
+  test("a desktop drag outside the visible resize controls moves an eligible Event without resizing", async ({ page }) => {
     await seedPlanner(page, seeded({ startLocal: `${today}T10:00`, endLocal: `${today}T12:00` }));
     const event = card(page);
     await event.scrollIntoViewIfNeeded();
