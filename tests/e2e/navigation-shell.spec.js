@@ -358,6 +358,117 @@ test.describe("the floating navigation shell", () => {
     expect(settled.right).toBeLessThanOrEqual(0);
   });
 
+  test("the mobile calendar rail keeps its outer corners rounded throughout travel", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openPlanner(page);
+
+    const shell = page.getByTestId("nav-shell");
+    const rail = page.getByTestId("mobile-calendar-return");
+    const readRail = () => page.evaluate(() => {
+      const node = document.querySelector('[data-test="mobile-calendar-return"]');
+      const shellNode = document.querySelector('[data-test="nav-shell"]');
+      const box = node.getBoundingClientRect();
+      const style = getComputedStyle(node);
+      return {
+        phase: shellNode.dataset.navState,
+        progress: Number(shellNode.dataset.navProgress),
+        x: box.x,
+        right: box.right,
+        borderTopLeft: style.borderTopLeftRadius,
+        borderTopRight: style.borderTopRightRadius,
+        borderBottomRight: style.borderBottomRightRadius,
+        borderBottomLeft: style.borderBottomLeftRadius,
+      };
+    });
+
+    await page.getByTestId("nav-toggle").click();
+    await expect(shell).toHaveAttribute("data-nav-state", "opening");
+    const opening = await page.evaluate(() => new Promise((resolve, reject) => {
+      const started = performance.now();
+      const read = () => {
+        const node = document.querySelector('[data-test="mobile-calendar-return"]');
+        const shellNode = document.querySelector('[data-test="nav-shell"]');
+        const box = node.getBoundingClientRect();
+        const style = getComputedStyle(node);
+        return {
+          phase: shellNode.dataset.navState,
+          progress: Number(shellNode.dataset.navProgress),
+          x: box.x,
+          right: box.right,
+          borderTopLeft: style.borderTopLeftRadius,
+          borderTopRight: style.borderTopRightRadius,
+          borderBottomRight: style.borderBottomRightRadius,
+          borderBottomLeft: style.borderBottomLeftRadius,
+        };
+      };
+      const sample = () => {
+        const value = read();
+        if (value.phase === "opening" && value.progress > 0.25 && value.progress < 0.75) {
+          resolve(value);
+          return;
+        }
+        if ((performance.now() - started) > 1200) {
+          reject(new Error(`opening rail frame was not sampled: ${JSON.stringify(value)}`));
+          return;
+        }
+        requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    }));
+    expect(opening.borderTopLeft, "opening keeps the visual outer-left corners rounded").toBe("0px");
+    expect(opening.borderTopRight, "opening keeps the visual outer-left corners rounded").toBe("16px");
+    expect(opening.borderBottomRight, "opening keeps the visual outer-left corners rounded").toBe("16px");
+    expect(opening.borderBottomLeft, "opening keeps the visual outer-left corners rounded").toBe("0px");
+
+    await expect(shell).toHaveAttribute("data-nav-state", "open");
+    const settledOpen = await readRail();
+    expect(settledOpen.borderTopLeft, "settled open rail rounds the outer-right corners").toBe("16px");
+    expect(settledOpen.borderTopRight, "settled open rail keeps the surface edge square").toBe("0px");
+    expect(settledOpen.borderBottomRight, "settled open rail keeps the surface edge square").toBe("0px");
+    expect(settledOpen.borderBottomLeft, "settled open rail rounds the outer-right corners").toBe("16px");
+
+    await rail.click();
+    await expect(shell).toHaveAttribute("data-nav-state", "closing");
+    const closing = await page.evaluate(() => new Promise((resolve, reject) => {
+      const started = performance.now();
+      const read = () => {
+        const node = document.querySelector('[data-test="mobile-calendar-return"]');
+        const shellNode = document.querySelector('[data-test="nav-shell"]');
+        const box = node.getBoundingClientRect();
+        const style = getComputedStyle(node);
+        return {
+          phase: shellNode.dataset.navState,
+          progress: Number(shellNode.dataset.navProgress),
+          x: box.x,
+          right: box.right,
+          borderTopLeft: style.borderTopLeftRadius,
+          borderTopRight: style.borderTopRightRadius,
+          borderBottomRight: style.borderBottomRightRadius,
+          borderBottomLeft: style.borderBottomLeftRadius,
+        };
+      };
+      const sample = () => {
+        const value = read();
+        if (value.phase === "closing" && value.progress > 0.25 && value.progress < 0.75) {
+          resolve(value);
+          return;
+        }
+        if ((performance.now() - started) > 1200) {
+          reject(new Error(`closing rail frame was not sampled: ${JSON.stringify(value)}`));
+          return;
+        }
+        requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    }));
+    expect(closing.borderTopLeft, "closing keeps the visual outer-left corners rounded").toBe("0px");
+    expect(closing.borderTopRight, "closing keeps the visual outer-left corners rounded").toBe("16px");
+    expect(closing.borderBottomRight, "closing keeps the visual outer-left corners rounded").toBe("16px");
+    expect(closing.borderBottomLeft, "closing keeps the visual outer-left corners rounded").toBe("0px");
+
+    await expect(shell).toHaveAttribute("data-nav-state", "closed");
+  });
+
   test("mobile resolves the open calendar into a return rail", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await openPlanner(page);
