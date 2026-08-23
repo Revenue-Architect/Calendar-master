@@ -130,8 +130,10 @@ test.describe("the floating navigation shell", () => {
           .toBeLessThan(1.5);
         expect(Math.abs(corner.height - (radius * sample.progress)), `${width}px ${corner.name} height`)
           .toBeLessThan(1.5);
-        expect(corner.scaleX, `${width}px ${corner.name} transform scaleX`).toBeCloseTo(sample.progress, 0.08);
-        expect(corner.scaleY, `${width}px ${corner.name} transform scaleY`).toBeCloseTo(sample.progress, 0.08);
+        expect(Math.abs(corner.scaleX - sample.progress), `${width}px ${corner.name} transform scaleX`)
+          .toBeLessThan(0.08);
+        expect(Math.abs(corner.scaleY - sample.progress), `${width}px ${corner.name} transform scaleY`)
+          .toBeLessThan(0.08);
       }
 
       if (width < 640) await page.getByTestId("mobile-calendar-return").click();
