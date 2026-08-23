@@ -38,6 +38,27 @@ Each sabotage was applied only locally with `apply_patch`, observed RED, and imm
 - `npx playwright test tests/e2e/timeline-gestures.spec.js tests/e2e/gesture-isolation.spec.js --project=chromium --workers=1` on port 49260 — 29 passed.
 - `npx playwright test tests/e2e/timeline-polish.spec.js --project=chromium --workers=1 --grep "empty Day still renders"` on port 49239 — 1 passed.
 
-## Residual validation
+## Final integrated verification
 
-The parent agent should run the full Verification Contract: the complete Action/gesture-isolation, Timeline polish/interaction-contract, adjacent calendar, full unit, and full Chromium suites; visible Windows Chrome review at 1280x900, 390x844, and 390x601; and final code review. Android Chrome and iOS Safari physical-device validation remain pending.
+The interaction correction and the CALENDAR-rail continuity correction were integrated on one clean branch and independently re-reviewed after the original three review findings were repaired.
+
+- Combined focused run: `navigation-shell`, `timeline-touch`, `actions`, `timeline-polish`, `interaction-contracts`, `timeline-gestures`, and `gesture-isolation` — **156 passed**.
+- Post-review focused run: complete `navigation-shell`, `actions`, and `timeline-polish` specs — **96 passed**.
+- The one grouped `motion.spec.js` setup miss was rerun alone on the same head and passed; the final full suite also passed that exact test.
+- `npm test` — **651 passed**.
+- `npm run build` — passed (190 modules transformed).
+- `npx playwright test --project=chromium --workers=1` on isolated port 49430 — **380 passed** in 11.7 minutes.
+- Final independent diff review — **PASS**, with no remaining P1/P2/P3 finding.
+
+### Visible Windows Chrome product review
+
+Production preview port 49420 was reviewed in connected Windows Chrome at 1280x900, 390x844, and 390x601.
+
+- A native held touch on an Event body moved `Client review — Nordwell` from 3:00–4:30 to 4:00–5:30 while preserving its duration and the Day stream scroll position.
+- Native touches on the visible end and start controls changed only the intended boundary; the opposite boundary stayed fixed and the stream did not move underneath the active gesture.
+- The Event controls stayed visually distinct at opposite corners and left the title/body lane unobstructed. The linked/JOIN reservation remained separate.
+- Scheduled Actions retained a dedicated move face; automated native-touch coverage passed for held movement, active scroll ownership, estimate resize, completion isolation, cancellation, and remount behavior.
+- `ANY TIME` remained visibly present in Day at both mobile heights and desktop, with populated chips remaining horizontally scrollable. Week rendered no `ANY TIME` landmark. The seeded empty-state regression verifies the compact one-line empty landmark without an empty scroller and retains at least three Timeline hours in the controlled 390x601 fixture.
+- Desktop Timeline and Actions remained aligned; no application-wide stray horizontal line or card-lane overlay appeared.
+
+Android Chrome and iOS Safari physical-device validation remain pending.

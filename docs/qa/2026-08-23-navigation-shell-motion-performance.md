@@ -283,3 +283,34 @@ software-raster validation, not a claim about every physical GPU or device.
   Chromium `151.0.7922.34`.
 - Physical Android/iOS devices were unavailable. **implementation complete;
   physical-device paint gate pending**.
+
+## Post-integration correction: CALENDAR rail corner continuity
+
+The mobile return rail is permanently rotated 180 degrees. The previous CSS
+radius therefore rounded the wrong visual side during travel, and an initial
+review attempt to switch radii at terminal boundaries introduced a visible
+shape swap at open settle and close start.
+
+The final correction removes imperative radius ownership and uses one static
+CSS topology for every state: `border-radius: 0 16px 16px 0`. After the rail's
+180-degree transform, its exposed outer corners remain rounded while the edge
+adjacent to the Calendar surface remains square. The same topology now applies
+to closed, opening, open, closing, reversal, and reduced-motion states.
+
+Evidence:
+
+- The regression test was first observed RED against the old settled topology:
+  expected computed top-left `0px`, received `16px`.
+- `navigation-shell.spec.js` — **22 passed** after the final correction.
+- The combined focused integration suite — **156 passed**.
+- The final full Chromium suite — **380 passed**.
+- Connected Windows Chrome at 390x844 reported the same computed radii during
+  opening, settled open, and closing: `0px 16px 16px 0px`. The rail retained its
+  rounded exposed ends without a settle/close-start pop.
+- At 1280x900, the in-flight desktop frame remained convex; settled open used
+  `clip-path: inset(24px 22px 24px 322px round 22px)` and all eight temporary
+  navigation masks were hidden, so the earlier double-framed concave corners
+  did not return.
+
+Physical Android/iOS devices were unavailable. **implementation complete;
+physical-device paint gate pending**.
