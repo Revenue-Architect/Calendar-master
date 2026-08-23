@@ -76,6 +76,11 @@ export function plannerStyles({ T, preferences }) {
           --nav-clip-right:var(--nav-margin-right);
           --nav-clip-bottom:calc(var(--nav-margin-bottom) + var(--nav-page-y));
           --nav-page-radius:22px;
+          --nav-mask-top:24px;
+          --nav-mask-right:22px;
+          --nav-mask-bottom:24px;
+          --nav-mask-left:322px;
+          --nav-mask-radius:22px;
           --nav-page-duration:520ms;
           --nav-content-duration:260ms;
           --nav-item-stagger:30ms;
@@ -98,6 +103,22 @@ export function plannerStyles({ T, preferences }) {
         .nb-nav-motion-carrier{
           position:absolute;inset:0;width:100%;height:100%;transform:translate3d(0,0,0);transform-origin:left center;
         }
+        /* The stage is deliberately un-clipped while a navigation run is
+           active. These shell-coloured walls move with compositor transforms
+           into the open margins, including static quarter-corner cut-outs,
+           so the planner surface keeps one raster instead of a changing
+           clip-path. */
+        .nb-nav-motion-mask{position:absolute;inset:0;z-index:3;pointer-events:none;overflow:visible}
+        .nb-nav-motion-mask>i{position:absolute;display:block;background:#17181b;transform:translate3d(0,0,0)}
+        .nb-nav-motion-mask>[data-nav-mask="top"]{top:0;left:0;right:0;height:var(--nav-mask-top);transform:translate3d(0,calc(-1 * var(--nav-mask-top)),0)}
+        .nb-nav-motion-mask>[data-nav-mask="right"]{top:var(--nav-mask-top);right:0;bottom:var(--nav-mask-bottom);width:var(--nav-mask-right);transform:translate3d(var(--nav-mask-right),0,0)}
+        .nb-nav-motion-mask>[data-nav-mask="bottom"]{left:0;right:0;bottom:0;height:var(--nav-mask-bottom);transform:translate3d(0,var(--nav-mask-bottom),0)}
+        .nb-nav-motion-mask>[data-nav-mask="left"]{top:var(--nav-mask-top);bottom:var(--nav-mask-bottom);left:0;width:var(--nav-mask-left);transform:translate3d(calc(-1 * var(--nav-mask-left)),0,0)}
+        .nb-nav-motion-mask>[data-nav-mask="top-left"],.nb-nav-motion-mask>[data-nav-mask="top-right"],.nb-nav-motion-mask>[data-nav-mask="bottom-left"],.nb-nav-motion-mask>[data-nav-mask="bottom-right"]{width:var(--nav-mask-radius);height:var(--nav-mask-radius)}
+        .nb-nav-motion-mask>[data-nav-mask="top-left"]{left:var(--nav-mask-left);top:var(--nav-mask-top);border-bottom-right-radius:var(--nav-mask-radius);transform-origin:100% 100%;transform:translate3d(calc(-1 * (var(--nav-mask-left) + var(--nav-mask-radius))),calc(-1 * (var(--nav-mask-top) + var(--nav-mask-radius))),0)}
+        .nb-nav-motion-mask>[data-nav-mask="top-right"]{right:var(--nav-mask-right);top:var(--nav-mask-top);border-bottom-left-radius:var(--nav-mask-radius);transform-origin:0 100%;transform:translate3d(calc(var(--nav-mask-right) + var(--nav-mask-radius)),calc(-1 * (var(--nav-mask-top) + var(--nav-mask-radius))),0)}
+        .nb-nav-motion-mask>[data-nav-mask="bottom-left"]{left:var(--nav-mask-left);bottom:var(--nav-mask-bottom);border-top-right-radius:var(--nav-mask-radius);transform-origin:100% 0;transform:translate3d(calc(-1 * (var(--nav-mask-left) + var(--nav-mask-radius))),calc(var(--nav-mask-bottom) + var(--nav-mask-radius)),0)}
+        .nb-nav-motion-mask>[data-nav-mask="bottom-right"]{right:var(--nav-mask-right);bottom:var(--nav-mask-bottom);border-top-left-radius:var(--nav-mask-radius);transform-origin:0 0;transform:translate3d(calc(var(--nav-mask-right) + var(--nav-mask-radius)),calc(var(--nav-mask-bottom) + var(--nav-mask-radius)),0)}
         .nb-nav-shell[data-nav-state="open"] .nb-nav-carrier,
         .nb-nav-shell[data-nav-state="open"] .nb-nav-motion-carrier,
         .nb-nav-shell[data-nav-state="opening"] .nb-nav-carrier,
@@ -108,7 +129,7 @@ export function plannerStyles({ T, preferences }) {
         .nb-app-surface{
           position:relative;width:100%;height:100%;overflow:clip;overflow-anchor:none;box-shadow:none;
         }
-        .nb-navigation{position:absolute;z-index:1;inset:0 auto 0 0;width:var(--nav-width);padding:22px 18px;color:#f2f0ea;display:flex;flex-direction:column;overflow:auto;transform:translate3d(-36%,0,0)}
+        .nb-navigation{position:absolute;z-index:4;inset:0 auto 0 0;width:var(--nav-width);padding:22px 18px;color:#f2f0ea;display:flex;flex-direction:column;overflow:auto;transform:translate3d(-36%,0,0)}
         .nb-nav-shell[data-nav-state="open"] .nb-navigation,
         .nb-nav-shell[data-nav-state="opening"] .nb-navigation{transform:translate3d(0,0,0)}
         .nb-navigation[aria-hidden="true"]{pointer-events:none}

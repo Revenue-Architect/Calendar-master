@@ -3,17 +3,30 @@ import { navMobileMotion, navPageFit } from "./navPageFit.js";
 
 const MOTION_MS = 520;
 const CLOSED_PHASES = new Set(["closed", "closing"]);
+const NAV_EASE = "cubic-bezier(.22,.61,.36,1)";
+const CORNER_MASKS = new Set(["top-left", "top-right", "bottom-left", "bottom-right"]);
 
 const clamp = (value, min = 0, max = 1) => Math.min(max, Math.max(min, value));
 
-/* This is the same deliberately quiet ease used by the static sheet rules. The
- * important detail here is not the particular curve, but that every moving
- * part is sampled from the same normalized progress value. CSS transitions
- * used to give the mask, carrier and drawer independent clocks, which is what
- * made the right edge appear late under load. */
+/* Keep the browser-owned timeline on the shell's --nav-ease curve. Sampling the
+ * curve here is only for reversal bookkeeping; visual interpolation remains in
+ * WAAPI rather than being written by React on every frame. */
+function cubicBezier(value, x1, y1, x2, y2) {
+  const x = clamp(value);
+  let low = 0;
+  let high = 1;
+  for (let index = 0; index < 18; index += 1) {
+    const t = (low + high) / 2;
+    const sample = (3 * (1 - t) ** 2 * t * x1) + (3 * (1 - t) * t ** 2 * x2) + t ** 3;
+    if (sample < x) low = t;
+    else high = t;
+  }
+  const t = (low + high) / 2;
+  return (3 * (1 - t) ** 2 * t * y1) + (3 * (1 - t) * t ** 2 * y2) + t ** 3;
+}
+
 function settleEase(value) {
-  const t = clamp(value);
-  return 1 - ((1 - t) ** 3);
+  return cubicBezier(value, 0.22, 0.61, 0.36, 1);
 }
 
 function desktopViewport() {
@@ -26,11 +39,93 @@ function matrixValue(value) {
   return Number(value.toFixed(3));
 }
 
+function viewportClip(progress, targetFit, desktop) {
+  const p = clamp(progress);
+  if (desktop) {
+    const frame = targetFit.frame;
+    return `inset(${matrixValue(frame.top * p)}px ${matrixValue(frame.right * p)}px ${matrixValue(frame.bottom * p)}px ${matrixValue(frame.left * p)}px round ${matrixValue(frame.radius * p)}px)`;
+  }
+  const mobile = navMobileMotion({ progress: p, mobile: targetFit.mobile });
+  return `inset(${matrixValue(mobile.frame.top)}px ${matrixValue(mobile.frame.right)}px ${matrixValue(mobile.frame.bottom)}px ${matrixValue(mobile.frame.left)}px round ${matrixValue(mobile.frame.radius)}px)`;
+}
+
+function carrierTransform(progress, targetFit, desktop) {
+  const p = clamp(progress);
+  const carrier = desktop
+    ? targetFit.carrier
+    : navMobileMotion({ progress: p, mobile: targetFit.mobile }).carrier;
+  const x = desktop ? carrier.x * p : carrier.x;
+  const y = desktop ? carrier.y * p : carrier.y;
+  return `translate3d(${matrixValue(x)}px, ${matrixValue(y)}px, 0)`;
+}
+
+function maskFrame(targetFit, desktop) {
+  if (desktop) return targetFit.frame;
+  return {
+    top: 14,
+    right: 0,
+    bottom: 14,
+    left: Number(targetFit.mobile?.x) || 0,
+    radius: 16,
+  };
+}
+
+function maskTransform(progress, targetFit, desktop, name) {
+  const p = clamp(progress);
+  const frame = maskFrame(targetFit, desktop);
+  const radius = frame.radius;
+  const distance = 1 - p;
+  const transforms = {
+    top: [0, -frame.top * distance],
+    right: [frame.right * distance, 0],
+    bottom: [0, frame.bottom * distance],
+    left: [-frame.left * distance, 0],
+    "top-left": [-(frame.left + radius) * distance, -(frame.top + radius) * distance],
+    "top-right": [(frame.right + radius) * distance, -(frame.top + radius) * distance],
+    "bottom-left": [-(frame.left + radius) * distance, (frame.bottom + radius) * distance],
+    "bottom-right": [(frame.right + radius) * distance, (frame.bottom + radius) * distance],
+  };
+  const [x, y] = transforms[name] || [0, 0];
+  /* A rounded clip's radius is r*p, not the destination radius translated
+     into place. CSS sets each corner's transform origin at its interior-facing
+     corner, so this scale keeps both its arc and its outer-frame position on
+     the same geometry as inset(... round r*p). */
+  const scale = CORNER_MASKS.has(name) ? ` scale(${matrixValue(p)})` : "";
+  return `translate3d(${matrixValue(x)}px, ${matrixValue(y)}px, 0)${scale}`;
+}
+
+function drawerTransform(progress) {
+  return `translate3d(${matrixValue(-36 * (1 - clamp(progress)))}%, 0, 0)`;
+}
+
+function labelStyle(progress, index) {
+  const p = clamp(progress);
+  const delay = (index * 30) / MOTION_MS;
+  const labelProgress = clamp((p - delay) / (1 - delay));
+  return {
+    opacity: `${matrixValue(labelProgress)}`,
+    transform: `translate3d(${matrixValue(-14 * (1 - labelProgress))}px, 0, 0)`,
+  };
+}
+
+/* WAAPI interpolates the geometry in the browser. Sampling the existing
+ * shared ease into a short keyframe list keeps the current normalized clock
+ * (including label staggering) without asking React to write visual styles on
+ * every frame. The list is authored once per logical run, not per frame. */
+function sampledKeyframes(from, target, styleForProgress) {
+  const steps = 24;
+  return Array.from({ length: steps + 1 }, (_, index) => {
+    const t = index / steps;
+    const progress = from + ((target - from) * t);
+    return { offset: t, ...styleForProgress(progress) };
+  });
+}
+
 /**
  * Owns one reversible navigation run.
  *
- * Both desktop and mobile use a small requestAnimationFrame clock rather than
- * separate CSS transition lifecycles. The viewport mask, content carrier,
+ * Both desktop and mobile use one browser-owned animation transaction rather
+ * than separate CSS transition lifecycles. The viewport mask, content carrier,
  * drawer, labels, and mobile rail all receive the same normalized progress, so
  * a reversal starts at the frame the user actually saw.
  */
@@ -54,7 +149,8 @@ export function useNavigationMotion({ reducedMotion = false } = {}) {
   const runIdRef = useRef(0);
   const [runId, setRunId] = useState(0);
   const frameRef = useRef(null);
-  const timerRef = useRef(null);
+  const clockRef = useRef(null);
+  const animationsRef = useRef([]);
 
   const shellRef = useRef(null);
   const viewportRef = useRef(null);
@@ -84,6 +180,12 @@ export function useNavigationMotion({ reducedMotion = false } = {}) {
     shell.style.setProperty("--nav-clip-right", `${targetFit.clipRight}px`);
     shell.style.setProperty("--nav-clip-bottom", `${targetFit.clipBottom}px`);
     shell.style.setProperty("--nav-page-radius", `${targetFit.frame.radius}px`);
+    const mask = maskFrame(targetFit, desktopRef.current);
+    shell.style.setProperty("--nav-mask-top", `${mask.top}px`);
+    shell.style.setProperty("--nav-mask-right", `${mask.right}px`);
+    shell.style.setProperty("--nav-mask-bottom", `${mask.bottom}px`);
+    shell.style.setProperty("--nav-mask-left", `${mask.left}px`);
+    shell.style.setProperty("--nav-mask-radius", `${mask.radius}px`);
   }, []);
 
   const cancelFrame = useCallback(() => {
@@ -91,8 +193,11 @@ export function useNavigationMotion({ reducedMotion = false } = {}) {
       cancelAnimationFrame(frameRef.current);
       frameRef.current = null;
     }
-    window.clearTimeout(timerRef.current);
-    timerRef.current = null;
+  }, []);
+
+  const cancelAnimations = useCallback(() => {
+    animationsRef.current.forEach((animation) => animation.cancel());
+    animationsRef.current = [];
   }, []);
 
   const setPromotion = useCallback((active) => {
@@ -100,24 +205,29 @@ export function useNavigationMotion({ reducedMotion = false } = {}) {
     const carrier = carrierRef.current;
     const drawer = drawerRef.current;
     const rail = railRef.current;
+    const masks = viewport?.querySelectorAll("[data-nav-mask]") || [];
     if (active) {
-      viewport?.style.setProperty("will-change", "clip-path");
+      /* The stage has no animated clip-path in the transform-wall design. */
+      viewport?.style.removeProperty("will-change");
       viewport?.style.setProperty("contain", "layout paint");
       carrier?.style.setProperty("will-change", "transform");
       drawer?.style.setProperty("will-change", "transform");
       rail?.style.setProperty("will-change", "transform");
+      masks.forEach((mask) => mask.style.setProperty("will-change", "transform"));
     } else {
       viewport?.style.removeProperty("will-change");
       viewport?.style.removeProperty("contain");
       carrier?.style.removeProperty("will-change");
       drawer?.style.removeProperty("will-change");
       rail?.style.removeProperty("will-change");
+      masks.forEach((mask) => mask.style.removeProperty("will-change"));
     }
   }, []);
 
-  /* Apply one frame to every moving part. Desktop and mobile differ only in
-     geometry; they never get separate clocks or CSS transition lifecycles. */
-  const applyProgress = useCallback((rawProgress, targetFit) => {
+  /* Apply only a terminal frame (or the initial closed frame). Active travel is
+     authored once with WAAPI below; this function must not become a per-frame
+     style writer again. */
+  const applyProgress = useCallback((rawProgress, targetFit, { active = false } = {}) => {
     if (!targetFit) return;
     const p = clamp(rawProgress);
     const viewport = viewportRef.current;
@@ -128,17 +238,18 @@ export function useNavigationMotion({ reducedMotion = false } = {}) {
     viewport.style.transition = "none";
     carrier.style.transition = "none";
     drawer.style.transition = "none";
-    if (desktopRef.current) {
-      const frame = targetFit.frame;
-      const carrierGeometry = targetFit.carrier;
-      /* Every desktop edge is a direct viewport inset. In particular, the
-       * right edge is never a cancellation of carrier travel and clipping. */
-      viewport.style.clipPath = `inset(${matrixValue(frame.top * p)}px ${matrixValue(frame.right * p)}px ${matrixValue(frame.bottom * p)}px ${matrixValue(frame.left * p)}px round ${matrixValue(frame.radius * p)}px)`;
-      carrier.style.transform = `translate3d(${matrixValue(carrierGeometry.x * p)}px, ${matrixValue(carrierGeometry.y * p)}px, 0)`;
-    } else {
+    viewport.style.clipPath = active ? "none" : viewportClip(p, targetFit, desktopRef.current);
+    carrier.style.transform = carrierTransform(p, targetFit, desktopRef.current);
+    viewport.querySelectorAll("[data-nav-mask]").forEach((mask) => {
+      /* The transform walls own the frame only during active travel. At either
+         terminal state the viewport clip owns the rounded edge; leaving a
+         corner wall painted over that clip cuts a concave notch into the card. */
+      mask.style.visibility = active ? "visible" : "hidden";
+      mask.style.opacity = active ? "1" : "0";
+      mask.style.transform = maskTransform(p, targetFit, desktopRef.current, mask.dataset.navMask);
+    });
+    if (!desktopRef.current) {
       const mobile = navMobileMotion({ progress: p, mobile: targetFit.mobile });
-      viewport.style.clipPath = `inset(${matrixValue(mobile.frame.top)}px ${matrixValue(mobile.frame.right)}px ${matrixValue(mobile.frame.bottom)}px ${matrixValue(mobile.frame.left)}px round ${matrixValue(mobile.frame.radius)}px)`;
-      carrier.style.transform = `translate3d(${matrixValue(mobile.carrier.x)}px, ${matrixValue(mobile.carrier.y)}px, 0)`;
       const rail = railRef.current;
       if (rail) {
         rail.style.transition = "none";
@@ -149,17 +260,16 @@ export function useNavigationMotion({ reducedMotion = false } = {}) {
         rail.style.pointerEvents = mobile.visibleRailWidth > 2 ? "auto" : "none";
       }
     }
-    drawer.style.transform = `translate3d(${matrixValue(-36 * (1 - p))}%, 0, 0)`;
+    drawer.style.transform = drawerTransform(p);
 
     const labels = drawer.querySelectorAll(".nb-nav-brand,.nb-nav-item,.nb-nav-membership");
     labels.forEach((label) => {
       const index = Number.parseFloat(label.style.getPropertyValue("--nav-index")) || 0;
-      const delay = (index * 30) / MOTION_MS;
-      const labelProgress = clamp((p - delay) / (1 - delay));
+      const style = labelStyle(p, index);
       label.style.transition = "none";
       label.style.transitionDelay = `${index * 30}ms`;
-      label.style.opacity = `${matrixValue(labelProgress)}`;
-      label.style.transform = `translate3d(${matrixValue(-14 * (1 - labelProgress))}px, 0, 0)`;
+      label.style.opacity = style.opacity;
+      label.style.transform = style.transform;
     });
     updateProgressAttribute(p);
   }, [updateProgressAttribute]);
@@ -171,11 +281,42 @@ export function useNavigationMotion({ reducedMotion = false } = {}) {
     });
   }, []);
 
+  const visualProgress = useCallback(() => {
+    const carrier = carrierRef.current;
+    const targetFit = fitRef.current;
+    if (!carrier || !targetFit) return progressRef.current;
+    const transform = getComputedStyle(carrier).transform;
+    const values = transform.match(/^matrix3d\((.+)\)$/)?.[1]?.split(",")
+      || transform.match(/^matrix\((.+)\)$/)?.[1]?.split(",");
+    if (!values) return progressRef.current;
+    const x = Number(values[values.length === 16 ? 12 : 4]);
+    const destination = desktopRef.current
+      ? targetFit.carrier.x
+      : (Number(targetFit.mobile?.x) || 0) + (Number(targetFit.mobile?.railWidth) || 44);
+    if (!Number.isFinite(x) || destination <= 0) return progressRef.current;
+    return clamp(x / destination);
+  }, []);
+
+  const sampleProgress = useCallback((now = performance.now()) => {
+    const clock = clockRef.current;
+    if (!clock) {
+      const sampled = visualProgress();
+      progressRef.current = sampled;
+      return sampled;
+    }
+    const elapsed = clamp((now - clock.startedAt) / clock.duration);
+    const next = clock.source + ((clock.target - clock.source) * settleEase(elapsed));
+    progressRef.current = next;
+    return next;
+  }, [visualProgress]);
+
   const settle = useCallback((run, target) => {
     if (!mountedRef.current || runIdRef.current !== run) return;
     const terminalPhase = target === 1 ? "open" : "closed";
     if (phaseRef.current !== "opening" && phaseRef.current !== "closing") return;
     cancelFrame();
+    cancelAnimations();
+    clockRef.current = null;
     progressRef.current = target;
     applyProgress(target, fitRef.current);
     setPromotion(false);
@@ -188,10 +329,71 @@ export function useNavigationMotion({ reducedMotion = false } = {}) {
     } else {
       restoreToggleFocus(run);
     }
-  }, [applyProgress, cancelFrame, restoreToggleFocus, setPromotion, updateProgressAttribute]);
+  }, [applyProgress, cancelAnimations, cancelFrame, restoreToggleFocus, setPromotion, updateProgressAttribute]);
+
+  const startBrowserMotion = useCallback((run, source, target, targetFit) => {
+    const viewport = viewportRef.current;
+    const carrier = carrierRef.current;
+    const drawer = drawerRef.current;
+    if (!viewport || !carrier || !drawer || typeof viewport.animate !== "function") return false;
+
+    const shell = shellRef.current;
+    const easing = getComputedStyle(shell).getPropertyValue("--nav-ease").trim() || NAV_EASE;
+    const timing = { duration: MOTION_MS, easing, fill: "both" };
+    const animations = [];
+    const animate = (node, keyframes) => {
+      const animation = node.animate(keyframes, timing);
+      animations.push(animation);
+      return animation;
+    };
+
+    try {
+      /* The viewport remains an un-clipped stage during travel. Static shell
+         walls move into the four margins, so the large planner surface is not
+         repainted for a changing clip path. */
+      const finish = animate(carrier, sampledKeyframes(source, target, (value) => ({
+        transform: carrierTransform(value, targetFit, desktopRef.current),
+      })));
+      animate(drawer, sampledKeyframes(source, target, (value) => ({
+        transform: drawerTransform(value),
+      })));
+
+      const labels = drawer.querySelectorAll(".nb-nav-brand,.nb-nav-item,.nb-nav-membership");
+      labels.forEach((label) => {
+        const index = Number.parseFloat(label.style.getPropertyValue("--nav-index")) || 0;
+        animate(label, sampledKeyframes(source, target, (value) => labelStyle(value, index)));
+      });
+
+      viewport.querySelectorAll("[data-nav-mask]").forEach((mask) => {
+        animate(mask, sampledKeyframes(source, target, (value) => ({
+          transform: maskTransform(value, targetFit, desktopRef.current, mask.dataset.navMask),
+        })));
+      });
+
+      if (!desktopRef.current) {
+        const rail = railRef.current;
+        if (rail) {
+          rail.style.visibility = "visible";
+          rail.style.pointerEvents = "auto";
+          animate(rail, sampledKeyframes(source, target, (value) => {
+            const mobile = navMobileMotion({ progress: value, mobile: targetFit.mobile });
+            return { transform: `translate3d(${matrixValue(mobile.rail.x)}px, 0, 0) rotate(180deg)` };
+          }));
+        }
+      }
+
+      finish.onfinish = () => settle(run, target);
+      animationsRef.current = animations;
+      return true;
+    } catch (error) {
+      animations.forEach((animation) => animation.cancel());
+      animationsRef.current = [];
+      throw error;
+    }
+  }, [settle]);
 
   const beginMotion = useCallback((target) => {
-    const current = progressRef.current;
+    const current = sampleProgress();
     if (target === 1 && phaseRef.current === "open") return;
     if (target === 0 && phaseRef.current === "closed") return;
 
@@ -199,6 +401,8 @@ export function useNavigationMotion({ reducedMotion = false } = {}) {
     runIdRef.current = run;
     setRunId(run);
     cancelFrame();
+    cancelAnimations();
+    clockRef.current = null;
 
     /* Opening snapshots geometry once. During a reversal the same snapshot is
        retained, preventing a resize from moving the destination underneath an
@@ -232,35 +436,38 @@ export function useNavigationMotion({ reducedMotion = false } = {}) {
     }
 
     setPromotion(true);
-    /* Put the starting frame in the DOM before the first animation frame. This
-       makes first-use paint deterministic even when Playwright or a busy main
-       thread delays the click's next frame. */
-    applyProgress(current, targetFit);
+    /* Put the starting frame in the DOM before handing the travel to the
+       browser. This makes first-use paint deterministic even when Playwright
+       or a busy main thread delays the next compositor sample. */
+    applyProgress(current, targetFit, { active: true });
     const startedAt = performance.now();
-    /* Keep one shared 520 ms clock even when reversing from an intermediate
-       progress. Scaling duration by the remaining distance makes a reversal
-       accelerate: an opening run interrupted near the middle would traverse
-       its remaining geometry in a fraction of a frame budget, so the first
-       reopening sample could jump away from the last closing sample. The
-       normalized progress still starts at the exact current frame; only the
-       shared clock remains constant. */
-    const duration = MOTION_MS;
+    clockRef.current = {
+      run,
+      source: current,
+      target,
+      direction: target > current ? "opening" : "closing",
+      startedAt,
+      duration: MOTION_MS,
+      state: nextPhase,
+    };
+    const started = startBrowserMotion(run, current, target, targetFit);
+    if (!started) {
+      settle(run, target);
+      return;
+    }
+
+    /* Keep one shared logical clock for the dataset and reversal sampling. The
+       visual channels themselves are browser-owned animations; this ticker only
+       exposes progress to focus/interaction tests and never writes geometry. */
     const tick = (now) => {
-      if (!mountedRef.current || runIdRef.current !== run) return;
-      const elapsed = clamp((now - startedAt) / duration);
-      const eased = settleEase(elapsed);
-      const nextProgress = current + ((target - current) * eased);
-      progressRef.current = nextProgress;
-      applyProgress(nextProgress, targetFit);
-      if (elapsed >= 1) {
-        settle(run, target);
-      } else {
-        frameRef.current = requestAnimationFrame(tick);
-      }
+      if (!mountedRef.current || runIdRef.current !== run || !clockRef.current) return;
+      const next = sampleProgress(now);
+      updateProgressAttribute(next);
+      if ((now - startedAt) < MOTION_MS) frameRef.current = requestAnimationFrame(tick);
+      else frameRef.current = null;
     };
     frameRef.current = requestAnimationFrame(tick);
-    timerRef.current = window.setTimeout(() => settle(run, target), duration + 120);
-  }, [applyGeometryStyles, applyProgress, cancelFrame, restoreToggleFocus, setPromotion, settle, updateProgressAttribute]);
+  }, [applyGeometryStyles, applyProgress, cancelAnimations, cancelFrame, restoreToggleFocus, sampleProgress, setPromotion, settle, startBrowserMotion, updateProgressAttribute]);
 
   const open = useCallback(() => beginMotion(1), [beginMotion]);
   const close = useCallback(() => beginMotion(0), [beginMotion]);
@@ -323,8 +530,10 @@ export function useNavigationMotion({ reducedMotion = false } = {}) {
     return () => {
       mountedRef.current = false;
       cancelFrame();
+      cancelAnimations();
+      clockRef.current = null;
     };
-  }, [cancelFrame]);
+  }, [cancelAnimations, cancelFrame]);
 
   return {
     phase,
