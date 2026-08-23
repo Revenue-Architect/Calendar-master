@@ -756,6 +756,7 @@ export default function Planner() {
     attachActiveRibbon,
     onScroll: onRibbonScroll,
     edges: ribbonEdges,
+    keyboardAnchorIndex: ribbonKeyboardAnchor,
     positionState: ribbonPositionState,
     setWindow: setRibbonWindow,
     ensureDateVisible: ensureRibbonDateVisible,
@@ -3915,13 +3916,11 @@ export default function Planner() {
                 const on = k === dateKey;
                 const n = ribbonDensities.get(k) ?? 0;
                 const target = gesture && gesture.overDay === k;
-                /* Roving tab stop. The strip is a virtual window over two years, and
-                   tabbing it moved one day at a time while the scroll refilled the
-                   window behind you — 32 stops deep and still going. The rail gets
-                   one stop; the day changes with the arrow keys it already answers to. */
+                /* One roving tab stop for the whole strip, not one per rendered day.
+                   `ribbonKeyboardAnchorIndex` owns which day holds it, and why. */
                 return (
                   <button key={k} data-day={k} ref={on ? attachActiveRibbon : null} onClick={() => jumpTo(k)}
-                    tabIndex={on ? 0 : -1}
+                    tabIndex={i === ribbonKeyboardAnchor ? 0 : -1}
                     className="nb-cell nb-tap relative w-16 sm:w-20 lg:w-24 shrink-0 py-2.5"
                     style={{ transitionDelay: `${Math.min(i, 10) * 14}ms`, boxShadow: target ? `inset 0 0 0 2px ${T.accent}` : "none" }}>
                     {/* Selection is a filled cell and today is an outlined one. Washing
