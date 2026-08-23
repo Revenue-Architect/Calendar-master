@@ -4,6 +4,7 @@ import { navMobileMotion, navPageFit } from "./navPageFit.js";
 const MOTION_MS = 520;
 const CLOSED_PHASES = new Set(["closed", "closing"]);
 const NAV_EASE = "cubic-bezier(.22,.61,.36,1)";
+const CORNER_MASKS = new Set(["top-left", "top-right", "bottom-left", "bottom-right"]);
 
 const clamp = (value, min = 0, max = 1) => Math.min(max, Math.max(min, value));
 
@@ -85,7 +86,12 @@ function maskTransform(progress, targetFit, desktop, name) {
     "bottom-right": [(frame.right + radius) * distance, (frame.bottom + radius) * distance],
   };
   const [x, y] = transforms[name] || [0, 0];
-  return `translate3d(${matrixValue(x)}px, ${matrixValue(y)}px, 0)`;
+  /* A rounded clip's radius is r*p, not the destination radius translated
+     into place. CSS sets each corner's transform origin at its interior-facing
+     corner, so this scale keeps both its arc and its outer-frame position on
+     the same geometry as inset(... round r*p). */
+  const scale = CORNER_MASKS.has(name) ? ` scale(${matrixValue(p)})` : "";
+  return `translate3d(${matrixValue(x)}px, ${matrixValue(y)}px, 0)${scale}`;
 }
 
 function drawerTransform(progress) {
