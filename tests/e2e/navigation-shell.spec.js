@@ -82,6 +82,64 @@ test.describe("the floating navigation shell", () => {
     expect(active.hasClipAnimation, "the viewport must not retain a WAAPI clip animation").toBe(false);
   });
 
+  test("active corner masks scale with the in-flight navigation radius", async ({ page }) => {
+    for (const { width, height, radius } of [
+      { width: 1280, height: 900, radius: 22 },
+      { width: 390, height: 844, radius: 16 },
+    ]) {
+      await page.setViewportSize({ width, height });
+      await openPlanner(page);
+      await page.getByTestId("nav-toggle").click();
+
+      const sample = await page.evaluate(() => new Promise((resolve, reject) => {
+        const shell = document.querySelector('[data-test="nav-shell"]');
+        const names = ["top-left", "top-right", "bottom-left", "bottom-right"];
+        let frames = 0;
+        const read = () => {
+          const progress = Number(shell.dataset.navProgress);
+          if (shell.dataset.navState === "opening" && progress >= 0.2 && progress <= 0.8) {
+            resolve({
+              progress,
+              corners: names.map((name) => {
+                const node = document.querySelector(`[data-nav-mask="${name}"]`);
+                const rect = node.getBoundingClientRect();
+                const transform = getComputedStyle(node).transform;
+                const values = transform.match(/^matrix\((.+)\)$/)?.[1]?.split(",")
+                  || transform.match(/^matrix3d\((.+)\)$/)?.[1]?.split(",");
+                const scaleX = values ? Number(values[0]) : NaN;
+                const scaleY = values ? Number(values[values.length === 16 ? 5 : 3]) : NaN;
+                return { name, width: rect.width, height: rect.height, scaleX, scaleY, transform };
+              }),
+            });
+            return;
+          }
+          frames += 1;
+          if (frames >= 90) {
+            reject(new Error(`corner geometry sample did not reach an active frame: state=${shell.dataset.navState} progress=${shell.dataset.navProgress}`));
+            return;
+          }
+          requestAnimationFrame(read);
+        };
+        requestAnimationFrame(read);
+      }));
+
+      expect(sample.progress).toBeGreaterThanOrEqual(0.2);
+      expect(sample.progress).toBeLessThanOrEqual(0.8);
+      for (const corner of sample.corners) {
+        expect(Math.abs(corner.width - (radius * sample.progress)), `${width}px ${corner.name} width`)
+          .toBeLessThan(1.5);
+        expect(Math.abs(corner.height - (radius * sample.progress)), `${width}px ${corner.name} height`)
+          .toBeLessThan(1.5);
+        expect(corner.scaleX, `${width}px ${corner.name} transform scaleX`).toBeCloseTo(sample.progress, 0.08);
+        expect(corner.scaleY, `${width}px ${corner.name} transform scaleY`).toBeCloseTo(sample.progress, 0.08);
+      }
+
+      if (width < 640) await page.getByTestId("mobile-calendar-return").click();
+      else await page.getByTestId("nav-toggle").click();
+      await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
+    }
+  });
+
   test("progress telemetry does not write visual geometry", async ({ page }) => {
     await openPlanner(page);
     await page.getByTestId("nav-toggle").click();
