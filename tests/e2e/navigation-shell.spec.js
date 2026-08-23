@@ -358,6 +358,12 @@ test.describe("the floating navigation shell", () => {
     expect(settled.right).toBeLessThanOrEqual(0);
   });
 
+  /* Updated with the all-corner fix: this previously expected the two
+     page-facing corners to be 0px, which described the element rather than the
+     render. At rest the viewport clip is coincident with the rail and rounds
+     all four anyway, so "settled open rail keeps the surface edge square" was
+     never what reached the screen; in travel that clip is removed and those two
+     corners really did go square, which is the defect this now guards. */
   test("the mobile calendar rail keeps its outer corners rounded throughout travel", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await openPlanner(page);
@@ -415,17 +421,17 @@ test.describe("the floating navigation shell", () => {
       };
       requestAnimationFrame(sample);
     }));
-    expect(opening.borderTopLeft, "opening keeps the visual outer-left corners rounded").toBe("0px");
-    expect(opening.borderTopRight, "opening keeps the visual outer-left corners rounded").toBe("16px");
-    expect(opening.borderBottomRight, "opening keeps the visual outer-left corners rounded").toBe("16px");
-    expect(opening.borderBottomLeft, "opening keeps the visual outer-left corners rounded").toBe("0px");
+    expect(opening.borderTopLeft, "opening rounds every corner").toBe("16px");
+    expect(opening.borderTopRight, "opening rounds every corner").toBe("16px");
+    expect(opening.borderBottomRight, "opening rounds every corner").toBe("16px");
+    expect(opening.borderBottomLeft, "opening rounds every corner").toBe("16px");
 
     await expect(shell).toHaveAttribute("data-nav-state", "open");
     const settledOpen = await readRail();
-    expect(settledOpen.borderTopLeft, "settled open rail keeps the surface edge square").toBe("0px");
-    expect(settledOpen.borderTopRight, "settled open rail keeps the visual outer-left corners rounded").toBe("16px");
-    expect(settledOpen.borderBottomRight, "settled open rail keeps the visual outer-left corners rounded").toBe("16px");
-    expect(settledOpen.borderBottomLeft, "settled open rail keeps the surface edge square").toBe("0px");
+    expect(settledOpen.borderTopLeft, "the settled rail rounds every corner").toBe("16px");
+    expect(settledOpen.borderTopRight, "the settled rail rounds every corner").toBe("16px");
+    expect(settledOpen.borderBottomRight, "the settled rail rounds every corner").toBe("16px");
+    expect(settledOpen.borderBottomLeft, "the settled rail rounds every corner").toBe("16px");
 
     await rail.click();
     await expect(shell).toHaveAttribute("data-nav-state", "closing");
@@ -461,10 +467,10 @@ test.describe("the floating navigation shell", () => {
       };
       requestAnimationFrame(sample);
     }));
-    expect(closing.borderTopLeft, "closing keeps the visual outer-left corners rounded").toBe("0px");
-    expect(closing.borderTopRight, "closing keeps the visual outer-left corners rounded").toBe("16px");
-    expect(closing.borderBottomRight, "closing keeps the visual outer-left corners rounded").toBe("16px");
-    expect(closing.borderBottomLeft, "closing keeps the visual outer-left corners rounded").toBe("0px");
+    expect(closing.borderTopLeft, "closing rounds every corner").toBe("16px");
+    expect(closing.borderTopRight, "closing rounds every corner").toBe("16px");
+    expect(closing.borderBottomRight, "closing rounds every corner").toBe("16px");
+    expect(closing.borderBottomLeft, "closing rounds every corner").toBe("16px");
 
     await expect(shell).toHaveAttribute("data-nav-state", "closed");
   });
@@ -692,6 +698,123 @@ test.describe("the floating navigation shell", () => {
     expect(separator.colour, "the open drawer must still show its group separator").not.toBe("rgba(0, 0, 0, 0)");
     expect(parseFloat(separator.width), "the separator must have width when open").toBeGreaterThan(0);
     expect(separator.style, "the separator must have a border style when open").not.toBe("none");
+  });
+
+  /* The rail's shape must not change between rest and travel. At rest the
+     viewport clip is exactly coincident with the rail and rounds it for free;
+     `applyProgress` sets that clip to `none` for the whole of travel, so a rail
+     that owns only some of its corners goes square on the others for every frame
+     of both motions and snaps back at the terminal frame.
+
+     Measured in pixels rather than from computed style on purpose: the defect is
+     that the *rendered* shape changes, and the rounding is legitimately allowed
+     to come from either the element or a clip. A computed-radius assertion would
+     pass for any implementation that rounds the box while the rail still renders
+     square, and fail for a correct one that reinstated a travel-time clip. */
+  test("the calendar rail keeps its corner radius through both motions", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openPlanner(page);
+
+    const decoder = await page.context().newPage();
+    const RADIUS = 16;
+
+    /* Non-accent pixels inside each RADIUS-square corner box. A square corner is
+       filled by the rail itself and reads ~0; a rounded one leaves the quarter
+       outside the arc, (1 - PI/4) * RADIUS^2 ~= 55, showing whatever is behind. */
+    const cornerBoxes = async (label) => {
+      const info = await page.evaluate(() => {
+        const rail = document.querySelector('[data-test="mobile-calendar-return"]');
+        const shell = document.querySelector('[data-test="nav-shell"]');
+        const rect = rail.getBoundingClientRect();
+        return {
+          state: shell.dataset.navState,
+          progress: Number(shell.dataset.navProgress),
+          accent: getComputedStyle(rail).backgroundColor,
+          rect: { x: rect.x, y: rect.y, w: rect.width, h: rect.height },
+        };
+      });
+      const shot = (await page.screenshot()).toString("base64");
+      const counts = await decoder.evaluate(async ({ shot, info, RADIUS, viewportWidth }) => {
+        const image = new Image();
+        image.src = `data:image/png;base64,${shot}`;
+        await image.decode();
+        const canvas = document.createElement("canvas");
+        canvas.width = image.width;
+        canvas.height = image.height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(image, 0, 0);
+        const ratio = image.width / viewportWidth;
+        const [ar, ag, ab] = info.accent.match(/\d+/g).map(Number);
+        const box = (x, y) => {
+          const sx = Math.round(x * ratio);
+          const sy = Math.round(y * ratio);
+          const size = Math.round(RADIUS * ratio);
+          if (sx < 0 || sy < 0 || sx + size > image.width || sy + size > image.height) return null;
+          const data = ctx.getImageData(sx, sy, size, size).data;
+          let other = 0;
+          for (let i = 0; i < data.length; i += 4) {
+            if (Math.abs(data[i] - ar) > 24 || Math.abs(data[i + 1] - ag) > 24 || Math.abs(data[i + 2] - ab) > 24) other += 1;
+          }
+          return Math.round(other / (ratio * ratio));
+        };
+        const { x, y, w, h } = info.rect;
+        return {
+          topLeft: box(x, y),
+          topRight: box(x + w - RADIUS, y),
+          bottomRight: box(x + w - RADIUS, y + h - RADIUS),
+          bottomLeft: box(x, y + h - RADIUS),
+        };
+      }, { shot, info, RADIUS, viewportWidth: 390 });
+      return { label, ...info, counts };
+    };
+
+    /* Stop the travel where it is by pausing every running animation, so the
+       sample is a real in-flight frame rather than a timing guess. */
+    const freezeAt = (target) => page.evaluate((stopAt) => new Promise((resolve) => {
+      const shell = document.querySelector('[data-test="nav-shell"]');
+      let frames = 0;
+      const tick = () => {
+        const state = shell.dataset.navState;
+        const progress = Number(shell.dataset.navProgress);
+        if (state !== "opening" && state !== "closing") return resolve();
+        if ((state === "opening" && progress >= stopAt) || (state === "closing" && progress <= stopAt)) {
+          document.getAnimations().forEach((animation) => animation.pause());
+          return resolve();
+        }
+        frames += 1;
+        if (frames >= 120) return resolve();
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    }), target);
+
+    const resume = () => page.evaluate(() => document.getAnimations().forEach((a) => a.play()));
+
+    const samples = [];
+    await page.getByTestId("nav-toggle").click();
+    await freezeAt(0.5);
+    samples.push(await cornerBoxes("opening"));
+    await resume();
+    await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "open");
+    samples.push(await cornerBoxes("rest open"));
+
+    await page.getByTestId("mobile-calendar-return").click();
+    await freezeAt(0.5);
+    samples.push(await cornerBoxes("closing"));
+    await resume();
+    await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
+    await decoder.close();
+
+    /* Rounded measured 63-88 here and square measured 0-16, so the midpoint
+       separates them with room for antialiasing and for whatever sits behind. */
+    const ROUNDED = 35;
+    for (const sample of samples) {
+      expect(sample.progress, `${sample.label}: must be a real in-flight or settled frame`).toBeGreaterThan(0);
+      for (const [corner, count] of Object.entries(sample.counts)) {
+        expect(count, `${sample.label} (p=${sample.progress.toFixed(2)}) ${corner} must stay rounded, got ${count} non-accent px`)
+          .toBeGreaterThanOrEqual(ROUNDED);
+      }
+    }
   });
 
   test("the navigation trigger uses one press scale channel", async ({ page }) => {
