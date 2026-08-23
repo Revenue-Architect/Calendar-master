@@ -241,6 +241,11 @@ export function useNavigationMotion({ reducedMotion = false } = {}) {
     viewport.style.clipPath = active ? "none" : viewportClip(p, targetFit, desktopRef.current);
     carrier.style.transform = carrierTransform(p, targetFit, desktopRef.current);
     viewport.querySelectorAll("[data-nav-mask]").forEach((mask) => {
+      /* The transform walls own the frame only during active travel. At either
+         terminal state the viewport clip owns the rounded edge; leaving a
+         corner wall painted over that clip cuts a concave notch into the card. */
+      mask.style.visibility = active ? "visible" : "hidden";
+      mask.style.opacity = active ? "1" : "0";
       mask.style.transform = maskTransform(p, targetFit, desktopRef.current, mask.dataset.navMask);
     });
     if (!desktopRef.current) {

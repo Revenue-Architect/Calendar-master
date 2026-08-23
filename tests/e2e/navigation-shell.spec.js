@@ -68,6 +68,10 @@ test.describe("the floating navigation shell", () => {
       const masks = [...viewport.querySelectorAll("[data-nav-mask]")];
       return {
         clipPath: viewport.style.clipPath,
+        masksVisible: masks.every((mask) => (
+          getComputedStyle(mask).visibility === "visible"
+          && getComputedStyle(mask).opacity === "1"
+        )),
         maskAnimations: masks.reduce((count, mask) => count + mask.getAnimations()
           .filter((animation) => animation.playState === "running").length, 0),
         hasClipAnimation: viewport.getAnimations().some((animation) => {
@@ -78,6 +82,7 @@ test.describe("the floating navigation shell", () => {
     });
 
     expect(active.clipPath, "the active stage must not animate a changing surface clip").toBe("none");
+    expect(active.masksVisible, "the travel masks must own the frame while the viewport is unclipped").toBe(true);
     expect(active.maskAnimations, "edge and corner framing must be browser-owned").toBeGreaterThan(0);
     expect(active.hasClipAnimation, "the viewport must not retain a WAAPI clip animation").toBe(false);
   });
@@ -139,6 +144,32 @@ test.describe("the floating navigation shell", () => {
       if (width < 640) await page.getByTestId("mobile-calendar-return").click();
       else await page.getByTestId("nav-toggle").click();
       await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
+    }
+  });
+
+  test("settled navigation returns corner ownership to the viewport clip", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await openPlanner(page);
+    await page.getByTestId("nav-toggle").click();
+    await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "open");
+
+    const settled = await page.evaluate(() => {
+      const viewport = document.querySelector('[data-test="nav-motion-viewport"]');
+      const masks = [...viewport.querySelectorAll("[data-nav-mask]")];
+      return {
+        clipPath: viewport.style.clipPath,
+        masks: masks.map((mask) => ({
+          name: mask.dataset.navMask,
+          visibility: getComputedStyle(mask).visibility,
+          opacity: getComputedStyle(mask).opacity,
+        })),
+      };
+    });
+
+    expect(settled.clipPath, "the settled surface must own its rounded frame").toContain("round");
+    for (const mask of settled.masks) {
+      expect(mask.visibility, `${mask.name} travel mask must be absent after settle`).toBe("hidden");
+      expect(mask.opacity, `${mask.name} travel mask must not paint after settle`).toBe("0");
     }
   });
 
@@ -682,6 +713,13 @@ test.describe("the floating navigation shell", () => {
     await page.getByTestId("nav-toggle").click();
 
     await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "open");
+    const openMasksHidden = await page.evaluate(() => (
+      [...document.querySelectorAll("[data-nav-mask]")].every((mask) => (
+        getComputedStyle(mask).visibility === "hidden"
+        && getComputedStyle(mask).opacity === "0"
+      ))
+    ));
+    expect(openMasksHidden, "reduced motion must settle the clip without painted travel masks").toBe(true);
     await expect(page.getByRole("navigation", { name: "Primary navigation" })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
