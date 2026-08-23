@@ -189,6 +189,13 @@ paint counts rather than per-frame surface repaint:
 | 390x844 | 126 | 4 | 6 | 136 | 134 |
 | 390x601 | 126 | 4 | 6 | 136 | 134 |
 
+These paint counts are from the final transform-wall build immediately before
+the narrow corner-scale correction. That correction changes only the eight
+frame-mask transforms; it does not reintroduce a viewport clip animation,
+surface scaling, or per-frame application-surface mutation. The corrective
+geometry and interaction gates were rerun; a new physical-device paint trace
+was not available.
+
 The small mask elements accounted for 40 `I` paints on desktop and 35 on each
 mobile trace. These traces support that the whole application surface no
 longer repaints for every travel frame in this environment; they do not prove
