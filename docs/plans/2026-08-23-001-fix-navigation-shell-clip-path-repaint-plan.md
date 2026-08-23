@@ -1,9 +1,20 @@
 ---
 title: Navigation Shell — Retire the Per-Frame clip-path Repaint
 type: bugfix
-status: proposed
+status: implemented
 date: 2026-08-23
 baseline_commit: e5c243e
+implemented_by:
+  - PR #11 (44933b0) — compositor-owned travel, approach C/A hybrid: transform
+    walls frame an unclipped stage; the viewport clip owns only terminal frames
+  - PR #12 (af5de2d) — released the walls at rest, closing the concave-corner
+    regression that #11 shipped
+outcome: |
+  Approach A as written was not taken. The walls-plus-static-clip design is
+  closer to B, and it introduced exactly the failure mode §5 warns about —
+  two frame owners disagreeing — which shipped as four concave corner notches
+  and was caught by a user, not by the suite. The §3 device paint gate is
+  still open; nothing has measured this on a phone.
 origin:
   - DESIGN.md
   - docs/spec/structure.md
