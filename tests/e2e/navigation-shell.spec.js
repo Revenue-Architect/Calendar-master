@@ -13,7 +13,75 @@ function expectMonotonic(samples, key, direction, message) {
   }
 }
 
-test.describe("the floating navigation shell", () => {
+test.describe("the floating navigation shell", () => {
+
+  test("does not mutate the viewport clip-path once per travel frame", async ({ page }) => {
+    await openPlanner(page);
+
+    await page.evaluate(() => {
+      const viewport = document.querySelector('[data-test="nav-motion-viewport"]');
+      if (!viewport) throw new Error("navigation motion viewport is missing");
+      const state = { active: false, values: [] };
+      const observer = new MutationObserver(() => {
+        if (!state.active) return;
+        const value = viewport.style.clipPath;
+        if (value !== state.values[state.values.length - 1]) state.values.push(value);
+      });
+      observer.observe(viewport, { attributes: true, attributeFilter: ["style"] });
+      window.__navClipMutationProbe = {
+        start() { state.values = []; state.active = true; },
+        stop() {
+          state.active = false;
+          observer.disconnect();
+          return { distinct: state.values.length, values: state.values };
+        },
+      };
+    });
+
+    await page.evaluate(() => window.__navClipMutationProbe.start());
+    await page.getByTestId("nav-toggle").click();
+    const activeRun = await page.getByTestId("nav-shell").evaluate((node) => ({
+      phase: node.dataset.navState,
+      runId: Number(node.dataset.navRunId),
+    }));
+    expect(activeRun.phase, "the probe must observe an active navigation transaction").toBe("opening");
+    expect(activeRun.runId, "the active transaction must have a run id").toBeGreaterThan(0);
+    await expect.poll(() => page.evaluate(() => Number(document.querySelector('[data-test="nav-shell"]').dataset.navProgress)), {
+      message: "the mutation probe must sample an observable in-flight frame",
+    }).toBeGreaterThan(0.15);
+    const observed = await page.evaluate(async () => {
+      /* This frame is a lifecycle sample of the active run, not a timeout used
+         to manufacture a particular mutation count. */
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      return window.__navClipMutationProbe.stop();
+    });
+    expect(observed.distinct, `active inline clip-path values: ${observed.values.join(" | ")}`).toBeLessThanOrEqual(1);
+  });
+  test("browser-owned framing keeps the active viewport unclipped", async ({ page }) => {
+    await openPlanner(page);
+    await page.getByTestId("nav-toggle").click();
+    await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "opening");
+
+    const active = await page.evaluate(async () => {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const viewport = document.querySelector('[data-test="nav-motion-viewport"]');
+      const masks = [...viewport.querySelectorAll("[data-nav-mask]")];
+      return {
+        clipPath: viewport.style.clipPath,
+        maskAnimations: masks.reduce((count, mask) => count + mask.getAnimations()
+          .filter((animation) => animation.playState === "running").length, 0),
+        hasClipAnimation: viewport.getAnimations().some((animation) => {
+          const keyframes = animation.effect?.getKeyframes?.() || [];
+          return keyframes.some((frame) => frame.clipPath != null);
+        }),
+      };
+    });
+
+    expect(active.clipPath, "the active stage must not animate a changing surface clip").toBe("none");
+    expect(active.maskAnimations, "edge and corner framing must be browser-owned").toBeGreaterThan(0);
+    expect(active.hasClipAnimation, "the viewport must not retain a WAAPI clip animation").toBe(false);
+  });
+
   test("drawer starts off-screen and labels stagger in", async ({ page }) => {
     await openPlanner(page);
     const shell = page.getByTestId("nav-shell");
@@ -195,6 +263,43 @@ test.describe("the floating navigation shell", () => {
     await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
   });
 
+  test("mobile transform masks meet the rail and full-size surface at both heights", async ({ page }) => {
+    for (const height of [844, 601]) {
+      await page.setViewportSize({ width: 390, height });
+      await openPlanner(page);
+      await page.getByTestId("nav-toggle").click();
+      await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "open");
+
+      const geometry = await page.evaluate(() => {
+        const mask = (name) => document.querySelector(`[data-nav-mask="${name}"]`).getBoundingClientRect();
+        const rail = document.querySelector('[data-test="mobile-calendar-return"]').getBoundingClientRect();
+        const surface = document.querySelector('[data-test="app-surface"]').getBoundingClientRect();
+        return {
+          topBottom: mask("top").bottom,
+          bottomTop: mask("bottom").top,
+          leftRight: mask("left").right,
+          railRight: rail.right,
+          surfaceLeft: surface.left,
+          seam: surface.left - rail.right,
+          maskPointerEvents: [...document.querySelectorAll("[data-nav-mask]")]
+            .map((node) => getComputedStyle(node).pointerEvents),
+        };
+      });
+
+      expect(geometry.topBottom, `${height}px top margin`).toBeCloseTo(14, 1);
+      expect(geometry.bottomTop, `${height}px bottom margin`).toBeCloseTo(height - 14, 1);
+      expect(geometry.leftRight, `${height}px rail frame`).toBeCloseTo(346, 1);
+      expect(geometry.railRight, `${height}px rail edge`).toBeCloseTo(390, 1);
+      expect(geometry.surfaceLeft, `${height}px full-size surface carrier`).toBeCloseTo(390, 1);
+      expect(geometry.seam, `${height}px rail/surface seam`).toBeLessThanOrEqual(1);
+      expect(geometry.maskPointerEvents, `${height}px masks must not intercept input`)
+        .toEqual(Array(8).fill("none"));
+
+      await page.getByTestId("mobile-calendar-return").click();
+      await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
+    }
+  });
+
   test("desktop nav keeps the page as a recessed card instead of clipping the right edge", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await openPlanner(page);
@@ -352,6 +457,58 @@ test.describe("the floating navigation shell", () => {
       }
       expect(motion.final.phase).toBe("open");
     }
+  });
+
+  test("reversal keeps the stage unclipped until the terminal frame", async ({ page }) => {
+    await openPlanner(page);
+    const shell = page.getByTestId("nav-shell");
+    await page.getByTestId("nav-toggle").click();
+    await expect(shell).toHaveAttribute("data-nav-state", "opening");
+    const { before, after } = await page.evaluate(() => new Promise((resolve) => {
+      const shellNode = document.querySelector('[data-test="nav-shell"]');
+      const viewport = document.querySelector('[data-test="nav-motion-viewport"]');
+      const toggle = document.querySelector('[data-test="nav-toggle"]');
+      const sample = () => ({
+        phase: shellNode.dataset.navState,
+        progress: shellNode.dataset.navProgress,
+        clipPath: viewport.style.clipPath,
+        carrier: getComputedStyle(document.querySelector('[data-test="nav-motion-carrier"]')).transform,
+        topMaskBottom: viewport.querySelector('[data-nav-mask="top"]').getBoundingClientRect().bottom,
+        leftMaskRight: viewport.querySelector('[data-nav-mask="left"]').getBoundingClientRect().right,
+      });
+      const waitForActiveFrame = () => {
+        const progress = Number(shellNode.dataset.navProgress);
+        if (shellNode.dataset.navState === "opening" && progress > 0.2 && progress < 0.8) {
+          const beforeSample = sample();
+          toggle.click();
+          requestAnimationFrame(() => resolve({ before: beforeSample, after: {
+            ...sample(),
+            maskAnimations: [...viewport.querySelectorAll("[data-nav-mask]")]
+              .reduce((count, mask) => count + mask.getAnimations()
+                .filter((animation) => animation.playState === "running").length, 0),
+          } }));
+          return;
+        }
+        requestAnimationFrame(waitForActiveFrame);
+      };
+      waitForActiveFrame();
+    }));
+
+    expect(before.phase).toBe("opening");
+    expect(before.clipPath).toBe("none");
+    expect(before.carrier).toMatch(/matrix|translate/);
+    expect(after.phase).toBe("closing");
+    expect(after.clipPath, "reversal must not briefly restore the destination clip").toBe("none");
+    expect(after.maskAnimations, "reversal must restart the same mask channels").toBeGreaterThan(0);
+    expect(after.carrier).toMatch(/matrix|translate/);
+    expect(Math.abs(after.topMaskBottom - before.topMaskBottom), "reversal must keep the top wall near its sampled frame")
+      .toBeLessThan(24);
+    expect(Math.abs(after.leftMaskRight - before.leftMaskRight), "reversal must keep the left wall near its sampled frame")
+      .toBeLessThan(32);
+    expect(after.leftMaskRight, "reversal must not jump to the open destination wall")
+      .toBeLessThan(300);
+    await expect(shell).toHaveAttribute("data-nav-state", "closed");
+    await expect(page.getByTestId("nav-motion-viewport")).toHaveCSS("clip-path", /inset\(0px\)/);
   });
 
   test("an interrupted close ignores stale completion and settles every channel", async ({ page }) => {
