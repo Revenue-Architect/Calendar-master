@@ -5,6 +5,7 @@ Branch: `fix/navigation-shell-compositor-travel`
 Authored base: `e5c243e5b7e5baeceae73dd9fed4dbb6e6d5cc4e`  
 Implementation source head: `fd4203e` (`fix(nav): move shell framing to browser transforms`)  
 Protection-test head: `253be84` (`test(nav): isolate progress telemetry from geometry`)
+Corrective corner-geometry source head: `aa18cd0` (`fix(nav): scale in-flight corner masks`)
 
 This record separates automated/headless evidence, headed Windows Chrome evidence,
 and the still-pending physical-device gate. It does not claim that device paint
@@ -34,7 +35,7 @@ px. The 390x844 and 390x601 checks confirm a <=1 px rail/surface seam.
 - Node `v24.18.0`; npm `11.16.0`.
 - Playwright `1.62.1`; browser product/file version `151.0.7922.34`.
 - Automated runs used the `chromium` project, one worker, and isolated preview
-  port `4347` after a fresh Vite build.
+  ports after fresh Vite builds (4353 for the corrective validation).
 - Headed profile viewport sizes: 1280x900, 390x844, and 390x601. Observed
   device scale factor was approximately 1 (`0.9999999688656018`).
 
@@ -91,6 +92,12 @@ terminal clip and mask dimensions use the existing `navPageFit()` and
 heights and the rail/surface seam. `Planner.jsx`, drawer dimensions, typography,
 IA, routing, and unrelated motion domains were not changed.
 
+The four corner walls also scale from zero to their destination radius during
+travel. Their transform origins face the interior corner (bottom-right,
+bottom-left, top-right, top-left respectively), and the translation plus scale
+algebra matches the old `inset(... round radius * progress)` boundary at every
+sampled progress; the planner surface is never scaled.
+
 ## Clock, reversal, and accessibility behavior
 
 - Each travel has one logical transaction containing run id, source progress,
@@ -119,6 +126,15 @@ value (the initial active `none` write). The test confirms an active opening
 phase, a positive run id, and an in-flight progress sample; it does not use a
 fixed sleep to manufacture a count.
 
+The corner-geometry test was added against the current PR head before the
+corrective change. It failed RED at an in-flight progress of about 0.2--0.8:
+the fixed 22 px desktop corner was measured where approximately `22 * p` was
+required. The final test reads `data-nav-progress`, bounds the sample to
+0.2--0.8 with a 90-frame lifecycle cap, and passes for both desktop radius 22
+px and mobile radius 16 px. A local negative control removing only the corner
+scale failed again (16.28 px geometry error); the scale was restored before
+the final build.
+
 Additional protection tests verify that:
 
 - active framing has no viewport clip animation and the edge/corner animations
@@ -143,13 +159,21 @@ the same test returned GREEN. No sabotage remains in the branch.
 | --- | --- |
 | `npm test` at exact base | 645 passed |
 | exact-base focused nav/motion/mobile/shell/reveal, Chromium, 1 worker | 79 passed |
-| final focused nav/motion/mobile/shell/reveal, Chromium, 1 worker | 84 passed |
-| final `npx playwright test --project=chromium --workers=1` | 362 passed |
+| corrective nav file (`navigation-shell.spec.js`), Chromium, 1 worker | 20 passed |
+| final focused nav/motion/mobile/shell/reveal, Chromium, 1 worker | 85 passed |
+| corrective full `npx playwright test --project=chromium --workers=1` | 363 passed, 1 transient `polish.spec.js` failure |
 
 The focused run includes open/close, mid-open and mid-close reversal, mobile
 rail, Escape, destination close, surface close, reduced motion, focus, and the
 new compositor/mask protections. The full suite was run from the fresh final
-build on the isolated preview port; it passed without retries.
+build on the isolated preview port. Its one unrelated long-sheet failure passed
+against the exact-base build with the same browser/worker strategy and passed
+again when rerun on the corrective build, so it is recorded as a transient
+baseline-equivalent failure rather than attributed to this PR.
+
+The corrective repeat check completed without retries: 10 desktop open/close
+cycles, 2 mid-open reversals, 2 mid-close reversals, 20 mobile CALENDAR-rail
+cycles (10 each at 390x844 and 390x601), and one reduced-motion open/close.
 
 ## Headed Windows Chrome performance evidence
 
