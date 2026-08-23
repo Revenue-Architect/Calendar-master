@@ -4,7 +4,7 @@ import { openPlanner, seedPlanner } from "./helpers.js";
 import { createBlankPlannerState } from "../../src/platform/persistence/plannerStateImport.js";
 import { createTask } from "../../src/domains/tasks/index.js";
 import { createEvent } from "../../src/domains/calendar/index.js";
-import { keyOf } from "../../src/shared/time/dateKey.js";
+import { addDaysToKey, keyOf } from "../../src/shared/time/dateKey.js";
 
 async function expectNoHorizontalOverflow(page, label) {
   const metrics = await page.evaluate(() => ({
@@ -266,20 +266,47 @@ test.describe("resilience, accessibility, and quality gates", () => {
   });
 
   test("the smart-view row says so when it scrolls past its edge", async ({ page }) => {
-    await openPlanner(page);
+    /* A view renders only when it is selected, is TODAY, or has a non-zero count
+       (ActionsPanel.jsx), so an empty notebook shows one chip and cannot overflow —
+       which is what made the first version of this guard vacuous: it asserted the
+       fade only `if (overflows)`, and overflows was false. Populate every view so
+       the row is required to overflow, then assert both facts unconditionally. */
+    const today = keyOf(new Date());
+    const blank = createBlankPlannerState({});
+    let tasks = blank.tasks;
+    const add = (id, input) => { tasks = createTask(tasks, { id, title: `Chip ${id}`, ...input }).tasks; };
+    add("sv-today", { planned: { date: today } });
+    add("sv-upcoming", { planned: { date: addDaysToKey(today, 2) } });
+    add("sv-deadline", { deadline: { date: addDaysToKey(today, 3) } });
+    add("sv-overdue", { deadline: { date: addDaysToKey(today, -3) } });
+    add("sv-someday", { someday: true });
+    add("sv-unscheduled", {});
+    add("sv-waiting", { status: "waiting" });
+    add("sv-done", { status: "completed" });
+
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await seedPlanner(page, { ...blank, tasks });
+    await expect(page.getByTestId("day-stream")).toBeVisible();
+
     /* ActionsPanel mounts twice — the desktop column and the full-view pane — so
        measure the instance that is actually on screen. */
     const row = page.getByTestId("smart-view-row").filter({ visible: true }).first();
     await expect(row).toBeVisible();
     const cue = await row.evaluate((node) => ({
+      chips: node.querySelectorAll("button").length,
+      scrollWidth: node.scrollWidth,
+      clientWidth: node.clientWidth,
       overflows: node.scrollWidth > node.clientWidth + 2,
       mask: getComputedStyle(node).maskImage,
     }));
+
+    expect(cue.chips, "every populated smart view should render a chip").toBe(10);
+    expect(cue.overflows,
+      `the fixture must overflow for this guard to mean anything (${cue.scrollWidth} vs ${cue.clientWidth})`)
+      .toBe(true);
     /* Same cue the any-time row uses, and for the same reason: a row that scrolls
        with no scrollbar and no fade reads as a row that is broken. */
-    if (cue.overflows) {
-      expect(cue.mask, "an overflowing filter row must fade at its edge").not.toBe("none");
-    }
+    expect(cue.mask, "an overflowing filter row must fade at its edge").not.toBe("none");
   });
 
   test("the inspector spends its accent on the action you came to take", async ({ page }) => {
