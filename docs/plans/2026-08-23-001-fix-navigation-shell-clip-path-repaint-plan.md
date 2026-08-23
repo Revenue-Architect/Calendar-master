@@ -39,10 +39,21 @@ different cost models**:
 | Content travel | `.nb-nav-motion-carrier` | `transform: translate3d(…)` | Compositor. Effectively free. |
 | Frame reveal | `.nb-nav-motion-viewport` | `clip-path: inset(…)` | **Main thread. Repaints the clipped subtree every frame.** |
 
-`clip-path` is not a compositor-animatable property in Chromium. Writing it as
-an inline style from a `requestAnimationFrame` clock — which is what
-`useNavigationMotion.js` does, by design and by its own header comment — forces
-a paint of the clipped subtree on every frame of the animation.
+Writing `clip-path` as an inline style from a `requestAnimationFrame` clock —
+which is what `useNavigationMotion.js` does, by design and by its own header
+comment — paints the clipped subtree on every frame of the animation.
+
+> **Baseline assumption vs measured result.** This diagnosis was written on the
+> assumption that `clip-path` is simply not compositor-animatable in Chromium.
+> That is too categorical: current Chromium support is more nuanced, and the
+> claim should not be carried forward as a general browser rule.
+>
+> The project-specific evidence is stronger than the assumption anyway. During
+> PR #11 the exact WAAPI `inset(… round …)` implementation was built and
+> profiled in the target headed Chromium, and it **still** produced broad
+> application-surface paint. It was rejected on that measurement, not on a
+> capability claim, and the transform-wall architecture was chosen instead.
+> Re-measure before reusing either statement on a different engine or version.
 
 The clipped subtree is the entire application:
 
@@ -73,8 +84,9 @@ Source, at `e5c243e`:
   same for carrier and drawer. CSS transitions are explicitly disabled.
 - `useNavigationMotion.js:136` — `viewport.style.clipPath = "inset(…)"`, written
   per frame.
-- `useNavigationMotion.js:104` — `will-change: clip-path`. This promotes the
-  layer; it does **not** make `clip-path` compositable.
+- `useNavigationMotion.js:104` — `will-change: clip-path`. It promotes the layer,
+  and on the profiled build it did not stop the surface repainting (see the
+  caveat above before treating that as a general rule).
 
 Runtime capture, mid-flight at 390×844:
 
@@ -177,7 +189,8 @@ Weaker than A only because it keeps a `clip-path` write on the critical path.
 
 `viewport.animate([{ clipPath: from }, { clipPath: to }], …)` instead of a rAF
 write loop. Removes the per-frame JS and style recalc; **does not remove the
-paint**, since Chromium still cannot composite `clip-path`.
+paint** — PR #11 profiled exactly this and measured broad surface paint in the
+target environment regardless of who drove the property.
 
 This is a partial fix. Adopt it only if A and B are both rejected on design
 grounds, and say so explicitly in the QA record rather than presenting it as a
