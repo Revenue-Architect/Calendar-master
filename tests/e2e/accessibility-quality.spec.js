@@ -301,29 +301,31 @@ test.describe("resilience, accessibility, and quality gates", () => {
     /* `countdownLabel` takes a duration so it can tell "started" from "over", and
        this call site omitted it — so the branch that prints Now was unreachable
        and a live event's headline figure claimed it had Ended, while the sentence
-       below it in the same sheet said otherwise. */
-    const now = new Date();
+       below it in the same sheet said otherwise.
+
+       A test about time has to own the clock. Fixing it here rather than skipping
+       near midnight is also what makes the assertion honest: the earlier
+       time-of-day guard quietly removed this regression for part of every day. */
+    const now = new Date("2026-08-23T12:00:00");
+    await page.clock.setFixedTime(now);
     const today = keyOf(now);
-    const pad = (n) => String(n).padStart(2, "0");
-    const at = (offsetMinutes) => {
-      const t = new Date(now.getTime() + offsetMinutes * 60_000);
-      return `${keyOf(t)}T${pad(t.getHours())}:${pad(t.getMinutes())}`;
-    };
-    /* Keep the whole span inside today so the fixture cannot straddle midnight. */
-    const minutesIntoDay = (now.getHours() * 60) + now.getMinutes();
-    test.skip(minutesIntoDay < 40 || minutesIntoDay > 1400, "no room for a live event inside today");
 
     const seeded = createEvent(createBlankPlannerState({}), {
       title: "Happening now",
       cat: "DEEP WORK",
       alerts: [],
       calendarId: "calendar-default",
-      timing: { kind: "timed", timeZoneMode: "floating", startLocal: at(-20), endLocal: at(20) },
+      timing: {
+        kind: "timed",
+        timeZoneMode: "floating",
+        startLocal: `${today}T11:40`,
+        endLocal: `${today}T12:20`,
+      },
     }, { id: "evt-live" }).state;
 
     await seedPlanner(page, seeded);
     await expect(page.getByTestId("day-stream")).toBeVisible();
-    await page.locator(`[data-event-id="evt-live"]`).first().click();
+    await page.locator('[data-event-id="evt-live"]').first().click();
     const sheet = page.getByTestId("sheet");
     await expect(sheet).toBeVisible();
 
@@ -332,6 +334,6 @@ test.describe("resilience, accessibility, and quality gates", () => {
         .find((el) => el.children.length === 0 && el.textContent.trim() === "STARTS");
       return caption?.parentElement?.querySelector("span")?.textContent?.trim() ?? null;
     });
-    expect(figure, `today ${today} at ${at(0)}`).toBe("Now");
+    expect(figure, `${today} 11:40-12:20 with the clock fixed at 12:00`).toBe("Now");
   });
 });
