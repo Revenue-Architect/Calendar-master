@@ -5,6 +5,7 @@ import {
   RIBBON_MAX_POSITION_RETRIES,
   nextRibbonRetry,
   ribbonIntersection,
+  ribbonKeyboardAnchorIndex,
   ribbonLogicalCenter,
   ribbonRevealTarget,
   ribbonScrollLeftForLogicalCenter,
@@ -96,4 +97,39 @@ test("logical centre rejects invalid dimensions", () => {
     cellWidth: 80,
     maxScrollLeft: 100,
   }), null);
+});
+
+/* The ribbon's single keyboard entry point. The selected day owns it when
+   rendered; a browse that carries the window off the selection must still leave
+   exactly one reachable anchor, without moving the selection. */
+test("the selected day owns the tab stop while it is rendered", () => {
+  assert.equal(ribbonKeyboardAnchorIndex({
+    selectedIndex: 370, windowStart: 348, windowLength: 56, logicalCenter: 366,
+  }), 370);
+});
+
+test("a browsed-out selection hands the tab stop to the visible centre", () => {
+  /* Selection sits at 370, far left of a window the user scrolled to. */
+  assert.equal(ribbonKeyboardAnchorIndex({
+    selectedIndex: 370, windowStart: 500, windowLength: 56, logicalCenter: 528.4,
+  }), 528);
+});
+
+test("the fallback is clamped inside the rendered window", () => {
+  assert.equal(ribbonKeyboardAnchorIndex({
+    selectedIndex: 10, windowStart: 500, windowLength: 56, logicalCenter: 9_999,
+  }), 555);
+  assert.equal(ribbonKeyboardAnchorIndex({
+    selectedIndex: 10, windowStart: 500, windowLength: 56, logicalCenter: -20,
+  }), 500);
+});
+
+test("an unmeasured ribbon still names a rendered anchor", () => {
+  assert.equal(ribbonKeyboardAnchorIndex({
+    selectedIndex: 10, windowStart: 100, windowLength: 56, logicalCenter: null,
+  }), 128);
+});
+
+test("nothing rendered owns nothing", () => {
+  assert.equal(ribbonKeyboardAnchorIndex({ windowStart: 0, windowLength: 0 }), null);
 });

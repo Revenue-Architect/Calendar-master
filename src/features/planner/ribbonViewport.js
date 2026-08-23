@@ -111,6 +111,47 @@ export function ribbonRevealTarget(strip, cell, { center = false, inset = 24 } =
   return { ...result, target, changed: Math.abs(target - current) >= 1 };
 }
 
+/**
+ * Which rendered day owns the ribbon's single keyboard tab stop.
+ *
+ * The selected day owns it whenever it is rendered. It is not always rendered:
+ * browsing the strip moves the virtual window off the selection deliberately,
+ * and PR #10 preserves that state rather than recentering. Giving every other
+ * cell `tabIndex=-1` in that state left the ribbon with no keyboard entry at
+ * all, so the browse position supplies a fallback anchor instead — derived from
+ * the logical centre the viewport already tracks, not from a second geometry
+ * model, and never by moving the selection.
+ *
+ * Returns an absolute day index (the same coordinate space as the rendered
+ * window), or null when nothing is rendered.
+ */
+export function ribbonKeyboardAnchorIndex({
+  selectedIndex,
+  windowStart,
+  windowLength,
+  logicalCenter,
+} = {}) {
+  const start = Math.max(0, Math.round(Number(windowStart) || 0));
+  const length = Math.round(Number(windowLength) || 0);
+  if (!(length > 0)) return null;
+  const last = start + length - 1;
+
+  const selected = Number(selectedIndex);
+  if (Number.isFinite(selected) && selected >= start && selected <= last) {
+    return Math.round(selected);
+  }
+
+  /* `Number(null)` is 0, and the viewport's remembered centre starts as null —
+     coercing it would silently anchor an unmeasured ribbon at its far left. */
+  const centre = logicalCenter == null || logicalCenter === "" ? NaN : Number(logicalCenter);
+  if (Number.isFinite(centre)) {
+    return Math.max(start, Math.min(last, Math.round(centre)));
+  }
+  /* No measurement yet — the middle of what is rendered is still reachable and
+     still inside the window, which is all the contract requires. */
+  return start + Math.floor(length / 2);
+}
+
 export function nextRibbonRetry(retries, max = RIBBON_MAX_POSITION_RETRIES) {
   const current = Math.max(0, Number(retries) || 0);
   if (current >= max) return null;

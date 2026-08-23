@@ -1,5 +1,12 @@
 # Handoff — Calendar-master, 19 Aug 2026
 
+> **Superseded for state by `docs/plans/HANDOFF-2026-08-23.md`.** The State,
+> baseline and nav-stutter sections below describe a tree from four sessions ago
+> — `Planner.jsx` is 5,545 lines now, and the stutter has since been re-profiled.
+> Everything from "Read this before you move any code" down is still the
+> reference for environment traps and working agreements.
+
+
 Read this, then `docs/plans/2026-08-18-001-refactor-planner-ui-extraction-plan.md`.
 
 ---

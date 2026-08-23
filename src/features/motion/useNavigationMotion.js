@@ -281,6 +281,21 @@ export function useNavigationMotion({ reducedMotion = false } = {}) {
     });
   }, []);
 
+  /* Same deferral as the toggle, and for a sharper reason: the drawer is `inert`
+     until React commits the open phase, and an inert element refuses focus
+     silently. Focusing in the same tick as `setPhase` therefore left the keyboard
+     on the toggle with the menu open. */
+  const focusFirstItem = useCallback((run) => {
+    /* Two frames, not one: the first still lands before React has committed the
+       open phase, and `.focus()` on a drawer that is momentarily `inert` fails
+       silently — which left the keyboard on the toggle with the menu open. The
+       ribbon's viewport hook waits the same two frames for the same reason. */
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (runIdRef.current !== run || phaseRef.current !== "open") return;
+      firstItemRef.current?.focus({ preventScroll: true });
+    }));
+  }, []);
+
   const visualProgress = useCallback(() => {
     const carrier = carrierRef.current;
     const targetFit = fitRef.current;
@@ -325,11 +340,11 @@ export function useNavigationMotion({ reducedMotion = false } = {}) {
     setProgress(target);
     updateProgressAttribute(target);
     if (target === 1) {
-      firstItemRef.current?.focus({ preventScroll: true });
+      focusFirstItem(run);
     } else {
       restoreToggleFocus(run);
     }
-  }, [applyProgress, cancelAnimations, cancelFrame, restoreToggleFocus, setPromotion, updateProgressAttribute]);
+  }, [applyProgress, cancelAnimations, cancelFrame, focusFirstItem, restoreToggleFocus, setPromotion, updateProgressAttribute]);
 
   const startBrowserMotion = useCallback((run, source, target, targetFit) => {
     const viewport = viewportRef.current;
@@ -430,7 +445,7 @@ export function useNavigationMotion({ reducedMotion = false } = {}) {
       setPhase(phaseRef.current);
       setProgress(target);
       updateProgressAttribute(target);
-      if (target === 1) firstItemRef.current?.focus({ preventScroll: true });
+      if (target === 1) focusFirstItem(run);
       else restoreToggleFocus(run);
       return;
     }

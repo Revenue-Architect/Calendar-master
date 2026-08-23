@@ -10,6 +10,7 @@ import {
   RIBBON_SHIFT_DAYS,
   nextRibbonRetry,
   ribbonIntersection,
+  ribbonKeyboardAnchorIndex,
   ribbonLogicalCenter,
   ribbonRevealTarget,
   ribbonScrollLeftForLogicalCenter,
@@ -60,6 +61,19 @@ export default function useRibbonViewport({
   const [ribbonActiveNode, setRibbonActiveNode] = useState(null);
   const [positionState, setPositionState] = useState(ribbonPositionStateRef.current);
   const [edges, setEdges] = useState({ start: false, end: false });
+  /* Seeded synchronously rather than left null until the first effect runs: the
+     contract is that a rendered ribbon always owns exactly one tab stop, and an
+     anchor that arrives after paint makes that true by timing instead of by
+     construction. Every input here is a prop, so no measurement is needed —
+     `logicalCenter` is null on a cold mount and the helper falls back to the
+     rendered middle, which the selected day supersedes as soon as it is in
+     range. */
+  const [keyboardAnchorIndex, setKeyboardAnchorIndex] = useState(() => ribbonKeyboardAnchorIndex({
+    selectedIndex: diffDays(selectedDateKey, ribbonRange.startKey),
+    windowStart: ribbonWindowStart,
+    windowLength: Math.min(RIBBON_RENDER_WINDOW_DAYS, Math.max(0, ribbonSpan - ribbonWindowStart)),
+    logicalCenter: null,
+  }));
 
   const rememberLogicalCenter = useCallback((strip = stripRef.current) => {
     if (!strip || strip.clientWidth <= 0) return ribbonLogicalCenterRef.current;
@@ -73,6 +87,22 @@ export default function useRibbonViewport({
     if (logicalCenter != null) ribbonLogicalCenterRef.current = logicalCenter;
     return logicalCenter;
   }, []);
+
+  /* The ribbon's one keyboard entry point, derived from the centre this hook
+     already remembers. Kept as state because the tab stop is rendered by
+     Planner and has to move when a browse carries the window off the
+     selection; it changes at most once per browse, not per scroll event. */
+  const syncKeyboardAnchor = useCallback(() => {
+    const windowStart = ribbonWindowStartRef.current;
+    const windowLength = Math.min(RIBBON_RENDER_WINDOW_DAYS, Math.max(0, ribbonSpan - windowStart));
+    const next = ribbonKeyboardAnchorIndex({
+      selectedIndex: diffDays(selectedDateKey, ribbonRange.startKey),
+      windowStart,
+      windowLength,
+      logicalCenter: ribbonLogicalCenterRef.current,
+    });
+    setKeyboardAnchorIndex((current) => (current === next ? current : next));
+  }, [ribbonRange.startKey, ribbonSpan, selectedDateKey]);
 
   const cancelScrollLock = useCallback(() => {
     const lock = ribbonScrollLockRef.current;
@@ -338,13 +368,14 @@ export default function useRibbonViewport({
     measureEdges();
     if (!strip || ribbonShiftPendingRef.current || ribbonScrollLockRef.current || ribbonVirtualWindowLockRef.current) return;
     rememberLogicalCenter(strip);
+    syncKeyboardAnchor();
     const cell = strip.querySelector("[data-day]");
     const width = cell?.getBoundingClientRect().width || RIBBON_FALLBACK_CELL_WIDTH;
     const edge = Math.max(160, width * RIBBON_EDGE_BUFFER_DAYS);
     if (strip.scrollLeft <= edge) { shift("before"); return; }
     if (strip.scrollLeft + strip.clientWidth >= strip.scrollWidth - edge) { shift("after"); return; }
     setWindow(Math.floor(strip.scrollLeft / width) - RIBBON_RENDER_BUFFER_DAYS);
-  }, [measureEdges, rememberLogicalCenter, setWindow, shift]);
+  }, [measureEdges, rememberLogicalCenter, setWindow, shift, syncKeyboardAnchor]);
 
   const ensureDateVisible = useCallback((key) => {
     if (!enabled || (zoom !== "week" && zoom !== "day")) return;
@@ -451,11 +482,14 @@ export default function useRibbonViewport({
     };
   }, [cancelScrollLock, measureEdges, releaseScroll, retryPosition, ribbonNode]);
 
+  useEffect(syncKeyboardAnchor, [syncKeyboardAnchor, ribbonWindowStart, ribbonNode]);
+
   return {
     attachRibbon,
     attachActiveRibbon,
     onScroll,
     edges,
+    keyboardAnchorIndex,
     positionState,
     setWindow,
     ensureDateVisible,

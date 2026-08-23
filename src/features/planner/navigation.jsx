@@ -186,7 +186,10 @@ function NavigationShell({
       role="navigation"
       aria-label="Primary navigation"
       aria-hidden={hidden}
-      inert={hidden ? "" : undefined}
+      /* `inert=""` is dropped as a falsy boolean attribute, which left every
+         drawer control focusable inside an `aria-hidden` subtree — six dead tab
+         stops before the header, announced to nobody. */
+      inert={hidden || undefined}
       className="nb-navigation"
     >
       <div className="nb-nav-brand mb-7" style={{ "--nav-index": 0 }}>

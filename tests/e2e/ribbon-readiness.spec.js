@@ -124,6 +124,7 @@ async function armFirstRibbonFrameObserver(page) {
         const intersecting = Object.freeze(intersectingRealDates);
         window.__ribbonFirstFrame = Object.freeze({
           renderedDayCount: cells.length,
+          tabbableDayCount: cells.filter((node) => node.tabIndex === 0).length,
           intersectingRealDates: intersecting,
           selectedRendered: Boolean(selected),
           selectedIntersects: Boolean(selected && intersects(selected)),
@@ -261,6 +262,79 @@ test.describe("Week ribbon readiness", () => {
     }
   });
 
+  /* PR #13 gave the ribbon a roving tab stop on the selected day, which is right
+     while that day is rendered. It is not the only supported state: this suite
+     already exercises browsing the selected date out of the 56-day window, and in
+     that state every rendered cell was `tabIndex=-1` and the strip had no keyboard
+     entry at all. */
+  test("a browsed-out ribbon still owns exactly one keyboard entry point", async ({ page }) => {
+    await boot(page);
+    await dismissWelcome(page);
+    const selected = await browseUntilSelectedIsUnrendered(page);
+
+    const state = await page.evaluate((selectedDate) => {
+      const strip = document.querySelector('[data-test="day-ribbon"]');
+      const cells = [...strip.querySelectorAll("button[data-day]")];
+      const box = strip.getBoundingClientRect();
+      const tabbable = cells.filter((node) => node.tabIndex === 0);
+      const intersects = (node) => {
+        const r = node.getBoundingClientRect();
+        return r.right > box.left + 1 && r.left < box.right - 1;
+      };
+      return {
+        renderedCount: cells.length,
+        selectedRenderedCount: cells.filter((n) => n.getAttribute("data-day") === selectedDate).length,
+        tabbableCount: tabbable.length,
+        tabbableDate: tabbable[0]?.getAttribute("data-day") ?? null,
+        tabbableIntersects: tabbable[0] ? intersects(tabbable[0]) : false,
+        tabbableDisabled: tabbable[0]?.disabled ?? null,
+      };
+    }, selected);
+
+    expect(state.selectedRenderedCount, "the browse must leave the selected date unrendered").toBe(0);
+    expect(state.renderedCount, "the ribbon must still be rendering days").toBeGreaterThan(0);
+    expect(state.tabbableCount, "a rendered ribbon must have exactly one keyboard entry point").toBe(1);
+    expect(state.tabbableDisabled, "the entry point must be a live control").toBe(false);
+    expect(state.tabbableIntersects, "the entry point should be a day the user can see").toBe(true);
+  });
+
+  test("the browsed-out entry point takes focus by Tab and selects on activation", async ({ page }) => {
+    await boot(page);
+    await dismissWelcome(page);
+    const selected = await browseUntilSelectedIsUnrendered(page);
+
+    const anchorDate = await page.evaluate(() => document
+      .querySelector('[data-test="day-ribbon"] button[data-day][tabindex="0"]')
+      ?.getAttribute("data-day") ?? null);
+    expect(anchorDate, "a browsed-out ribbon must expose an anchor to focus").not.toBeNull();
+    expect(anchorDate).not.toBe(selected);
+
+    /* Start on the real control before the strip and press Tab once. The first
+       version of this test focused the anchor itself when it could not find that
+       control — `day-ribbon` is the first child of `ribbon-viewport`, so its
+       previousElementSibling is null — and then broke out of its own loop before
+       pressing anything. It passed 50/50 while proving only that Enter activates
+       a focused button. No loop and no fallback here: if one Tab does not reach
+       the anchor, the tab order is wrong and this must fail. */
+    const previousDay = page.getByRole("button", { name: "Previous day", exact: true });
+    await previousDay.focus();
+    await expect(previousDay).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(page.locator(`[data-test="day-ribbon"] button[data-day="${anchorDate}"]`)).toBeFocused();
+
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("day-heading")).toHaveAttribute("data-date", anchorDate);
+
+    /* Ownership returns to the selection once it is the rendered selected day. */
+    const afterSelect = await page.evaluate(() => {
+      const strip = document.querySelector('[data-test="day-ribbon"]');
+      const tabbable = [...strip.querySelectorAll("button[data-day]")].filter((n) => n.tabIndex === 0);
+      return { count: tabbable.length, date: tabbable[0]?.getAttribute("data-day") ?? null };
+    });
+    expect(afterSelect.count, "selection must not leave two tab stops behind").toBe(1);
+    expect(afterSelect.date).toBe(anchorDate);
+  });
+
   test("manual ribbon browsing preserves the logical center across resize", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await boot(page);
@@ -328,6 +402,28 @@ test.describe("Week ribbon readiness", () => {
     const snapshot = await ribbonSnapshot(page);
     expect(snapshot.state, "missing scrollend should not leave a positioning lock").toBe("settled");
     assertUsable(snapshot, "missing scrollend");
+  });
+
+  /* Exactly one tab stop on the frame a re-entry commits, before anything has
+     settled. This guards the anchor policy across a remount — 0 stops if the
+     anchor names an unrendered day, 2 if selection and fallback both claim it.
+     It does NOT guard the hook's initial state: Planner never unmounts here, so
+     the anchor survives the strip. Seeding that initializer synchronously is
+     construction rather than timing, and no test in this suite can fail for it. */
+  test("a re-entered ribbon frame owns exactly one keyboard entry point", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await boot(page);
+    await dismissWelcome(page);
+    await assertRibbonSettled(page, "Day before Actions");
+
+    await page.getByRole("tab", { name: "ACTIONS", exact: true }).click();
+    await expect(page.getByTestId("day-ribbon")).toHaveCount(0);
+    await armFirstRibbonFrameObserver(page);
+    await page.getByRole("tab", { name: "TIMELINE", exact: true }).click();
+
+    const frame = await firstRibbonFrame(page);
+    expect(frame.renderedDayCount, "the re-entered frame must render days").toBeGreaterThan(0);
+    expect(frame.tabbableDayCount, "the re-entered frame must own exactly one tab stop").toBe(1);
   });
 
   test("Day re-entry renders the browsed-out selection on its first frame", async ({ page }) => {

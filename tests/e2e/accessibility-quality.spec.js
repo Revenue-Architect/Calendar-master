@@ -3,7 +3,8 @@ import { readFile } from "node:fs/promises";
 import { openPlanner, seedPlanner } from "./helpers.js";
 import { createBlankPlannerState } from "../../src/platform/persistence/plannerStateImport.js";
 import { createTask } from "../../src/domains/tasks/index.js";
-import { keyOf } from "../../src/shared/time/dateKey.js";
+import { createEvent } from "../../src/domains/calendar/index.js";
+import { addDaysToKey, keyOf } from "../../src/shared/time/dateKey.js";
 
 async function expectNoHorizontalOverflow(page, label) {
   const metrics = await page.evaluate(() => ({
@@ -208,5 +209,158 @@ test.describe("resilience, accessibility, and quality gates", () => {
     });
     expect(errors).toEqual([]);
     expect(maxLongTask).toBeLessThan(250);
+  });
+  /* Four defects found by reading the rendered app rather than the suite. Each
+     assertion below was watched failing against the tree before its fix. */
+
+  test("the closed navigation drawer is inert, not merely aria-hidden", async ({ page }) => {
+    await openPlanner(page);
+    const drawer = page.locator("#planner-navigation");
+    await expect(drawer).toHaveAttribute("aria-hidden", "true");
+
+    /* `inert=""` is a falsy boolean attribute and React drops it, which left six
+       focusable controls inside an aria-hidden subtree: announced to nobody and
+       still the first six stops of every keyboard traversal. */
+    const state = await drawer.evaluate((node) => ({
+      inert: node.inert,
+      firstItemFocusable: (() => {
+        const button = node.querySelector("button");
+        button.focus();
+        return document.activeElement === button;
+      })(),
+    }));
+    expect(state.inert, "a hidden drawer must be inert").toBe(true);
+    expect(state.firstItemFocusable, "no control inside aria-hidden may take focus").toBe(false);
+  });
+
+  test("opening the drawer moves the keyboard into it, and closing gives it back", async ({ page }) => {
+    await openPlanner(page);
+    /* Making the drawer genuinely inert broke this and nothing caught it: focus
+       was requested in the same tick as the phase change, so it landed while the
+       drawer was still inert and was dropped without an error. */
+    await page.getByTestId("nav-toggle").click();
+    await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "open");
+    await expect(page.getByRole("button", { name: "Timeline", exact: true })).toBeFocused();
+
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
+    await expect(page.getByTestId("nav-toggle")).toBeFocused();
+  });
+
+  test("the date ribbon is one tab stop, not one per day", async ({ page }) => {
+    await openPlanner(page);
+    /* The strip virtualises two years and refills as it scrolls, so a stop per
+       cell walked the keyboard 30-plus days into the future before releasing it. */
+    const cells = await page.evaluate(() => {
+      const all = [...document.querySelectorAll("[data-day]")];
+      return {
+        rendered: all.length,
+        tabbable: all.filter((node) => node.tabIndex >= 0).length,
+        tabbableIsSelected: all.filter((node) => node.tabIndex >= 0)
+          .every((node) => node.getAttribute("data-day") === document.querySelector("[data-day][tabindex='0']")?.getAttribute("data-day")),
+      };
+    });
+    expect(cells.rendered, "the ribbon should render a window of days").toBeGreaterThan(10);
+    expect(cells.tabbable, "only the selected day may hold the ribbon's tab stop").toBe(1);
+    expect(cells.tabbableIsSelected).toBe(true);
+  });
+
+  test("the smart-view row says so when it scrolls past its edge", async ({ page }) => {
+    /* A view renders only when it is selected, is TODAY, or has a non-zero count
+       (ActionsPanel.jsx), so an empty notebook shows one chip and cannot overflow —
+       which is what made the first version of this guard vacuous: it asserted the
+       fade only `if (overflows)`, and overflows was false. Populate every view so
+       the row is required to overflow, then assert both facts unconditionally. */
+    const today = keyOf(new Date());
+    const blank = createBlankPlannerState({});
+    let tasks = blank.tasks;
+    const add = (id, input) => { tasks = createTask(tasks, { id, title: `Chip ${id}`, ...input }).tasks; };
+    add("sv-today", { planned: { date: today } });
+    add("sv-upcoming", { planned: { date: addDaysToKey(today, 2) } });
+    add("sv-deadline", { deadline: { date: addDaysToKey(today, 3) } });
+    add("sv-overdue", { deadline: { date: addDaysToKey(today, -3) } });
+    add("sv-someday", { someday: true });
+    add("sv-unscheduled", {});
+    add("sv-waiting", { status: "waiting" });
+    add("sv-done", { status: "completed" });
+
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await seedPlanner(page, { ...blank, tasks });
+    await expect(page.getByTestId("day-stream")).toBeVisible();
+
+    /* ActionsPanel mounts twice — the desktop column and the full-view pane — so
+       measure the instance that is actually on screen. */
+    const row = page.getByTestId("smart-view-row").filter({ visible: true }).first();
+    await expect(row).toBeVisible();
+    const cue = await row.evaluate((node) => ({
+      chips: node.querySelectorAll("button").length,
+      scrollWidth: node.scrollWidth,
+      clientWidth: node.clientWidth,
+      overflows: node.scrollWidth > node.clientWidth + 2,
+      mask: getComputedStyle(node).maskImage,
+    }));
+
+    expect(cue.chips, "every populated smart view should render a chip").toBe(10);
+    expect(cue.overflows,
+      `the fixture must overflow for this guard to mean anything (${cue.scrollWidth} vs ${cue.clientWidth})`)
+      .toBe(true);
+    /* Same cue the any-time row uses, and for the same reason: a row that scrolls
+       with no scrollbar and no fade reads as a row that is broken. */
+    expect(cue.mask, "an overflowing filter row must fade at its edge").not.toBe("none");
+  });
+
+  test("the inspector spends its accent on the action you came to take", async ({ page }) => {
+    await openPlanner(page, { keepSample: true });
+    await page.locator("[data-event-id]").first().click();
+    const primary = page.getByTestId("inspect-primary");
+    await expect(primary).toBeVisible();
+    const paint = await primary.evaluate((node) => ({
+      label: node.textContent.trim(),
+      background: getComputedStyle(node).backgroundColor,
+    }));
+    /* DUPLICATE is a rare errand. It must not be the loudest control in a sheet
+       whose actual action is the EDIT EVENT pill in its header. */
+    expect(paint.label).toBe("DUPLICATE");
+    expect(paint.background, "DUPLICATE must not wear the accent")
+      .toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
+  });
+  test("an event happening right now reads Now, not Ended", async ({ page }) => {
+    /* `countdownLabel` takes a duration so it can tell "started" from "over", and
+       this call site omitted it — so the branch that prints Now was unreachable
+       and a live event's headline figure claimed it had Ended, while the sentence
+       below it in the same sheet said otherwise.
+
+       A test about time has to own the clock. Fixing it here rather than skipping
+       near midnight is also what makes the assertion honest: the earlier
+       time-of-day guard quietly removed this regression for part of every day. */
+    const now = new Date("2026-08-23T12:00:00");
+    await page.clock.setFixedTime(now);
+    const today = keyOf(now);
+
+    const seeded = createEvent(createBlankPlannerState({}), {
+      title: "Happening now",
+      cat: "DEEP WORK",
+      alerts: [],
+      calendarId: "calendar-default",
+      timing: {
+        kind: "timed",
+        timeZoneMode: "floating",
+        startLocal: `${today}T11:40`,
+        endLocal: `${today}T12:20`,
+      },
+    }, { id: "evt-live" }).state;
+
+    await seedPlanner(page, seeded);
+    await expect(page.getByTestId("day-stream")).toBeVisible();
+    await page.locator('[data-event-id="evt-live"]').first().click();
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).toBeVisible();
+
+    const figure = await sheet.evaluate((node) => {
+      const caption = [...node.querySelectorAll("*")]
+        .find((el) => el.children.length === 0 && el.textContent.trim() === "STARTS");
+      return caption?.parentElement?.querySelector("span")?.textContent?.trim() ?? null;
+    });
+    expect(figure, `${today} 11:40-12:20 with the clock fixed at 12:00`).toBe("Now");
   });
 });
