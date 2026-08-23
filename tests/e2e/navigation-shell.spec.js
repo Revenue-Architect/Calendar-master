@@ -82,6 +82,53 @@ test.describe("the floating navigation shell", () => {
     expect(active.hasClipAnimation, "the viewport must not retain a WAAPI clip animation").toBe(false);
   });
 
+  test("progress telemetry does not write visual geometry", async ({ page }) => {
+    await openPlanner(page);
+    await page.getByTestId("nav-toggle").click();
+
+    const telemetry = await page.evaluate(() => new Promise((resolve) => {
+      const shell = document.querySelector('[data-test="nav-shell"]');
+      const viewport = document.querySelector('[data-test="nav-motion-viewport"]');
+      const nodes = [
+        viewport,
+        document.querySelector('[data-test="nav-motion-carrier"]'),
+        document.querySelector('[data-test="mobile-calendar-return"]'),
+        ...viewport.querySelectorAll('[data-nav-mask]'),
+        document.querySelector("#planner-navigation"),
+      ].filter(Boolean);
+      const initialProgress = shell.dataset.navProgress;
+      const initialStyles = nodes.map((node) => node.getAttribute("style"));
+      let geometryMutations = 0;
+      const observer = new MutationObserver((records) => {
+        geometryMutations += records.filter((record) => record.attributeName === "style").length;
+      });
+      nodes.forEach((node) => observer.observe(node, { attributes: true, attributeFilter: ["style"] }));
+
+      const sample = () => {
+        if (shell.dataset.navState === "opening" && shell.dataset.navProgress !== initialProgress) {
+          requestAnimationFrame(() => {
+            observer.disconnect();
+            resolve({
+              initialProgress,
+              progress: shell.dataset.navProgress,
+              geometryMutations,
+              initialStyles,
+              finalStyles: nodes.map((node) => node.getAttribute("style")),
+            });
+          });
+          return;
+        }
+        requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    }));
+
+    expect(Number(telemetry.progress)).toBeGreaterThan(Number(telemetry.initialProgress));
+    expect(telemetry.geometryMutations, "rAF progress updates must not mutate visual inline styles")
+      .toBe(0);
+    expect(telemetry.finalStyles).toEqual(telemetry.initialStyles);
+  });
+
   test("drawer starts off-screen and labels stagger in", async ({ page }) => {
     await openPlanner(page);
     const shell = page.getByTestId("nav-shell");
