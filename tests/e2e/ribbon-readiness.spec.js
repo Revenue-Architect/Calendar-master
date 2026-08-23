@@ -47,6 +47,8 @@ async function ribbonSnapshot(page) {
       state: viewport?.getAttribute("data-ribbon-position"),
       selectedDateKey: headerDate,
       selectedRibbonDate: cell?.getAttribute("data-day") ?? null,
+      ribbonStart: strip?.getAttribute("data-ribbon-start") ?? null,
+      ribbonEnd: strip?.getAttribute("data-ribbon-end") ?? null,
       windowStart: strip?.getAttribute("data-ribbon-window-start") ?? null,
       windowEnd: strip?.getAttribute("data-ribbon-window-end") ?? null,
       scrollLeft: strip?.scrollLeft ?? null,
@@ -70,6 +72,108 @@ async function ribbonSnapshot(page) {
         .map((node) => getComputedStyle(node).pointerEvents),
     };
   });
+}
+
+async function browseUntilSelectedIsUnrendered(page) {
+  const ribbon = page.getByTestId("day-ribbon");
+  const selected = await page.getByTestId("day-heading").getAttribute("data-date");
+  if (!selected) throw new Error("selected heading date is missing before ribbon browse");
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    if (await ribbon.locator(`button[data-day="${selected}"]`).count() === 0) return selected;
+    await ribbon.evaluate((node) => {
+      node.scrollLeft = Math.min(node.scrollWidth - node.clientWidth,
+        node.scrollLeft + node.clientWidth * 1.5);
+      node.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+    await page.waitForTimeout(32);
+  }
+  throw new Error("selected date never left the rendered ribbon window");
+}
+
+async function armFirstRibbonFrameObserver(page) {
+  await page.evaluate(() => {
+    window.__ribbonFirstFrameObserver?.disconnect?.();
+    window.__ribbonFirstFrame = null;
+    let frameQueued = false;
+    const observer = new MutationObserver(() => {
+      const strip = document.querySelector('[data-test="day-ribbon"]');
+      if (frameQueued || !strip) return;
+      frameQueued = true;
+      requestAnimationFrame(() => {
+        const currentStrip = document.querySelector('[data-test="day-ribbon"]');
+        if (!currentStrip) return;
+        const viewport = document.querySelector('[data-test="ribbon-viewport"]');
+        const headerDate = document.querySelector('[data-test="day-heading"]')?.getAttribute("data-date") ?? null;
+        const stripRect = currentStrip.getBoundingClientRect();
+        const cells = [...currentStrip.querySelectorAll("button[data-day]")];
+        const firstCell = cells[0];
+        const inset = Math.min(24, Math.max(0,
+          (currentStrip.clientWidth - (firstCell?.offsetWidth ?? 0)) / 2));
+        const intersects = (node) => {
+          const rect = node.getBoundingClientRect();
+          return Boolean(stripRect.width > 0
+            && rect.left >= stripRect.left + inset - 1
+            && rect.right <= stripRect.right - inset + 1);
+        };
+        const intersectingRealDates = cells.filter(intersects)
+          .map((node) => node.getAttribute("data-day"))
+          .filter(Boolean);
+        const selected = headerDate
+          ? currentStrip.querySelector(`button[data-day="${headerDate}"]`)
+          : null;
+        const intersecting = Object.freeze(intersectingRealDates);
+        window.__ribbonFirstFrame = Object.freeze({
+          renderedDayCount: cells.length,
+          intersectingRealDates: intersecting,
+          selectedRendered: Boolean(selected),
+          selectedIntersects: Boolean(selected && intersects(selected)),
+          dataRibbonPosition: viewport?.getAttribute("data-ribbon-position") ?? null,
+          stripWidth: stripRect.width,
+          clientWidth: currentStrip.clientWidth,
+          scrollLeft: currentStrip.scrollLeft,
+        });
+        observer.disconnect();
+      });
+    });
+    window.__ribbonFirstFrameObserver = observer;
+    observer.observe(document.body, { childList: true, subtree: true });
+  });
+}
+
+async function firstRibbonFrame(page) {
+  await expect.poll(() => page.evaluate(() => window.__ribbonFirstFrame ?? null), {
+    timeout: 7_000,
+  }).not.toBeNull();
+  return page.evaluate(() => window.__ribbonFirstFrame);
+}
+
+function assertSelectedOutOfRenderedWindow(snapshot, selected, label) {
+  expect(snapshot.selectedDateKey, `${label}: selected header date`).toBe(selected);
+  expect(snapshot.ribbonStart, `${label}: logical ribbon start`).toBeTruthy();
+  expect(snapshot.ribbonEnd, `${label}: logical ribbon end`).toBeTruthy();
+  expect(selected >= snapshot.ribbonStart && selected <= snapshot.ribbonEnd,
+    `${label}: selected date must remain in logical ribbon range`).toBe(true);
+  expect(snapshot.selectedRibbonDate, `${label}: selected cell must be unrendered`).toBeNull();
+  expect(snapshot.renderedDayCount, `${label}: rendered day presence`).toBeGreaterThan(0);
+  expect(snapshot.renderedDayCount, `${label}: rendered day bound`).toBeLessThanOrEqual(56);
+}
+
+function assertFirstFrameReady(firstFrame, label) {
+  expect(firstFrame.renderedDayCount, `${label}: first frame rendered day count`).toBeGreaterThan(0);
+  expect(firstFrame.intersectingRealDates.length, `${label}: first frame intersecting dates`).toBeGreaterThan(0);
+  expect(firstFrame.selectedRendered, `${label}: first frame selected rendered`).toBe(true);
+  expect(firstFrame.selectedIntersects, `${label}: first frame selected intersects`).toBe(true);
+  expect(firstFrame.clientWidth, `${label}: first frame client width`).toBeGreaterThan(0);
+}
+
+async function assertRibbonSettled(page, label) {
+  await expect.poll(async () => {
+    const value = await ribbonSnapshot(page);
+    return value.state === "settled"
+      && value.selectedRibbonDate === value.selectedDateKey
+      && value.intersects;
+  }, { timeout: 7_000 }).toBe(true);
+  assertUsable(await ribbonSnapshot(page), label);
 }
 
 function assertUsable(snapshot, label) {
@@ -224,6 +328,61 @@ test.describe("Week ribbon readiness", () => {
     const snapshot = await ribbonSnapshot(page);
     expect(snapshot.state, "missing scrollend should not leave a positioning lock").toBe("settled");
     assertUsable(snapshot, "missing scrollend");
+  });
+
+  test("Day re-entry renders the browsed-out selection on its first frame", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await boot(page);
+    await dismissWelcome(page);
+    await assertRibbonSettled(page, "Day before browse");
+
+    const selected = await browseUntilSelectedIsUnrendered(page);
+    assertSelectedOutOfRenderedWindow(await ribbonSnapshot(page), selected, "Day before Actions");
+    await page.getByRole("tab", { name: "ACTIONS", exact: true }).click();
+    await expect(page.getByTestId("day-ribbon")).toHaveCount(0);
+    await armFirstRibbonFrameObserver(page);
+    await page.getByRole("tab", { name: "TIMELINE", exact: true }).click();
+    const firstFrame = await firstRibbonFrame(page);
+    assertFirstFrameReady(firstFrame, "Day re-entry");
+    await assertRibbonSettled(page, "Day after Actions");
+  });
+
+  test("Week re-entry renders the browsed-out selection on its first frame", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await boot(page);
+    await dismissWelcome(page);
+    await page.getByTestId("zoom-out").click();
+    await assertRibbonSettled(page, "Week before browse");
+
+    const selected = await browseUntilSelectedIsUnrendered(page);
+    assertSelectedOutOfRenderedWindow(await ribbonSnapshot(page), selected, "Week before Actions");
+    await page.getByRole("tab", { name: "ACTIONS", exact: true }).click();
+    await expect(page.getByTestId("day-ribbon")).toHaveCount(0);
+    await armFirstRibbonFrameObserver(page);
+    await page.getByRole("tab", { name: "TIMELINE", exact: true }).click();
+    const firstFrame = await firstRibbonFrame(page);
+    assertFirstFrameReady(firstFrame, "Week re-entry");
+    await expect(page.getByTestId("zoom-in")).toHaveText(/DAY/);
+    await assertRibbonSettled(page, "Week after Actions");
+  });
+
+  test("Month return renders the browsed-out selection on its first ribbon frame", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await boot(page);
+    await dismissWelcome(page);
+    await page.getByTestId("zoom-out").click();
+    await assertRibbonSettled(page, "Month path before browse");
+
+    const selected = await browseUntilSelectedIsUnrendered(page);
+    assertSelectedOutOfRenderedWindow(await ribbonSnapshot(page), selected, "Month before zoom");
+    await page.getByTestId("zoom-out").click();
+    await expect(page.getByTestId("day-ribbon")).toHaveCount(0);
+    await expect(page.locator(".nb-month-navigator.is-month")).toBeVisible();
+    await armFirstRibbonFrameObserver(page);
+    await page.getByTestId("zoom-in").click();
+    const firstFrame = await firstRibbonFrame(page);
+    assertFirstFrameReady(firstFrame, "Month return");
+    await assertRibbonSettled(page, "Month return");
   });
 
   test("Timeline → Actions → Timeline restores a settled ribbon", async ({ page }) => {
