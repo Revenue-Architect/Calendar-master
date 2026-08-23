@@ -202,8 +202,84 @@ longer repaints for every travel frame in this environment; they do not prove
 that every physical GPU/device has identical behavior. Final screenshots and
 trace artifacts are intentionally left untracked in the worktree.
 
-No DPR-2 run was required for the chosen Option 2; the DPR-1/DPR-2 requirement
-applies when Option 1 keeps an animated clip path. No physical Android or iOS
-device was available.
+Fractional-DPR seam validation is required for the chosen Option 2 as well; no
+clip-path-specific exemption is assumed. The post-review probe at DPR 1, 1.25,
+1.5, and 2 is recorded below. No physical Android or iOS device was available.
 
 **implementation complete; physical-device paint gate pending**
+
+## Post-review correction: fractional-DPR mask validation
+
+This section was added after independent review of the prior branch head and
+preserves the earlier profiling and paint-trace provenance above.
+
+- Review start head: `4b732cd875467f2ed0e892b1cce437e75fa96d98`.
+- Corrective test commit: `be2f32e5dea796c8936260a524216735592ab421`
+  (`test(nav): tighten corner scale tolerance`).
+- The final QA-evidence commit is the documentation commit immediately after
+  that test commit in this branch.
+- Production motion files are unchanged from the review start head; the final
+  production diff against that head is empty.
+
+### Assertion integrity
+
+The corner-scale assertions now use explicit absolute error checks:
+`Math.abs(actualScale - sample.progress) < 0.08` for both axes. Width and height
+remain independently bounded at `< 1.5 px`.
+
+Before accepting the assertion change, a local uncommitted negative control
+removed only `scale(progress)` from the production corner-mask transform. The
+command below ran only the corner-geometry test against a fresh negative-control
+build:
+
+```text
+PLAYWRIGHT_PORT=4355 npx playwright test tests/e2e/navigation-shell.spec.js --project=chromium --workers=1 -g "active corner masks scale"
+```
+
+It returned RED: `1280px top-left width`, expected error `< 1.5`, observed
+`16.5 px`. The production scale was restored immediately; the restored test
+returned GREEN with `1 passed`. The temporary no-scale edit was not committed.
+
+### Fractional-DPR probe and classifier controls
+
+The final reviewed implementation was built fresh to `dist-corner-final` and
+served on isolated preview port 4356. The probe used Windows software Chromium
+`151.0.7922.34` at a 1280x900 CSS viewport, opened navigation, waited for the
+settled `data-nav-state="open"` frame, captured a PNG, and decoded physical
+pixels. `deviceScaleFactor` was set per run and the browser reported the same
+actual `window.devicePixelRatio`: 1, 1.25, 1.5, and 2 respectively.
+
+The classifier was validated rather than treating zero as a default. The shell
+reference was the known shell-mask interior at CSS `(10,10)`, RGB `(23,24,27)`;
+the known planner-surface reference was the app-surface interior at CSS
+`(800,40)`, RGB `(10,10,12)`. A pixel was classified as planner surface only
+when its RGB distance to the planner reference was less than its distance to
+the shell reference and no more than 18. Both controls passed at every DPR:
+the shell positive classified as shell (`classifiedPlanner=false`), and the
+surface positive classified as planner (`classifiedPlanner=true`).
+
+For each rounded desktop junction, the probe tested the physical pixels in the
+22x22 CSS corner box that should be shell outside the rounded boundary (the
+quarter-circle condition outside radius 22), then counted planner-classified
+pixels. The result was zero stray planner pixels at every requested DPR:
+
+| actual DPR | PNG pixels | top-left tested/stray | top-right tested/stray | bottom-left tested/stray | bottom-right tested/stray |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 1280x900 | 102 / 0 | 102 / 0 | 102 / 0 | 102 / 0 |
+| 1.25 | 1600x1125 | 149 / 0 | 177 / 0 | 150 / 0 | 177 / 0 |
+| 1.5 | 1920x1350 | 230 / 0 | 230 / 0 | 230 / 0 | 230 / 0 |
+| 2 | 2560x1800 | 413 / 0 | 413 / 0 | 413 / 0 | 413 / 0 |
+
+The probe therefore found no top/corner, left/corner, right/corner, or
+bottom/corner seam in this software Chromium raster. This is a desktop
+software-raster validation, not a claim about every physical GPU or device.
+
+### Post-review verification and device gate
+
+- `npx playwright test tests/e2e/navigation-shell.spec.js --project=chromium --workers=1`: **20 passed**.
+- `npm test`: **645 passed, 0 failed**.
+- `git diff --check`: clean.
+- Exact environment: Node `v24.18.0`, npm `11.16.0`, Playwright `1.62.1`,
+  Chromium `151.0.7922.34`.
+- Physical Android/iOS devices were unavailable. **implementation complete;
+  physical-device paint gate pending**.
