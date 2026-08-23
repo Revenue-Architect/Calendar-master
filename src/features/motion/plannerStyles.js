@@ -136,6 +136,15 @@ export function plannerStyles({ T, preferences }) {
         .nb-nav-shell .nb-nav-brand,.nb-nav-shell .nb-nav-item,.nb-nav-shell .nb-nav-membership{opacity:0;transform:translate3d(-14px,0,0);transition:background-color 160ms ease,color 160ms ease}
         .nb-nav-shell[data-nav-state="open"] .nb-nav-brand,.nb-nav-shell[data-nav-state="open"] .nb-nav-item,.nb-nav-shell[data-nav-state="open"] .nb-nav-membership,
         .nb-nav-shell[data-nav-state="opening"] .nb-nav-brand,.nb-nav-shell[data-nav-state="opening"] .nb-nav-item,.nb-nav-shell[data-nav-state="opening"] .nb-nav-membership{opacity:1;transform:translate3d(0,0,0)}
+        /* The drawer rests at translate3d(-36%,0,0), so most of it still sits over
+           the page when closed; it reads as absent only because its content is
+           faded out. This separator lives on a group wrapper rather than on a
+           faded item, so an unconditional border painted a hairline across the
+           left of the app at every viewport. Keep the 1px so layout is identical
+           in both states and reveal it with the same states as the content. */
+        .nb-nav-shell .nb-nav-divide{border-top:1px solid transparent}
+        .nb-nav-shell[data-nav-state="open"] .nb-nav-divide,
+        .nb-nav-shell[data-nav-state="opening"] .nb-nav-divide{border-top-color:#313237}
         .nb-nav-item{font-family:${MONO};font-size:15px;letter-spacing:.1em;text-align:left;padding:13px 12px;border-radius:10px;color:#c8c7c0}
         .nb-nav-item:hover,.nb-nav-item:focus-visible{background:#2a2b2f;color:#fff;outline:none}
         .nb-nav-membership{margin-top:auto;padding:15px 12px;border:1px solid #37383d;border-radius:12px;color:#aaa9a2}

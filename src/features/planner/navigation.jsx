@@ -210,7 +210,11 @@ function NavigationShell({
           </button>
         ))}
       </div>
-      <div className="flex flex-col gap-1 mt-5 pt-5" style={{ borderTop: "1px solid #313237" }}>
+      {/* The separator is styled in CSS rather than inline so it can join the
+          same closed-state fade as the drawer's other content. The closed drawer
+          still overlaps the page, so anything here that paints unconditionally
+          paints on top of the app. */}
+      <div className="nb-nav-divide flex flex-col gap-1 mt-5 pt-5">
         {utilityItems.map(([label, onClick], index) => (
           <button
             key={label}

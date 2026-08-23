@@ -504,6 +504,85 @@ test.describe("the floating navigation shell", () => {
     expect(Math.round(after.width)).toBe(Math.round(before.width));
   });
 
+  /* The closed drawer is not off-screen. It rests at translate3d(-36%,0,0), so
+     roughly two thirds of it still overlaps the page, and it reads as absent only
+     because its content is faded out. Every descendant therefore has to opt into
+     that fade: a group wrapper carried an unconditional `border-top` and painted a
+     1px rule across the left of the app at every viewport, in every view, over the
+     timeline card. It went unreported for so long because the colour is invisible
+     against the dark shell and obvious against a light one.
+
+     This asserts the invariant rather than the single element, so anything added
+     to the drawer later that paints while closed fails here too. */
+  test("a closed navigation drawer paints nothing over the page", async ({ page }) => {
+    for (const [width, height] of [[390, 844], [1280, 900]]) {
+      await page.setViewportSize({ width, height });
+      await openPlanner(page);
+      await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
+
+      const offenders = await page.evaluate(() => {
+        const aside = document.querySelector("aside.nb-navigation");
+        if (!aside) throw new Error("navigation drawer is missing");
+        const alpha = (colour) => {
+          const match = /rgba?\(([^)]+)\)/.exec(colour || "");
+          if (!match) return 0;
+          const parts = match[1].split(",").map((value) => parseFloat(value));
+          return parts.length > 3 ? parts[3] : 1;
+        };
+        const effectiveOpacity = (node) => {
+          let value = 1;
+          for (let cursor = node; cursor && cursor !== document.documentElement; cursor = cursor.parentElement) {
+            value *= parseFloat(getComputedStyle(cursor).opacity);
+            if (value === 0) return 0;
+          }
+          return value;
+        };
+        const found = [];
+        for (const node of [aside, ...aside.querySelectorAll("*")]) {
+          const rect = node.getBoundingClientRect();
+          const onScreen = rect.width > 0 && rect.height > 0
+            && rect.right > 0 && rect.left < window.innerWidth
+            && rect.bottom > 0 && rect.top < window.innerHeight;
+          if (!onScreen || effectiveOpacity(node) === 0) continue;
+          const style = getComputedStyle(node);
+          const paints = [];
+          if (alpha(style.backgroundColor) > 0) paints.push(`background ${style.backgroundColor}`);
+          for (const side of ["Top", "Right", "Bottom", "Left"]) {
+            if (parseFloat(style[`border${side}Width`]) > 0
+              && style[`border${side}Style`] !== "none"
+              && alpha(style[`border${side}Color`]) > 0) {
+              paints.push(`border-${side.toLowerCase()} ${style[`border${side}Color`]}`);
+            }
+          }
+          const ownText = [...node.childNodes]
+            .filter((child) => child.nodeType === 3 && child.textContent.trim())
+            .map((child) => child.textContent.trim())
+            .join(" ");
+          if (ownText && alpha(style.color) > 0) paints.push(`text "${ownText.slice(0, 24)}"`);
+          if (paints.length) {
+            found.push(`${node.tagName.toLowerCase()}.${(node.getAttribute("class") || "(none)").slice(0, 40)} → ${paints.join(", ")}`);
+          }
+        }
+        return found;
+      });
+
+      expect(offenders, `${width}x${height}: the closed drawer must not paint over the page`).toEqual([]);
+    }
+
+    /* The separator must still be there when the drawer is open. Without this the
+       assertion above is satisfied just as well by deleting it, which would trade
+       a visible defect for an invisible one. */
+    await page.getByTestId("nav-toggle").click();
+    await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "open");
+    const separator = await page.locator(".nb-nav-divide").first().evaluate((node) => {
+      const style = getComputedStyle(node);
+      return { colour: style.borderTopColor, width: style.borderTopWidth, style: style.borderTopStyle };
+    });
+    expect(separator.colour, "the open drawer must still show its group separator").not.toBe("rgba(0, 0, 0, 0)");
+    expect(parseFloat(separator.width), "the separator must have width when open").toBeGreaterThan(0);
+    expect(separator.style, "the separator must have a border style when open").not.toBe("none");
+  });
+
   test("the navigation trigger uses one press scale channel", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 601 });
     await openPlanner(page);
