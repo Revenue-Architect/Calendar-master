@@ -1,9 +1,9 @@
 # Navigation shell motion performance QA
 
-Date: 2026-08-23  
-Branch: `fix/navigation-shell-compositor-travel`  
-Authored base: `e5c243e5b7e5baeceae73dd9fed4dbb6e6d5cc4e`  
-Implementation source head: `fd4203e` (`fix(nav): move shell framing to browser transforms`)  
+Date: 2026-08-23
+Branch: `fix/navigation-shell-compositor-travel`
+Authored base: `e5c243e5b7e5baeceae73dd9fed4dbb6e6d5cc4e`
+Implementation source head: `fd4203e` (`fix(nav): move shell framing to browser transforms`)
 Protection-test head: `253be84` (`test(nav): isolate progress telemetry from geometry`)
 Corrective corner-geometry source head: `aa18cd0` (`fix(nav): scale in-flight corner masks`)
 
