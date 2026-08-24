@@ -244,7 +244,7 @@ test.describe("the actions column", () => {
     }
   });
 
-  test("nearby short Actions do not overlap after the 44px render minimum", async ({ page }) => {
+  test("nearby short Actions do not overlap after the 22px render minimum", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await seedPlanner(page, nearbyShortActions());
     const cards = page.locator('[data-task-chip^="task-short-nearby-"]');

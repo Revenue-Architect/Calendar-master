@@ -107,6 +107,7 @@ import {
   pointerButtonsHeld,
   proposeGesture,
   shouldCommitActionSwipe,
+  timelineBlockHeight,
   timelineTouchIntent,
 } from "./features/planner/timelineGesture.js";
 import {
@@ -360,7 +361,6 @@ function repeatFor(freq, current, dateKey) {
   };
 }
 
-const TIMELINE_FOCUS_TRIGGER_PX = 24;
 /* How long the load-in fade will wait for a frame before giving up and simply
    showing the content. Long enough that a healthy page always animates on the
    first rAF instead of snapping, short enough that a frame-starved one is never
@@ -2702,8 +2702,8 @@ export default function Planner() {
   };
   /* Day and week timelines have different scroll nodes, but focus mode is one
      piece of navigation. Keep the direction/restore rule here so the two views
-     cannot drift: a small move away from midnight collapses the chrome, and only
-     movement back toward midnight restores it. Initial positioning is explicitly
+     cannot drift: leaving the first hour-row collapses the chrome, and only
+     movement back into that row restores it. Initial positioning is explicitly
      silent so opening a week at 10am never collapses the header by accident. */
   const onTimelineScrollPosition = useCallback((nextScrollTop, { initial = false } = {}) => {
     if (!Number.isFinite(nextScrollTop)) return;
@@ -2744,7 +2744,7 @@ export default function Planner() {
     const intent = timelineChromeIntent({
       previousScrollTop,
       nextScrollTop,
-      triggerPx: TIMELINE_FOCUS_TRIGGER_PX,
+      triggerPx: dayHourHeight,
     });
     if (intent === "none") return;
     setTimelineFocused(intent === "collapse");
@@ -4433,7 +4433,7 @@ export default function Planner() {
                       ? (Math.max(0, streamNode.clientWidth - 72) / Math.max(1, t.cols)) - 6
                       : 0;
                     const resizeEligible = canExposeActionTouchResize({ width: laneWidth, hasEstimate: block }) || sizing;
-                    const h = block ? Math.max(44, (estimate / 1440) * dayHeight - 3) : 44;
+                    const h = block ? timelineBlockHeight(estimate, dayHeight) : 44;
                     const live = liveAction?.id === t.id;
                     const pct = live ? livePct * 100 : 0;
                     return (
