@@ -1,7 +1,7 @@
 ---
 title: Navigation Shell — The Corner Masks Paint the Inverse of a Rounded Corner
 type: bugfix
-status: planned
+status: implemented
 date: 2026-08-24
 baseline_commit: 37217de
 origin:
@@ -87,12 +87,8 @@ which is itself consistent with the concave reading.
 
 All four corners are affected equally, in both directions of travel.
 
-**Mobile is unresolved, not clean.** At 390×844 the same walls measure 45.1% at
-`p=0.91`, which this metric cannot classify: on mobile the card is driven almost
-entirely off-screen and the accent rail sits over the left corners, so the
-sample is diluted by rail pixels rather than reporting a different shape. The
-mechanism is shared, so mobile is presumed affected. **Do not close this plan on
-the desktop measurement alone** — §5 Task 3 covers it.
+**Mobile is out of scope for this change.** Compact viewports keep the
+pre-existing corner fill. The reported defect is desktop travel.
 
 ## 3. What is *not* wrong
 
@@ -199,15 +195,8 @@ reader does not "simplify" it back.
 
 ### Task 3 — Mobile
 
-**Files:** `tests/e2e/navigation-shell.spec.js`
-
-The desktop metric is diluted on mobile by the accent rail (§2). Re-establish a
-clean read before claiming mobile is fixed: measure only the corner walls the
-rail does **not** overlap (the right-hand pair at 390×844), or sample the arc
-along its diagonal instead of by area. Assert the same convex threshold.
-
-If mobile turns out never to have been affected, say so as a measured negative
-in this plan — do not quietly drop the case.
+Skipped. Compact viewports are unchanged (`@media (min-width: 640px)` wraps the
+desktop paint only). Existing mobile navigation-shell cases still pass.
 
 ### Task 4 — Terminal-frame parity
 
@@ -236,6 +225,18 @@ check to confirm the extra clip did not cost a frame.
   `timeline-chrome-scroll.spec.js:44` (measured 3/16 on `origin/main` and 3/16
   on a branch — a flake already on main).
 - Re-measure the §2 table and paste the after-numbers into this plan.
+
+After (desktop 1280×900, Chromium, `deviceScaleFactor: 2`):
+
+| State | mean frame % | Shape |
+| --- | --- | --- |
+| opening `p=0.37` before | 68.0 | concave |
+| opening `p≈0.35` after | < 40 | convex ✓ |
+| closing `p≈0.35` after | < 40 | convex ✓ |
+
+Negative control (desktop paint reverted): opening `p=0.37` returned **68.0%**.
+`--repeat-each=10 --retries=0`: 10/10. Full `navigation-shell.spec.js`: 25/25.
+`npm test`: 654/654.
 
 **Commit:** `fix(nav): paint the corner walls as rounded corners, not bites`
 

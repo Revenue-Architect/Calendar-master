@@ -1,6 +1,6 @@
-import { expect, test } from "@playwright/test";
-import { openPlanner } from "./helpers.js";
-
+import { expect, test } from "@playwright/test";
+import { openPlanner } from "./helpers.js";
+
 function expectMonotonic(samples, key, direction, message) {
   const values = samples.map((sample) => sample[key]);
   for (let index = 1; index < values.length; index += 1) {
@@ -10,6 +10,128 @@ function expectMonotonic(samples, key, direction, message) {
     } else {
       expect(delta, `${message}: ${values.join(", ")}`).toBeGreaterThanOrEqual(-1);
     }
+  }
+}
+
+/* Corner-shape samples are pixel counts inside each [data-nav-mask] box, not
+   computed style. border-radius: 22px is true of both a rounded corner and the
+   inverted bite that currently paints during travel; only the painted frame
+   fraction distinguishes them (convex ≈ 21.5%, concave ≈ 78.5%). */
+const CORNER_MASKS = ["top-left", "top-right", "bottom-left", "bottom-right"];
+const CONVEX_MAX_FRAME_PCT = 40;
+
+function freezeNavAt(page, target) {
+  return page.evaluate((stopAt) => new Promise((resolve) => {
+    const shell = document.querySelector('[data-test="nav-shell"]');
+    let frames = 0;
+    const tick = () => {
+      const state = shell.dataset.navState;
+      const progress = Number(shell.dataset.navProgress);
+      if (state !== "opening" && state !== "closing") return resolve({ state, progress, frozen: false });
+      if ((state === "opening" && progress >= stopAt) || (state === "closing" && progress <= stopAt)) {
+        document.getAnimations().forEach((animation) => animation.pause());
+        return resolve({ state, progress, frozen: true });
+      }
+      frames += 1;
+      if (frames >= 120) return resolve({ state, progress, frozen: false });
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }), target);
+}
+
+function resumeNav(page) {
+  return page.evaluate(() => document.getAnimations().forEach((animation) => animation.play()));
+}
+
+/* Shell / mask fill is authored as #17181b. Card panels sit too close in RGB
+   for a loose tolerance, so interior is read from the screenshot itself. */
+const FRAME_RGB = [0x17, 0x18, 0x1b];
+
+async function sampleCornerFramePct(page, decoder, names = CORNER_MASKS) {
+  const info = await page.evaluate((maskNames) => {
+    const shell = document.querySelector('[data-test="nav-shell"]');
+    const surface = document.querySelector('[data-test="app-surface"]');
+    if (!surface) throw new Error("app surface is missing");
+    const surfaceRect = surface.getBoundingClientRect();
+    return {
+      state: shell.dataset.navState,
+      progress: Number(shell.dataset.navProgress),
+      viewportWidth: window.innerWidth,
+      surface: { x: surfaceRect.x, y: surfaceRect.y, w: surfaceRect.width, h: surfaceRect.height },
+      corners: maskNames.map((name) => {
+        const node = document.querySelector(`[data-nav-mask="${name}"]`);
+        if (!node) throw new Error(`missing [data-nav-mask="${name}"]`);
+        const rect = node.getBoundingClientRect();
+        return { name, x: rect.x, y: rect.y, w: rect.width, h: rect.height };
+      }),
+    };
+  }, names);
+
+  const shot = (await page.screenshot()).toString("base64");
+  const corners = await decoder.evaluate(async ({ shot, info, FRAME_RGB }) => {
+    const image = new Image();
+    image.src = `data:image/png;base64,${shot}`;
+    await image.decode();
+    const canvas = document.createElement("canvas");
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(image, 0, 0);
+    const ratio = image.width / info.viewportWidth;
+    const samplePx = (x, y) => {
+      const sx = Math.min(image.width - 1, Math.max(0, Math.round(x * ratio)));
+      const sy = Math.min(image.height - 1, Math.max(0, Math.round(y * ratio)));
+      const px = ctx.getImageData(sx, sy, 1, 1).data;
+      return [px[0], px[1], px[2]];
+    };
+    const dist = (r, g, b, target) => (
+      Math.abs(r - target[0]) + Math.abs(g - target[1]) + Math.abs(b - target[2])
+    );
+    const interiorRgb = samplePx(
+      info.surface.x + info.surface.w / 2,
+      info.surface.y + info.surface.h / 2,
+    );
+    const result = {};
+    for (const corner of info.corners) {
+      const sx = Math.max(0, Math.round(corner.x * ratio));
+      const sy = Math.max(0, Math.round(corner.y * ratio));
+      const sw = Math.max(1, Math.round(corner.w * ratio));
+      const sh = Math.max(1, Math.round(corner.h * ratio));
+      const width = Math.min(sw, image.width - sx);
+      const height = Math.min(sh, image.height - sy);
+      if (width <= 0 || height <= 0) {
+        result[corner.name] = { pct: NaN, width: corner.w, height: corner.h };
+        continue;
+      }
+      const data = ctx.getImageData(sx, sy, width, height).data;
+      let framePx = 0;
+      const total = data.length / 4;
+      for (let i = 0; i < data.length; i += 4) {
+        if (dist(data[i], data[i + 1], data[i + 2], FRAME_RGB)
+          <= dist(data[i], data[i + 1], data[i + 2], interiorRgb)) {
+          framePx += 1;
+        }
+      }
+      result[corner.name] = {
+        pct: (framePx / total) * 100,
+        width: corner.w,
+        height: corner.h,
+      };
+    }
+    return result;
+  }, { shot, info, FRAME_RGB });
+
+  return { state: info.state, progress: info.progress, corners };
+}
+
+function expectConvexCorners(sample, names, label) {
+  for (const name of names) {
+    const pct = sample.corners[name]?.pct;
+    expect(
+      pct,
+      `${label} (state=${sample.state} p=${sample.progress.toFixed(2)}) ${name} framePct=${Number.isFinite(pct) ? pct.toFixed(1) : String(pct)} — convex is < ${CONVEX_MAX_FRAME_PCT}, concave is ~73`,
+    ).toBeLessThan(CONVEX_MAX_FRAME_PCT);
   }
 }
 
@@ -173,6 +295,41 @@ test.describe("the floating navigation shell", () => {
     }
   });
 
+  test.describe("corner wall paint shape", () => {
+    test.use({ deviceScaleFactor: 2 });
+
+  test("corner walls paint a rounded corner, not a bite, through desktop travel", async ({ page }) => {
+    test.setTimeout(60_000);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await openPlanner(page);
+    const decoder = await page.context().newPage();
+    const samples = [];
+
+    try {
+      await page.getByTestId("nav-toggle").click();
+      const opening = await freezeNavAt(page, 0.35);
+      expect(opening.frozen, `opening p≈0.35 must freeze in flight, got state=${opening.state} p=${opening.progress}`).toBe(true);
+      samples.push({ label: "opening p≈0.35", ...await sampleCornerFramePct(page, decoder) });
+      await resumeNav(page);
+      await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "open");
+
+      await page.getByTestId("nav-toggle").click();
+      const closing = await freezeNavAt(page, 0.35);
+      expect(closing.frozen, `closing p≈0.35 must freeze in flight, got state=${closing.state} p=${closing.progress}`).toBe(true);
+      samples.push({ label: "closing p≈0.35", ...await sampleCornerFramePct(page, decoder) });
+      await resumeNav(page);
+      await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
+    } finally {
+      await decoder.close();
+    }
+
+    for (const sample of samples) {
+      expectConvexCorners(sample, CORNER_MASKS, sample.label);
+    }
+  });
+
+  });
+
   test("progress telemetry does not write visual geometry", async ({ page }) => {
     await openPlanner(page);
     await page.getByTestId("nav-toggle").click();
@@ -250,49 +407,49 @@ test.describe("the floating navigation shell", () => {
     expect(Number.parseFloat(lastDelay), "later labels must wait their turn").toBeGreaterThan(Number.parseFloat(firstDelay));
   });
 
-  test("opens a labelled floating shell and restores focus after Escape", async ({ page }) => {
-    await openPlanner(page);
-    const trigger = page.getByTestId("nav-toggle");
-    const shell = page.getByTestId("nav-shell");
-    const surface = page.getByTestId("app-surface");
-
-    await expect(trigger).toHaveAttribute("aria-expanded", "false");
-    await trigger.click();
-    await expect(shell).toHaveAttribute("data-nav-state", "open");
-    await expect(trigger).toHaveAttribute("aria-expanded", "true");
-    await expect(page.getByRole("navigation", { name: "Primary navigation" })).toBeVisible();
-    await expect(surface).toHaveClass(/nb-app-surface-open/);
-
-    await page.keyboard.press("Escape");
-    await expect(shell).toHaveAttribute("data-nav-state", "closed");
-    await expect(trigger).toBeFocused();
-  });
-
-  test("destinations call existing planner actions and close navigation", async ({ page }) => {
-    await openPlanner(page);
-    await page.getByTestId("nav-toggle").click();
-    await page.getByRole("button", { name: "Actions", exact: true }).click();
-
-    await expect(page.getByRole("tab", { name: "ACTIONS", exact: true })).toHaveAttribute("aria-selected", "true");
-    await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
-  });
-
-  test("shortcuts move into the side navigation", async ({ page }) => {
-    await openPlanner(page);
-    await page.getByTestId("nav-toggle").click();
-    await page.getByRole("button", { name: "Shortcuts", exact: true }).click();
-
-    await expect(page.getByRole("dialog", { name: "SHORTCUTS" })).toBeVisible();
-    await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
-  });
-
-  test("outside press closes the panel", async ({ page }) => {
-    await openPlanner(page);
-    await page.getByTestId("nav-toggle").click();
-    await page.getByTestId("app-surface").click({ position: { x: 700, y: 500 } });
-    await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
-  });
-
+  test("opens a labelled floating shell and restores focus after Escape", async ({ page }) => {
+    await openPlanner(page);
+    const trigger = page.getByTestId("nav-toggle");
+    const shell = page.getByTestId("nav-shell");
+    const surface = page.getByTestId("app-surface");
+
+    await expect(trigger).toHaveAttribute("aria-expanded", "false");
+    await trigger.click();
+    await expect(shell).toHaveAttribute("data-nav-state", "open");
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
+    await expect(page.getByRole("navigation", { name: "Primary navigation" })).toBeVisible();
+    await expect(surface).toHaveClass(/nb-app-surface-open/);
+
+    await page.keyboard.press("Escape");
+    await expect(shell).toHaveAttribute("data-nav-state", "closed");
+    await expect(trigger).toBeFocused();
+  });
+
+  test("destinations call existing planner actions and close navigation", async ({ page }) => {
+    await openPlanner(page);
+    await page.getByTestId("nav-toggle").click();
+    await page.getByRole("button", { name: "Actions", exact: true }).click();
+
+    await expect(page.getByRole("tab", { name: "ACTIONS", exact: true })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
+  });
+
+  test("shortcuts move into the side navigation", async ({ page }) => {
+    await openPlanner(page);
+    await page.getByTestId("nav-toggle").click();
+    await page.getByRole("button", { name: "Shortcuts", exact: true }).click();
+
+    await expect(page.getByRole("dialog", { name: "SHORTCUTS" })).toBeVisible();
+    await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
+  });
+
+  test("outside press closes the panel", async ({ page }) => {
+    await openPlanner(page);
+    await page.getByTestId("nav-toggle").click();
+    await page.getByTestId("app-surface").click({ position: { x: 700, y: 500 } });
+    await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
+  });
+
   test("the calendar return rail and mobile surface share one close timeline", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await openPlanner(page);

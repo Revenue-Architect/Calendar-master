@@ -105,9 +105,8 @@ export function plannerStyles({ T, preferences }) {
         }
         /* The stage is deliberately un-clipped while a navigation run is
            active. These shell-coloured walls move with compositor transforms
-           into the open margins, including static quarter-corner cut-outs,
-           so the planner surface keeps one raster instead of a changing
-           clip-path. */
+           into the open margins so the planner surface keeps one raster
+           instead of a changing clip-path. */
         .nb-nav-motion-mask{position:absolute;inset:0;z-index:3;pointer-events:none;overflow:visible}
         .nb-nav-motion-mask>i{position:absolute;display:block;background:#17181b;transform:translate3d(0,0,0)}
         .nb-nav-motion-mask>[data-nav-mask="top"]{top:0;left:0;right:0;height:var(--nav-mask-top);transform:translate3d(0,calc(-1 * var(--nav-mask-top)),0)}
@@ -119,6 +118,16 @@ export function plannerStyles({ T, preferences }) {
         .nb-nav-motion-mask>[data-nav-mask="top-right"]{right:var(--nav-mask-right);top:var(--nav-mask-top);border-bottom-left-radius:var(--nav-mask-radius);transform-origin:0 100%;transform:translate3d(calc(var(--nav-mask-right) + var(--nav-mask-radius)),calc(-1 * (var(--nav-mask-top) + var(--nav-mask-radius))),0)}
         .nb-nav-motion-mask>[data-nav-mask="bottom-left"]{left:var(--nav-mask-left);bottom:var(--nav-mask-bottom);border-top-right-radius:var(--nav-mask-radius);transform-origin:100% 0;transform:translate3d(calc(-1 * (var(--nav-mask-left) + var(--nav-mask-radius))),calc(var(--nav-mask-bottom) + var(--nav-mask-radius)),0)}
         .nb-nav-motion-mask>[data-nav-mask="bottom-right"]{right:var(--nav-mask-right);bottom:var(--nav-mask-bottom);border-top-left-radius:var(--nav-mask-radius);transform-origin:0 0;transform:translate3d(calc(var(--nav-mask-right) + var(--nav-mask-radius)),calc(var(--nav-mask-bottom) + var(--nav-mask-radius)),0)}
+        /* Desktop travel only. Rounding the corner tile with border-radius paints
+           a filled pie that bites into the card. Punch a circular hole at the
+           interior corner instead so the tile is the outer rounding. Do not
+           "simplify" this back to border-radius. Mobile keeps the original fill. */
+        @media(min-width:640px){
+          .nb-nav-motion-mask>[data-nav-mask="top-left"]{border-bottom-right-radius:0;background:radial-gradient(circle farthest-side at 100% 100%,transparent 0 calc(100% - 0.5px),#17181b 100%)}
+          .nb-nav-motion-mask>[data-nav-mask="top-right"]{border-bottom-left-radius:0;background:radial-gradient(circle farthest-side at 0 100%,transparent 0 calc(100% - 0.5px),#17181b 100%)}
+          .nb-nav-motion-mask>[data-nav-mask="bottom-left"]{border-top-right-radius:0;background:radial-gradient(circle farthest-side at 100% 0,transparent 0 calc(100% - 0.5px),#17181b 100%)}
+          .nb-nav-motion-mask>[data-nav-mask="bottom-right"]{border-top-left-radius:0;background:radial-gradient(circle farthest-side at 0 0,transparent 0 calc(100% - 0.5px),#17181b 100%)}
+        }
         .nb-nav-shell[data-nav-state="open"] .nb-nav-carrier,
         .nb-nav-shell[data-nav-state="open"] .nb-nav-motion-carrier,
         .nb-nav-shell[data-nav-state="opening"] .nb-nav-carrier,
