@@ -127,7 +127,7 @@ import {
   resolveShortEventEdge,
   updateInteractionProposal,
 } from "./features/planner/timelineInteractionState.js";
-import { canExposeActionTouchMove, canExposeActionTouchResize, canExposeEventTouchMove, canExposeEventTouchResize, classifyTimelineTouchTarget, EVENT_JOIN_RESERVATION, TOUCH_TARGET_KINDS } from "./features/planner/timelineTouchTarget.js";
+import { canExposeActionTouchResize, classifyTimelineTouchTarget, TOUCH_TARGET_KINDS } from "./features/planner/timelineTouchTarget.js";
 import { acquireTimelineTouchScrollLock, createTimelineTouchScrollLock, releaseTimelineTouchScrollLock } from "./features/planner/timelineTouchScrollLock.js";
 import { loadBackupRecord, saveBackupRecord } from "./platform/persistence/backupStore.js";
 import { textToNoteBlocks } from "./features/notes/noteText.js";
@@ -3181,8 +3181,10 @@ export default function Planner() {
         : target.kind === TOUCH_TARGET_KINDS.actionEstimate && chip
           ? { edge: "end", kind: "task" }
           : null;
-      const directMove = target.kind === TOUCH_TARGET_KINDS.eventMove || target.kind === TOUCH_TARGET_KINDS.actionMove;
-      const direct = Boolean(resizing || (directMove && (ev || chip)));
+      /* Event edges retain the proven hold-to-own contract: an immediate
+         vertical movement from an edge remains a Timeline scroll. The explicit
+         Action estimate can own from deliberate vertical movement. */
+      const direct = target.kind === TOUCH_TARGET_KINDS.actionEstimate;
       const targetKind = direct ? "direct" : (ev || chipId ? "card" : "empty");
       const controlRect = target.node?.getBoundingClientRect?.();
       const resizePointerOffset = resizing && controlRect
@@ -3203,9 +3205,9 @@ export default function Planner() {
           origin: ev
             ? (resizing?.edge === "start" ? INTERACTION_ORIGINS.eventStart
               : resizing?.edge === "end" ? INTERACTION_ORIGINS.eventEnd
-                : target.kind === TOUCH_TARGET_KINDS.eventMove ? INTERACTION_ORIGINS.eventMove : INTERACTION_ORIGINS.eventBody)
+                : INTERACTION_ORIGINS.eventBody)
             : (resizing ? INTERACTION_ORIGINS.actionResize
-              : target.kind === TOUCH_TARGET_KINDS.actionMove ? INTERACTION_ORIGINS.actionMove : INTERACTION_ORIGINS.actionBody),
+              : INTERACTION_ORIGINS.actionBody),
           mode: resizing ? (resizing.kind === "task" ? "task-resize" : `resize-${resizing.edge}`) : ev ? "move" : "task",
           id: ev?.id ?? chipId,
           before,
@@ -4288,16 +4290,7 @@ export default function Planner() {
                        from the minimum itself. The old ordering turned the stated
                        22px floor into 19px — shorter than one line of title text. */
                     const h = Math.max(22, (e.dur / 1440) * dayHeight - 3);
-                    const laneWidth = streamNode
-                      ? (Math.max(0, streamNode.clientWidth - 72) / Math.max(1, e.cols)) - 6
-                      : 0;
                     const joinUrl = normalizeMeetingLink(e.link);
-                    const touchResizeHeld = gesture?.touchId != null && gesture.id === e.id
-                      && (gesture.mode === "resize-end" || gesture.mode === "resize-start");
-                    const touchResizeEligible = canExposeEventTouchResize({ height: h, width: laneWidth, hasJoin: Boolean(joinUrl) }) || touchResizeHeld;
-                    const touchMoveEligible = canExposeEventTouchMove({
-                      height: h, width: laneWidth, hasJoin: Boolean(joinUrl), hasResize: touchResizeEligible,
-                    }) || touchResizeHeld;
                     const live = isToday && nowMin >= e.start && nowMin < e.start + e.dur;
                     const past = isToday && nowMin >= e.start + e.dur;
                     const pct = live ? ((nowMin - e.start) / e.dur) * 100 : 0;
@@ -4348,10 +4341,7 @@ export default function Planner() {
                               <span className="absolute inset-y-0" style={{ right: 0, width: 2, background: T.accent }} />
                             </span>
                           )}
-                          <div className={`relative pl-2.5 pr-2.5 ${h < 28 ? "h-full py-0" : "py-1.5"}`} style={{
-                            paddingLeft: touchMoveEligible ? (touchResizeEligible ? 88 : 44) : undefined,
-                            paddingRight: touchResizeEligible ? (joinUrl ? 44 + EVENT_JOIN_RESERVATION : 44) : (joinUrl && touchMoveEligible ? EVENT_JOIN_RESERVATION : (joinUrl ? 64 : undefined)),
-                          }}>
+                          <div className={`relative pl-2.5 ${joinUrl ? "pr-16" : "pr-2.5"} ${h < 28 ? "h-full py-0" : "py-1.5"}`}>
                             <div className={`nb-event-row flex items-center gap-2 ${h < 28 ? "h-full" : ""}`}>
                               {/* the category dot is the card's only colour, so it stays
                                   legible at 22px height where a left rail would vanish */}
@@ -4379,19 +4369,10 @@ export default function Planner() {
                               which meant the only way to say "this started earlier"
                               was to move the block and then lengthen it — two gestures
                               for one thought, and the second undid the first. */}
-                          {/* The top handle is shorter than the bottom one and only
-                              appears on a card with room to spare. The title sits at
-                              the top of the card, and the top of the card is also the
-                              most natural place to grab it — a full-width 12px handle
-                              there turns "pick this up" into "make it start earlier".
-                              8px is edge; anything more is content. */}
-                          <div data-resize={e.id} data-resize-edge="start" onPointerDown={(ev) => resizeDown(ev, e, "start")} className="absolute inset-x-0 top-0 flex items-start justify-center" style={{ height: h < 28 ? 8 : 8, cursor: "ns-resize", touchAction: "pan-y" }}>
-                            <span style={{ background: T.faint, width: 22, height: 2, marginTop: 2, borderRadius: 2 }} />
-                          </div>
-                          <div data-resize={e.id} data-resize-edge="end" onPointerDown={(ev) => resizeDown(ev, e, "end")} className="absolute inset-x-0 bottom-0 flex items-end justify-center" style={{ height: 12, cursor: "ns-resize", touchAction: "pan-y" }}>
-                            <span style={{ background: T.faint, width: 22, height: 2, marginBottom: 3, borderRadius: 2 }} />
-                          </div>
-                          <TimelineEventResizeControls event={e} theme={T} hasJoin={Boolean(joinUrl)} onPointerDown={resizeDown} onMoveClick={() => { if (clickFollowsGesture()) return; beep("click"); setInspect({ kind: "event", id: e.id }); }} clickFollowsGesture={clickFollowsGesture} showMove={touchMoveEligible} showResize={touchResizeEligible} />
+                          {/* Thin, full-width boundary strips keep resize ownership
+                              predictable at every duration. The asymmetric 8/12px
+                              edges leave the readable middle as the move surface. */}
+                          <TimelineEventResizeControls event={e} theme={T} onPointerDown={resizeDown} />
                         </div>
                         {joinUrl && (
                           <a href={joinUrl} target="_blank" rel="noopener noreferrer" draggable={false} data-join={e.id}
@@ -4433,7 +4414,6 @@ export default function Planner() {
                       ? (Math.max(0, streamNode.clientWidth - 72) / Math.max(1, t.cols)) - 6
                       : 0;
                     const resizeEligible = canExposeActionTouchResize({ width: laneWidth, hasEstimate: block }) || sizing;
-                    const moveEligible = canExposeActionTouchMove({ width: laneWidth, hasEstimate: resizeEligible }) || sizing;
                     const h = block ? Math.max(44, (estimate / 1440) * dayHeight - 3) : 44;
                     const live = liveAction?.id === t.id;
                     const pct = live ? livePct * 100 : 0;
@@ -4441,7 +4421,7 @@ export default function Planner() {
                       <TimelineActionCard key={t.id} task={t}
                         top={((dragging && gesture.start != null ? gesture.start : t.planned.startMinute) / 1440) * dayHeight + 2}
                         height={h} left={`${(t.lane / t.cols) * 100}%`} width={`calc(${100 / t.cols}% - 6px)`}
-                        estimate={estimate} block={block} resizeEligible={resizeEligible} moveEligible={moveEligible} sizing={sizing} dragging={dragging} reducedMotion={reducedMotion}
+                        estimate={estimate} block={block} resizeEligible={resizeEligible} sizing={sizing} dragging={dragging} reducedMotion={reducedMotion}
                         live={live} livePct={pct}
                         subtaskProgress={subtaskProgressByParent.get(parseTaskOccurrenceId(t.id).seriesId) ?? null}
                         swipeOffset={taskSwipe?.id === t.id ? taskSwipe.offset : 0}

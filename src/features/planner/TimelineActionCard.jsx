@@ -15,15 +15,6 @@ function resizeCueStyle(theme) {
   };
 }
 
-function moveCueStyle(theme) {
-  return {
-    width: 22, height: 22, borderRadius: 5,
-    border: `1px solid ${theme.accent}`, background: `${theme.accent}26`,
-    color: theme.accentText, display: "flex", alignItems: "center", justifyContent: "center",
-    fontSize: 14, lineHeight: 1, fontWeight: 700,
-  };
-}
-
 export default function TimelineActionCard({
   task,
   top,
@@ -34,7 +25,6 @@ export default function TimelineActionCard({
   block,
   sizing,
   resizeEligible = block,
-  moveEligible = true,
   dragging = false,
   reducedMotion = false,
   live = false,
@@ -135,10 +125,9 @@ export default function TimelineActionCard({
             backgroundColor: theme.card,
             backgroundImage: block ? `linear-gradient(${theme.accent}0D, ${theme.accent}0D)` : "none",
             opacity: 1,
-            /* The gap between the completion and move lanes is still ordinary
-               Action surface. Keep it in the same vertical-scroll / horizontal
-               swipe browser contract as the title body. Explicit controls below
-               override this with touch-action:none. */
+            /* The readable Action face is one continuous move candidate between
+               completion and estimate. Before lift it keeps native vertical
+               scrolling; the explicit estimate control owns direct resize. */
             touchAction: "pan-y",
           }}>
           {/* Inside the opaque card face so it remains visibly beneath the
@@ -150,29 +139,16 @@ export default function TimelineActionCard({
               <span className="absolute inset-y-0 right-0" style={{ width: 2, background: theme.accent }} />
             </span>
           )}
-          {moveEligible && (
-            <button type="button" data-touch-move={task.id} data-test="timeline-action-move"
-              aria-label={`Open or move ${task.title}`} onClick={open} onKeyDown={keyOpen}
-              className="nb-tap absolute z-10 flex w-11 items-center justify-center"
-              style={{
-                top: -1, bottom: -1, left: ACTION_COMPLETION_LANE,
-                background: "transparent",
-                borderRadius: 0,
-                touchAction: "none",
-              }}>
-              <span data-test="timeline-action-move-cue" aria-hidden="true" style={moveCueStyle(theme)}>↕</span>
-            </button>
-          )}
           <button type="button" onClick={open} onKeyDown={keyOpen}
             className="nb-tap absolute min-w-0 overflow-hidden text-left"
             style={{
               top: 0, bottom: 0,
-              left: ACTION_COMPLETION_LANE + (moveEligible ? 44 : 0),
+              left: ACTION_COMPLETION_LANE,
               right: resizeEligible ? 48 : 0,
               display: "flex", flexDirection: "column", justifyContent: "flex-start",
               background: "transparent", borderRadius: 0, touchAction: "pan-y",
             }}>
-            <span className={`flex min-w-0 items-center gap-2 py-1 ${moveEligible || resizeEligible ? "pr-1.5" : "pr-0"}`}>
+            <span className={`flex min-w-0 items-center gap-2 py-1 ${resizeEligible ? "pr-1.5" : "pr-0"}`}>
               <span className="nb-lead min-w-0 flex-1 truncate" style={{ color: done ? theme.dimText : theme.text }}>{task.title}</span>
               {subtaskProgress?.total > 0 && (
                 <span data-test="timeline-action-subtask-marker" aria-label={`${subtaskProgress.total} subtask${subtaskProgress.total === 1 ? "" : "s"}`}
