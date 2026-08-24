@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { navPageFit } from "./navPageFit.js";
+import { navPageFit, sideWallInsets } from "./navPageFit.js";
 
 function transition(currentPhase, command) {
   switch (command) {
@@ -92,4 +92,15 @@ test("desktop frame exposes direct viewport-coordinate insets without subtractio
   // Carrier travel: (322px, 20px)
   assert.equal(fit.carrier.x, 322);
   assert.equal(fit.carrier.y, 20);
+});
+
+test("desktop side walls follow the in-flight card, not the destination insets", () => {
+  /* Destination top is 24px. At p=0.35 the card's top is 8.4px. Side walls that
+     stay at 24px leave a strip past the rounded corner where the unclipped page
+     leaks. */
+  const frame = navPageFit({ viewportWidth: 1280, viewportHeight: 900 }).frame;
+  assert.equal(sideWallInsets(0, frame).top, 0);
+  assert.equal(sideWallInsets(0.35, frame).top, 8.4);
+  assert.equal(sideWallInsets(0.35, frame).bottom, 8.4);
+  assert.equal(sideWallInsets(1, frame).top, 24);
 });

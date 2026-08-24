@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { navMobileMotion, navPageFit } from "./navPageFit.js";
+import { navMobileMotion, navPageFit, sideWallInsets } from "./navPageFit.js";
 
 const MOTION_MS = 520;
 const CLOSED_PHASES = new Set(["closed", "closing"]);
@@ -240,13 +240,23 @@ export function useNavigationMotion({ reducedMotion = false } = {}) {
     drawer.style.transition = "none";
     viewport.style.clipPath = active ? "none" : viewportClip(p, targetFit, desktopRef.current);
     carrier.style.transform = carrierTransform(p, targetFit, desktopRef.current);
+    const desktop = desktopRef.current;
+    const liveInsets = desktop ? sideWallInsets(p, maskFrame(targetFit, true)) : null;
     viewport.querySelectorAll("[data-nav-mask]").forEach((mask) => {
       /* The transform walls own the frame only during active travel. At either
          terminal state the viewport clip owns the rounded edge; leaving a
          corner wall painted over that clip cuts a concave notch into the card. */
+      const name = mask.dataset.navMask;
       mask.style.visibility = active ? "visible" : "hidden";
       mask.style.opacity = active ? "1" : "0";
-      mask.style.transform = maskTransform(p, targetFit, desktopRef.current, mask.dataset.navMask);
+      mask.style.transform = maskTransform(p, targetFit, desktop, name);
+      if (active && liveInsets && (name === "left" || name === "right")) {
+        mask.style.top = `${liveInsets.top}px`;
+        mask.style.bottom = `${liveInsets.bottom}px`;
+      } else {
+        mask.style.removeProperty("top");
+        mask.style.removeProperty("bottom");
+      }
     });
     if (!desktopRef.current) {
       const mobile = navMobileMotion({ progress: p, mobile: targetFit.mobile });
@@ -380,9 +390,18 @@ export function useNavigationMotion({ reducedMotion = false } = {}) {
       });
 
       viewport.querySelectorAll("[data-nav-mask]").forEach((mask) => {
-        animate(mask, sampledKeyframes(source, target, (value) => ({
-          transform: maskTransform(value, targetFit, desktopRef.current, mask.dataset.navMask),
-        })));
+        const name = mask.dataset.navMask;
+        animate(mask, sampledKeyframes(source, target, (value) => {
+          const style = {
+            transform: maskTransform(value, targetFit, desktopRef.current, name),
+          };
+          if (desktopRef.current && (name === "left" || name === "right")) {
+            const insets = sideWallInsets(value, maskFrame(targetFit, true));
+            style.top = `${insets.top}px`;
+            style.bottom = `${insets.bottom}px`;
+          }
+          return style;
+        }));
       });
 
       if (!desktopRef.current) {

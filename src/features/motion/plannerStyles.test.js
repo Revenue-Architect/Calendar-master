@@ -5,19 +5,23 @@ import { plannerStyles } from "./plannerStyles.js";
 
 const prefs = { display: { reducedMotion: false } };
 
-test("nav frame fill follows the active ground instead of a hardcoded dark tile", () => {
-  const cream = THEMES.find((theme) => theme.id === "cream-terracotta");
-  const css = plannerStyles({ T: { ...cream, accentText: cream.accent }, preferences: prefs });
-  const fill = css.match(/--nav-frame-fill:([^;]+);/)?.[1];
-  assert.ok(fill, "the shell must expose a frame fill token");
-  assert.notEqual(fill.toLowerCase(), "#17181b");
-  assert.ok(css.includes(".nb-nav-motion-mask>i{position:absolute;display:block;background:var(--nav-frame-fill)"));
-  assert.ok(css.includes("radial-gradient(circle farthest-side at 0 100%,transparent 0 calc(100% - 0.5px),var(--nav-frame-fill) 100%)"));
-});
+function cssFor(themeId) {
+  const theme = THEMES.find((entry) => entry.id === themeId);
+  return plannerStyles({ T: { ...theme, accentText: theme.accent }, preferences: prefs });
+}
 
-test("obsidian keeps the cinematic dark stage", () => {
-  const obsidian = THEMES.find((theme) => theme.id === "obsidian-acid");
-  const css = plannerStyles({ T: { ...obsidian, accentText: obsidian.accent }, preferences: prefs });
-  const fill = css.match(/--nav-frame-fill:([^;]+);/)?.[1];
-  assert.equal(fill.toLowerCase(), "#17181b");
+test("the nav stage stays #17181b on every ground", () => {
+  for (const themeId of ["obsidian-acid", "cream-terracotta"]) {
+    const css = cssFor(themeId);
+    assert.match(css, /\.nb-nav-shell\{[^}]*background:#17181b/, `${themeId} shell`);
+    assert.ok(
+      css.includes(".nb-nav-motion-mask>i{position:absolute;display:block;background:#17181b"),
+      `${themeId} walls`,
+    );
+    assert.ok(
+      css.includes("radial-gradient(circle farthest-side at 0 100%,transparent 0 calc(100% - 0.5px),#17181b 100%)"),
+      `${themeId} right-corner tile`,
+    );
+    assert.equal(css.includes("--nav-frame-fill:"), false, `${themeId} must not theme the stage`);
+  }
 });
