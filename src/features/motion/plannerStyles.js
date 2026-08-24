@@ -16,7 +16,6 @@
  * leaving the comments alone is what stops it happening a fourth.
  */
 import { NOW_RED } from "../../design/themes.js";
-import { isDark, mixHex } from "../../design/colorMix.js";
 import { DISPLAY, MONO } from "../../design/typography.js";
 import {
   MORPH_FADE,
@@ -33,11 +32,6 @@ import {
 } from "./morphTiming.js";
 
 export function plannerStyles({ T, preferences }) {
-  /* Travel masks and the shell behind the shrinking card share one fill. A
-     hardcoded #17181b matched dark grounds and read as growing black wedges on
-     cream ones — most visible at the desktop right corners, where the wall is
-     only as wide as the radius so the scale-from-zero tiles dominate. */
-  const frameFill = isDark(T.bg) ? "#17181b" : mixHex(T.bg, "#17181b", 0.18);
   return `
         /* A touch browser zooms the whole viewport when it focuses a field whose
            text is under 16px, and every sheet here autofocuses one. Standalone
@@ -91,8 +85,7 @@ export function plannerStyles({ T, preferences }) {
           --nav-content-duration:260ms;
           --nav-item-stagger:30ms;
           --nav-ease:cubic-bezier(.22,.61,.36,1);
-          --nav-frame-fill:${frameFill};
-          position:relative;height:100dvh;overflow:clip;overflow-anchor:none;background:var(--nav-frame-fill);
+          position:relative;height:100dvh;overflow:clip;overflow-anchor:none;background:#17181b;
         }
         .nb-root{height:100%;overflow:clip;overflow-anchor:none}
         .nb-nav-viewport,
@@ -115,7 +108,7 @@ export function plannerStyles({ T, preferences }) {
            into the open margins so the planner surface keeps one raster
            instead of a changing clip-path. */
         .nb-nav-motion-mask{position:absolute;inset:0;z-index:3;pointer-events:none;overflow:visible}
-        .nb-nav-motion-mask>i{position:absolute;display:block;background:var(--nav-frame-fill);transform:translate3d(0,0,0)}
+        .nb-nav-motion-mask>i{position:absolute;display:block;background:#17181b;transform:translate3d(0,0,0)}
         .nb-nav-motion-mask>[data-nav-mask="top"]{top:0;left:0;right:0;height:var(--nav-mask-top);transform:translate3d(0,calc(-1 * var(--nav-mask-top)),0)}
         .nb-nav-motion-mask>[data-nav-mask="right"]{top:var(--nav-mask-top);right:0;bottom:var(--nav-mask-bottom);width:var(--nav-mask-right);transform:translate3d(var(--nav-mask-right),0,0)}
         .nb-nav-motion-mask>[data-nav-mask="bottom"]{left:0;right:0;bottom:0;height:var(--nav-mask-bottom);transform:translate3d(0,var(--nav-mask-bottom),0)}
@@ -130,10 +123,10 @@ export function plannerStyles({ T, preferences }) {
            interior corner instead so the tile is the outer rounding. Do not
            "simplify" this back to border-radius. Mobile keeps the original fill. */
         @media(min-width:640px){
-          .nb-nav-motion-mask>[data-nav-mask="top-left"]{border-bottom-right-radius:0;background:radial-gradient(circle farthest-side at 100% 100%,transparent 0 calc(100% - 0.5px),var(--nav-frame-fill) 100%)}
-          .nb-nav-motion-mask>[data-nav-mask="top-right"]{border-bottom-left-radius:0;background:radial-gradient(circle farthest-side at 0 100%,transparent 0 calc(100% - 0.5px),var(--nav-frame-fill) 100%)}
-          .nb-nav-motion-mask>[data-nav-mask="bottom-left"]{border-top-right-radius:0;background:radial-gradient(circle farthest-side at 100% 0,transparent 0 calc(100% - 0.5px),var(--nav-frame-fill) 100%)}
-          .nb-nav-motion-mask>[data-nav-mask="bottom-right"]{border-top-left-radius:0;background:radial-gradient(circle farthest-side at 0 0,transparent 0 calc(100% - 0.5px),var(--nav-frame-fill) 100%)}
+          .nb-nav-motion-mask>[data-nav-mask="top-left"]{border-bottom-right-radius:0;background:radial-gradient(circle farthest-side at 100% 100%,transparent 0 calc(100% - 0.5px),#17181b 100%)}
+          .nb-nav-motion-mask>[data-nav-mask="top-right"]{border-bottom-left-radius:0;background:radial-gradient(circle farthest-side at 0 100%,transparent 0 calc(100% - 0.5px),#17181b 100%)}
+          .nb-nav-motion-mask>[data-nav-mask="bottom-left"]{border-top-right-radius:0;background:radial-gradient(circle farthest-side at 100% 0,transparent 0 calc(100% - 0.5px),#17181b 100%)}
+          .nb-nav-motion-mask>[data-nav-mask="bottom-right"]{border-top-left-radius:0;background:radial-gradient(circle farthest-side at 0 0,transparent 0 calc(100% - 0.5px),#17181b 100%)}
         }
         .nb-nav-shell[data-nav-state="open"] .nb-nav-carrier,
         .nb-nav-shell[data-nav-state="open"] .nb-nav-motion-carrier,

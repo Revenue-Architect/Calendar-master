@@ -87,6 +87,17 @@ export function navPageFit({
   };
 }
 
+/** Where left/right travel walls must start so they meet the in-flight card.
+ *  Destination insets leave a strip past the rounded corner while clip-path is
+ *  none; the unclipped page shows through there. */
+export function sideWallInsets(progress, frame) {
+  const p = Math.min(1, Math.max(0, Number(progress) || 0));
+  return {
+    top: Number(((Number(frame?.top) || 0) * p).toFixed(3)),
+    bottom: Number(((Number(frame?.bottom) || 0) * p).toFixed(3)),
+  };
+}
+
 /* Mobile uses the same normalized progress as the frame and content carrier.
  * Keeping this pure makes the alignment contract testable without a browser:
  * at p=1 the rail's right edge meets the carrier's left edge, while the frame

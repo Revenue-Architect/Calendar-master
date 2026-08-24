@@ -44,10 +44,10 @@ function resumeNav(page) {
   return page.evaluate(() => document.getAnimations().forEach((animation) => animation.play()));
 }
 
-/* Frame paint follows --nav-frame-fill (obsidian still #17181b; cream is a
-   mixed ground). Card panels sit too close in RGB for a loose tolerance, so
-   interior is read from the screenshot itself and the frame colour is sampled
-   from the live shell rather than assumed. */
+/* Shell / mask fill is authored as #17181b on every theme. Card panels sit too
+   close in RGB for a loose tolerance, so interior is read from the screenshot
+   itself. */
+const FRAME_RGB = [0x17, 0x18, 0x1b];
 
 async function sampleCornerFramePct(page, decoder, names = CORNER_MASKS) {
   const info = await page.evaluate((maskNames) => {
@@ -68,12 +68,6 @@ async function sampleCornerFramePct(page, decoder, names = CORNER_MASKS) {
       }),
     };
   }, names);
-
-  const FRAME_RGB = await page.evaluate(() => {
-    const bg = getComputedStyle(document.querySelector('[data-test="nav-shell"]')).backgroundColor;
-    const channels = bg.match(/\d+/g);
-    return channels ? channels.slice(0, 3).map(Number) : [0x17, 0x18, 0x1b];
-  });
 
   const shot = (await page.screenshot()).toString("base64");
   const corners = await decoder.evaluate(async ({ shot, info, FRAME_RGB }) => {
@@ -335,7 +329,7 @@ test.describe("the floating navigation shell", () => {
     }
   });
 
-  test("light grounds do not paint dark travel tiles at the desktop right corners", async ({ page }) => {
+  test("the nav stage stays dark on a light ground, and in-flight right corners do not leak the page", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await openPlanner(page);
     await page.evaluate(() => {
@@ -356,18 +350,63 @@ test.describe("the floating navigation shell", () => {
     expect(opening.frozen, `opening p≈0.35 must freeze in flight, got state=${opening.state} p=${opening.progress}`).toBe(true);
 
     const paint = await page.evaluate(() => {
-      const shell = getComputedStyle(document.querySelector('[data-test="nav-shell"]')).backgroundColor;
-      const topRight = getComputedStyle(document.querySelector('[data-nav-mask="top-right"]'));
-      const bottomRight = getComputedStyle(document.querySelector('[data-nav-mask="bottom-right"]'));
+      const shell = document.querySelector('[data-test="nav-shell"]');
+      const right = document.querySelector('[data-nav-mask="right"]');
       return {
-        shell,
-        topRightImage: topRight.backgroundImage,
-        bottomRightImage: bottomRight.backgroundImage,
+        shell: getComputedStyle(shell).backgroundColor,
+        rightTop: right.getBoundingClientRect().top,
+        progress: Number(shell.dataset.navProgress),
       };
     });
-    expect(paint.shell, "cream ground must not keep the hardcoded dark stage").not.toBe("rgb(23, 24, 27)");
-    expect(paint.topRightImage, "top-right travel tile must follow the themed frame fill").not.toContain("23, 24, 27");
-    expect(paint.bottomRightImage, "bottom-right travel tile must follow the themed frame fill").not.toContain("23, 24, 27");
+    expect(paint.shell, "the stage is not a theme").toBe("rgb(23, 24, 27)");
+    expect(paint.rightTop, "the right wall must meet the in-flight card top, not the destination 24px inset")
+      .toBeLessThan(16);
+
+    const decoder = await page.context().newPage();
+    try {
+      const leak = await page.evaluate(() => {
+        const progress = Number(document.querySelector('[data-test="nav-shell"]').dataset.navProgress);
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        return {
+          progress,
+          viewportWidth: vw,
+          top: { x: vw - 4, y: (24 * progress + 24) / 2 },
+          bottom: { x: vw - 4, y: vh - (24 * progress + 24) / 2 },
+        };
+      });
+      const shot = (await page.screenshot()).toString("base64");
+      const samples = await decoder.evaluate(async ({ shot, leak, FRAME_RGB }) => {
+        const image = new Image();
+        image.src = `data:image/png;base64,${shot}`;
+        await image.decode();
+        const canvas = document.createElement("canvas");
+        canvas.width = image.width;
+        canvas.height = image.height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(image, 0, 0);
+        const ratio = image.width / leak.viewportWidth;
+        const read = (point) => {
+          const sx = Math.min(image.width - 1, Math.max(0, Math.round(point.x * ratio)));
+          const sy = Math.min(image.height - 1, Math.max(0, Math.round(point.y * ratio)));
+          const px = ctx.getImageData(sx, sy, 1, 1).data;
+          return [px[0], px[1], px[2]];
+        };
+        const dist = (rgb) => (
+          Math.abs(rgb[0] - FRAME_RGB[0]) + Math.abs(rgb[1] - FRAME_RGB[1]) + Math.abs(rgb[2] - FRAME_RGB[2])
+        );
+        return {
+          top: read(leak.top),
+          bottom: read(leak.bottom),
+          topDist: dist(read(leak.top)),
+          bottomDist: dist(read(leak.bottom)),
+        };
+      }, { shot, leak, FRAME_RGB });
+      expect(samples.topDist, `top-right margin ${samples.top.join(",")} must be stage, not page`).toBeLessThan(40);
+      expect(samples.bottomDist, `bottom-right margin ${samples.bottom.join(",")} must be stage, not page`).toBeLessThan(40);
+    } finally {
+      await decoder.close();
+    }
   });
 
   });
