@@ -19,9 +19,11 @@ import {
   shouldCommitSwipe,
   finishCommittedInteraction,
   interactionOwnerAllows,
+  recordTimelineGestureProposalHistory,
   resolveShortEventEdge,
   restoreCancelledInteraction,
   shouldYieldArmedHold,
+  timelineTouchReleaseIntent,
   updateInteractionProposal,
 } from "./timelineInteractionState.js";
 
@@ -107,6 +109,39 @@ test("the movement that crosses activation updates the proposal in that same fra
   const next = activateWithMovement(armed(), { start: 620, duration: 30, date: "2026-08-13" });
   assert.equal(next.phase, INTERACTION_PHASES.active);
   assert.equal(next.proposal.start, 620);
+});
+
+test("elapsed lift time alone is not recorded as manipulation", () => {
+  const active = activateInteraction(armed(), before);
+  assert.equal(active.phase, INTERACTION_PHASES.active);
+  assert.equal(active.proposalChanged, false);
+});
+
+test("proposal history survives a deliberate move back to the origin", () => {
+  const moved = updateInteractionProposal(
+    activateInteraction(armed(), before),
+    { start: 630, duration: 30, date: "2026-08-13" },
+  );
+  const returned = updateInteractionProposal(moved, before);
+  assert.equal(returned.proposalChanged, true);
+  assert.deepEqual(returned.proposal, before);
+  assert.equal(commitInteraction(returned).shouldPersist, false);
+});
+
+test("a lifted stationary touch inspects while a moved-returned touch remains a gesture", () => {
+  const stationary = { mode: "move", kind: "event", touchId: 1, start: 600, dur: 30, was: { start: 600, dur: 30 } };
+  assert.equal(timelineTouchReleaseIntent(stationary, activateInteraction(armed(), before), "2026-08-13"), "inspect");
+
+  const moved = { ...stationary, proposalChanged: true };
+  assert.equal(recordTimelineGestureProposalHistory(moved, moved, null, "2026-08-13"), true);
+  assert.equal(timelineTouchReleaseIntent(moved, null, "2026-08-13"), "finish");
+});
+
+test("an Action drop target counts as manipulation even when its time is unchanged", () => {
+  const action = { mode: "task", kind: "task", id: "task-a", touchId: 1, start: 600, dur: 30, was: { start: 600, dur: 30 } };
+  const overSibling = { ...action, overTask: "task-b" };
+  assert.equal(recordTimelineGestureProposalHistory(action, overSibling, null, "2026-08-13"), true);
+  assert.equal(timelineTouchReleaseIntent(overSibling, null, "2026-08-13"), "finish");
 });
 
 test("an armed hold yields to scroll once the shared threshold is crossed", () => {

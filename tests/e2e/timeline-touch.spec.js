@@ -4,6 +4,7 @@ import { createBlankPlannerState } from "../../src/platform/persistence/plannerS
 import { createEvent } from "../../src/domains/calendar/index.js";
 import { createTask } from "../../src/domains/tasks/index.js";
 import { keyOf } from "../../src/shared/time/dateKey.js";
+import { addMinutesToLocalDateTime, localDateTimeToEpochMinutes } from "../../src/shared/time/localDateTime.js";
 
 /* The timeline, under a finger.
  *
@@ -67,6 +68,42 @@ function compactAction() {
     planned: { date: today, startMinute: 10 * 60, estimateMinutes: 15 },
   });
   return { ...state, tasks: planned.tasks };
+}
+
+function scheduledAction({ id = "task-touch-hold", title = "Move the brief", estimateMinutes = 60 } = {}) {
+  const state = createBlankPlannerState({});
+  const planned = createTask(state.tasks, {
+    id, title,
+    planned: { date: today, startMinute: 10 * 60, estimateMinutes },
+  });
+  return { ...state, tasks: planned.tasks };
+}
+
+function scheduledActionsForReorder() {
+  const state = createBlankPlannerState({});
+  let tasks = createTask(state.tasks, {
+    id: "task-reorder-a", title: "Move me after the sibling",
+    planned: { date: today, startMinute: 10 * 60, estimateMinutes: 60 },
+  }).tasks;
+  for (let index = 0; index < 8; index += 1) {
+    tasks = createTask(tasks, { id: `task-filler-${index}`, title: `Filler ${index + 1}` }).tasks;
+  }
+  tasks = createTask(tasks, {
+    id: "task-reorder-b", title: "Reorder target",
+    planned: { date: today, startMinute: 12 * 60, estimateMinutes: 60 },
+  }).tasks;
+  return { ...state, tasks };
+}
+
+function shortEvent(durationMinutes) {
+  const startLocal = `${today}T10:00`;
+  return createEvent(createBlankPlannerState({}), {
+    calendarId: "calendar-default", title: `${durationMinutes}-minute body`, category: "PEOPLE",
+    timing: {
+      kind: "timed", timeZoneMode: "floating",
+      startLocal, endLocal: addMinutesToLocalDateTime(startLocal, durationMinutes),
+    },
+  }, { id: `evt-short-${durationMinutes}` }).state;
 }
 
 const card = (page) => page.locator('[data-event-id="evt-standup"]');
@@ -218,7 +255,7 @@ test.describe("a resize grip is part of the card it sits on", () => {
     return h * 60 + m;
   };
 
-  test("an ordinary one-hour Event keeps full-width start and end ownership", async ({ page }) => {
+  test("an ordinary one-hour Event keeps full-width mouse edges and centred touch cues", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await seedPlanner(page, seeded({
       startLocal: `${today}T10:00`,
@@ -228,14 +265,25 @@ test.describe("a resize grip is part of the card it sits on", () => {
     await event.scrollIntoViewIfNeeded();
     const start = event.locator('[data-touch-resize="start"]');
     const end = event.locator('[data-touch-resize="end"]');
+    const desktopStart = event.locator('[data-resize-edge="start"]:not([data-touch-resize])');
+    const desktopEnd = event.locator('[data-resize-edge="end"]:not([data-touch-resize])');
     await expect(start, "a normal one-hour Event must remain touch-resizable at its start").toHaveCount(1);
     await expect(end, "a normal one-hour Event must remain touch-resizable at its end").toHaveCount(1);
 
-    const [eventBox, startBox, endBox] = await Promise.all([
-      event.boundingBox(), start.boundingBox(), end.boundingBox(),
+    const [eventBox, startBox, endBox, desktopStartBox, desktopEndBox] = await Promise.all([
+      event.boundingBox(), start.boundingBox(), end.boundingBox(), desktopStart.boundingBox(), desktopEnd.boundingBox(),
     ]);
-    expect(startBox.width, "the start edge must not be a small corner target").toBeGreaterThan(eventBox.width - 2);
-    expect(endBox.width, "the end edge must not be a small corner target").toBeGreaterThan(eventBox.width - 2);
+    expect(eventBox).not.toBeNull();
+    expect(startBox).not.toBeNull();
+    expect(endBox).not.toBeNull();
+    expect(desktopStartBox).not.toBeNull();
+    expect(desktopEndBox).not.toBeNull();
+    expect(desktopStartBox.width, "mouse start resize must span the Event").toBeGreaterThan(eventBox.width - 2);
+    expect(desktopEndBox.width, "mouse end resize must span the Event").toBeGreaterThan(eventBox.width - 2);
+    expect(startBox.width, "touch start resize must stay local to its visible cue").toBeLessThanOrEqual(44);
+    expect(endBox.width, "touch end resize must stay local to its visible cue").toBeLessThanOrEqual(44);
+    expect(startBox.x + startBox.width / 2).toBeCloseTo(eventBox.x + eventBox.width / 2, 0);
+    expect(endBox.x + endBox.width / 2).toBeCloseTo(eventBox.x + eventBox.width / 2, 0);
     expect(startBox.height, "the start edge must leave a readable move body").toBeLessThanOrEqual(12);
     expect(endBox.height, "the end edge must leave a readable move body").toBeLessThanOrEqual(14);
     await expect(event.locator("[data-touch-move]"), "the Event body itself is the move surface").toHaveCount(0);
@@ -332,8 +380,10 @@ test.describe("a resize grip is part of the card it sits on", () => {
     expect(cardBox).not.toBeNull();
     expect(startBox).not.toBeNull();
     expect(endBox).not.toBeNull();
-    expect(startBox.x).toBeCloseTo(cardBox.x, 0);
-    expect(endBox.x + endBox.width).toBeCloseTo(cardBox.x + cardBox.width, 0);
+    expect(startBox.width).toBeLessThanOrEqual(44);
+    expect(endBox.width).toBeLessThanOrEqual(44);
+    expect(startBox.x + startBox.width / 2).toBeCloseTo(cardBox.x + cardBox.width / 2, 0);
+    expect(endBox.x + endBox.width / 2).toBeCloseTo(cardBox.x + cardBox.width / 2, 0);
     expect(startBox.y + startBox.height).toBeLessThanOrEqual(endBox.y);
   });
 
@@ -429,8 +479,8 @@ test.describe("a resize grip is part of the card it sits on", () => {
     const join = event.getByRole("link", { name: "Join Linked planning session" });
     await event.scrollIntoViewIfNeeded();
     await expect(join).toBeVisible();
-    const start = event.locator('[data-touch-resize="start"]');
-    const end = event.locator('[data-touch-resize="end"]');
+    const start = event.locator('[data-resize-edge="start"]:not([data-touch-resize])');
+    const end = event.locator('[data-resize-edge="end"]:not([data-touch-resize])');
     await expect(start).toHaveCount(1);
     await expect(end).toHaveCount(1);
     const [cardBox, startBox, endBox, joinBox] = await Promise.all([
@@ -670,6 +720,49 @@ test.describe("stable Event edge and body touch ownership", () => {
     await expect(sheets(page), "an Event body move must not inspect the card").toHaveCount(0);
   });
 
+  /* These waits characterize the product clock well beyond the 300ms lift.
+     They are not synchronization delays: each sequence must remain a live move
+     candidate however long the finger stays down after lift. */
+  for (const holdMs of [600, 1000]) {
+    test(`an Event body still moves after a ${holdMs}ms hold`, async ({ page }) => {
+      await seedPlanner(page, seeded());
+      const event = card(page);
+      await event.scrollIntoViewIfNeeded();
+      const title = event.locator("span[title]").first();
+      const box = await title.boundingBox();
+      expect(box, "the Event body is not measurable").not.toBeNull();
+      const x = box.x + box.width / 2;
+      const y = box.y + box.height / 2;
+
+      await finger(page, { x, y, holdMs, to: { x, y: y + HOUR_PX } });
+
+      const timing = (await stored(page, (value) => value.startLocal === `${today}T11:00`, `the Event body stopped moving after ${holdMs}ms`)).events[0].timing;
+      expect(timing.startLocal).toBe(`${today}T11:00`);
+      expect(timing.endLocal, "a long-held Event move must preserve duration").toBe(`${today}T13:00`);
+      await expect(sheets(page), "a long-held Event move must not inspect").toHaveCount(0);
+    });
+  }
+
+  test("a stationary 1000ms Event hold releases as inspect without writing", async ({ page }) => {
+    await seedPlanner(page, seeded());
+    const event = card(page);
+    await event.scrollIntoViewIfNeeded();
+    const before = (await settledState(page, () => true, "the notebook never settled")).events[0].timing;
+    const title = event.locator("span[title]").first();
+    const box = await title.boundingBox();
+    expect(box, "the Event body is not measurable").not.toBeNull();
+
+    await finger(page, {
+      x: box.x + box.width / 2,
+      y: box.y + box.height / 2,
+      holdMs: 1000,
+    });
+
+    const after = (await settledState(page, () => true, "the notebook never settled after the stationary Event hold")).events[0].timing;
+    expect(after, "a stationary Event hold must not write").toEqual(before);
+    await expect(sheets(page), "a stationary Event hold must open its inspector on release").toHaveCount(1);
+  });
+
   test("the Event start edge resizes after lift", async ({ page }) => {
     await seedPlanner(page, seeded());
     const event = card(page);
@@ -781,7 +874,7 @@ test.describe("stable Event edge and body touch ownership", () => {
     await expect(sheets(page), "mouse activation must inspect the Event").toHaveCount(1);
   });
 
-  test("touch scrolling from Event body outside direct controls does not mutate or inspect it", async ({ page }) => {
+  test("pre-lift touch scrolling from Event body physically moves the Day without writing or inspecting", async ({ page }) => {
     await seedPlanner(page, seeded());
     const event = card(page);
     await event.scrollIntoViewIfNeeded();
@@ -809,6 +902,9 @@ test.describe("stable Event edge and body touch ownership", () => {
 
     const session = await page.context().newCDPSession(page);
     await session.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+    /* This is deliberately inside the 300ms lift window. It characterizes the
+       product clock; the movement below, not this delay, synchronizes the test. */
+    await page.waitForTimeout(150);
     await session.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y: y + 80 }] });
     await expect.poll(() => stream.evaluate((node, initial) => Math.abs(node.scrollTop - initial), beforeScroll), {
       message: "vertical Event body touch should physically scroll the Day timeline",
@@ -822,23 +918,59 @@ test.describe("stable Event edge and body touch ownership", () => {
     await expect(sheets(page), "scrolling from Event body must not inspect it").toHaveCount(0);
   });
 
-  test("Event resize edges are visible, full-width, scroll-safe, and leave JOIN authoritative", async ({ page }) => {
+  test("touch-start scroll authorization expires after the touch sequence", async ({ page }) => {
+    await seedPlanner(page, seeded());
+    const event = card(page);
+    await event.scrollIntoViewIfNeeded();
+    const title = event.locator("span[title]").first();
+    const box = await title.boundingBox();
+    expect(box, "the Event body is not measurable").not.toBeNull();
+
+    await finger(page, { x: box.x + box.width / 2, y: box.y + box.height / 2 });
+    await expect(sheets(page), "the control touch sequence must finish as a tap").toHaveCount(1);
+    await closeAnySheet(page);
+    const chrome = page.getByTestId("timeline-chrome");
+    const stream = page.getByTestId("day-stream");
+    await expect(chrome).toHaveAttribute("data-collapsed", "false");
+
+    /* Layout code can move the stream without user intent. Once touchend has
+       closed the authorization window, that later scroll must not impersonate
+       the old finger and collapse the Timeline chrome. */
+    await stream.evaluate((node) => {
+      node.scrollTop += 120;
+      node.dispatchEvent(new Event("scroll"));
+    });
+    await expect(chrome, "a completed touch sequence left scroll authorization live")
+      .toHaveAttribute("data-collapsed", "false");
+  });
+
+  test("Event mouse edges stay full-width while touch cues stay local and leave JOIN authoritative", async ({ page }) => {
     await seedPlanner(page, linkedSeeded());
     const event = page.locator('[data-event-id="evt-linked"]');
     await event.scrollIntoViewIfNeeded();
     const start = event.locator('[data-touch-resize="start"]');
     const end = event.locator('[data-touch-resize="end"]');
+    const desktopStart = event.locator('[data-resize-edge="start"]:not([data-touch-resize])');
+    const desktopEnd = event.locator('[data-resize-edge="end"]:not([data-touch-resize])');
     const join = event.getByRole("link", { name: "Join Linked planning session" });
     await expect(start).toHaveCount(1);
     await expect(end).toHaveCount(1);
     await expect(join).toBeVisible();
 
     const [startGeom, endGeom] = await Promise.all([controlGeometry(start), controlGeometry(end)]);
+    const [desktopStartBox, desktopEndBox, eventBox] = await Promise.all([
+      desktopStart.boundingBox(), desktopEnd.boundingBox(), event.boundingBox(),
+    ]);
     const joinBox = await join.boundingBox();
+    expect(eventBox, "the Event has no measurable box").not.toBeNull();
+    expect(desktopStartBox, "the desktop start edge has no measurable box").not.toBeNull();
+    expect(desktopEndBox, "the desktop end edge has no measurable box").not.toBeNull();
     expect(joinBox, "JOIN has no measurable box").not.toBeNull();
+    expect(desktopStartBox.width, "desktop start resize must span the Event").toBeGreaterThan(eventBox.width - 2);
+    expect(desktopEndBox.width, "desktop end resize must span the Event").toBeGreaterThan(eventBox.width - 2);
 
     for (const [label, geom] of [["start resize", startGeom], ["end resize", endGeom]]) {
-      expect(geom.box.width, `the Event ${label} edge must span the card`).toBeGreaterThanOrEqual(joinBox.width * 3);
+      expect(geom.box.width, `the Event ${label} touch cue must stay local`).toBeLessThanOrEqual(44);
       expect(geom.box.height, `the Event ${label} edge must leave a body move lane`).toBeLessThanOrEqual(12);
       expect(geom.style.visibility).not.toBe("hidden");
       expect(geom.style.opacity, `the Event ${label} cue must not be transparent`).not.toBe("0");
@@ -898,6 +1030,129 @@ test.describe("stable Event edge and body touch ownership", () => {
       expect(point.resize).toBeNull();
       expect(point.join).toBe(false);
     }
+  });
+});
+
+test.describe("short Event body touch ownership", () => {
+  for (const durationMinutes of [10, 15, 16, 20, 23, 30]) {
+    test(`a ${durationMinutes}-minute Event keeps a body move surface between its resize cues`, async ({ page }) => {
+      await seedPlanner(page, shortEvent(durationMinutes));
+      const event = page.locator(`[data-event-id="evt-short-${durationMinutes}"]`);
+      await event.scrollIntoViewIfNeeded();
+      const before = (await settledState(page, () => true, "the short Event never settled")).events[0].timing;
+      const eventBox = await event.boundingBox();
+      expect(eventBox, "the short Event is not measurable").not.toBeNull();
+      const point = { x: eventBox.x + eventBox.width / 2, y: eventBox.y + eventBox.height / 2 };
+      const ownership = await page.evaluate(({ x, y }) => {
+        const hit = document.elementFromPoint(x, y);
+        return {
+          event: hit?.closest?.("[data-event-id]")?.getAttribute("data-event-id") ?? null,
+          resize: hit?.closest?.("[data-touch-resize]")?.getAttribute("data-touch-resize") ?? null,
+        };
+      }, point);
+      expect(ownership.event).toBe(`evt-short-${durationMinutes}`);
+
+      await finger(page, { x: point.x, y: point.y, holdMs: 340, to: { x: point.x, y: point.y + HOUR_PX } });
+
+      const state = await settledState(page, () => true, `the ${durationMinutes}-minute Event never settled after its body gesture`);
+      const timing = state.events[0].timing;
+      expect.soft(ownership.resize, "the short Event center must be body-owned, not a resize edge").toBeNull();
+      expect.soft(timing.startLocal, "the short Event center must persist a body move").toBe(`${today}T11:00`);
+      const beforeDuration = localDateTimeToEpochMinutes(before.endLocal) - localDateTimeToEpochMinutes(before.startLocal);
+      const afterDuration = localDateTimeToEpochMinutes(timing.endLocal) - localDateTimeToEpochMinutes(timing.startLocal);
+      expect.soft(afterDuration, "a short Event body move must preserve duration").toBe(beforeDuration);
+    });
+  }
+});
+
+test.describe("long-held Action body touch", () => {
+  /* As above, 600ms and 1000ms are intentional product-clock dwell times, not
+     waits for the page to become ready. */
+  for (const holdMs of [600, 1000]) {
+    test(`a scheduled Action body still moves after a ${holdMs}ms hold`, async ({ page }) => {
+      await seedPlanner(page, scheduledAction({ id: `task-hold-${holdMs}` }));
+      const action = page.locator(`[data-task-chip="task-hold-${holdMs}"]`);
+      await action.scrollIntoViewIfNeeded();
+      const title = action.locator(".nb-lead").first();
+      const box = await title.boundingBox();
+      expect(box, "the Action body is not measurable").not.toBeNull();
+      const before = (await settledState(page, () => true, "the Action never settled")).tasks[0].planned;
+      const x = box.x + box.width / 2;
+      const y = box.y + box.height / 2;
+
+      await finger(page, { x, y, holdMs, to: { x, y: y + HOUR_PX } });
+
+      const state = await settledState(page, (stored) => stored.tasks[0].planned.startMinute === 11 * 60, `the Action body stopped moving after ${holdMs}ms`);
+      expect(state.tasks[0].planned.startMinute).toBe(11 * 60);
+      expect(state.tasks[0].planned.date, "a long-held Action move must preserve date").toBe(before.date);
+      expect(state.tasks[0].planned.estimateMinutes, "a long-held Action move must preserve estimate").toBe(before.estimateMinutes);
+      await expect(sheets(page), "a long-held Action move must not inspect").toHaveCount(0);
+    });
+  }
+
+  test("a stationary 1000ms Action hold releases as inspect without writing", async ({ page }) => {
+    await seedPlanner(page, scheduledAction({ id: "task-stationary-long", title: "Inspect the brief" }));
+    const action = page.locator('[data-task-chip="task-stationary-long"]');
+    await action.scrollIntoViewIfNeeded();
+    const title = action.locator(".nb-lead").first();
+    const box = await title.boundingBox();
+    expect(box, "the Action body is not measurable").not.toBeNull();
+    const before = (await settledState(page, () => true, "the Action never settled")).tasks[0].planned;
+
+    await finger(page, {
+      x: box.x + box.width / 2,
+      y: box.y + box.height / 2,
+      holdMs: 1000,
+    });
+
+    const after = (await settledState(page, () => true, "the notebook never settled after the stationary Action hold")).tasks[0].planned;
+    expect(after, "a stationary Action hold must not write").toEqual(before);
+    await expect(sheets(page), "a stationary Action hold must open its inspector on release").toHaveCount(1);
+  });
+});
+
+test.describe("cross-surface Action touch ownership", () => {
+  test.use({ viewport: { width: 1280, height: 900 }, hasTouch: true, isMobile: false });
+
+  test("a held Action can reorder over a sibling without becoming an inspector tap", async ({ page }) => {
+    await seedPlanner(page, scheduledActionsForReorder());
+    const column = page.getByTestId("actions-column");
+    if (!(await column.isVisible())) await page.getByTestId("actions-restore").click();
+    await expect(column).toBeVisible();
+
+    const source = page.locator('[data-task-chip="task-reorder-a"]');
+    const target = column.locator('[data-task="task-reorder-b"]');
+    await source.scrollIntoViewIfNeeded();
+    await target.scrollIntoViewIfNeeded();
+    const sourceBox = await source.boundingBox();
+    let targetBox = await target.boundingBox();
+    expect(sourceBox, "the scheduled Action is not measurable").not.toBeNull();
+    expect(targetBox, "the reorder target is not measurable").not.toBeNull();
+    const sourcePoint = { x: sourceBox.x + sourceBox.width / 2, y: sourceBox.y + sourceBox.height / 2 };
+
+    await column.evaluate((node, delta) => { node.scrollTop += delta; }, targetBox.y + targetBox.height / 2 - sourcePoint.y);
+    targetBox = await target.boundingBox();
+    expect(sourcePoint.y, "the target could not be aligned with an unchanged-time horizontal drop").toBeGreaterThan(targetBox.y + 2);
+    expect(sourcePoint.y, "the target could not be aligned with an unchanged-time horizontal drop").toBeLessThan(targetBox.y + targetBox.height - 2);
+
+    const before = await settledState(page, () => true, "the reorder fixture never settled");
+    const beforeAction = before.tasks.find((task) => task.id === "task-reorder-a");
+    await finger(page, {
+      x: sourcePoint.x,
+      y: sourcePoint.y,
+      holdMs: 340,
+      to: { x: targetBox.x + targetBox.width / 2, y: sourcePoint.y },
+    });
+
+    const after = await settledState(
+      page,
+      (state) => state.tasks.find((task) => task.id === "task-reorder-a").rank
+        > state.tasks.find((task) => task.id === "task-reorder-b").rank,
+      "the held Action never reordered over its sibling",
+    );
+    const moved = after.tasks.find((task) => task.id === "task-reorder-a");
+    expect(moved.planned, "reordering must not reschedule the Action").toEqual(beforeAction.planned);
+    await expect(sheets(page), "a semantic reorder must not become an inspector tap").toHaveCount(0);
   });
 });
 
