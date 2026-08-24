@@ -41,6 +41,16 @@ export const ACTION_SWIPE_COMMIT_PX = 64;
    mis-drag; an action's estimate is a unit of work and rounds coarser. */
 export const MIN_EVENT_MINUTES = 10;
 export const MIN_TASK_MINUTES = 15;
+/* Visual floor for a timed block on the day stream. Events already use 22px so
+   a title line still fits; Actions used 44px, which at 68px/hour is ~41 minutes
+   and made shorter estimates look stuck while the stored value kept falling. */
+export const TIMELINE_BLOCK_MIN_PX = 22;
+
+/** Pixel height of a timed block on the day stream. */
+export function timelineBlockHeight(minutes, dayHeight, minPx = TIMELINE_BLOCK_MIN_PX) {
+  const occupy = (finite(minutes, 0) / MINUTES_PER_DAY) * finite(dayHeight, 0) - 3;
+  return Math.max(minPx, occupy);
+}
 
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 const finite = (value, fallback = 0) => (Number.isFinite(value) ? value : fallback);

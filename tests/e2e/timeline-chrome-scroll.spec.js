@@ -57,11 +57,26 @@ for (const tier of [
 
         const before = await scroller.evaluate((node) => node.scrollTop);
         await movePointerOverScroller(page, scroller);
+        /* Day hours are 68px; a 24px wheel stays in 12AM. Week columns map the
+           same delta onto a much taller stream, so the short-scroll probe is
+           day-only — week still uses the collapse-on-real-travel path below. */
+        if (surface === "day") {
+          await page.mouse.wheel(0, 24);
+          await expect.poll(
+            () => scroller.evaluate((node) => node.scrollTop),
+            { message: "a short wheel from midnight must move the stream" },
+          ).toBeGreaterThan(before);
+          const afterShort = await scroller.evaluate((node) => node.scrollTop);
+          expect(afterShort, "the short probe must stay inside the first hour row").toBeLessThan(68);
+          await expect(chrome(page), "one hour-row of scroll must not collapse the ribbon")
+            .toHaveAttribute("data-collapsed", "false");
+          await movePointerOverScroller(page, scroller);
+        }
         await page.mouse.wheel(0, 500);
         await expect.poll(
           () => scroller.evaluate((node) => node.scrollTop),
           { message: "real wheel input must move the timeline away from midnight" },
-        ).toBeGreaterThan(before + 1);
+        ).toBeGreaterThan(68);
         await expect(chrome(page),
           "scrolling away from midnight must collapse the chrome")
           .toHaveAttribute("data-collapsed", "true");

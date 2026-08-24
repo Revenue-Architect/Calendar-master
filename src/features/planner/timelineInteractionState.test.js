@@ -189,6 +189,17 @@ test("timelineChromeIntent collapses only past the trigger, moving away", () => 
   assert.equal(timelineChromeIntent({ previousScrollTop: 0, nextScrollTop: 10 }), "restore");
 });
 
+test("timelineChromeIntent treats one hour of scroll as still the top of the day", () => {
+  /* One wheel tick (~24px) used to collapse the week ribbon. The live trigger
+     is the current hour row so midnight stays visible until the reader has
+     actually left 12AM. */
+  const hour = 68;
+  assert.equal(timelineChromeIntent({ previousScrollTop: 0, nextScrollTop: 24, triggerPx: hour }), "restore");
+  assert.equal(timelineChromeIntent({ previousScrollTop: 0, nextScrollTop: 40, triggerPx: hour }), "restore");
+  assert.equal(timelineChromeIntent({ previousScrollTop: 0, nextScrollTop: hour, triggerPx: hour }), "restore");
+  assert.equal(timelineChromeIntent({ previousScrollTop: 0, nextScrollTop: hour + 1, triggerPx: hour }), "collapse");
+});
+
 test("timelineChromeIntent ignores sub-pixel jitter in both directions", () => {
   assert.equal(timelineChromeIntent({ previousScrollTop: 500, nextScrollTop: 500 }), "none");
   assert.equal(timelineChromeIntent({ previousScrollTop: 500, nextScrollTop: 500.5 }), "none");

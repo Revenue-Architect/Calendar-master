@@ -1190,10 +1190,11 @@ test.describe("the visible Action estimate owns a direct resize on touch", () =>
       await estimate.scrollIntoViewIfNeeded();
     const [laneBox, estimateBox] = await Promise.all([lane.boundingBox(), estimate.boundingBox()]);
     expect(laneBox, "the compact Action lane is not measurable").not.toBeNull();
-    expect(laneBox.height, "the compact Action outer lane must stay at its 44px layout minimum").toBeCloseTo(44, 0);
+    expect(laneBox.height, "a 15-minute Action must paint below the old 44px floor").toBeLessThan(35);
+    expect(laneBox.height, "a 15-minute Action still has a title-sized floor").toBeGreaterThanOrEqual(22);
     expect(estimateBox, "the compact Action estimate control is not measurable").not.toBeNull();
     expect(estimateBox.width, "compact Action estimate control must retain its 48px lane").toBe(48);
-    expect(estimateBox.height, "compact Action estimate control must be at least 44px tall").toBeGreaterThanOrEqual(44);
+    expect(estimateBox.height, "compact Action estimate follows the painted block, not a 44px height floor").toBeLessThan(35);
     const ownership = await lane.evaluate((node) => {
       const box = node.getBoundingClientRect();
       const body = document.elementFromPoint(box.left + box.width * 0.55, box.top + box.height / 2);

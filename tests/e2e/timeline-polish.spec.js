@@ -178,6 +178,7 @@ test.describe("mobile timeline focus", () => {
     expect(motion.innerTransform).toContain("transform");
     expect(motion.innerTransform).toContain("opacity");
     expect(motion.innerDuration).toContain("0.3s");
+    expect(motion.innerDuration, "inner fade must share the 300ms height path, not outrun it").not.toContain("0.24s");
 
     await toggle.click();
     await page.waitForTimeout(70);
@@ -659,7 +660,12 @@ test.describe("Timeline Action progress", () => {
         const timeBox = await time.boundingBox();
         if (timeBox) expect(noOverlap(timeBox, donutBox), "donut must not cover the time").toBe(true);
       }
-      expect(height).toBeGreaterThanOrEqual(44);
+      /* Preferred hour row is 68px. 15m floors at 22; 30m is 31; 60m is 65. */
+      const occupy = minutes === 15 ? 22
+        : minutes === 30 ? 31
+        : minutes === 60 ? 65
+        : 133;
+      expect(height).toBeCloseTo(occupy, 0);
 
       const owner = await page.evaluate(({ x, y }) => {
         const hit = document.elementFromPoint(x, y);

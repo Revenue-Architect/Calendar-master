@@ -9,6 +9,7 @@ import {
   MINUTES_PER_DAY,
   MIN_EVENT_MINUTES,
   MIN_TASK_MINUTES,
+  timelineBlockHeight,
   gestureChangedAnything,
   isResizable,
   liftDelayForTimelineTarget,
@@ -179,6 +180,17 @@ test("the floors are the ones the surfaces are told to use", () => {
   assert.equal(minimumFor("event"), MIN_EVENT_MINUTES);
   assert.equal(minimumFor("task"), MIN_TASK_MINUTES);
   assert.equal(minimumFor(undefined), MIN_EVENT_MINUTES);
+});
+
+test("an Action block paints below 44px once the estimate drops under ~41 minutes", () => {
+  /* Preferred hour row is 68px (HOUR_H). A 30-minute claim is half an hour
+     minus the 3px inter-card gap: 31px. The old paint floor of 44px made every
+     drag below ~41 minutes look stuck. */
+  const dayHeight = 68 * 24;
+  assert.equal(timelineBlockHeight(30, dayHeight), 31);
+  assert.equal(timelineBlockHeight(15, dayHeight), 22);
+  assert.ok(timelineBlockHeight(30, dayHeight) < 44);
+  assert.equal(timelineBlockHeight(60, dayHeight), 65);
 });
 
 test("garbage in does not produce a record that cannot exist", () => {

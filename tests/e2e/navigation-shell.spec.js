@@ -44,9 +44,10 @@ function resumeNav(page) {
   return page.evaluate(() => document.getAnimations().forEach((animation) => animation.play()));
 }
 
-/* Shell / mask fill is authored as #17181b. Card panels sit too close in RGB
-   for a loose tolerance, so interior is read from the screenshot itself. */
-const FRAME_RGB = [0x17, 0x18, 0x1b];
+/* Frame paint follows --nav-frame-fill (obsidian still #17181b; cream is a
+   mixed ground). Card panels sit too close in RGB for a loose tolerance, so
+   interior is read from the screenshot itself and the frame colour is sampled
+   from the live shell rather than assumed. */
 
 async function sampleCornerFramePct(page, decoder, names = CORNER_MASKS) {
   const info = await page.evaluate((maskNames) => {
@@ -67,6 +68,12 @@ async function sampleCornerFramePct(page, decoder, names = CORNER_MASKS) {
       }),
     };
   }, names);
+
+  const FRAME_RGB = await page.evaluate(() => {
+    const bg = getComputedStyle(document.querySelector('[data-test="nav-shell"]')).backgroundColor;
+    const channels = bg.match(/\d+/g);
+    return channels ? channels.slice(0, 3).map(Number) : [0x17, 0x18, 0x1b];
+  });
 
   const shot = (await page.screenshot()).toString("base64");
   const corners = await decoder.evaluate(async ({ shot, info, FRAME_RGB }) => {
@@ -326,6 +333,41 @@ test.describe("the floating navigation shell", () => {
     for (const sample of samples) {
       expectConvexCorners(sample, CORNER_MASKS, sample.label);
     }
+  });
+
+  test("light grounds do not paint dark travel tiles at the desktop right corners", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await openPlanner(page);
+    await page.evaluate(() => {
+      const stored = JSON.parse(localStorage.getItem("nbmp:preferences:v1") || "{}");
+      localStorage.setItem("nbmp:preferences:v1", JSON.stringify({
+        schemaVersion: 2,
+        display: { ...(stored.display || {}), themeId: "cream-terracotta" },
+        feedback: stored.feedback || { sound: true, haptics: true },
+        notifications: stored.notifications || { systemEnabled: false },
+        motivation: stored.motivation || { points: true, levels: true, streaks: true, celebrations: true },
+      }));
+    });
+    await page.reload();
+    await expect(page.getByTestId("day-stream")).toBeVisible();
+
+    await page.getByTestId("nav-toggle").click();
+    const opening = await freezeNavAt(page, 0.35);
+    expect(opening.frozen, `opening p≈0.35 must freeze in flight, got state=${opening.state} p=${opening.progress}`).toBe(true);
+
+    const paint = await page.evaluate(() => {
+      const shell = getComputedStyle(document.querySelector('[data-test="nav-shell"]')).backgroundColor;
+      const topRight = getComputedStyle(document.querySelector('[data-nav-mask="top-right"]'));
+      const bottomRight = getComputedStyle(document.querySelector('[data-nav-mask="bottom-right"]'));
+      return {
+        shell,
+        topRightImage: topRight.backgroundImage,
+        bottomRightImage: bottomRight.backgroundImage,
+      };
+    });
+    expect(paint.shell, "cream ground must not keep the hardcoded dark stage").not.toBe("rgb(23, 24, 27)");
+    expect(paint.topRightImage, "top-right travel tile must follow the themed frame fill").not.toContain("23, 24, 27");
+    expect(paint.bottomRightImage, "bottom-right travel tile must follow the themed frame fill").not.toContain("23, 24, 27");
   });
 
   });
