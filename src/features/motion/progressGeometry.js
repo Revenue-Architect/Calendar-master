@@ -26,6 +26,51 @@ export function progressSegmentDelay(index, previousDone, doneCount, {
   return (newly / lastNew) * capMs;
 }
 
+function polarPoint(cx, cy, r, deg) {
+  const rad = (deg * Math.PI) / 180;
+  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+}
+
+/* Clockwise arcs from 12 o'clock. One item is a closed circle so a lone
+   step does not look like a broken ring. */
+export function progressRingSegments(total, {
+  cx = 10,
+  cy = 10,
+  r = 7,
+  gapDeg = 14,
+  startDeg = -90,
+} = {}) {
+  const n = Math.max(0, Math.floor(finite(total)));
+  if (!n) return [];
+  if (n === 1) {
+    return [{
+      kind: "circle",
+      cx,
+      cy,
+      r,
+      length: 2 * Math.PI * r,
+      from: { x: cx, y: cy - r },
+    }];
+  }
+  const slot = 360 / n;
+  const gap = Math.min(slot * 0.28, Math.max(6, finite(gapDeg, 14)));
+  const sweep = slot - gap;
+  return Array.from({ length: n }, (_, index) => {
+    const start = startDeg + index * slot + gap / 2;
+    const end = start + sweep;
+    const from = polarPoint(cx, cy, r, start);
+    const to = polarPoint(cx, cy, r, end);
+    const large = sweep > 180 ? 1 : 0;
+    return {
+      kind: "arc",
+      d: `M ${from.x.toFixed(4)} ${from.y.toFixed(4)} A ${r} ${r} 0 ${large} 1 ${to.x.toFixed(4)} ${to.y.toFixed(4)}`,
+      length: (sweep * Math.PI / 180) * r,
+      from,
+      to,
+    };
+  });
+}
+
 export function holdProgress(elapsedMs, holdDurationMs = 640) {
   if (!Number.isFinite(elapsedMs) || elapsedMs <= 0) return 0;
   if (!Number.isFinite(holdDurationMs) || holdDurationMs <= 0) return 1;

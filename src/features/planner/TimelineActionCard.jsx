@@ -57,6 +57,7 @@ export default function TimelineActionCard({
     open();
   };
   const done = task.status === "completed";
+  const hasWorkProgress = (task.checklist?.length > 0) || ((subtaskProgress?.total ?? 0) > 0);
 
   /* Native listeners stay on the card root. The move body, checkmark, and
      estimate each occupy a different region, so a captured pointer cannot turn
@@ -148,9 +149,10 @@ export default function TimelineActionCard({
             density="compact"
             className="pointer-events-none absolute z-[11]"
             style={{
-              left: ACTION_COMPLETION_LANE,
-              right: resizeEligible ? ACTION_ESTIMATE_LANE : 0,
-              bottom: 5,
+              top: 5,
+              right: resizeEligible ? ACTION_ESTIMATE_LANE + 2 : 5,
+              width: 18,
+              height: 18,
             }}
           />
           <button type="button" onClick={open} onKeyDown={keyOpen}
@@ -159,6 +161,7 @@ export default function TimelineActionCard({
               top: 0, bottom: 0,
               left: ACTION_COMPLETION_LANE,
               right: resizeEligible ? 48 : 0,
+              paddingRight: hasWorkProgress ? 22 : 0,
               display: "flex", flexDirection: "column", justifyContent: "flex-start",
               background: "transparent", borderRadius: 0, touchAction: "pan-y",
             }}>

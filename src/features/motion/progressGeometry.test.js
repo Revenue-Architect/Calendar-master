@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   progressSegmentStates,
   progressSegmentDelay,
+  progressRingSegments,
   holdProgress,
   holdRatchetStep,
   holdRadialDashOffset,
@@ -26,6 +27,31 @@ test("segment stagger only delays newly filled segments and caps the cascade", (
   assert.equal(progressSegmentDelay(3, 2, 4), 60);
   assert.equal(progressSegmentDelay(9, 0, 10), 160);
   assert.ok(progressSegmentDelay(5, 0, 10) <= 160);
+});
+
+test("ring segments are equal clockwise arcs from 12 o'clock", () => {
+  const segs = progressRingSegments(4, { cx: 10, cy: 10, r: 8, gapDeg: 12 });
+  assert.equal(segs.length, 4);
+  const lengths = segs.map((seg) => seg.length);
+  assert.ok(Math.max(...lengths) - Math.min(...lengths) < 1e-9);
+  assert.equal(segs[0].kind, "arc");
+  assert.equal(segs.every((seg) => seg.kind === "arc"), true);
+  /* First segment starts at 12 o'clock and runs clockwise. */
+  assert.ok(segs[0].from.y < 10);
+  assert.ok(Math.abs(segs[0].from.x - 10) < 1.5);
+});
+
+test("a single item is a closed ring with no gap", () => {
+  const segs = progressRingSegments(1, { cx: 10, cy: 10, r: 8 });
+  assert.equal(segs.length, 1);
+  assert.equal(segs[0].kind, "circle");
+  assert.equal(segs[0].r, 8);
+  assert.equal(segs[0].length, 2 * Math.PI * 8);
+});
+
+test("zero items yields no ring geometry", () => {
+  assert.deepEqual(progressRingSegments(0), []);
+  assert.deepEqual(progressRingSegments(-3), []);
 });
 
 test("holdProgress clamps accurately between 0 and 1", () => {

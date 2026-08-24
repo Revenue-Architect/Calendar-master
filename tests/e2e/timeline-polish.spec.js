@@ -611,8 +611,14 @@ test.describe("Timeline Action progress", () => {
     return state;
   };
 
+  const noOverlap = (a, b) => {
+    const overlapX = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+    const overlapY = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+    return overlapX <= 1 || overlapY <= 1;
+  };
+
   for (const minutes of [15, 30, 60, 120]) {
-    test(`${minutes}-minute Action shows compact checklist and subtask rails in the body lane`, async ({ page }) => {
+    test(`${minutes}-minute Action shows concentric progress rings without covering type`, async ({ page }) => {
       await seedPlanner(page, scheduledWithWork({
         estimateMinutes: minutes,
         checklist: [
@@ -624,22 +630,34 @@ test.describe("Timeline Action progress", () => {
 
       const lane = page.getByTestId("timeline-action-lane");
       await lane.scrollIntoViewIfNeeded();
-      const rails = lane.getByTestId("timeline-action-progress");
-      await expect(rails).toBeVisible();
+      const donut = lane.getByTestId("timeline-action-progress");
+      await expect(donut).toBeVisible();
       await expect(lane.getByRole("progressbar", { name: /checklist steps complete/ })).toBeVisible();
       await expect(lane.getByRole("progressbar", { name: /subtasks complete/ })).toBeVisible();
+      await expect(donut.locator("[data-ring='outer']")).toHaveCount(1);
+      await expect(donut.locator("[data-ring='inner']")).toHaveCount(1);
       const height = await lane.evaluate((node) => node.getBoundingClientRect().height);
       const complete = lane.locator("[data-timeline-complete]");
       const estimate = lane.getByTestId("timeline-action-resize");
-      const railBox = await rails.boundingBox();
+      const donutBox = await donut.boundingBox();
       const completeBox = await complete.boundingBox();
-      expect(railBox).not.toBeNull();
+      const titleBox = await lane.locator(".nb-lead").boundingBox();
+      expect(donutBox).not.toBeNull();
       expect(completeBox).not.toBeNull();
-      expect(railBox.x).toBeGreaterThanOrEqual(completeBox.x + completeBox.width - 1);
+      expect(titleBox).not.toBeNull();
+      expect(donutBox.width).toBeLessThanOrEqual(22);
+      expect(donutBox.height).toBeLessThanOrEqual(22);
+      expect(donutBox.x).toBeGreaterThanOrEqual(completeBox.x + completeBox.width - 1);
       if (await estimate.count()) {
         const estimateBox = await estimate.boundingBox();
         expect(estimateBox).not.toBeNull();
-        expect(railBox.x + railBox.width).toBeLessThanOrEqual(estimateBox.x + 1);
+        expect(donutBox.x + donutBox.width).toBeLessThanOrEqual(estimateBox.x + 1);
+      }
+      expect(noOverlap(titleBox, donutBox), "donut must not cover the title").toBe(true);
+      const time = lane.locator(".nb-task-time");
+      if (await time.count()) {
+        const timeBox = await time.boundingBox();
+        if (timeBox) expect(noOverlap(timeBox, donutBox), "donut must not cover the time").toBe(true);
       }
       expect(height).toBeGreaterThanOrEqual(44);
 
@@ -652,11 +670,25 @@ test.describe("Timeline Action progress", () => {
           complete: hit?.closest?.("[data-timeline-complete]") != null,
           estimate: hit?.closest?.("[data-action-estimate]") != null,
         };
-      }, { x: railBox.x + railBox.width / 2, y: railBox.y + railBox.height / 2 });
-      expect(owner.progress, "progress rails must not steal the hit").toBe(false);
-      expect(owner.chip || owner.complete, "the body or complete owner remains under the rail").toBe(true);
+      }, { x: donutBox.x + donutBox.width / 2, y: donutBox.y + donutBox.height / 2 });
+      expect(owner.progress, "progress donut must not steal the hit").toBe(false);
+      expect(owner.chip || owner.complete, "the body or complete owner remains under the donut").toBe(true);
     });
   }
+
+  test("a checklist-only Timeline Action uses one ring", async ({ page }) => {
+    await seedPlanner(page, scheduledWithWork({
+      estimateMinutes: 60,
+      checklist: [
+        { id: "s1", title: "Step 1", done: true, order: 0 },
+        { id: "s2", title: "Step 2", done: false, order: 1 },
+      ],
+    }));
+    const donut = page.getByTestId("timeline-action-lane").getByTestId("timeline-action-progress");
+    await expect(donut.locator("[data-ring='outer']")).toHaveCount(1);
+    await expect(donut.locator("[data-ring='inner']")).toHaveCount(0);
+    await expect(donut.getByTestId("action-progress-subtasks")).toHaveCount(0);
+  });
 });
 
 

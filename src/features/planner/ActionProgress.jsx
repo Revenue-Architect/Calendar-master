@@ -1,5 +1,6 @@
 import { MONO } from "../../design/typography.js";
 import { checklistProgress } from "../../domains/tasks/index.js";
+import SegmentedDonut from "../motion/SegmentedDonut.jsx";
 import SegmentedProgress from "../motion/SegmentedProgress.jsx";
 import "../motion/progressGeometry.js";
 
@@ -57,32 +58,41 @@ export default function ActionProgress({
   if (!tracks.length) return null;
 
   const compact = density === "compact";
+  if (compact) {
+    return (
+      <div
+        data-test="timeline-action-progress"
+        data-density="compact"
+        className={`nb-action-progress-donut ${className}`}
+        style={style}
+      >
+        <SegmentedDonut T={T} tracks={tracks} size={18} />
+      </div>
+    );
+  }
+
   return (
     <div
-      data-test={compact ? "timeline-action-progress" : "action-progress"}
+      data-test="action-progress"
       data-density={density}
-      className={`${compact ? "nb-action-progress-compact" : "flex flex-col gap-1.5"} ${className}`}
+      className={`flex flex-col gap-1.5 ${className}`}
       style={style}
     >
       {tracks.map((track) => (
         <div
           key={track.kind}
           data-test={`action-progress-${track.kind}`}
-          className={compact ? "w-full" : "flex items-center gap-2 min-w-0"}
+          className="flex items-center gap-2 min-w-0"
         >
-          {!compact && (
-            <>
-              <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data shrink-0">{track.label}</span>
-              <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data shrink-0">{track.done} / {track.total}</span>
-            </>
-          )}
+          <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data shrink-0">{track.label}</span>
+          <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data shrink-0">{track.done} / {track.total}</span>
           <SegmentedProgress
             T={T}
             done={track.done}
             total={track.total}
             ariaLabel={track.ariaLabel}
             density={density}
-            className={compact ? "w-full" : "flex-1 min-w-0"}
+            className="flex-1 min-w-0"
           />
         </div>
       ))}
