@@ -124,7 +124,9 @@ import {
   rubberBand,
   shouldCommitSwipe,
   restoreCancelledInteraction,
+  recordTimelineGestureProposalHistory,
   resolveShortEventEdge,
+  timelineTouchReleaseIntent,
   updateInteractionProposal,
 } from "./features/planner/timelineInteractionState.js";
 import { canExposeActionTouchResize, classifyTimelineTouchTarget, TOUCH_TARGET_KINDS } from "./features/planner/timelineTouchTarget.js";
@@ -680,7 +682,6 @@ export default function Planner() {
      scroll top and the old auto-position flag all belong to an element that no
      longer exists. */
   useEffect(() => {
-    timelineUserScrollRef.current = false;
     timelineScrollSessionRef.current?.expire?.();
     timelineAutoPositionRef.current = false;
   }, [dateKey, viewMode, zoom]);
@@ -780,7 +781,6 @@ export default function Planner() {
   const streamRef = useRef(null);
   const timelineScrollTopRef = useRef(0);
   const timelineAutoPositionRef = useRef(false);
-  const timelineUserScrollRef = useRef(false);
   const timelineScrollSessionRef = useRef(createScrollSession());
   const interactionRef = useRef(createIdleInteraction());
   const timelineTouchScrollLockRef = useRef(createTimelineTouchScrollLock());
@@ -2684,15 +2684,21 @@ export default function Planner() {
       next.start = resized.start;
       next.dur = resized.duration;
     }
-    gestureRef.current = next;
-    setGesture(next);
     if (g.touchId != null && interactionRef.current.phase === "active") {
       interactionRef.current = updateInteractionProposal(interactionRef.current, {
         start: next.start,
         duration: next.dur,
         date: dateKeyRef.current,
       });
+      next.proposalChanged = recordTimelineGestureProposalHistory(
+        g,
+        next,
+        interactionRef.current,
+        dateKeyRef.current,
+      );
     }
+    gestureRef.current = next;
+    setGesture(next);
   };
   /* Day and week timelines have different scroll nodes, but focus mode is one
      piece of navigation. Keep the direction/restore rule here so the two views
@@ -2766,6 +2772,14 @@ export default function Planner() {
     const finishedDraft = g?.mode === "draft"
       ? { date: dateKeyRef.current, start: g.start, dur: g.dur }
       : null;
+    if (timelineTouchReleaseIntent(g, interactionRef.current, dateKeyRef.current) === "inspect") {
+      const kind = g.kind === "task" ? "task" : "event";
+      const id = g.id;
+      abortGesture();
+      beep("click");
+      if (id) setInspect({ kind, id });
+      return;
+    }
     if (g?.touchId != null) {
       releaseTimelineTouchScrollLock(timelineTouchScrollLockRef.current, g.interactionSequence, g.touchId);
       interactionRef.current = settleInteraction(interactionRef.current);
@@ -3147,17 +3161,15 @@ export default function Planner() {
     const cancelTouchSequence = () => {
       if (gestureRef.current || interactionRef.current.phase === "active") finishRef.current(0, 0, { cancelled: true });
       else cancelPress();
+      /* A cancelled touch cannot lend its scroll authority to a later
+         layout-driven scroll event. Real vertical intent is opened below from
+         touchmove/native scroll, never speculatively at touchstart. */
+      timelineScrollSessionRef.current.expire();
       disarm(); setTaskSwipe(null);
     };
     const onStart = (e) => {
       if (e.touches.length !== 1) { cancelTouchSequence(); return; }
       if (gestureRef.current) return;
-      /* A scroll event can arrive after the finger moves outside the stream (or
-         after a device compositor applies the offset), so establish intent at
-         touch start. A tap alone never changes focus; it only authorizes a
-         following scroll event to do so. */
-      timelineScrollSessionRef.current.begin();
-      timelineUserScrollRef.current = timelineScrollSessionRef.current.isActive();
       /* Resolve transformed-control edge hits from the actual client point. */
       const target = classifyTimelineTouchTarget(document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY) ?? e.target);
       if (target.kind === TOUCH_TARGET_KINDS.complete) return;
@@ -3307,21 +3319,25 @@ export default function Planner() {
       if (movedEnoughToCancelHold(p, { x: t.clientX, y: t.clientY })) cancelPress();
       if (Math.abs(t.clientY - p.y) > 4) {
         timelineScrollSessionRef.current.begin();
-        timelineUserScrollRef.current = true;
       }
     };
 
     const onScroll = () => {
       const lock = timelineTouchScrollLockRef.current.snapshot();
       if (lock && lock.node === el && timelineTouchScrollLockRef.current.enforce(lock.sequence, { node: el, touchId: lock.touchId })) return;
-      onTimelineScrollPosition(el.scrollTop);
       const p = press.t;
+      /* A native scroll is definitive user intent even if Chromium delivered it
+         before our threshold-crossing touchmove. Authorize this scroll only,
+         then close the session with the touch sequence below. */
+      if (p) {
+        timelineScrollSessionRef.current.begin();
+      }
+      onTimelineScrollPosition(el.scrollTop);
       if (!p) return;
       cancelPress();
     };
     const onWheel = () => {
       timelineScrollSessionRef.current.begin();
-      timelineUserScrollRef.current = true;
       timelineScrollSessionRef.current.end();
     };
 
@@ -3333,6 +3349,9 @@ export default function Planner() {
       if ((g?.touchId != null && touchId !== g.touchId)
         || (p?.touchId != null && touchId != null && touchId !== p.touchId)) { cancelTouchSequence(); return; }
       disarm();
+      /* Keep bounded momentum only after a real scroll called begin(); a
+         stationary tap cannot authorize a later layout-driven scroll. */
+      timelineScrollSessionRef.current.end();
       if (p?.swiping) {
         if (e.cancelable) e.preventDefault();
         e.stopPropagation();
@@ -3364,6 +3383,7 @@ export default function Planner() {
     el.addEventListener("scroll", onScroll, { passive: true });
     el.addEventListener("wheel", onWheel, { passive: true });
     return () => {
+      timelineScrollSessionRef.current.expire();
       const lock = timelineTouchScrollLockRef.current.snapshot();
       if (lock?.node === el) timelineTouchScrollLockRef.current.releaseNode(lock.sequence, el);
       if (gestureRef.current?.owner === INTERACTION_OWNERS.dayStream) finishRef.current(0, 0, { cancelled: true });
@@ -4159,7 +4179,6 @@ export default function Planner() {
                   onTimelineScroll={onTimelineScrollPosition}
                   onTimelineIntent={() => {
                     timelineScrollSessionRef.current.begin();
-                    timelineUserScrollRef.current = true;
                     timelineScrollSessionRef.current.end();
                   }}
                   onOpenDay={(k) => { beep("tick"); if (k !== dateKey) jumpTo(k); setZoom("day"); }}

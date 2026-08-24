@@ -60,6 +60,7 @@ export function createIdleInteraction() {
     id: null,
     before: null,
     proposal: null,
+    proposalChanged: false,
     suppressNextClick: false,
     suppressUntil: 0,
     sequence: 0,
@@ -94,6 +95,7 @@ export function armInteraction(state, {
     id,
     before: cloneSnapshot(before),
     proposal: cloneSnapshot(before),
+    proposalChanged: false,
     suppressNextClick: false,
     suppressUntil: 0,
     sequence: (state?.sequence ?? 0) + 1,
@@ -106,6 +108,11 @@ export function activateInteraction(state, proposal = state?.proposal) {
     ...state,
     phase: INTERACTION_PHASES.active,
     proposal: cloneSnapshot(proposal ?? state.proposal ?? state.before),
+    /* Activation itself is not evidence that a held card moved.  The touch
+       path activates after the lift timer, before it has necessarily produced
+       a proposal frame; updateInteractionProposal records the first real
+       change below. */
+    proposalChanged: false,
     suppressNextClick: true,
     suppressUntil: nowMs() + CLICK_SUPPRESS_MS,
   };
@@ -113,7 +120,39 @@ export function activateInteraction(state, proposal = state?.proposal) {
 
 export function updateInteractionProposal(state, proposal) {
   if (!state || state.phase !== INTERACTION_PHASES.active) return state ?? createIdleInteraction();
-  return { ...state, proposal: cloneSnapshot(proposal) };
+  const nextProposal = cloneSnapshot(proposal);
+  return {
+    ...state,
+    proposal: nextProposal,
+    /* Keep history instead of deriving this from the final drop.  A deliberate
+       move that returns to its origin is still a gesture and must not fall back
+       to an inspector click on release. */
+    proposalChanged: Boolean(
+      state.proposalChanged || gestureChangedAnything(state.before, nextProposal),
+    ),
+  };
+}
+
+/** Preserve whether a live item ever left its initial proposal. */
+export function recordTimelineGestureProposalHistory(gesture, next, interaction, dateKey) {
+  return Boolean(
+    gesture?.proposalChanged
+    || interaction?.proposalChanged
+    || gestureChangedAnything(
+      { start: gesture?.was?.start ?? gesture?.start, duration: gesture?.was?.dur ?? gesture?.dur },
+      { start: next?.start, duration: next?.dur },
+    )
+    || (next?.overDay && next.overDay !== dateKey)
+    || (next?.overTask && next.overTask !== gesture?.id),
+  );
+}
+
+/** A timed lift with no manipulation still resolves to the item's tap action. */
+export function timelineTouchReleaseIntent(gesture, interaction, dateKey) {
+  const itemGesture = gesture?.kind === "event" || gesture?.kind === "task";
+  if (gesture?.touchId == null || !itemGesture) return "finish";
+  const changed = recordTimelineGestureProposalHistory(gesture, gesture, interaction, dateKey);
+  return changed ? "finish" : "inspect";
 }
 
 export function activateWithMovement(state, proposal) {
@@ -229,6 +268,7 @@ export function createScrollSession({ timeoutMs = 180 } = {}) {
     },
     end() {
       clear();
+      if (!active) return;
       timer = setTimeout(() => {
         active = false;
         timer = null;
