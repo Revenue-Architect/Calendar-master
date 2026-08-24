@@ -166,7 +166,7 @@ import {
   durationFromDatedClockRange,
   hasDetailDraft,
 } from "./features/planner/detailDraft.js";
-import SegmentedProgress from "./features/planner/SegmentedProgress.jsx";
+import ActionProgress from "./features/planner/ActionProgress.jsx";
 import {
   ArrowRightIcon,
   ArrowUpIcon,
@@ -4710,18 +4710,8 @@ export default function Planner() {
                 ))}
               </section>
 
-              {(inspectDraft.checklist ?? []).length > 0 && (() => {
-                const checklistDone = inspectDraft.checklist.filter((x) => x.done).length;
-                return (
-                  <div className="flex items-center gap-3 mt-3">
-                    <SegmentedProgress T={T} done={checklistDone} total={inspectDraft.checklist.length}
-                      ariaLabel={`${checklistDone} of ${inspectDraft.checklist.length} steps done`} className="flex-1" />
-                    <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data">
-                      {checklistDone} / {inspectDraft.checklist.length}
-                    </span>
-                  </div>
-                );
-              })()}
+              <ActionProgress T={T} title={inspectDraft.title} checklist={inspectDraft.checklist}
+                subtasks={inspectSubtasks} className="mt-3" />
 
               <PromotedSubtasks T={T} subtasks={inspectSubtasks}
                 className="mx-0 mt-3"

@@ -15,7 +15,7 @@ import { uid } from "../../shared/ids.js";
 import { fmtTime } from "../../shared/time/clockFormat.js";
 import { diffDays } from "../../shared/time/dateKey.js";
 
-import SegmentedProgress from "./SegmentedProgress.jsx";
+import ActionProgress from "./ActionProgress.jsx";
 import { CARD_R, HOLD_MS, SWIPE_SOFT_LIMIT, catColor } from "./constants.js";
 import { ArrowUpIcon, BlockIcon, CheckIcon, CloseIcon, GripIcon, RepeatIcon } from "./icons.jsx";
 import { PromotedSubtasks, SubComposer } from "./subtasks.jsx";
@@ -191,8 +191,7 @@ function TaskCard({ T, t, beep, buzz, target, todayKey, blockers = [], subtasks 
                 </span>
               )}
             </div>
-            <SegmentedProgress T={T} done={subDone} total={checklist.length}
-              className="mt-2" ariaLabel={`${subDone} of ${checklist.length} steps done`} />
+            <ActionProgress T={T} title={t.title} checklist={checklist} subtasks={subtasks} className="mt-2" />
           </div>
 
           <button onPointerDown={(e) => { e.stopPropagation(); onDragStart(t.id, e.clientX, e.clientY); }}

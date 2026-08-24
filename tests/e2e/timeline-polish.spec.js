@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { openPlanner, quickAdd, seedPlanner } from "./helpers.js";
 import { createBlankPlannerState } from "../../src/platform/persistence/plannerStateImport.js";
 import { createEvent } from "../../src/domains/calendar/index.js";
-import { createTask, updateTask } from "../../src/domains/tasks/index.js";
+import { createSubtask, createTask, updateTask } from "../../src/domains/tasks/index.js";
 import { keyOf } from "../../src/shared/time/dateKey.js";
 
 /* Two marks that have to read as one thing each: the now marker against the hour
@@ -437,7 +437,7 @@ test.describe("checklist progress", () => {
 
   test("is one segment per step, not a fraction of one bar", async ({ page }) => {
     await seedPlanner(page, withSteps(2, 5));
-    const bar = page.getByRole("progressbar", { name: /steps done/ }).first();
+    const bar = page.getByRole("progressbar", { name: /steps (done|complete)/ }).first();
     await expect(bar).toBeVisible();
     await expect(bar.locator("> span")).toHaveCount(5);
     await expect(bar).toHaveAttribute("aria-valuenow", "2");
@@ -449,7 +449,7 @@ test.describe("checklist progress", () => {
     await page.getByRole("button", { name: "Ship the release" }).first().click();
 
     const sheet = page.getByTestId("sheet");
-    const bar = sheet.getByRole("progressbar", { name: /steps done/ });
+    const bar = sheet.getByRole("progressbar", { name: /steps (done|complete)/ });
     await expect(bar).toBeVisible();
     await expect(bar.locator("> span")).toHaveCount(5);
     await expect(bar).toHaveAttribute("aria-valuenow", "2");
@@ -523,6 +523,140 @@ test.describe("checklist progress", () => {
     await seedPlanner(page, withSteps(0, 0));
     await expect(page.getByRole("progressbar")).toHaveCount(0);
   });
+
+  test("a subtask-only Action shows a SUBTASKS track and no STEPS track", async ({ page }) => {
+    let state = createBlankPlannerState({});
+    const parent = createTask(state.tasks, { id: "task-release", title: "Ship the release", planned: { date: keyOf(new Date()) } });
+    state = { ...state, tasks: parent.tasks };
+    state = { ...state, tasks: createSubtask(state.tasks, "task-release", { id: "child-a", title: "Pull data" }).tasks };
+    state = { ...state, tasks: createSubtask(state.tasks, "task-release", { id: "child-b", title: "Rebuild math" }).tasks };
+    await seedPlanner(page, state);
+
+    const card = page.getByTestId("actions-column").locator("[data-task='task-release'] .nb-action-card");
+    await expect(card.getByTestId("action-progress-subtasks")).toBeVisible();
+    await expect(card.getByTestId("action-progress-checklist")).toHaveCount(0);
+    await expect(card.getByTestId("action-progress-subtasks").getByText("SUBTASKS", { exact: true })).toBeVisible();
+    await expect(card.getByRole("progressbar", { name: /0 of 2 subtasks complete/ })).toBeVisible();
+  });
+
+  test("mixed work shows STEPS then SUBTASKS as separate tracks", async ({ page }) => {
+    let state = withSteps(2, 4);
+    state = { ...state, tasks: createSubtask(state.tasks, "task-release", { id: "child-a", title: "Pull data" }).tasks };
+    state = { ...state, tasks: createSubtask(state.tasks, "task-release", { id: "child-b", title: "Rebuild math" }).tasks };
+    await seedPlanner(page, state);
+
+    const card = page.getByTestId("actions-column").locator("[data-task='task-release'] .nb-action-card");
+    const labels = card.locator("[data-test='action-progress'] .nb-data");
+    await expect(card.getByTestId("action-progress-checklist")).toBeVisible();
+    await expect(card.getByTestId("action-progress-subtasks")).toBeVisible();
+    await expect(card.getByTestId("action-progress-checklist").getByText("STEPS", { exact: true })).toBeVisible();
+    await expect(card.getByTestId("action-progress-subtasks").getByText("SUBTASKS", { exact: true })).toBeVisible();
+    const order = await card.locator("[data-test='action-progress'] [data-test^='action-progress-']").evaluateAll(
+      (nodes) => nodes.map((node) => node.getAttribute("data-test")),
+    );
+    expect(order).toEqual(["action-progress-checklist", "action-progress-subtasks"]);
+    await expect(card.getByRole("progressbar", { name: /2 of 4 checklist steps complete/ })).toBeVisible();
+    await expect(card.getByRole("progressbar", { name: /0 of 2 subtasks complete/ })).toBeVisible();
+    expect(labels).toBeTruthy();
+  });
+
+  test("reduced motion fills a step immediately", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await seedPlanner(page, withSteps(0, 3));
+    const bar = page.getByRole("progressbar").first();
+    await page.getByRole("button", { name: /Step 1/ }).first().click();
+    await page.waitForTimeout(20);
+    const width = await bar.locator("> span > span").first().evaluate((n) => n.getBoundingClientRect().width);
+    expect(width).toBeGreaterThan(1);
+  });
+
+  test("a cancelled subtask is absent from the subtask denominator", async ({ page }) => {
+    let state = createBlankPlannerState({});
+    const parent = createTask(state.tasks, { id: "task-release", title: "Ship the release", planned: { date: keyOf(new Date()) } });
+    state = { ...state, tasks: parent.tasks };
+    state = { ...state, tasks: createSubtask(state.tasks, "task-release", { id: "child-a", title: "Keep me" }).tasks };
+    state = { ...state, tasks: createSubtask(state.tasks, "task-release", { id: "child-b", title: "Cancel me" }).tasks };
+    state = {
+      ...state,
+      tasks: state.tasks.map((task) => (task.id === "child-b" ? { ...task, status: "cancelled" } : task)),
+    };
+    await seedPlanner(page, state);
+
+    const card = page.getByTestId("actions-column").locator("[data-task='task-release'] .nb-action-card");
+    await expect(card.getByRole("progressbar", { name: /0 of 1 subtasks complete/ })).toBeVisible();
+  });
+});
+
+test.describe("Timeline Action progress", () => {
+  const scheduledWithWork = ({ estimateMinutes = 60, checklist = [], children = [] } = {}) => {
+    let state = createBlankPlannerState({});
+    const created = createTask(state.tasks, {
+      id: "task-timeline-progress",
+      title: "Review launch brief",
+      planned: { date: keyOf(new Date()), startMinute: 13 * 60, estimateMinutes },
+      checklist,
+    });
+    state = { ...state, tasks: created.tasks };
+    for (const child of children) {
+      state = { ...state, tasks: createSubtask(state.tasks, "task-timeline-progress", {
+        id: child.id, title: child.title,
+      }).tasks };
+      if (child.status) {
+        state = {
+          ...state,
+          tasks: state.tasks.map((task) => (task.id === child.id ? { ...task, status: child.status } : task)),
+        };
+      }
+    }
+    return state;
+  };
+
+  for (const minutes of [15, 30, 60, 120]) {
+    test(`${minutes}-minute Action shows compact checklist and subtask rails in the body lane`, async ({ page }) => {
+      await seedPlanner(page, scheduledWithWork({
+        estimateMinutes: minutes,
+        checklist: [
+          { id: "s1", title: "Step 1", done: true, order: 0 },
+          { id: "s2", title: "Step 2", done: false, order: 1 },
+        ],
+        children: [{ id: "c1", title: "Child", status: "open" }],
+      }));
+
+      const lane = page.getByTestId("timeline-action-lane");
+      await lane.scrollIntoViewIfNeeded();
+      const rails = lane.getByTestId("timeline-action-progress");
+      await expect(rails).toBeVisible();
+      await expect(lane.getByRole("progressbar", { name: /checklist steps complete/ })).toBeVisible();
+      await expect(lane.getByRole("progressbar", { name: /subtasks complete/ })).toBeVisible();
+      const height = await lane.evaluate((node) => node.getBoundingClientRect().height);
+      const complete = lane.locator("[data-timeline-complete]");
+      const estimate = lane.getByTestId("timeline-action-resize");
+      const railBox = await rails.boundingBox();
+      const completeBox = await complete.boundingBox();
+      expect(railBox).not.toBeNull();
+      expect(completeBox).not.toBeNull();
+      expect(railBox.x).toBeGreaterThanOrEqual(completeBox.x + completeBox.width - 1);
+      if (await estimate.count()) {
+        const estimateBox = await estimate.boundingBox();
+        expect(estimateBox).not.toBeNull();
+        expect(railBox.x + railBox.width).toBeLessThanOrEqual(estimateBox.x + 1);
+      }
+      expect(height).toBeGreaterThanOrEqual(44);
+
+      const owner = await page.evaluate(({ x, y }) => {
+        const hit = document.elementFromPoint(x, y);
+        return {
+          progress: hit?.closest?.("[data-test='timeline-action-progress']") != null
+            && getComputedStyle(hit.closest("[data-test='timeline-action-progress']")).pointerEvents !== "none",
+          chip: hit?.closest?.("[data-task-chip]") != null,
+          complete: hit?.closest?.("[data-timeline-complete]") != null,
+          estimate: hit?.closest?.("[data-action-estimate]") != null,
+        };
+      }, { x: railBox.x + railBox.width / 2, y: railBox.y + railBox.height / 2 });
+      expect(owner.progress, "progress rails must not steal the hit").toBe(false);
+      expect(owner.chip || owner.complete, "the body or complete owner remains under the rail").toBe(true);
+    });
+  }
 });
 
 

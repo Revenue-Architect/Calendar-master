@@ -13,6 +13,7 @@ import {
   promoteChecklistItem,
   reopenTask,
   subtaskProgress,
+  taskProgress,
 } from "../index.js";
 
 const NOW = "2026-08-09T10:00";
@@ -122,6 +123,49 @@ test("checklist progress is reported apart from subtask progress", () => {
     checklist: [{ id: "i1", title: "A", done: true }, { id: "i2", title: "B", done: false }],
   }, { now: NOW }).tasks;
   assert.deepEqual(checklistProgress(tasks[0].checklist), { done: 1, total: 2, complete: false });
+});
+
+test("taskProgress keeps checklist and subtask tracks separate", () => {
+  let tasks = createTask([], {
+    id: "p",
+    title: "Ship",
+    checklist: [{ id: "i1", title: "Draft", done: true }, { id: "i2", title: "Review", done: false }],
+  }, { now: NOW }).tasks;
+  tasks = createSubtask(tasks, "p", { id: "c1", title: "Pull data" }, { now: NOW }).tasks;
+  tasks = createSubtask(tasks, "p", { id: "c2", title: "Rebuild math" }, { now: NOW }).tasks;
+  tasks = completeTask(tasks, "c1", { now: NOW }).tasks;
+  tasks = tasks.map((task) => (task.id === "c2" ? { ...task, status: "cancelled" } : task));
+
+  const progress = taskProgress(tasks, tasks.find((task) => task.id === "p"));
+  assert.deepEqual(progress.checklist, { done: 1, total: 2 });
+  assert.deepEqual(progress.subtasks, { done: 1, total: 1, complete: true });
+  assert.equal(
+    progress.checklist.done + progress.subtasks.done,
+    2,
+    "a combined percentage would hide that checklist work is still open",
+  );
+});
+
+test("promoting a checklist item moves that unit onto the subtask track", () => {
+  let tasks = createTask([], {
+    id: "p",
+    title: "Ship",
+    checklist: [
+      { id: "i1", title: "Draft", done: true, completedAt: NOW },
+      { id: "i2", title: "Review", done: false },
+    ],
+  }, { now: NOW }).tasks;
+  const parent = () => tasks.find((task) => task.id === "p");
+
+  tasks = promoteChecklistItem(tasks, "p", "i2", "child-open", { now: NOW }).tasks;
+  assert.deepEqual(taskProgress(tasks, parent()).checklist, { done: 1, total: 1 });
+  assert.deepEqual(taskProgress(tasks, parent()).subtasks, { done: 0, total: 1, complete: false });
+
+  tasks = promoteChecklistItem(tasks, "p", "i1", "child-done", { now: NOW }).tasks;
+  assert.deepEqual(taskProgress(tasks, parent()).checklist, { done: 0, total: 0 });
+  assert.deepEqual(taskProgress(tasks, parent()).subtasks, { done: 1, total: 2, complete: false });
+  assert.equal(parent().checklist.length, 0);
+  assert.equal(tasks.some((task) => "progress" in task), false);
 });
 
 test("reopening a parent does not reopen its checklist items", () => {

@@ -1,10 +1,17 @@
 # Action Card Work Progress Visualization — Implementation Plan
 
 **Date:** 2026-08-24
-**Status:** Ready for implementation
+**Status:** Implemented
 **Base:** `04f6ccbe2d6021370ea20996fcce825cd31e4d81`
 **Recommended branch:** `feat/action-card-work-progress`
 **Scope:** Action-card progress only; no task-domain, persistence, Timeline-gesture, navigation, ribbon, Event-card, or motion-shell redesign.
+
+After-numbers (2026-08-24):
+- Unit `npm test`: 657/657
+- Plan gates (timeline-polish, actions, timeline-touch, interaction-contracts, recurring): 149/149
+- 10× mixed / 15-min rails / swipe / drag / resize: 50/50
+- Chromium `--workers=1`: 424/425 on the first full pass; the one failure was `week-drag` palette close (`quickAdd` click did not dismiss). Retry of that case 5/5, then the full `week-drag` file 11/11
+- `Planner.jsx` 5533 lines, ceiling lowered 5544 → 5534
 
 ## 1. Objective
 

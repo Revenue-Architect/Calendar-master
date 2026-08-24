@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
-import { ACTION_COMPLETION_LANE } from "./timelineTouchTarget.js";
+import { ACTION_COMPLETION_LANE, ACTION_ESTIMATE_LANE } from "./timelineTouchTarget.js";
+import ActionProgress from "./ActionProgress.jsx";
 
 function resizeCueStyle(theme) {
   return {
@@ -139,6 +140,19 @@ export default function TimelineActionCard({
               <span className="absolute inset-y-0 right-0" style={{ width: 2, background: theme.accent }} />
             </span>
           )}
+          <ActionProgress
+            T={theme}
+            title={task.title}
+            checklist={task.checklist}
+            subtasks={subtaskProgress}
+            density="compact"
+            className="pointer-events-none absolute z-[11]"
+            style={{
+              left: ACTION_COMPLETION_LANE,
+              right: resizeEligible ? ACTION_ESTIMATE_LANE : 0,
+              bottom: 5,
+            }}
+          />
           <button type="button" onClick={open} onKeyDown={keyOpen}
             className="nb-tap absolute min-w-0 overflow-hidden text-left"
             style={{

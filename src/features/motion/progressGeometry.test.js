@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   progressSegmentStates,
+  progressSegmentDelay,
   holdProgress,
   holdRatchetStep,
   holdRadialDashOffset,
@@ -17,6 +18,14 @@ test("clamps malformed counts to the available segments", () => {
   assert.deepEqual(progressSegmentStates(-1, 3), [false, false, false]);
   assert.deepEqual(progressSegmentStates(9, 3), [true, true, true]);
   assert.deepEqual(progressSegmentStates(1, 0), []);
+});
+
+test("segment stagger only delays newly filled segments and caps the cascade", () => {
+  assert.equal(progressSegmentDelay(0, 2, 3), 0);
+  assert.equal(progressSegmentDelay(2, 2, 3), 0);
+  assert.equal(progressSegmentDelay(3, 2, 4), 60);
+  assert.equal(progressSegmentDelay(9, 0, 10), 160);
+  assert.ok(progressSegmentDelay(5, 0, 10) <= 160);
 });
 
 test("holdProgress clamps accurately between 0 and 1", () => {
