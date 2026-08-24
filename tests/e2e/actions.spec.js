@@ -764,8 +764,9 @@ test.describe("the actions column", () => {
     await chip.scrollIntoViewIfNeeded();
     await chip.click();
     const sheet = page.getByTestId("sheet");
-    await sheet.getByRole("button", { name: "EDIT ACTION" }).click();
-    await sheet.getByRole("button", { name: "Convert step to a subtask" }).click();
+    const promote = sheet.getByRole("button", { name: "Convert step to a subtask" });
+    await expect(promote, "convert stays available without EDIT ACTION").toBeVisible();
+    await promote.click();
     await settledState(
       page,
       (stored) => stored.tasks.some((task) => task.parentTaskId === "task-timeline-promote" && task.title === "Send the briefing"),
