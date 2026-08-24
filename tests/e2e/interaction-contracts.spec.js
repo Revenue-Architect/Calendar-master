@@ -111,16 +111,17 @@ test.describe("Action exclusive owners", () => {
   test("a compact Action dedicates its visible estimate to resizing", async ({ page }) => {
     await seedPlanner(page, compactActionNotebook());
     const card = page.locator('[data-task-chip="task-compact"]');
-    const move = card.getByTestId("timeline-action-move");
+    const body = card.locator("button");
     const estimate = page.locator('[data-resize="task-compact"]');
     await card.scrollIntoViewIfNeeded();
-    await expect(move).toBeVisible();
+    await expect(card.getByTestId("timeline-action-move"), "compact movement must not depend on a small move plate").toHaveCount(0);
+    await expect(body, "the compact Action keeps one readable move body").toBeVisible();
     await expect(estimate).toHaveText("15m");
 
-    const [moveBox, estimateBox] = await Promise.all([move.boundingBox(), estimate.boundingBox()]);
-    expect(moveBox, "the Action body has no measurable move region").not.toBeNull();
+    const [bodyBox, estimateBox] = await Promise.all([body.boundingBox(), estimate.boundingBox()]);
+    expect(bodyBox, "the Action body has no measurable move region").not.toBeNull();
     expect(estimateBox, "the visible estimate has no measurable resize target").not.toBeNull();
-    expect(estimateBox.x, "the estimate must sit beside the body, not over it").toBeGreaterThanOrEqual(moveBox.x + moveBox.width - 1);
+    expect(estimateBox.x, "the estimate must sit beside the body, not over it").toBeGreaterThanOrEqual(bodyBox.x + bodyBox.width - 1);
 
     const hit = await hitTarget(page, estimateBox.x + estimateBox.width / 2, estimateBox.y + estimateBox.height / 2);
     expect(hit.resize).toBe("end");

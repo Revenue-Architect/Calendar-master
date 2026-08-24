@@ -218,6 +218,29 @@ test.describe("a resize grip is part of the card it sits on", () => {
     return h * 60 + m;
   };
 
+  test("an ordinary one-hour Event keeps full-width start and end ownership", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await seedPlanner(page, seeded({
+      startLocal: `${today}T10:00`,
+      endLocal: `${today}T11:00`,
+    }));
+    const event = card(page);
+    await event.scrollIntoViewIfNeeded();
+    const start = event.locator('[data-touch-resize="start"]');
+    const end = event.locator('[data-touch-resize="end"]');
+    await expect(start, "a normal one-hour Event must remain touch-resizable at its start").toHaveCount(1);
+    await expect(end, "a normal one-hour Event must remain touch-resizable at its end").toHaveCount(1);
+
+    const [eventBox, startBox, endBox] = await Promise.all([
+      event.boundingBox(), start.boundingBox(), end.boundingBox(),
+    ]);
+    expect(startBox.width, "the start edge must not be a small corner target").toBeGreaterThan(eventBox.width - 2);
+    expect(endBox.width, "the end edge must not be a small corner target").toBeGreaterThan(eventBox.width - 2);
+    expect(startBox.height, "the start edge must leave a readable move body").toBeLessThanOrEqual(12);
+    expect(endBox.height, "the end edge must leave a readable move body").toBeLessThanOrEqual(14);
+    await expect(event.locator("[data-touch-move]"), "the Event body itself is the move surface").toHaveCount(0);
+  });
+
   test("a hold on the bottom grip still resizes, which is what it is for", async ({ page }) => {
     await seedPlanner(page, seeded());
     await card(page).scrollIntoViewIfNeeded();
@@ -284,7 +307,7 @@ test.describe("a resize grip is part of the card it sits on", () => {
     const box = await card(page).boundingBox();
     const session = await page.context().newCDPSession(page);
     const x = box.x + box.width / 2;
-    const y = box.y + box.height - 4;
+    const y = box.y + box.height - 16;
     await session.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
     await page.waitForTimeout(340);
     await session.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y: y + HOUR_PX }] });
@@ -418,7 +441,7 @@ test.describe("a resize grip is part of the card it sits on", () => {
     expect(endBox).not.toBeNull();
     expect(joinBox).not.toBeNull();
     expect(startBox.x).toBeCloseTo(cardBox.x, 0);
-    expect(endBox.x + endBox.width).toBeLessThanOrEqual(joinBox.x);
+    expect(endBox.x + endBox.width, "the resize edge must span the full Event width").toBeCloseTo(cardBox.x + cardBox.width, 0);
     expect(joinBox.x + joinBox.width).toBeLessThanOrEqual(cardBox.x + cardBox.width);
     const titlePoint = await event.locator("span[title]").boundingBox();
     const ownership = await page.evaluate(({ x, y }) => {
@@ -601,7 +624,7 @@ test.describe("a resize grip is part of the card it sits on", () => {
   });
 });
 
-test.describe("explicit Event direct-control touch", () => {
+test.describe("stable Event edge and body touch ownership", () => {
   const minutesInto = (local) => {
     const [h, m] = local.split("T")[1].split(":").map(Number);
     return h * 60 + m;
@@ -623,32 +646,31 @@ test.describe("explicit Event direct-control touch", () => {
     return { box, style };
   };
 
-  test("an explicit Event move control starts from immediate movement", async ({ page }) => {
+  test("the Event body moves after lift without a special move plate", async ({ page }) => {
     await seedPlanner(page, seeded());
     const event = card(page);
     await event.scrollIntoViewIfNeeded();
-    const move = event.locator("[data-touch-move]");
-    expect(await move.count(), "eligible Events need an explicit data-touch-move descendant").toBe(1);
-    const box = await move.boundingBox();
-    expect(box, "the Event move control is not measurable").not.toBeNull();
+    await expect(event.locator("[data-touch-move]"), "the readable Event body is the move owner").toHaveCount(0);
+    const box = await event.boundingBox();
+    expect(box, "the Event body is not measurable").not.toBeNull();
     const stream = page.getByTestId("day-stream");
     const beforeScroll = await stream.evaluate((node) => node.scrollTop);
     const x = box.x + box.width / 2;
     const y = box.y + box.height / 2;
 
-    await finger(page, { x, y, to: { x, y: y + HOUR_PX } });
+    await finger(page, { x, y, holdMs: 340, to: { x, y: y + HOUR_PX } });
 
-    const timing = (await stored(page, (t) => t.startLocal !== `${today}T10:00`, "immediate Event move never changed start")).events[0].timing;
+    const timing = (await stored(page, (t) => t.startLocal !== `${today}T10:00`, "held Event body move never changed start")).events[0].timing;
     expect(timing.startLocal).toBe(`${today}T11:00`);
-    expect(timing.endLocal, "an explicit Event move must preserve duration").toBe(`${today}T13:00`);
-    expect(timing.startLocal.startsWith(`${today}T`) && timing.endLocal.startsWith(`${today}T`), "a same-Day Event move must keep the date").toBe(true);
+    expect(timing.endLocal, "an Event body move must preserve duration").toBe(`${today}T13:00`);
+    expect(timing.startLocal.startsWith(`${today}T`) && timing.endLocal.startsWith(`${today}T`), "a same-Day body move must keep the date").toBe(true);
     await expect.poll(() => stream.evaluate((node) => node.scrollTop), {
-      message: "the Day stream moved under an explicit Event move",
+      message: "the Day stream moved under an active Event body move",
     }).toBe(beforeScroll);
-    await expect(sheets(page), "an explicit Event move must not inspect the card").toHaveCount(0);
+    await expect(sheets(page), "an Event body move must not inspect the card").toHaveCount(0);
   });
 
-  test("an explicit Event start control resizes immediately without a hold", async ({ page }) => {
+  test("the Event start edge resizes after lift", async ({ page }) => {
     await seedPlanner(page, seeded());
     const event = card(page);
     await event.scrollIntoViewIfNeeded();
@@ -660,18 +682,18 @@ test.describe("explicit Event direct-control touch", () => {
     const x = box.x + box.width / 2;
     const y = box.y + box.height / 2;
 
-    await finger(page, { x, y, to: { x, y: y + HOUR_PX } });
+    await finger(page, { x, y, holdMs: 340, to: { x, y: y + HOUR_PX } });
 
-    const timing = (await stored(page, (t) => t.startLocal !== `${today}T10:00`, "immediate Event start resize never moved the start")).events[0].timing;
+    const timing = (await stored(page, (t) => t.startLocal !== `${today}T10:00`, "held Event start resize never moved the start")).events[0].timing;
     expect(timing.endLocal, "resizing the start moved the end").toBe(`${today}T12:00`);
     expect(minutesInto(timing.startLocal), "the start did not follow the finger")
       .toBeGreaterThan(minutesInto(`${today}T10:00`));
     await expect.poll(() => stream.evaluate((node) => node.scrollTop), {
-      message: "the Day stream moved under an explicit Event start resize",
+      message: "the Day stream moved under an active Event start resize",
     }).toBe(beforeScroll);
   });
 
-  test("an explicit Event end control resizes immediately without a hold", async ({ page }) => {
+  test("the Event end edge resizes after lift", async ({ page }) => {
     await seedPlanner(page, seeded());
     const event = card(page);
     await event.scrollIntoViewIfNeeded();
@@ -683,14 +705,14 @@ test.describe("explicit Event direct-control touch", () => {
     const x = box.x + box.width / 2;
     const y = box.y + box.height / 2;
 
-    await finger(page, { x, y, to: { x, y: y + HOUR_PX } });
+    await finger(page, { x, y, holdMs: 340, to: { x, y: y + HOUR_PX } });
 
-    const timing = (await stored(page, (t) => t.endLocal !== `${today}T12:00`, "immediate Event end resize never moved the end")).events[0].timing;
+    const timing = (await stored(page, (t) => t.endLocal !== `${today}T12:00`, "held Event end resize never moved the end")).events[0].timing;
     expect(timing.startLocal, "resizing the end moved the start").toBe(`${today}T10:00`);
     expect(minutesInto(timing.endLocal), "the end did not follow the finger")
       .toBeGreaterThan(minutesInto(`${today}T12:00`));
     await expect.poll(() => stream.evaluate((node) => node.scrollTop), {
-      message: "the Day stream moved under an explicit Event end resize",
+      message: "the Day stream moved under an active Event end resize",
     }).toBe(beforeScroll);
   });
 
@@ -725,38 +747,37 @@ test.describe("explicit Event direct-control touch", () => {
     }
   });
 
-  test("a tap or 2px tremor on the Event move control inspects without writing", async ({ page }) => {
+  test("a tap or 2px tremor on the Event body inspects without writing", async ({ page }) => {
     await seedPlanner(page, seeded());
     const event = card(page);
     await event.scrollIntoViewIfNeeded();
     const before = (await settledState(page, () => true, "the notebook never settled")).events[0].timing;
-    const move = event.locator("[data-touch-move]");
-    expect(await move.count(), "eligible Events need an explicit move control").toBe(1);
-    const box = await move.boundingBox();
-    expect(box, "the Event move control is not measurable").not.toBeNull();
+    await expect(event.locator("[data-touch-move]"), "the body must not be fragmented by a move plate").toHaveCount(0);
+    const box = await event.boundingBox();
+    expect(box, "the Event body is not measurable").not.toBeNull();
     const x = box.x + box.width / 2;
     const y = box.y + box.height / 2;
 
     await finger(page, { x, y });
-    await expect(sheets(page), "a tap on the Event move control must inspect").toHaveCount(1);
-    let state = await settledState(page, () => true, "the notebook never settled after a move-control tap");
-    expect(state.events[0].timing, "a tap on the Event move control must not write").toEqual(before);
+    await expect(sheets(page), "a tap on the Event body must inspect").toHaveCount(1);
+    let state = await settledState(page, () => true, "the notebook never settled after a body tap");
+    expect(state.events[0].timing, "a tap on the Event body must not write").toEqual(before);
     await closeAnySheet(page);
 
     await finger(page, { x, y, to: { x: x + 2, y }, steps: 2 });
-    await expect(sheets(page), "a 2px tremor on the Event move control must inspect").toHaveCount(1);
-    state = await settledState(page, () => true, "the notebook never settled after a move-control tremor");
-    expect(state.events[0].timing, "a 2px tremor on the Event move control must not write").toEqual(before);
+    await expect(sheets(page), "a 2px tremor on the Event body must inspect").toHaveCount(1);
+    state = await settledState(page, () => true, "the notebook never settled after a body tremor");
+    expect(state.events[0].timing, "a 2px tremor on the Event body must not write").toEqual(before);
   });
 
-  test("the Event move control remains keyboard and click inspectable", async ({ page }) => {
+  test("the Event card remains keyboard and click inspectable", async ({ page }) => {
     await seedPlanner(page, seeded());
-    const move = card(page).locator("[data-touch-move]");
-    await move.focus();
+    const event = card(page).getByRole("button", { name: "Standup" });
+    await event.focus();
     await page.keyboard.press("Enter");
     await expect(sheets(page), "keyboard activation must inspect the Event").toHaveCount(1);
     await closeAnySheet(page);
-    await move.click();
+    await event.click();
     await expect(sheets(page), "mouse activation must inspect the Event").toHaveCount(1);
   });
 
@@ -801,7 +822,7 @@ test.describe("explicit Event direct-control touch", () => {
     await expect(sheets(page), "scrolling from Event body must not inspect it").toHaveCount(0);
   });
 
-  test("Event resize controls are visible, coarse, disjoint from JOIN, and browser-owned", async ({ page }) => {
+  test("Event resize edges are visible, full-width, scroll-safe, and leave JOIN authoritative", async ({ page }) => {
     await seedPlanner(page, linkedSeeded());
     const event = page.locator('[data-event-id="evt-linked"]');
     await event.scrollIntoViewIfNeeded();
@@ -817,16 +838,14 @@ test.describe("explicit Event direct-control touch", () => {
     expect(joinBox, "JOIN has no measurable box").not.toBeNull();
 
     for (const [label, geom] of [["start resize", startGeom], ["end resize", endGeom]]) {
-      expect(geom.box.width, `the Event ${label} control must be at least 44px wide`).toBeGreaterThanOrEqual(44);
-      expect(geom.box.height, `the Event ${label} control must be at least 44px tall`).toBeGreaterThanOrEqual(44);
+      expect(geom.box.width, `the Event ${label} edge must span the card`).toBeGreaterThanOrEqual(joinBox.width * 3);
+      expect(geom.box.height, `the Event ${label} edge must leave a body move lane`).toBeLessThanOrEqual(12);
       expect(geom.style.visibility).not.toBe("hidden");
-      expect(geom.style.opacity, `the Event ${label} control must not be transparent`).not.toBe("0");
-      expect(geom.style.touchAction, `the Event ${label} control must take browser ownership at touch start`).toBe("none");
+      expect(geom.style.opacity, `the Event ${label} cue must not be transparent`).not.toBe("0");
+      expect(geom.style.touchAction, `the Event ${label} edge must permit vertical scroll before lift`).toMatch(/pan-y|auto|manipulation/);
     }
 
     disjoint(startGeom.box, endGeom.box, "Event start resize overlaps end resize");
-    disjoint(startGeom.box, joinBox, "Event start resize overlaps JOIN");
-    disjoint(endGeom.box, joinBox, "Event end resize overlaps JOIN");
 
     const hits = await page.evaluate((points) => points.map(([label, x, y]) => {
       const hit = document.elementFromPoint(x, y);
@@ -849,108 +868,94 @@ test.describe("explicit Event direct-control touch", () => {
     expect(byLabel.join.resize).toBeNull();
   });
 
-  test("Event move control is visible, coarse, disjoint, and browser-owned", async ({ page }) => {
+  test("Event body ownership is continuous between the two resize edges", async ({ page }) => {
     await seedPlanner(page, linkedSeeded());
     const event = page.locator('[data-event-id="evt-linked"]');
     await event.scrollIntoViewIfNeeded();
-    const move = event.locator("[data-touch-move]");
     const start = event.locator('[data-touch-resize="start"]');
     const end = event.locator('[data-touch-resize="end"]');
     const join = event.getByRole("link", { name: "Join Linked planning session" });
-    expect(await move.count(), "eligible Events need an explicit data-touch-move descendant").toBe(1);
+    await expect(event.locator("[data-touch-move]"), "the Event body must not be fragmented by a move plate").toHaveCount(0);
     await expect(start).toHaveCount(1);
     await expect(end).toHaveCount(1);
     await expect(join).toBeVisible();
-    await expect(move).toHaveAttribute("aria-label", "Open or move Linked planning session");
-    await expect(move).not.toHaveAttribute("aria-hidden", "true");
-
-    const [moveGeom, startGeom, endGeom] = await Promise.all([
-      controlGeometry(move), controlGeometry(start), controlGeometry(end),
-    ]);
+    const [startGeom, endGeom] = await Promise.all([controlGeometry(start), controlGeometry(end)]);
     const joinBox = await join.boundingBox();
     expect(joinBox, "JOIN has no measurable box").not.toBeNull();
-    expect(moveGeom.box.width, "the Event move control must be at least 44px wide").toBeGreaterThanOrEqual(44);
-    expect(moveGeom.box.height, "the Event move control must be at least 44px tall").toBeGreaterThanOrEqual(44);
-    expect(moveGeom.style.visibility).not.toBe("hidden");
-    expect(moveGeom.style.opacity, "the Event move control must not be transparent").not.toBe("0");
-    expect(moveGeom.style.touchAction, "the Event move control must take browser ownership at touch start").toBe("none");
-    disjoint(moveGeom.box, startGeom.box, "Event move overlaps start resize");
-    disjoint(moveGeom.box, endGeom.box, "Event move overlaps end resize");
-    disjoint(moveGeom.box, joinBox, "Event move overlaps JOIN");
-
-    const hit = await page.evaluate(({ x, y }) => {
-      const node = document.elementFromPoint(x, y);
+    const eventBox = await event.boundingBox();
+    const points = await page.evaluate(({ box, joinLeft }) => [0.3, 0.55, 0.75].map((fraction) => {
+      const node = document.elementFromPoint(box.x + Math.min(box.width * fraction, joinLeft - box.x - 8), box.y + box.height / 2);
       return {
+        event: node?.closest?.("[data-event-id]")?.getAttribute("data-event-id") ?? null,
         move: node?.closest?.("[data-touch-move]") != null,
         resize: node?.closest?.("[data-touch-resize]")?.getAttribute("data-touch-resize") ?? null,
         join: node?.closest?.("[data-join], a[href]") != null,
       };
-    }, { x: moveGeom.box.x + moveGeom.box.width / 2, y: moveGeom.box.y + moveGeom.box.height / 2 });
-    expect(hit.move, "the move control center must hit data-touch-move").toBe(true);
-    expect(hit.resize).toBeNull();
-    expect(hit.join).toBe(false);
+    }), { box: eventBox, joinLeft: joinBox.x });
+    for (const point of points) {
+      expect(point.event).toBe("evt-linked");
+      expect(point.move).toBe(false);
+      expect(point.resize).toBeNull();
+      expect(point.join).toBe(false);
+    }
   });
 });
 
-test.describe("the visible Event move control remains desktop-draggable", () => {
+test.describe("the Event body remains desktop-draggable", () => {
   test.use({ viewport: { width: 1280, height: 900 }, hasTouch: false, isMobile: false });
 
-  test("a mouse drag from the visible Event move control still moves the Event", async ({ page }) => {
+  test("a mouse drag from the Event body still moves the Event", async ({ page }) => {
     await seedPlanner(page, seeded());
-    const move = card(page).locator("[data-touch-move]");
-    await move.scrollIntoViewIfNeeded();
-    const box = await move.boundingBox();
-    expect(box, "the Event move control is not measurable for mouse drag").not.toBeNull();
+    const event = card(page);
+    await event.scrollIntoViewIfNeeded();
+    const box = await event.boundingBox();
+    expect(box, "the Event body is not measurable for mouse drag").not.toBeNull();
     const x = box.x + box.width / 2;
     const y = box.y + box.height / 2;
     await page.mouse.move(x, y);
     await page.mouse.down();
-    await page.waitForTimeout(360);
     await page.mouse.move(x, y + HOUR_PX, { steps: 5 });
     await page.mouse.up();
 
-    const timing = (await stored(page, (t) => t.startLocal !== `${today}T10:00`, "mouse drag from the Event move control did not change start")).events[0].timing;
+    const timing = (await stored(page, (t) => t.startLocal !== `${today}T10:00`, "mouse drag from the Event body did not change start")).events[0].timing;
     expect(timing.startLocal).toBe(`${today}T11:00`);
     expect(timing.endLocal).toBe(`${today}T13:00`);
   });
 });
 
 test.describe("the visible Action estimate owns a direct resize on touch", () => {
-  test("compact Action move and estimate controls retain 44px hit boxes", async ({ page }) => {
+  test("compact Actions keep one body lane beside the 48px estimate owner", async ({ page }) => {
     for (const height of [844, 601]) {
       await page.setViewportSize({ width: 390, height });
       await seedPlanner(page, compactAction());
       const lane = page.getByTestId("timeline-action-lane");
-      const move = page.getByTestId("timeline-action-move");
       const estimate = page.getByTestId("timeline-action-resize");
-      await expect(move).toHaveCount(1);
+      await expect(page.getByTestId("timeline-action-move"), "a compact Action must not fragment movement into a small plate").toHaveCount(0);
       await expect(estimate).toHaveCount(1);
       await estimate.scrollIntoViewIfNeeded();
-    const [laneBox, moveBox, estimateBox] = await Promise.all([lane.boundingBox(), move.boundingBox(), estimate.boundingBox()]);
+    const [laneBox, estimateBox] = await Promise.all([lane.boundingBox(), estimate.boundingBox()]);
     expect(laneBox, "the compact Action lane is not measurable").not.toBeNull();
     expect(laneBox.height, "the compact Action outer lane must stay at its 44px layout minimum").toBeCloseTo(44, 0);
-    expect(moveBox, "the compact Action move control is not measurable").not.toBeNull();
     expect(estimateBox, "the compact Action estimate control is not measurable").not.toBeNull();
-    for (const [label, box] of [["move", moveBox], ["estimate", estimateBox]]) {
-      expect(box.width, `compact Action ${label} control must be at least 44px wide`).toBeGreaterThanOrEqual(44);
-      expect(box.height, `compact Action ${label} control must be at least 44px tall`).toBeGreaterThanOrEqual(44);
-    }
-    const ownership = await page.evaluate((points) => points.map(([label, x, y]) => {
-      const hit = document.elementFromPoint(x, y);
+    expect(estimateBox.width, "compact Action estimate control must retain its 48px lane").toBe(48);
+    expect(estimateBox.height, "compact Action estimate control must be at least 44px tall").toBeGreaterThanOrEqual(44);
+    const ownership = await lane.evaluate((node) => {
+      const box = node.getBoundingClientRect();
+      const body = document.elementFromPoint(box.left + box.width * 0.55, box.top + box.height / 2);
+      const estimate = document.elementFromPoint(box.right - 8, box.top + box.height / 2);
       return {
-        label,
-        move: hit?.closest?.("[data-touch-move]") != null,
-        estimate: hit?.closest?.("[data-action-estimate]") != null,
+        body: {
+          action: body?.closest?.("[data-task-chip]") != null,
+          estimate: body?.closest?.("[data-action-estimate]") != null,
+          move: body?.closest?.("[data-touch-move]") != null,
+        },
+        estimate: estimate?.closest?.("[data-action-estimate]") != null,
       };
-    }), [
-      ["move", moveBox.x + moveBox.width / 2, moveBox.y + moveBox.height / 2],
-      ["estimate", estimateBox.x + estimateBox.width / 2, estimateBox.y + estimateBox.height / 2],
-    ]);
-    const byLabel = Object.fromEntries(ownership.map((item) => [item.label, item]));
-    expect(byLabel.move.move, "compact Action move center must hit data-touch-move").toBe(true);
-    expect(byLabel.move.estimate).toBe(false);
-    expect(byLabel.estimate.move).toBe(false);
-    expect(byLabel.estimate.estimate, "compact Action estimate center must hit the estimate owner").toBe(true);
+    });
+    expect(ownership.body.action).toBe(true);
+    expect(ownership.body.estimate).toBe(false);
+    expect(ownership.body.move).toBe(false);
+    expect(ownership.estimate).toBe(true);
     }
   });
 

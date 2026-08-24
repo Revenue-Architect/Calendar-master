@@ -43,12 +43,10 @@ on the first painted frame.
 | Surface | Target | Tap/click | Hold + move | Edge drag | Horizontal swipe | Cancel |
 | --- | --- | --- | --- | --- | --- | --- |
 | Day Event | body | Open details | Move in time after stationary lift; movement before lift scrolls | Desktop/pen overlays resize | None | Abort and restore |
-| Day Event | move control | Open details below movement threshold | Direct move from deliberate movement | None | None | Abort and restore |
-| Day Event | start/end control | Open details below movement threshold | None | Directly resize the matching boundary | None | Abort and restore |
+| Day Event | start/end edge | Open details below movement threshold | Resize the matching boundary after stationary lift; movement before lift scrolls | Full-width desktop/pen edge activates from deliberate movement | None | Abort and restore |
 | Day Event | JOIN | Open meeting directly | None | None | None | No Event inspector |
 | Day Action | check | Complete or reopen | None | None | None | No inspector |
 | Day Action | body | Open details | Move in time after stationary lift; movement before lift scrolls | None | Complete only from body | Abort and restore |
-| Day Action | move control | Open details below movement threshold | Direct move from deliberate movement | None | None | Abort and restore |
 | Day Action | estimate | Open details below movement threshold | None | Directly resize estimate | Never complete | Abort and restore |
 | Empty Day/Week | space | Open one-hour composer | After 500ms, create and size draft | N/A | N/A | No composer and no write |
 | Week Event | body | Open details | Move across day/time | Deferred; do not show a dead handle | None | Abort and restore |
