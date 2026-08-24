@@ -6,7 +6,7 @@
 **Recommended branch:** `feat/action-card-work-progress`
 **Scope:** Action-card progress only; no task-domain, persistence, Timeline-gesture, navigation, ribbon, Event-card, or motion-shell redesign.
 
-After-numbers (2026-08-24):
+After-numbers (2026-08-24, `0dd688b`):
 - Unit `npm test`: 657/657
 - Plan gates (timeline-polish, actions, timeline-touch, interaction-contracts, recurring): 149/149
 - 10× mixed / 15-min rails / swipe / drag / resize: 50/50

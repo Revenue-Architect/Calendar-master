@@ -1,7 +1,7 @@
 # QA — Action card work progress visualization
 
 **Date:** 2026-08-24  
-**Commit:** (filled at ship)  
+**Commit:** `0dd688b`  
 **Scope:** Two-track Action progress on full cards, inspector, and Timeline compact rails.
 
 ## Verification
