@@ -1,9 +1,9 @@
 # Action Card Work Progress Visualization — Implementation Plan
 
-**Date:** 2026-08-24  
-**Status:** Ready for implementation  
-**Base:** `04f6ccbe2d6021370ea20996fcce825cd31e4d81`  
-**Recommended branch:** `feat/action-card-work-progress`  
+**Date:** 2026-08-24
+**Status:** Ready for implementation
+**Base:** `04f6ccbe2d6021370ea20996fcce825cd31e4d81`
+**Recommended branch:** `feat/action-card-work-progress`
 **Scope:** Action-card progress only; no task-domain, persistence, Timeline-gesture, navigation, ribbon, Event-card, or motion-shell redesign.
 
 ## 1. Objective
