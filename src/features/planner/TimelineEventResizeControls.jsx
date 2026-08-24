@@ -40,7 +40,7 @@ function EventResizeControl({ edge, event, theme, hasJoin, onPointerDown }) {
       data-touch-resize={edge} data-resize-edge={edge}
       onPointerDown={(pointerEvent) => onPointerDown(pointerEvent, event, edge)}
       className={`absolute ${edge === "start" ? "top-0 left-0" : "bottom-0"} z-10 flex items-center justify-center`}
-      style={{ width: 44, height: 44, right: endOffset, cursor: "ns-resize", touchAction: "pan-y", pointerEvents: "auto" }}>
+      style={{ width: 44, height: 44, right: endOffset, cursor: "ns-resize", touchAction: "none", pointerEvents: "auto" }}>
       <span data-test={`timeline-event-resize-cue-${edge}`} style={cueStyle(theme, edge)}>
         <span aria-hidden="true" style={{ width: 12, height: 1.5, background: theme.accentText }} />
         <span aria-hidden="true" style={chevronStyle(theme)} />
@@ -49,11 +49,44 @@ function EventResizeControl({ edge, event, theme, hasJoin, onPointerDown }) {
   );
 }
 
-export default function TimelineEventResizeControls({ event, theme, hasJoin = false, onPointerDown }) {
+function moveCueStyle(theme) {
+  return {
+    width: 22, height: 22, borderRadius: 5,
+    border: `1px solid ${theme.accent}`, background: `${theme.accent}26`,
+    color: theme.accentText, display: "flex", alignItems: "center", justifyContent: "center",
+    fontSize: 14, lineHeight: 1, fontWeight: 700,
+  };
+}
+
+function EventMoveControl({ event, theme, left = 44, onMoveClick, clickFollowsGesture }) {
+  const stopKeyboard = (keyEvent) => {
+    if (keyEvent.key === "Enter" || keyEvent.key === " ") keyEvent.stopPropagation();
+  };
+  const open = (clickEvent) => {
+    clickEvent.stopPropagation();
+    if (clickFollowsGesture?.()) return;
+    onMoveClick?.(clickEvent);
+  };
+  return (
+    <button type="button" aria-label={`Open or move ${event.title}`} data-touch-move={event.id} data-test="timeline-event-move"
+      onKeyDown={stopKeyboard} onClick={open}
+      className="absolute top-0 z-10 flex items-center justify-center"
+      style={{ left, width: 44, height: 44, cursor: "grab", touchAction: "none", pointerEvents: "auto" }}>
+      <span aria-hidden="true" style={moveCueStyle(theme)}>↕</span>
+    </button>
+  );
+}
+
+export default function TimelineEventResizeControls({
+  event, theme, hasJoin = false, onPointerDown, onMoveClick, clickFollowsGesture, showMove = true, showResize = true,
+}) {
   return (
     <>
-      <EventResizeControl edge="start" event={event} theme={theme} hasJoin={hasJoin} onPointerDown={onPointerDown} />
-      <EventResizeControl edge="end" event={event} theme={theme} hasJoin={hasJoin} onPointerDown={onPointerDown} />
+      {showMove && <EventMoveControl event={event} theme={theme} left={showResize ? 44 : 0} onMoveClick={onMoveClick} clickFollowsGesture={clickFollowsGesture} />}
+      {showResize && <>
+        <EventResizeControl edge="start" event={event} theme={theme} hasJoin={hasJoin} onPointerDown={onPointerDown} />
+        <EventResizeControl edge="end" event={event} theme={theme} hasJoin={hasJoin} onPointerDown={onPointerDown} />
+      </>}
     </>
   );
 }

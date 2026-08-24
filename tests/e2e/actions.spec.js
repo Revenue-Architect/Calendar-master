@@ -35,6 +35,19 @@ function narrowScheduledActions() {
   return state;
 }
 
+function nearbyShortActions() {
+  let state = createBlankPlannerState({});
+  for (const [index, startMinute] of [10 * 60, 10 * 60 + 15].entries()) {
+    const result = createTask(state.tasks, {
+      id: `task-short-nearby-${index}`,
+      title: `Nearby short ${index}`,
+      planned: { date: keyOf(new Date()), startMinute, estimateMinutes: 15 },
+    });
+    state = { ...state, tasks: result.tasks };
+  }
+  return state;
+}
+
 function liveActionAt(now, { id = "task-live", title = "Live Action", estimateMinutes = 60 } = {}) {
   const state = createBlankPlannerState({});
   const result = createTask(state.tasks, {
@@ -75,6 +88,25 @@ async function dispatchTouch(session, type, x, y) {
     type,
     touchPoints: type === "touchEnd" ? [] : [{ x, y, radiusX: 4, radiusY: 4, force: .5 }],
   });
+}
+
+async function completionSwipePoint(page, chip) {
+  const title = chip.locator(".nb-lead").first();
+  const box = await title.boundingBox();
+  expect(box, "the Action title is not measurable for completion swipe").not.toBeNull();
+  const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  const ownership = await page.evaluate(({ x, y }) => {
+    const hit = document.elementFromPoint(x, y);
+    return {
+      move: hit?.closest?.("[data-touch-move]") != null,
+      estimate: hit?.closest?.("[data-action-estimate]") != null,
+      complete: hit?.closest?.("[data-timeline-complete]") != null,
+    };
+  }, point);
+  expect(ownership.move, "completion swipe must start outside the move control").toBe(false);
+  expect(ownership.estimate, "completion swipe must start outside the estimate control").toBe(false);
+  expect(ownership.complete, "completion swipe must start outside completion").toBe(false);
+  return point;
 }
 
 test.describe("the actions column", () => {
@@ -148,7 +180,7 @@ test.describe("the actions column", () => {
     expect(state.tasks[0].planned.startMinute).toBe(11 * 60);
   });
 
-  test("a narrow collision lane stays move-first instead of exposing an overlapping estimate resize", async ({ page }) => {
+  test("a narrow collision lane keeps a readable body instead of exposing direct controls", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await seedPlanner(page, narrowScheduledActions());
     const cards = page.locator('[data-task-chip^="task-narrow-"]');
@@ -157,11 +189,42 @@ test.describe("the actions column", () => {
       const card = cards.nth(index);
       await card.scrollIntoViewIfNeeded();
       await expect(card.getByTestId("timeline-action-resize"), "a narrow Action must not advertise a resize owner").toHaveCount(0);
-      const move = card.getByTestId("timeline-action-move");
-      const moveBox = await move.boundingBox();
-      expect(moveBox, "a narrow Action must retain a measurable body move lane").not.toBeNull();
-      expect(moveBox.width, "the move lane must remain at least one coarse-pointer gutter").toBeGreaterThanOrEqual(44);
+      await expect(card.getByTestId("timeline-action-move"), "a dense Action must leave its move lane to the body").toHaveCount(0);
+      const title = card.locator(".nb-lead");
+      const titleBox = await title.boundingBox();
+      const cardBox = await card.boundingBox();
+      expect(titleBox, "a dense Action title must remain measurable").not.toBeNull();
+      expect(cardBox, "a dense Action card must remain measurable").not.toBeNull();
+      expect(titleBox.width, "a dense Action must leave a readable body after completion").toBeGreaterThanOrEqual(44);
+      const ownership = await page.evaluate(({ x, y }) => {
+        const hit = document.elementFromPoint(x, y);
+        return {
+          chip: hit?.closest?.("[data-task-chip]")?.getAttribute("data-task-chip") ?? null,
+          move: hit?.closest?.("[data-touch-move]") != null,
+          estimate: hit?.closest?.("[data-action-estimate]") != null,
+          complete: hit?.closest?.("[data-timeline-complete]") != null,
+        };
+      }, { x: titleBox.x + titleBox.width / 2, y: titleBox.y + titleBox.height / 2 });
+      expect(ownership.chip).toBe(`task-narrow-${index}`);
+      expect(ownership.move, "a dense Action title point must remain body-owned").toBe(false);
+      expect(ownership.estimate).toBe(false);
+      expect(ownership.complete).toBe(false);
     }
+  });
+
+  test("nearby short Actions do not overlap after the 44px render minimum", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await seedPlanner(page, nearbyShortActions());
+    const cards = page.locator('[data-task-chip^="task-short-nearby-"]');
+    await expect(cards).toHaveCount(2);
+    const boxes = await cards.evaluateAll((nodes) => nodes.map((node) => {
+      const box = node.getBoundingClientRect();
+      return { left: box.left, right: box.right, top: box.top, bottom: box.bottom };
+    }));
+    const [first, second] = boxes;
+    const overlaps = first.left < second.right && second.left < first.right
+      && first.top < second.bottom && second.top < first.bottom;
+    expect(overlaps, "nearby short Action cards must remain disjoint").toBe(false);
   });
 
   test("a stationary desktop Action hold stays a click candidate", async ({ page }) => {
@@ -948,9 +1011,7 @@ test.describe("scheduled action completion in the mobile timeline", () => {
     const chip = page.locator('[data-task-chip="task-swipe"]');
     await chip.scrollIntoViewIfNeeded();
     const beforeDate = await page.getByTestId("day-heading").getAttribute("data-date");
-    const box = await chip.boundingBox();
-    const x = box.x + Math.min(70, box.width / 2);
-    const y = box.y + Math.min(18, box.height / 2);
+    const { x, y } = await completionSwipePoint(page, chip);
     const session = await page.context().newCDPSession(page);
 
     await dispatchTouch(session, "touchStart", x, y);
@@ -968,9 +1029,7 @@ test.describe("scheduled action completion in the mobile timeline", () => {
     await seedPlanner(page, scheduledAction({ id: "task-partial", title: "Keep the brief" }));
     const chip = page.locator('[data-task-chip="task-partial"]');
     await chip.scrollIntoViewIfNeeded();
-    const box = await chip.boundingBox();
-    const x = box.x + Math.min(70, box.width / 2);
-    const y = box.y + Math.min(18, box.height / 2);
+    const { x, y } = await completionSwipePoint(page, chip);
     const session = await page.context().newCDPSession(page);
 
     await dispatchTouch(session, "touchStart", x, y);
@@ -995,9 +1054,24 @@ test.describe("touch Action ownership in the timeline", () => {
     const stream = page.getByTestId("day-stream");
     const beforeScroll = await stream.evaluate((node) => node.scrollTop);
     const before = (await storedState(page)).tasks[0].planned;
-    const box = await chip.boundingBox();
+    const title = chip.locator(".nb-lead");
+    const box = await title.boundingBox();
+    expect(box, "the Action title is not measurable").not.toBeNull();
     const x = box.x + box.width / 2;
-    const y = box.y + Math.min(box.height / 2, 18);
+    const y = box.y + box.height / 2;
+    const ownership = await page.evaluate(({ x: px, y: py }) => {
+      const hit = document.elementFromPoint(px, py);
+      return {
+        chip: hit?.closest?.("[data-task-chip]")?.getAttribute("data-task-chip") ?? null,
+        move: hit?.closest?.("[data-touch-move]") != null,
+        estimate: hit?.closest?.("[data-action-estimate]") != null,
+        complete: hit?.closest?.("[data-timeline-complete]") != null,
+      };
+    }, { x, y });
+    expect(ownership.chip).toBe("task-touch-scroll");
+    expect(ownership.move, "body-scroll coverage must start outside the explicit move control").toBe(false);
+    expect(ownership.estimate, "body-scroll coverage must start outside the estimate control").toBe(false);
+    expect(ownership.complete, "body-scroll coverage must start outside completion").toBe(false);
     const session = await page.context().newCDPSession(page);
 
     await dispatchTouch(session, "touchStart", x, y);
@@ -1012,6 +1086,250 @@ test.describe("touch Action ownership in the timeline", () => {
     const after = (await settledState(page, (state) => state.tasks.length === 1)).tasks[0].planned;
     expect(after, "scrolling from an Action must not write its plan").toEqual(before);
     await expect(page.getByTestId("sheet"), "scrolling from an Action must not inspect it").toHaveCount(0);
+  });
+
+  test("an explicit Action move control starts from immediate movement", async ({ page }) => {
+    await seedPlanner(page, scheduledAction({ id: "task-touch-direct-move", title: "Move the brief immediately" }));
+    const chip = page.locator('[data-task-chip="task-touch-direct-move"]');
+    await chip.scrollIntoViewIfNeeded();
+    const move = chip.locator("[data-touch-move]");
+    expect(await move.count(), "scheduled Actions need an explicit data-touch-move descendant").toBe(1);
+    const box = await move.boundingBox();
+    expect(box, "the Action move control is not measurable").not.toBeNull();
+    const stream = page.getByTestId("day-stream");
+    const beforeScroll = await stream.evaluate((node) => node.scrollTop);
+    const before = (await storedState(page)).tasks[0].planned;
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    const session = await page.context().newCDPSession(page);
+
+    await dispatchTouch(session, "touchStart", x, y);
+    await dispatchTouch(session, "touchMove", x, y + 68);
+    await dispatchTouch(session, "touchEnd", x, y + 68);
+    await session.detach();
+
+    const state = await settledState(page, (stored) => stored.tasks[0]?.planned.startMinute === 11 * 60, "immediate Action move never changed start");
+    expect(state.tasks[0].planned.date, "an explicit Action move must keep the date").toBe(before.date);
+    expect(state.tasks[0].planned.estimateMinutes, "an explicit Action move must keep the estimate").toBe(before.estimateMinutes);
+    expect(state.tasks[0].planned.startMinute).toBe(11 * 60);
+    await expect.poll(() => stream.evaluate((node) => node.scrollTop), {
+      message: "the Day stream moved under an explicit Action move",
+    }).toBe(beforeScroll);
+    await expect(page.getByTestId("sheet"), "an explicit Action move must not inspect the card").toHaveCount(0);
+  });
+
+  test("an explicit Action estimate control resizes immediately without a hold", async ({ page }) => {
+    await seedPlanner(page, scheduledAction({ id: "task-touch-direct-resize", title: "Resize the brief immediately" }));
+    const chip = page.locator('[data-task-chip="task-touch-direct-resize"]');
+    await chip.scrollIntoViewIfNeeded();
+    const handle = chip.getByTestId("timeline-action-resize");
+    const box = await handle.boundingBox();
+    expect(box, "the Action estimate control is not measurable").not.toBeNull();
+    const stream = page.getByTestId("day-stream");
+    const beforeScroll = await stream.evaluate((node) => node.scrollTop);
+    const before = (await storedState(page)).tasks[0].planned;
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    const session = await page.context().newCDPSession(page);
+
+    await dispatchTouch(session, "touchStart", x, y);
+    await dispatchTouch(session, "touchMove", x, y + 68);
+    await dispatchTouch(session, "touchEnd", x, y + 68);
+    await session.detach();
+
+    const state = await settledState(page, (stored) => stored.tasks[0]?.planned.estimateMinutes > before.estimateMinutes, "immediate Action estimate resize never changed estimate");
+    expect(state.tasks[0].planned.date, "an explicit Action resize must keep the date").toBe(before.date);
+    expect(state.tasks[0].planned.startMinute, "an explicit Action resize must keep the start").toBe(before.startMinute);
+    expect(state.tasks[0].planned.estimateMinutes).toBeGreaterThan(before.estimateMinutes);
+    await expect.poll(() => stream.evaluate((node) => node.scrollTop), {
+      message: "the Day stream moved under an explicit Action estimate resize",
+    }).toBe(beforeScroll);
+    await expect(page.getByTestId("sheet"), "an explicit Action resize must not inspect the card").toHaveCount(0);
+  });
+
+  test("a tap or 2px tremor on the Action estimate control inspects without writing", async ({ page }) => {
+    await seedPlanner(page, scheduledAction({ id: "task-touch-direct-tap", title: "Inspect the brief" }));
+    const chip = page.locator('[data-task-chip="task-touch-direct-tap"]');
+    await chip.scrollIntoViewIfNeeded();
+    const before = (await storedState(page)).tasks[0].planned;
+    const locator = chip.getByTestId("timeline-action-resize");
+    expect(await locator.count(), "scheduled Actions need an explicit estimate resize control").toBe(1);
+    const box = await locator.boundingBox();
+    expect(box, "the Action estimate control is not measurable").not.toBeNull();
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    const session = await page.context().newCDPSession(page);
+
+    await dispatchTouch(session, "touchStart", x, y);
+    await dispatchTouch(session, "touchEnd", x, y);
+    await expect(page.getByTestId("sheet"), "a tap on the Action estimate control must inspect").toHaveCount(1);
+    let planned = (await settledState(page, () => true, "the notebook never settled after a direct-control tap")).tasks[0].planned;
+    expect(planned, "a tap on the Action estimate control must not write").toEqual(before);
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("sheet")).toHaveCount(0);
+
+    await dispatchTouch(session, "touchStart", x, y);
+    await dispatchTouch(session, "touchMove", x + 2, y);
+    await dispatchTouch(session, "touchEnd", x + 2, y);
+    await expect(page.getByTestId("sheet"), "a 2px tremor on the Action estimate control must inspect").toHaveCount(1);
+    planned = (await settledState(page, () => true, "the notebook never settled after a direct-control tremor")).tasks[0].planned;
+    expect(planned, "a 2px tremor on the Action estimate control must not write").toEqual(before);
+    await session.detach();
+  });
+
+  test("a tap or 2px tremor on the Action move control inspects without writing", async ({ page }) => {
+    await seedPlanner(page, scheduledAction({ id: "task-touch-direct-move-tap", title: "Inspect the brief from move" }));
+    const chip = page.locator('[data-task-chip="task-touch-direct-move-tap"]');
+    await chip.scrollIntoViewIfNeeded();
+    const before = (await storedState(page)).tasks[0].planned;
+    const move = chip.locator("[data-touch-move]");
+    expect(await move.count(), "scheduled Actions need an explicit move control").toBe(1);
+    const box = await move.boundingBox();
+    expect(box, "the Action move control is not measurable").not.toBeNull();
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    const session = await page.context().newCDPSession(page);
+
+    await dispatchTouch(session, "touchStart", x, y);
+    await dispatchTouch(session, "touchEnd", x, y);
+    await expect(page.getByTestId("sheet"), "a tap on the Action move control must inspect").toHaveCount(1);
+    let planned = (await settledState(page, () => true, "the notebook never settled after a move-control tap")).tasks[0].planned;
+    expect(planned, "a tap on the Action move control must not write").toEqual(before);
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("sheet")).toHaveCount(0);
+
+    await dispatchTouch(session, "touchStart", x, y);
+    await dispatchTouch(session, "touchMove", x + 2, y);
+    await dispatchTouch(session, "touchEnd", x + 2, y);
+    await expect(page.getByTestId("sheet"), "a 2px tremor on the Action move control must inspect").toHaveCount(1);
+    planned = (await settledState(page, () => true, "the notebook never settled after a move-control tremor")).tasks[0].planned;
+    expect(planned, "a 2px tremor on the Action move control must not write").toEqual(before);
+    await session.detach();
+  });
+
+  test("Action estimate control is visible, coarse, disjoint from completion, and browser-owned", async ({ page }) => {
+    await seedPlanner(page, scheduledAction({ id: "task-touch-direct-geometry", title: "Own the brief lanes" }));
+    const lane = page.getByTestId("timeline-action-lane");
+    const chip = page.locator('[data-task-chip="task-touch-direct-geometry"]');
+    await chip.scrollIntoViewIfNeeded();
+    const estimate = chip.getByTestId("timeline-action-resize");
+    const complete = lane.locator("[data-timeline-complete]");
+    await expect(estimate).toHaveCount(1);
+    await expect(complete).toHaveCount(1);
+
+    const geometryOf = async (locator) => {
+      const box = await locator.boundingBox();
+      expect(box, "a direct Action control has no measurable box").not.toBeNull();
+      const style = await locator.evaluate((node) => {
+        const computed = getComputedStyle(node);
+        return { touchAction: computed.touchAction, opacity: computed.opacity, visibility: computed.visibility };
+      });
+      return { box, style };
+    };
+    const [estimateGeom, completeGeom] = await Promise.all([geometryOf(estimate), geometryOf(complete)]);
+    const disjoint = (a, b, label) => {
+      const separate = a.x + a.width <= b.x + 0.5
+        || b.x + b.width <= a.x + 0.5
+        || a.y + a.height <= b.y + 0.5
+        || b.y + b.height <= a.y + 0.5;
+      expect(separate, label).toBe(true);
+    };
+
+    expect(estimateGeom.box.width, "the Action estimate control must be at least 44px wide").toBeGreaterThanOrEqual(44);
+    expect(estimateGeom.box.height, "the Action estimate control must be at least 44px tall").toBeGreaterThanOrEqual(44);
+    expect(estimateGeom.style.visibility).not.toBe("hidden");
+    expect(estimateGeom.style.opacity, "the Action estimate control must not be transparent").not.toBe("0");
+    expect(estimateGeom.style.touchAction, "the Action estimate control must take browser ownership at touch start").toBe("none");
+    disjoint(estimateGeom.box, completeGeom.box, "Action estimate overlaps completion");
+
+    const hits = await page.evaluate((points) => points.map(([label, x, y]) => {
+      const hit = document.elementFromPoint(x, y);
+      return {
+        label,
+        estimate: hit?.closest?.("[data-action-estimate]") != null,
+        complete: hit?.closest?.("[data-timeline-complete]") != null,
+      };
+    }), [
+      ["estimate", estimateGeom.box.x + estimateGeom.box.width / 2, estimateGeom.box.y + estimateGeom.box.height / 2],
+      ["complete", completeGeom.box.x + completeGeom.box.width / 2, completeGeom.box.y + completeGeom.box.height / 2],
+    ]);
+    const byLabel = Object.fromEntries(hits.map((hit) => [hit.label, hit]));
+    expect(byLabel.estimate.estimate, "the estimate center must remain estimate-owned").toBe(true);
+    expect(byLabel.estimate.complete).toBe(false);
+    expect(byLabel.complete.complete, "the completion center must remain completion-owned").toBe(true);
+    expect(byLabel.complete.estimate).toBe(false);
+  });
+
+  test("Action move control is visible, coarse, disjoint, and browser-owned", async ({ page }) => {
+    await seedPlanner(page, scheduledAction({ id: "task-touch-direct-move-geometry", title: "Own the brief move lane" }));
+    const lane = page.getByTestId("timeline-action-lane");
+    const chip = page.locator('[data-task-chip="task-touch-direct-move-geometry"]');
+    await chip.scrollIntoViewIfNeeded();
+    const move = chip.locator("[data-touch-move]");
+    const estimate = chip.getByTestId("timeline-action-resize");
+    const complete = lane.locator("[data-timeline-complete]");
+    expect(await move.count(), "scheduled Actions need an explicit data-touch-move descendant").toBe(1);
+    await expect(estimate).toHaveCount(1);
+    await expect(complete).toHaveCount(1);
+    await expect(move).toHaveAttribute("aria-label", "Open or move Own the brief move lane");
+    await expect(move).not.toHaveAttribute("aria-hidden", "true");
+
+    const geometryOf = async (locator) => {
+      const box = await locator.boundingBox();
+      expect(box, "a direct Action control has no measurable box").not.toBeNull();
+      const style = await locator.evaluate((node) => {
+        const computed = getComputedStyle(node);
+        return { touchAction: computed.touchAction, opacity: computed.opacity, visibility: computed.visibility };
+      });
+      return { box, style };
+    };
+    const [moveGeom, estimateGeom, completeGeom] = await Promise.all([
+      geometryOf(move), geometryOf(estimate), geometryOf(complete),
+    ]);
+    const disjoint = (a, b, label) => {
+      const separate = a.x + a.width <= b.x + 0.5
+        || b.x + b.width <= a.x + 0.5
+        || a.y + a.height <= b.y + 0.5
+        || b.y + b.height <= a.y + 0.5;
+      expect(separate, label).toBe(true);
+    };
+
+    expect(moveGeom.box.width, "the Action move control must be at least 44px wide").toBeGreaterThanOrEqual(44);
+    expect(moveGeom.box.height, "the Action move control must be at least 44px tall").toBeGreaterThanOrEqual(44);
+    expect(moveGeom.style.visibility).not.toBe("hidden");
+    expect(moveGeom.style.opacity, "the Action move control must not be transparent").not.toBe("0");
+    expect(moveGeom.style.touchAction, "the Action move control must take browser ownership at touch start").toBe("none");
+    disjoint(moveGeom.box, estimateGeom.box, "Action move overlaps estimate resize");
+    disjoint(moveGeom.box, completeGeom.box, "Action move overlaps completion");
+
+    const hit = await page.evaluate(({ x, y }) => {
+      const node = document.elementFromPoint(x, y);
+      return {
+        move: node?.closest?.("[data-touch-move]") != null,
+        estimate: node?.closest?.("[data-action-estimate]") != null,
+        complete: node?.closest?.("[data-timeline-complete]") != null,
+      };
+    }, { x: moveGeom.box.x + moveGeom.box.width / 2, y: moveGeom.box.y + moveGeom.box.height / 2 });
+    expect(hit.move, "the Action move control center must hit data-touch-move").toBe(true);
+    expect(hit.estimate).toBe(false);
+    expect(hit.complete).toBe(false);
+
+    const boundaryHits = await page.evaluate((points) => points.map(({ label, x, y }) => {
+      const node = document.elementFromPoint(x, y);
+      return {
+        label,
+        move: node?.closest?.("[data-touch-move]") != null,
+        complete: node?.closest?.("[data-timeline-complete]") != null,
+      };
+    }), [
+      { label: "completion edge", x: completeGeom.box.x + completeGeom.box.width - 1, y: completeGeom.box.y + completeGeom.box.height / 2 },
+      { label: "move edge", x: moveGeom.box.x + 1, y: moveGeom.box.y + moveGeom.box.height / 2 },
+    ]);
+    const boundaryByLabel = Object.fromEntries(boundaryHits.map((sample) => [sample.label, sample]));
+    expect(boundaryByLabel["completion edge"].complete, "completion must own its final visible pixel").toBe(true);
+    expect(boundaryByLabel["completion edge"].move).toBe(false);
+    expect(boundaryByLabel["move edge"].move, "move must own its first visible pixel on a coarse pointer").toBe(true);
+    expect(boundaryByLabel["move edge"].complete, "completion's expanded pseudo-target must not cover move").toBe(false);
   });
 
   test("a held touch Action moves after the lift threshold", async ({ page }) => {

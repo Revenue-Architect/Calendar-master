@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { ACTION_COMPLETION_LANE } from "./timelineTouchTarget.js";
 
 function resizeCueStyle(theme) {
   return {
@@ -14,6 +15,15 @@ function resizeCueStyle(theme) {
   };
 }
 
+function moveCueStyle(theme) {
+  return {
+    width: 22, height: 22, borderRadius: 5,
+    border: `1px solid ${theme.accent}`, background: `${theme.accent}26`,
+    color: theme.accentText, display: "flex", alignItems: "center", justifyContent: "center",
+    fontSize: 14, lineHeight: 1, fontWeight: 700,
+  };
+}
+
 export default function TimelineActionCard({
   task,
   top,
@@ -24,6 +34,7 @@ export default function TimelineActionCard({
   block,
   sizing,
   resizeEligible = block,
+  moveEligible = true,
   dragging = false,
   reducedMotion = false,
   live = false,
@@ -113,13 +124,22 @@ export default function TimelineActionCard({
           <span className="nb-label">COMPLETE</span>
         </div>
         <div ref={chipRef} data-task-chip={task.id}
-          className="absolute inset-0 overflow-hidden"
+          className="absolute inset-0"
           style={{
             borderRadius: cardRadius,
             border: `1px dashed ${sizing ? theme.accent : theme.faint}`,
+            /* Keep the 44px outer lane as the layout contract. The 1px border
+               may extend beyond that lane; its controls use the content box
+               and the lane's overflow clips the border at the edge. */
+            boxSizing: "content-box",
             backgroundColor: theme.card,
             backgroundImage: block ? `linear-gradient(${theme.accent}0D, ${theme.accent}0D)` : "none",
             opacity: 1,
+            /* The gap between the completion and move lanes is still ordinary
+               Action surface. Keep it in the same vertical-scroll / horizontal
+               swipe browser contract as the title body. Explicit controls below
+               override this with touch-action:none. */
+            touchAction: "pan-y",
           }}>
           {/* Inside the opaque card face so it remains visibly beneath the
               content, COMPLETE overlay, checkmark, and resize affordance. */}
@@ -130,15 +150,29 @@ export default function TimelineActionCard({
               <span className="absolute inset-y-0 right-0" style={{ width: 2, background: theme.accent }} />
             </span>
           )}
-          <button type="button" data-test="timeline-action-move" onClick={open} onKeyDown={keyOpen}
-            className="nb-tap absolute inset-y-0 left-8 min-w-0 overflow-hidden text-left"
+          {moveEligible && (
+            <button type="button" data-touch-move={task.id} data-test="timeline-action-move"
+              aria-label={`Open or move ${task.title}`} onClick={open} onKeyDown={keyOpen}
+              className="nb-tap absolute z-10 flex w-11 items-center justify-center"
+              style={{
+                top: -1, bottom: -1, left: ACTION_COMPLETION_LANE,
+                background: "transparent",
+                borderRadius: 0,
+                touchAction: "none",
+              }}>
+              <span data-test="timeline-action-move-cue" aria-hidden="true" style={moveCueStyle(theme)}>↕</span>
+            </button>
+          )}
+          <button type="button" onClick={open} onKeyDown={keyOpen}
+            className="nb-tap absolute min-w-0 overflow-hidden text-left"
             style={{
+              top: 0, bottom: 0,
+              left: ACTION_COMPLETION_LANE + (moveEligible ? 44 : 0),
               right: resizeEligible ? 48 : 0,
               display: "flex", flexDirection: "column", justifyContent: "flex-start",
-              background: "transparent",
-              borderRadius: 0,
+              background: "transparent", borderRadius: 0, touchAction: "pan-y",
             }}>
-            <span className="flex min-w-0 items-center gap-2 py-1 pr-1.5">
+            <span className={`flex min-w-0 items-center gap-2 py-1 ${moveEligible || resizeEligible ? "pr-1.5" : "pr-0"}`}>
               <span className="nb-lead min-w-0 flex-1 truncate" style={{ color: done ? theme.dimText : theme.text }}>{task.title}</span>
               {subtaskProgress?.total > 0 && (
                 <span data-test="timeline-action-subtask-marker" aria-label={`${subtaskProgress.total} subtask${subtaskProgress.total === 1 ? "" : "s"}`}
@@ -162,8 +196,8 @@ export default function TimelineActionCard({
                 event.stopPropagation();
                 onResizePointerDown(event, task, estimate);
               }}
-              className="absolute inset-y-0 right-0 z-30 flex w-12 items-center justify-center gap-0"
-              style={{ cursor: "ns-resize", touchAction: "pan-y", fontFamily: mono, color: sizing ? theme.accent : theme.dim }}>
+              className="absolute right-0 z-30 flex w-12 items-center justify-center gap-0"
+              style={{ top: -1, bottom: -1, cursor: "ns-resize", touchAction: "none", fontFamily: mono, color: sizing ? theme.accent : theme.dim }}>
               <span data-test="timeline-action-resize-cue" aria-hidden="true" style={resizeCueStyle(theme)}>
                 <span style={{ width: 4, height: 1.5, background: theme.accent }} />
               </span>
@@ -175,7 +209,7 @@ export default function TimelineActionCard({
             aria-label={`${done ? "Reopen" : "Complete"} ${task.title}`}
             onClick={(event) => { event.stopPropagation(); (done ? onReopen : onComplete)(task.id); }}
             onPointerDown={(event) => event.stopPropagation()}
-            className="nb-tap absolute inset-y-0 left-0 z-30 flex w-8 items-center justify-center"
+            className="nb-tap absolute inset-y-0 left-0 z-30 flex w-11 items-center justify-center"
             style={{ color: theme.accent, background: "transparent", touchAction: "manipulation" }}>
             <span data-test="timeline-complete-mark" aria-hidden="true"
               className="flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold leading-none"

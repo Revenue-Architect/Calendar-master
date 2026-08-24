@@ -8,18 +8,22 @@ Cancel is never commit. `pointercancel` and `touchcancel` restore the before
 snapshot, clear lifted visuals, and open neither a composer nor a toast.
 
 On the Day Timeline, a touch that begins on an Event or Action body remains a
-vertical-pan candidate until the stationary hold threshold is met. Ordinary
-Event body touches move the Event, including the upper and lower card areas;
-the broad desktop resize overlays do not establish touch resize intent. An
-Event exposes visibly marked, disjoint 44px start/end corner controls only when
-its live geometry can reserve a start lane, a 44px body gutter, and an end lane.
+vertical-pan candidate until the stationary hold threshold is met. Direct
+manipulation instead begins from deliberate movement on a visible 44px move or
+resize control. Those controls establish browser ownership at touch start; a
+tap or 1–2px tremor still opens the inspector without writing. The broad
+desktop resize overlays do not establish touch resize intent. An Event exposes
+visibly marked, disjoint start, move, and end controls only when its live
+geometry can reserve their lanes and readable body content.
 Linked Events reserve a separate 56px JOIN lane (plus its existing 4px inset)
 before the end control. Their title/body is padded into the remaining lane, so
 the visible cue and the actual
-touch owner cannot disagree. Short or narrow Events expose no touch resize
-controls; precise start/end editing remains available through the Event
-inspector. The Action estimate control is the explicit touch resize region and
-remains direct; the Action body moves only after lift.
+touch owner cannot disagree. Short or narrow Events expose only the direct
+controls their geometry can contain; precise start/end editing remains
+available through the Event inspector. A scheduled Action reserves separate
+completion, move, readable-body, and optional estimate lanes. Its move and
+estimate controls are direct; its remaining body stays a scroll-safe hold
+candidate. A horizontal swipe from that body continues to own completion.
 
 After lift, the active Day sequence owns the initiating touch and freezes the
 Day stream's physical `scrollTop` until normal end or cancellation. A forced
@@ -38,11 +42,14 @@ on the first painted frame.
 
 | Surface | Target | Tap/click | Hold + move | Edge drag | Horizontal swipe | Cancel |
 | --- | --- | --- | --- | --- | --- | --- |
-| Day Event | body | Open details | Move in time, including upper/lower card areas | Desktop/pen overlays resize; touch resizes only from eligible visible corner controls | None | Abort and restore |
+| Day Event | body | Open details | Move in time after stationary lift; movement before lift scrolls | Desktop/pen overlays resize | None | Abort and restore |
+| Day Event | move control | Open details below movement threshold | Direct move from deliberate movement | None | None | Abort and restore |
+| Day Event | start/end control | Open details below movement threshold | None | Directly resize the matching boundary | None | Abort and restore |
 | Day Event | JOIN | Open meeting directly | None | None | None | No Event inspector |
 | Day Action | check | Complete or reopen | None | None | None | No inspector |
-| Day Action | body | Open details | Move in time | None | Complete only from body | Abort and restore |
-| Day Action | estimate | Ordinary tap may open | Directly resize estimate | Resize estimate | Never complete | Abort and restore |
+| Day Action | body | Open details | Move in time after stationary lift; movement before lift scrolls | None | Complete only from body | Abort and restore |
+| Day Action | move control | Open details below movement threshold | Direct move from deliberate movement | None | None | Abort and restore |
+| Day Action | estimate | Open details below movement threshold | None | Directly resize estimate | Never complete | Abort and restore |
 | Empty Day/Week | space | Open one-hour composer | After 500ms, create and size draft | N/A | N/A | No composer and no write |
 | Week Event | body | Open details | Move across day/time | Deferred; do not show a dead handle | None | Abort and restore |
 | Week Event | JOIN | Open meeting directly | None | None | None | No Event inspector |
@@ -58,8 +65,8 @@ the base-green external-origin characterization remains to guard the existing
 Actions-column behavior. It is not a second owner.
 
 Only a normal pointer/touch end may persist, and only when the proposal differs
-from the before snapshot. The movement that crosses a resize activation
-threshold is applied in that same frame. A second finger, a non-owner end,
+from the before snapshot. The movement that crosses a direct move or resize
+activation threshold is applied in that same frame. A second finger, a non-owner end,
 touch cancellation, stream remount, date/zoom change, or superseding
 interaction cancels and restores the before snapshot without a write.
 

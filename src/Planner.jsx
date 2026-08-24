@@ -98,6 +98,7 @@ import {
 } from "./features/planner/taskCompleteUndo.js";
 import {
   gestureChangedAnything,
+  DIRECT_DRAG_ACTIVATION_PX,
   EMPTY_SPACE_LIFT_MS,
   isResizable,
   liftDelayForTimelineTarget,
@@ -126,7 +127,7 @@ import {
   resolveShortEventEdge,
   updateInteractionProposal,
 } from "./features/planner/timelineInteractionState.js";
-import { canExposeActionTouchResize, canExposeEventTouchResize, classifyTimelineTouchTarget, EVENT_JOIN_RESERVATION, TOUCH_TARGET_KINDS } from "./features/planner/timelineTouchTarget.js";
+import { canExposeActionTouchMove, canExposeActionTouchResize, canExposeEventTouchMove, canExposeEventTouchResize, classifyTimelineTouchTarget, EVENT_JOIN_RESERVATION, TOUCH_TARGET_KINDS } from "./features/planner/timelineTouchTarget.js";
 import { acquireTimelineTouchScrollLock, createTimelineTouchScrollLock, releaseTimelineTouchScrollLock } from "./features/planner/timelineTouchScrollLock.js";
 import { loadBackupRecord, saveBackupRecord } from "./platform/persistence/backupStore.js";
 import { textToNoteBlocks } from "./features/notes/noteText.js";
@@ -1375,7 +1376,7 @@ export default function Planner() {
      full-width made an action at 9:00 cover every 9:00 event even though each
      individual renderer looked correct in isolation. */
   const timelineLayout = useMemo(() => {
-    const g = gesture;
+    const g = gesture; const actionMinDur = (44 / dayHeight) * 1440;
     const movingEvent = g && (g.mode === "move" || g.mode === "resize-end" || g.mode === "resize-start");
     const movingTask = g && g.mode === "task";
     const resizingTask = g && g.mode === "task-resize";
@@ -1389,12 +1390,12 @@ export default function Planner() {
       ...scheduledTasks.map((task) => ({
         ...task,
         start: movingTask && g.id === task.id && g.start != null ? g.start : task.planned.startMinute,
-        dur: resizingTask && g.id === task.id ? g.dur : (task.planned.estimateMinutes ?? 30),
+        dur: resizingTask && g.id === task.id ? Math.max(g.dur, actionMinDur) : Math.max(task.planned.estimateMinutes ?? 30, actionMinDur),
         timelineKind: "task",
         timelineKey: `task:${task.id}`,
       })),
     ];
-    const packed = packEventLanes(list);
+    const packed = packEventLanes(list).map((item) => item.timelineKind === "task" ? { ...item, dur: resizingTask && g.id === item.id ? g.dur : (item.planned.estimateMinutes ?? 30) } : item);
     /* Lanes are frozen for the duration of a transform. Repacking every frame
        makes surrounding cards slide under the hand and changes the held card's
        width mid-gesture. They settle together once the gesture lands. */
@@ -1413,7 +1414,7 @@ export default function Planner() {
       events: laidOut.filter((item) => item.timelineKind === "event"),
       tasks: laidOut.filter((item) => item.timelineKind === "task"),
     };
-  }, [timed, scheduledTasks, gesture]);
+  }, [timed, scheduledTasks, gesture, dayHeight]);
   const events = timelineLayout.events;
   const plannedTasks = timelineLayout.tasks;
 
@@ -2667,12 +2668,18 @@ export default function Planner() {
       const pointerMinute = originStart + g.grab + (((y - originY) + scrollDelta) / dayHeight) * 1440;
       next.start = proposeGesture("move", { pointerMinute, grab: g.grab, duration: g.dur }).start;
     } else if (g.mode === "resize-end" || g.mode === "task-resize" || g.mode === "draft") {
-      next.dur = proposeGesture("resize-end", { start: g.start, pointerMinute: m, kind: g.kind }).duration;
+      const pointerMinute = m + (Number.isFinite(g.resizePointerOffset)
+        ? (g.resizePointerOffset / dayHeight) * 1440
+        : 0);
+      next.dur = proposeGesture("resize-end", { start: g.start, pointerMinute, kind: g.kind }).duration;
     } else if (g.mode === "resize-start") {
       /* Measured from where the gesture began, not from the last frame, so a
          chain of roundings can never walk the end of the block away. */
+      const pointerMinute = m + (Number.isFinite(g.resizePointerOffset)
+        ? (g.resizePointerOffset / dayHeight) * 1440
+        : 0);
       const resized = proposeGesture("resize-start", {
-        start: g.was.start, duration: g.was.dur, pointerMinute: m, kind: g.kind,
+        start: g.was.start, duration: g.was.dur, pointerMinute, kind: g.kind,
       });
       next.start = resized.start;
       next.dur = resized.duration;
@@ -3151,7 +3158,8 @@ export default function Planner() {
          following scroll event to do so. */
       timelineScrollSessionRef.current.begin();
       timelineUserScrollRef.current = timelineScrollSessionRef.current.isActive();
-      const target = classifyTimelineTouchTarget(e.target);
+      /* Resolve transformed-control edge hits from the actual client point. */
+      const target = classifyTimelineTouchTarget(document.elementFromPoint(e.touches[0].clientX, e.touches[0].clientY) ?? e.target);
       if (target.kind === TOUCH_TARGET_KINDS.complete) return;
       /* JOIN is an action inside an event card, not a card gesture. The native
          listener owns touch intent before React's synthetic click reaches the
@@ -3173,13 +3181,19 @@ export default function Planner() {
         : target.kind === TOUCH_TARGET_KINDS.actionEstimate && chip
           ? { edge: "end", kind: "task" }
           : null;
-      const targetKind = resizing ? "resize" : (ev || chipId ? "card" : "empty");
+      const directMove = target.kind === TOUCH_TARGET_KINDS.eventMove || target.kind === TOUCH_TARGET_KINDS.actionMove;
+      const direct = Boolean(resizing || (directMove && (ev || chip)));
+      const targetKind = direct ? "direct" : (ev || chipId ? "card" : "empty");
+      const controlRect = target.node?.getBoundingClientRect?.();
+      const resizePointerOffset = resizing && controlRect
+        ? (resizing.edge === "start" ? controlRect.top - t.clientY : controlRect.bottom - t.clientY)
+        : 0;
       const p = {
-        x: t.clientX, y: t.clientY, ev, chipId, resizing,
+        x: t.clientX, y: t.clientY, ev, chipId, resizing, direct, resizePointerOffset,
         startMin: snapTo(m),
         grab: ev ? m - ev.start : chip?.planned?.startMinute != null ? m - chip.planned.startMinute : 0,
         startScrollTop: el.scrollTop, held: false, cancelled: false, swiping: false,
-        lastX: t.clientX, lastY: t.clientY, touchId: t.identifier, timer: null,
+        lastX: t.clientX, lastY: t.clientY, touchId: t.identifier, timer: null, activate: null,
       };
       if (ev || chip) {
         const before = ev ? { start: ev.start, duration: ev.dur, date: dateKeyRef.current }
@@ -3187,14 +3201,17 @@ export default function Planner() {
         interactionRef.current = armInteraction(interactionRef.current, {
           owner: INTERACTION_OWNERS.dayStream, surface: "day", input: "touch",
           origin: ev
-            ? (resizing?.edge === "start" ? INTERACTION_ORIGINS.eventStart : resizing?.edge === "end" ? INTERACTION_ORIGINS.eventEnd : INTERACTION_ORIGINS.eventBody)
-            : (resizing ? INTERACTION_ORIGINS.actionResize : INTERACTION_ORIGINS.actionBody),
+            ? (resizing?.edge === "start" ? INTERACTION_ORIGINS.eventStart
+              : resizing?.edge === "end" ? INTERACTION_ORIGINS.eventEnd
+                : target.kind === TOUCH_TARGET_KINDS.eventMove ? INTERACTION_ORIGINS.eventMove : INTERACTION_ORIGINS.eventBody)
+            : (resizing ? INTERACTION_ORIGINS.actionResize
+              : target.kind === TOUCH_TARGET_KINDS.actionMove ? INTERACTION_ORIGINS.actionMove : INTERACTION_ORIGINS.actionBody),
           mode: resizing ? (resizing.kind === "task" ? "task-resize" : `resize-${resizing.edge}`) : ev ? "move" : "task",
           id: ev?.id ?? chipId,
           before,
         });
       }
-      p.timer = setTimeout(() => {
+      const activateTouchGesture = (x = p.x, y = p.y) => {
         if (!press.t || press.t.cancelled) return;
         press.t.timer = null;
         press.t.held = true;
@@ -3209,6 +3226,7 @@ export default function Planner() {
             mode: p.resizing.kind === "task" ? "task-resize" : `resize-${p.resizing.edge}`,
             kind: p.resizing.kind,
             id: ev ? ev.id : chipId, ...block, was: { ...block }, x: p.x, y: p.y,
+            resizePointerOffset: p.resizePointerOffset,
             touchId: p.touchId, owner: INTERACTION_OWNERS.dayStream, interactionSequence: active.sequence,
           });
           acquireTimelineTouchScrollLock(timelineTouchScrollLockRef.current, streamRef.current, active.sequence, p.touchId);
@@ -3233,7 +3251,10 @@ export default function Planner() {
           acquireTimelineTouchScrollLock(timelineTouchScrollLockRef.current, streamRef.current, active.sequence, p.touchId);
         }
         else startGesture({ mode: "draft", start: p.startMin, dur: 30, x: p.x, y: p.y });
-      }, liftDelayForTimelineTarget(targetKind));
+        if (p.direct && gestureRef.current) applyRef.current(x, y);
+      };
+      p.activate = activateTouchGesture;
+      if (!direct) p.timer = setTimeout(activateTouchGesture, liftDelayForTimelineTarget(targetKind));
       press.t = p;
     };
 
@@ -3259,6 +3280,20 @@ export default function Planner() {
       if (!t) return;
       p.lastX = t.clientX;
       p.lastY = t.clientY;
+      if (p.direct && !p.held && !p.cancelled) {
+        const dx = t.clientX - p.x;
+        const dy = t.clientY - p.y;
+        const moved = p.resizing
+          ? Math.abs(dy) >= DIRECT_DRAG_ACTIVATION_PX && Math.abs(dy) >= Math.abs(dx)
+          : movedEnoughToActivateDirectDrag(p, { x: t.clientX, y: t.clientY });
+        if (moved) {
+          clearPressTimer(p);
+          if (e.cancelable) e.preventDefault();
+          e.stopPropagation();
+          p.activate?.(t.clientX, t.clientY);
+        }
+        return;
+      }
       if (p.chipId && !p.resizing && (p.swiping || (t.clientX > p.x && timelineTouchIntent(p, { x: t.clientX, y: t.clientY }) === "horizontal"))) {
         if (e.cancelable) e.preventDefault();
         e.stopPropagation();
@@ -3266,30 +3301,6 @@ export default function Planner() {
         p.swiping = true;
         setTaskSwipe({ id: p.chipId, offset: Math.max(0, Math.min(96, t.clientX - p.x)) });
         return;
-      }
-      /* The Action estimate is a dedicated, visible resize control rather than
-         a thin edge laid over the card. Once its drag has a deliberate vertical
-         direction it can respond immediately: there is no title or checkmark
-         underneath for it to steal, and a user should not have to wait out a
-         long-press just to extend a fifteen-minute Action. */
-      if (p.resizing?.kind === "task" && !p.held && !p.cancelled
-        && Math.abs(t.clientY - p.y) > 4
-        && Math.abs(t.clientY - p.y) >= Math.abs(t.clientX - p.x)) {
-        const task = plannedRef.current.find((item) => item.id === p.chipId);
-        if (task?.planned?.startMinute != null) {
-          clearPressTimer(p);
-          p.held = true;
-          armedResizeRef.current = {
-            x: p.x, y: p.y,
-            ev: { id: task.id, start: task.planned.startMinute, dur: task.planned.estimateMinutes ?? 30 },
-            edge: p.resizing.edge,
-            kind: "task",
-            touchId: p.touchId,
-          };
-          if (e.cancelable) e.preventDefault();
-          beginResizeRef.current(t.clientX, t.clientY);
-          return;
-        }
       }
       if (movedEnoughToCancelHold(p, { x: t.clientX, y: t.clientY })) cancelPress();
       if (Math.abs(t.clientY - p.y) > 4) {
@@ -4284,6 +4295,9 @@ export default function Planner() {
                     const touchResizeHeld = gesture?.touchId != null && gesture.id === e.id
                       && (gesture.mode === "resize-end" || gesture.mode === "resize-start");
                     const touchResizeEligible = canExposeEventTouchResize({ height: h, width: laneWidth, hasJoin: Boolean(joinUrl) }) || touchResizeHeld;
+                    const touchMoveEligible = canExposeEventTouchMove({
+                      height: h, width: laneWidth, hasJoin: Boolean(joinUrl), hasResize: touchResizeEligible,
+                    }) || touchResizeHeld;
                     const live = isToday && nowMin >= e.start && nowMin < e.start + e.dur;
                     const past = isToday && nowMin >= e.start + e.dur;
                     const pct = live ? ((nowMin - e.start) / e.dur) * 100 : 0;
@@ -4335,8 +4349,8 @@ export default function Planner() {
                             </span>
                           )}
                           <div className={`relative pl-2.5 pr-2.5 ${h < 28 ? "h-full py-0" : "py-1.5"}`} style={{
-                            paddingLeft: touchResizeEligible ? 44 : undefined,
-                            paddingRight: touchResizeEligible ? (joinUrl ? 44 + EVENT_JOIN_RESERVATION : 44) : (joinUrl ? 64 : undefined),
+                            paddingLeft: touchMoveEligible ? (touchResizeEligible ? 88 : 44) : undefined,
+                            paddingRight: touchResizeEligible ? (joinUrl ? 44 + EVENT_JOIN_RESERVATION : 44) : (joinUrl && touchMoveEligible ? EVENT_JOIN_RESERVATION : (joinUrl ? 64 : undefined)),
                           }}>
                             <div className={`nb-event-row flex items-center gap-2 ${h < 28 ? "h-full" : ""}`}>
                               {/* the category dot is the card's only colour, so it stays
@@ -4371,25 +4385,13 @@ export default function Planner() {
                               most natural place to grab it — a full-width 12px handle
                               there turns "pick this up" into "make it start earlier".
                               8px is edge; anything more is content. */}
-                          {/* `pan-y`, not `none`, and the same as the card behind
-                              them. `none` told the browser this strip handles its
-                              own gestures and must never scroll — which was true
-                              only while a press on a grip meant a resize the
-                              instant it landed. Now that a grip waits for a hold
-                              like everything else here, a finger that starts on
-                              one and moves is a scroll, and the browser has to be
-                              allowed to treat it as one. The hold fires before any
-                              movement, so a real resize still claims the gesture
-                              first and `preventDefault` keeps it. */}
                           <div data-resize={e.id} data-resize-edge="start" onPointerDown={(ev) => resizeDown(ev, e, "start")} className="absolute inset-x-0 top-0 flex items-start justify-center" style={{ height: h < 28 ? 8 : 8, cursor: "ns-resize", touchAction: "pan-y" }}>
                             <span style={{ background: T.faint, width: 22, height: 2, marginTop: 2, borderRadius: 2 }} />
                           </div>
                           <div data-resize={e.id} data-resize-edge="end" onPointerDown={(ev) => resizeDown(ev, e, "end")} className="absolute inset-x-0 bottom-0 flex items-end justify-center" style={{ height: 12, cursor: "ns-resize", touchAction: "pan-y" }}>
                             <span style={{ background: T.faint, width: 22, height: 2, marginBottom: 3, borderRadius: 2 }} />
                           </div>
-                          {touchResizeEligible && (
-                            <TimelineEventResizeControls event={e} theme={T} hasJoin={Boolean(joinUrl)} onPointerDown={resizeDown} />
-                          )}
+                          <TimelineEventResizeControls event={e} theme={T} hasJoin={Boolean(joinUrl)} onPointerDown={resizeDown} onMoveClick={() => { if (clickFollowsGesture()) return; beep("click"); setInspect({ kind: "event", id: e.id }); }} clickFollowsGesture={clickFollowsGesture} showMove={touchMoveEligible} showResize={touchResizeEligible} />
                         </div>
                         {joinUrl && (
                           <a href={joinUrl} target="_blank" rel="noopener noreferrer" draggable={false} data-join={e.id}
@@ -4430,15 +4432,16 @@ export default function Planner() {
                     const laneWidth = streamNode
                       ? (Math.max(0, streamNode.clientWidth - 72) / Math.max(1, t.cols)) - 6
                       : 0;
-                    const resizeEligible = canExposeActionTouchResize({ width: laneWidth, hasEstimate: block });
-                    const h = block ? Math.max(28, (estimate / 1440) * dayHeight - 3) : 28;
+                    const resizeEligible = canExposeActionTouchResize({ width: laneWidth, hasEstimate: block }) || sizing;
+                    const moveEligible = canExposeActionTouchMove({ width: laneWidth, hasEstimate: resizeEligible }) || sizing;
+                    const h = block ? Math.max(44, (estimate / 1440) * dayHeight - 3) : 44;
                     const live = liveAction?.id === t.id;
                     const pct = live ? livePct * 100 : 0;
                     return (
                       <TimelineActionCard key={t.id} task={t}
                         top={((dragging && gesture.start != null ? gesture.start : t.planned.startMinute) / 1440) * dayHeight + 2}
                         height={h} left={`${(t.lane / t.cols) * 100}%`} width={`calc(${100 / t.cols}% - 6px)`}
-                        estimate={estimate} block={block} resizeEligible={resizeEligible} sizing={sizing} dragging={dragging} reducedMotion={reducedMotion}
+                        estimate={estimate} block={block} resizeEligible={resizeEligible} moveEligible={moveEligible} sizing={sizing} dragging={dragging} reducedMotion={reducedMotion}
                         live={live} livePct={pct}
                         subtaskProgress={subtaskProgressByParent.get(parseTaskOccurrenceId(t.id).seriesId) ?? null}
                         swipeOffset={taskSwipe?.id === t.id ? taskSwipe.offset : 0}

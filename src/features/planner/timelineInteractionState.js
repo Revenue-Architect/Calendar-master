@@ -27,9 +27,11 @@ export const INTERACTION_OWNERS = Object.freeze({
 
 export const INTERACTION_ORIGINS = Object.freeze({
   eventBody: "event-body",
+  eventMove: "event-move",
   eventStart: "event-start",
   eventEnd: "event-end",
   actionBody: "action-body",
+  actionMove: "action-move",
   actionCheck: "action-check",
   actionResize: "action-resize",
   join: "join",
