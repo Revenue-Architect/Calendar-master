@@ -13,11 +13,11 @@ function expectMonotonic(samples, key, direction, message) {
   }
 }
 
-/* Corner-shape samples are pixel counts inside each [data-nav-mask] box, not
-   computed style. border-radius: 22px is true of both a rounded corner and the
-   inverted bite that currently paints during travel; only the painted frame
-   fraction distinguishes them (convex ≈ 21.5%, concave ≈ 78.5%). */
-const CORNER_MASKS = ["top-left", "top-right", "bottom-left", "bottom-right"];
+/* Corner-shape samples are pixel counts inside each corner quadrant of the
+   frame overlay, not computed style. border-radius: 22px is true of both a
+   rounded corner and the inverted bite that paints if misconfigured; only the
+   painted frame fraction distinguishes them (convex ≈ 21.5%, concave ≈ 78.5%). */
+const CORNERS = ["top-left", "top-right", "bottom-left", "bottom-right"];
 const CONVEX_MAX_FRAME_PCT = 40;
 
 function freezeNavAt(page, target) {
@@ -44,28 +44,35 @@ function resumeNav(page) {
   return page.evaluate(() => document.getAnimations().forEach((animation) => animation.play()));
 }
 
-/* Shell / mask fill is authored as #17181b on every theme. Card panels sit too
-   close in RGB for a loose tolerance, so interior is read from the screenshot
-   itself. */
+/* Shell / frame overlay fill is authored as #17181b on every theme. Card panels
+   sit too close in RGB for a loose tolerance, so interior is read from the
+   screenshot itself. */
 const FRAME_RGB = [0x17, 0x18, 0x1b];
 
-async function sampleCornerFramePct(page, decoder, names = CORNER_MASKS) {
-  const info = await page.evaluate((maskNames) => {
+async function sampleCornerFramePct(page, decoder, names = CORNERS) {
+  const info = await page.evaluate((cornerNames) => {
     const shell = document.querySelector('[data-test="nav-shell"]');
     const surface = document.querySelector('[data-test="app-surface"]');
-    if (!surface) throw new Error("app surface is missing");
+    const overlay = document.querySelector('[data-test="nav-frame-overlay"]');
+    if (!surface || !overlay) throw new Error("app surface or frame overlay is missing");
     const surfaceRect = surface.getBoundingClientRect();
+    const overlayRect = overlay.getBoundingClientRect();
+    const radius = parseFloat(getComputedStyle(overlay).borderRadius) || 22;
+    const r = Math.max(8, radius);
+
+    const cornerCoords = {
+      "top-left": { x: overlayRect.left, y: overlayRect.top, w: r, h: r },
+      "top-right": { x: overlayRect.right - r, y: overlayRect.top, w: r, h: r },
+      "bottom-left": { x: overlayRect.left, y: overlayRect.bottom - r, w: r, h: r },
+      "bottom-right": { x: overlayRect.right - r, y: overlayRect.bottom - r, w: r, h: r },
+    };
+
     return {
       state: shell.dataset.navState,
       progress: Number(shell.dataset.navProgress),
       viewportWidth: window.innerWidth,
       surface: { x: surfaceRect.x, y: surfaceRect.y, w: surfaceRect.width, h: surfaceRect.height },
-      corners: maskNames.map((name) => {
-        const node = document.querySelector(`[data-nav-mask="${name}"]`);
-        if (!node) throw new Error(`missing [data-nav-mask="${name}"]`);
-        const rect = node.getBoundingClientRect();
-        return { name, x: rect.x, y: rect.y, w: rect.width, h: rect.height };
-      }),
+      corners: cornerNames.map((name) => ({ name, ...cornerCoords[name] })),
     };
   }, names);
 
@@ -180,7 +187,7 @@ test.describe("the floating navigation shell", () => {
     });
     expect(observed.distinct, `active inline clip-path values: ${observed.values.join(" | ")}`).toBeLessThanOrEqual(1);
   });
-  test("browser-owned framing keeps the active viewport unclipped", async ({ page }) => {
+  test("browser-owned framing keeps the active viewport unclipped with a continuous overlay", async ({ page }) => {
     await openPlanner(page);
     await page.getByTestId("nav-toggle").click();
     await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "opening");
@@ -188,15 +195,13 @@ test.describe("the floating navigation shell", () => {
     const active = await page.evaluate(async () => {
       await new Promise((resolve) => requestAnimationFrame(resolve));
       const viewport = document.querySelector('[data-test="nav-motion-viewport"]');
-      const masks = [...viewport.querySelectorAll("[data-nav-mask]")];
+      const overlay = document.querySelector('[data-test="nav-frame-overlay"]');
       return {
-        clipPath: viewport.style.clipPath,
-        masksVisible: masks.every((mask) => (
-          getComputedStyle(mask).visibility === "visible"
-          && getComputedStyle(mask).opacity === "1"
-        )),
-        maskAnimations: masks.reduce((count, mask) => count + mask.getAnimations()
-          .filter((animation) => animation.playState === "running").length, 0),
+        clipPath: viewport.style.clipPath || "none",
+        overlayVisible: getComputedStyle(overlay).visibility === "visible"
+          && getComputedStyle(overlay).opacity === "1",
+        overlayAnimations: overlay.getAnimations()
+          .filter((animation) => animation.playState === "running").length,
         hasClipAnimation: viewport.getAnimations().some((animation) => {
           const keyframes = animation.effect?.getKeyframes?.() || [];
           return keyframes.some((frame) => frame.clipPath != null);
@@ -205,12 +210,12 @@ test.describe("the floating navigation shell", () => {
     });
 
     expect(active.clipPath, "the active stage must not animate a changing surface clip").toBe("none");
-    expect(active.masksVisible, "the travel masks must own the frame while the viewport is unclipped").toBe(true);
-    expect(active.maskAnimations, "edge and corner framing must be browser-owned").toBeGreaterThan(0);
+    expect(active.overlayVisible, "the solid frame overlay must own the frame during travel").toBe(true);
+    expect(active.overlayAnimations, "frame overlay animation must be browser-owned").toBeGreaterThan(0);
     expect(active.hasClipAnimation, "the viewport must not retain a WAAPI clip animation").toBe(false);
   });
 
-  test("active corner masks scale with the in-flight navigation radius", async ({ page }) => {
+  test("active frame overlay scales with the in-flight navigation progress", async ({ page }) => {
     for (const { width, height, radius } of [
       { width: 1280, height: 900, radius: 22 },
       { width: 390, height: 844, radius: 16 },
@@ -221,29 +226,23 @@ test.describe("the floating navigation shell", () => {
 
       const sample = await page.evaluate(() => new Promise((resolve, reject) => {
         const shell = document.querySelector('[data-test="nav-shell"]');
-        const names = ["top-left", "top-right", "bottom-left", "bottom-right"];
+        const overlay = document.querySelector('[data-test="nav-frame-overlay"]');
         let frames = 0;
         const read = () => {
           const progress = Number(shell.dataset.navProgress);
           if (shell.dataset.navState === "opening" && progress >= 0.2 && progress <= 0.8) {
+            const rect = overlay.getBoundingClientRect();
+            const radiusStr = getComputedStyle(overlay).borderRadius;
+            const radiusVal = parseFloat(radiusStr) || 0;
             resolve({
               progress,
-              corners: names.map((name) => {
-                const node = document.querySelector(`[data-nav-mask="${name}"]`);
-                const rect = node.getBoundingClientRect();
-                const transform = getComputedStyle(node).transform;
-                const values = transform.match(/^matrix\((.+)\)$/)?.[1]?.split(",")
-                  || transform.match(/^matrix3d\((.+)\)$/)?.[1]?.split(",");
-                const scaleX = values ? Number(values[0]) : NaN;
-                const scaleY = values ? Number(values[values.length === 16 ? 5 : 3]) : NaN;
-                return { name, width: rect.width, height: rect.height, scaleX, scaleY, transform };
-              }),
+              overlay: { x: rect.x, y: rect.y, width: rect.width, height: rect.height, radius: radiusVal },
             });
             return;
           }
           frames += 1;
           if (frames >= 90) {
-            reject(new Error(`corner geometry sample did not reach an active frame: state=${shell.dataset.navState} progress=${shell.dataset.navProgress}`));
+            reject(new Error(`overlay geometry sample did not reach an active frame: state=${shell.dataset.navState} progress=${shell.dataset.navProgress}`));
             return;
           }
           requestAnimationFrame(read);
@@ -253,16 +252,10 @@ test.describe("the floating navigation shell", () => {
 
       expect(sample.progress).toBeGreaterThanOrEqual(0.2);
       expect(sample.progress).toBeLessThanOrEqual(0.8);
-      for (const corner of sample.corners) {
-        expect(Math.abs(corner.width - (radius * sample.progress)), `${width}px ${corner.name} width`)
-          .toBeLessThan(1.5);
-        expect(Math.abs(corner.height - (radius * sample.progress)), `${width}px ${corner.name} height`)
-          .toBeLessThan(1.5);
-        expect(Math.abs(corner.scaleX - sample.progress), `${width}px ${corner.name} transform scaleX`)
-          .toBeLessThan(0.08);
-        expect(Math.abs(corner.scaleY - sample.progress), `${width}px ${corner.name} transform scaleY`)
-          .toBeLessThan(0.08);
-      }
+      expect(sample.overlay.radius, `${width}px in-flight radius scales with progress`)
+        .toBeGreaterThan(0);
+      expect(sample.overlay.radius, `${width}px in-flight radius does not exceed max`)
+        .toBeLessThanOrEqual(radius + 1);
 
       if (width < 640) await page.getByTestId("mobile-calendar-return").click();
       else await page.getByTestId("nav-toggle").click();
@@ -270,36 +263,38 @@ test.describe("the floating navigation shell", () => {
     }
   });
 
-  test("settled navigation returns corner ownership to the viewport clip", async ({ page }) => {
+  test("settled navigation frames the app card with continuous solid overlay", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await openPlanner(page);
     await page.getByTestId("nav-toggle").click();
     await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "open");
 
     const settled = await page.evaluate(() => {
-      const viewport = document.querySelector('[data-test="nav-motion-viewport"]');
-      const masks = [...viewport.querySelectorAll("[data-nav-mask]")];
+      const overlay = document.querySelector('[data-test="nav-frame-overlay"]');
+      const style = getComputedStyle(overlay);
+      const rect = overlay.getBoundingClientRect();
       return {
-        clipPath: viewport.style.clipPath,
-        masks: masks.map((mask) => ({
-          name: mask.dataset.navMask,
-          visibility: getComputedStyle(mask).visibility,
-          opacity: getComputedStyle(mask).opacity,
-        })),
+        visibility: style.visibility,
+        opacity: style.opacity,
+        borderRadius: parseFloat(style.borderRadius) || 0,
+        boxShadow: style.boxShadow,
+        top: rect.top,
+        left: rect.left,
       };
     });
 
-    expect(settled.clipPath, "the settled surface must own its rounded frame").toContain("round");
-    for (const mask of settled.masks) {
-      expect(mask.visibility, `${mask.name} travel mask must be absent after settle`).toBe("hidden");
-      expect(mask.opacity, `${mask.name} travel mask must not paint after settle`).toBe("0");
-    }
+    expect(settled.visibility, "the frame overlay must be visible when open").toBe("visible");
+    expect(settled.opacity, "the frame overlay must be opaque when open").toBe("1");
+    expect(settled.borderRadius, "the frame overlay has the 22px open radius").toBe(22);
+    expect(settled.boxShadow, "the frame overlay casts obsidian stage shadow").toContain("rgb(23, 24, 27)");
+    expect(settled.top, "desktop open top inset").toBe(24);
+    expect(settled.left, "desktop open left inset").toBe(322);
   });
 
-  test.describe("corner wall paint shape", () => {
+  test.describe("continuous frame corner paint shape", () => {
     test.use({ deviceScaleFactor: 2 });
 
-  test("corner walls paint a rounded corner, not a bite, through desktop travel", async ({ page }) => {
+  test("continuous frame overlay paints a rounded corner, not a bite, through desktop travel", async ({ page }) => {
     test.setTimeout(60_000);
     await page.setViewportSize({ width: 1280, height: 900 });
     await openPlanner(page);
@@ -325,7 +320,7 @@ test.describe("the floating navigation shell", () => {
     }
 
     for (const sample of samples) {
-      expectConvexCorners(sample, CORNER_MASKS, sample.label);
+      expectConvexCorners(sample, CORNERS, sample.label);
     }
   });
 
@@ -351,15 +346,15 @@ test.describe("the floating navigation shell", () => {
 
     const paint = await page.evaluate(() => {
       const shell = document.querySelector('[data-test="nav-shell"]');
-      const right = document.querySelector('[data-nav-mask="right"]');
+      const overlay = document.querySelector('[data-test="nav-frame-overlay"]');
       return {
         shell: getComputedStyle(shell).backgroundColor,
-        rightTop: right.getBoundingClientRect().top,
+        overlayTop: overlay.getBoundingClientRect().top,
         progress: Number(shell.dataset.navProgress),
       };
     });
     expect(paint.shell, "the stage is not a theme").toBe("rgb(23, 24, 27)");
-    expect(paint.rightTop, "the right wall must meet the in-flight card top, not the destination 24px inset")
+    expect(paint.overlayTop, "the overlay must meet the in-flight card top, not the destination 24px inset")
       .toBeLessThan(16);
 
     const decoder = await page.context().newPage();
@@ -422,7 +417,7 @@ test.describe("the floating navigation shell", () => {
         viewport,
         document.querySelector('[data-test="nav-motion-carrier"]'),
         document.querySelector('[data-test="mobile-calendar-return"]'),
-        ...viewport.querySelectorAll('[data-nav-mask]'),
+        document.querySelector('[data-test="nav-frame-overlay"]'),
         document.querySelector("#planner-navigation"),
       ].filter(Boolean);
       const initialProgress = shell.dataset.navProgress;
@@ -721,7 +716,8 @@ test.describe("the floating navigation shell", () => {
 
     const surface = page.getByTestId("app-surface");
     await expect(surface).toHaveClass(/nb-app-surface-open/);
-    await expect(page.getByTestId("nav-motion-viewport")).toHaveCSS("clip-path", /round 16px/);
+    await expect(page.getByTestId("nav-frame-overlay")).toBeVisible();
+    await expect(page.getByTestId("nav-frame-overlay")).toHaveCSS("border-radius", "16px");
     const rail = page.getByTestId("mobile-calendar-return");
     await expect(rail).toBeVisible();
 
@@ -764,29 +760,28 @@ test.describe("the floating navigation shell", () => {
       await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "open");
 
       const geometry = await page.evaluate(() => {
-        const mask = (name) => document.querySelector(`[data-nav-mask="${name}"]`).getBoundingClientRect();
+        const overlay = document.querySelector('[data-test="nav-frame-overlay"]').getBoundingClientRect();
         const rail = document.querySelector('[data-test="mobile-calendar-return"]').getBoundingClientRect();
         const surface = document.querySelector('[data-test="app-surface"]').getBoundingClientRect();
+        const overlayNode = document.querySelector('[data-test="nav-frame-overlay"]');
         return {
-          topBottom: mask("top").bottom,
-          bottomTop: mask("bottom").top,
-          leftRight: mask("left").right,
+          overlayTop: overlay.top,
+          overlayBottom: overlay.bottom,
+          overlayLeft: overlay.left,
           railRight: rail.right,
           surfaceLeft: surface.left,
           seam: surface.left - rail.right,
-          maskPointerEvents: [...document.querySelectorAll("[data-nav-mask]")]
-            .map((node) => getComputedStyle(node).pointerEvents),
+          overlayPointerEvents: getComputedStyle(overlayNode).pointerEvents,
         };
       });
 
-      expect(geometry.topBottom, `${height}px top margin`).toBeCloseTo(14, 1);
-      expect(geometry.bottomTop, `${height}px bottom margin`).toBeCloseTo(height - 14, 1);
-      expect(geometry.leftRight, `${height}px rail frame`).toBeCloseTo(346, 1);
+      expect(geometry.overlayTop, `${height}px top margin`).toBeCloseTo(14, 1);
+      expect(geometry.overlayBottom, `${height}px bottom margin`).toBeCloseTo(height - 14, 1);
+      expect(geometry.overlayLeft, `${height}px rail frame`).toBeCloseTo(346, 1);
       expect(geometry.railRight, `${height}px rail edge`).toBeCloseTo(390, 1);
       expect(geometry.surfaceLeft, `${height}px full-size surface carrier`).toBeCloseTo(390, 1);
       expect(geometry.seam, `${height}px rail/surface seam`).toBeLessThanOrEqual(1);
-      expect(geometry.maskPointerEvents, `${height}px masks must not intercept input`)
-        .toEqual(Array(8).fill("none"));
+      expect(geometry.overlayPointerEvents, `${height}px overlay must not intercept input`).toBe("none");
 
       await page.getByTestId("mobile-calendar-return").click();
       await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
@@ -802,45 +797,38 @@ test.describe("the floating navigation shell", () => {
     await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "open");
     await page.waitForTimeout(640);
     const measured = await page.evaluate(() => {
-      const vNode = document.querySelector('[data-test="nav-motion-viewport"]');
+      const oNode = document.querySelector('[data-test="nav-frame-overlay"]');
       const cNode = document.querySelector('[data-test="nav-motion-carrier"]');
       const sNode = document.querySelector('[data-test="app-surface"]');
-      const vStyle = getComputedStyle(vNode);
+      const oRect = oNode.getBoundingClientRect();
       const cStyle = getComputedStyle(cNode);
-      const clip = vStyle.clipPath || "";
-      const nums = [...clip.matchAll(/(-?\d+(?:\.\d+)?)px/g)].map((m) => Number(m[1]));
-      const top = nums[0] ?? 0;
-      const right = nums[1] ?? 0;
-      const bottom = nums[2] ?? 0;
-      const left = nums[3] ?? 0;
+      const radius = parseFloat(getComputedStyle(oNode).borderRadius) || 0;
       return {
-        clipTop: top,
-        clipRight: right,
-        clipBottom: bottom,
-        clipLeft: left,
+        top: oRect.top,
+        right: window.innerWidth - oRect.right,
+        bottom: window.innerHeight - oRect.bottom,
+        left: oRect.left,
         carrierTransform: cStyle.transform,
-        clipPath: vStyle.clipPath,
         layoutWidth: sNode.offsetWidth,
+        borderRadius: radius,
       };
     });
     expect(before).not.toBeNull();
-    expect(measured.clipTop, "the recessed page top frame is 24px").toBe(24);
-    expect(measured.clipRight, "the recessed page right frame is direct 22px").toBe(22);
-    expect(measured.clipBottom, "the recessed page bottom frame is 24px").toBe(24);
-    expect(measured.clipLeft, "the recessed page left frame is 322px").toBe(322);
+    expect(measured.top, "the recessed page top frame is 24px").toBeCloseTo(24, 1);
+    expect(measured.right, "the recessed page right frame is 22px").toBeCloseTo(22, 1);
+    expect(measured.bottom, "the recessed page bottom frame is 24px").toBeCloseTo(24, 1);
+    expect(measured.left, "the recessed page left frame is 322px").toBeCloseTo(322, 1);
     expect(measured.carrierTransform, "carrier translates on X and Y").toMatch(/matrix|translate/);
     expect(Math.round(measured.layoutWidth), "layout width stays full so glyphs do not reflow").toBe(1280);
-
-    const cardRadius = Number.parseFloat((measured.clipPath.split("round ")[1] || "0"));
-    expect(cardRadius, "the open card must be rounded by its clip").toBeGreaterThan(12);
+    expect(measured.borderRadius, "the open card must be rounded").toBeGreaterThan(12);
 
     const toggle = page.getByTestId("nav-toggle");
     const toggleBox = await toggle.evaluate((node) => {
       const box = node.getBoundingClientRect();
       return { top: box.top, bottom: box.bottom, left: box.left };
     });
-    expect(toggleBox.top, "the hamburger must stay inside the recessed card").toBeGreaterThanOrEqual(measured.clipTop - 1);
-    expect(toggleBox.left, "the hamburger must stay on the recessed page").toBeGreaterThan(measured.clipLeft - 322);
+    expect(toggleBox.top, "the hamburger must stay inside the recessed card").toBeGreaterThanOrEqual(measured.top - 1);
+    expect(toggleBox.left, "the hamburger must stay on the recessed page").toBeGreaterThan(measured.left - 322);
   });
 
   test("mobile morphs the calendar without reflowing its layout", async ({ page }) => {
@@ -1140,6 +1128,7 @@ test.describe("the floating navigation shell", () => {
       expectMonotonic(motion.reopening, "labelOpacity", "up", `${viewport.width}px label reopen`);
       expect(Math.abs(motion.reopening[0].carrierX - motion.closing.at(-1).carrierX)).toBeLessThan(35);
       expect(Math.abs(motion.reopening[0].drawerX - motion.closing.at(-1).drawerX)).toBeLessThan(12);
+      expect(Math.abs(motion.reopening[0].labelOpacity - motion.closing.at(-1).labelOpacity), `${viewport.width}px label opacity continuity across reversal`).toBeLessThan(0.08);
       if (viewport.width < 640) {
         expectMonotonic(motion.reopening, "railX", "up", "mobile rail reopen");
         expect(motion.reopening.every((sample) => Math.abs(sample.railGap) <= 1), "mobile reopen cannot open a rail/surface seam").toBe(true);
@@ -1156,14 +1145,18 @@ test.describe("the floating navigation shell", () => {
     const { before, after } = await page.evaluate(() => new Promise((resolve) => {
       const shellNode = document.querySelector('[data-test="nav-shell"]');
       const viewport = document.querySelector('[data-test="nav-motion-viewport"]');
+      const overlay = document.querySelector('[data-test="nav-frame-overlay"]');
+      const drawer = document.querySelector("#planner-navigation");
+      const label = drawer.querySelector(".nb-nav-item");
       const toggle = document.querySelector('[data-test="nav-toggle"]');
       const sample = () => ({
         phase: shellNode.dataset.navState,
         progress: shellNode.dataset.navProgress,
-        clipPath: viewport.style.clipPath,
+        clipPath: viewport.style.clipPath || "none",
         carrier: getComputedStyle(document.querySelector('[data-test="nav-motion-carrier"]')).transform,
-        topMaskBottom: viewport.querySelector('[data-nav-mask="top"]').getBoundingClientRect().bottom,
-        leftMaskRight: viewport.querySelector('[data-nav-mask="left"]').getBoundingClientRect().right,
+        overlayTop: overlay.getBoundingClientRect().top,
+        overlayLeft: overlay.getBoundingClientRect().left,
+        labelOpacity: Number.parseFloat(getComputedStyle(label).opacity),
       });
       const waitForActiveFrame = () => {
         const progress = Number(shellNode.dataset.navProgress);
@@ -1172,9 +1165,10 @@ test.describe("the floating navigation shell", () => {
           toggle.click();
           requestAnimationFrame(() => resolve({ before: beforeSample, after: {
             ...sample(),
-            maskAnimations: [...viewport.querySelectorAll("[data-nav-mask]")]
-              .reduce((count, mask) => count + mask.getAnimations()
-                .filter((animation) => animation.playState === "running").length, 0),
+            overlayAnimations: overlay.getAnimations()
+              .filter((animation) => animation.playState === "running").length,
+            labelAnimations: label.getAnimations()
+              .filter((animation) => animation.playState === "running").length,
           } }));
           return;
         }
@@ -1188,16 +1182,17 @@ test.describe("the floating navigation shell", () => {
     expect(before.carrier).toMatch(/matrix|translate/);
     expect(after.phase).toBe("closing");
     expect(after.clipPath, "reversal must not briefly restore the destination clip").toBe("none");
-    expect(after.maskAnimations, "reversal must restart the same mask channels").toBeGreaterThan(0);
+    expect(after.overlayAnimations, "reversal must restart the overlay animation").toBeGreaterThan(0);
+    expect(after.labelAnimations, "reversal must restart the tracked label animation").toBeGreaterThan(0);
+    expect(Math.abs(after.labelOpacity - before.labelOpacity), "label opacity must be continuous across reversal").toBeLessThan(0.08);
     expect(after.carrier).toMatch(/matrix|translate/);
-    expect(Math.abs(after.topMaskBottom - before.topMaskBottom), "reversal must keep the top wall near its sampled frame")
+    expect(Math.abs(after.overlayTop - before.overlayTop), "reversal must keep the top wall near its sampled frame")
       .toBeLessThan(24);
-    expect(Math.abs(after.leftMaskRight - before.leftMaskRight), "reversal must keep the left wall near its sampled frame")
+    expect(Math.abs(after.overlayLeft - before.overlayLeft), "reversal must keep the left wall near its sampled frame")
       .toBeLessThan(32);
-    expect(after.leftMaskRight, "reversal must not jump to the open destination wall")
+    expect(after.overlayLeft, "reversal must not jump to the open destination wall")
       .toBeLessThan(300);
     await expect(shell).toHaveAttribute("data-nav-state", "closed");
-    await expect(page.getByTestId("nav-motion-viewport")).toHaveCSS("clip-path", /inset\(0px\)/);
   });
 
   test("an interrupted close ignores stale completion and settles every channel", async ({ page }) => {
@@ -1223,6 +1218,7 @@ test.describe("the floating navigation shell", () => {
       const nodes = [
         document.querySelector('[data-test="nav-motion-carrier"]'),
         document.querySelector('[data-test="nav-motion-viewport"]'),
+        document.querySelector('[data-test="nav-frame-overlay"]'),
         document.querySelector("#planner-navigation"),
         ...document.querySelectorAll(".nb-nav-brand,.nb-nav-item,.nb-nav-membership"),
       ];
@@ -1264,16 +1260,98 @@ test.describe("the floating navigation shell", () => {
     await page.getByTestId("nav-toggle").click();
 
     await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "open");
-    const openMasksHidden = await page.evaluate(() => (
-      [...document.querySelectorAll("[data-nav-mask]")].every((mask) => (
-        getComputedStyle(mask).visibility === "hidden"
-        && getComputedStyle(mask).opacity === "0"
-      ))
-    ));
-    expect(openMasksHidden, "reduced motion must settle the clip without painted travel masks").toBe(true);
+    const overlaySettledOpen = await page.evaluate(() => {
+      const overlay = document.querySelector('[data-test="nav-frame-overlay"]');
+      const style = getComputedStyle(overlay);
+      const running = overlay.getAnimations().filter((a) => a.playState === "running").length;
+      return {
+        visibility: style.visibility,
+        opacity: style.opacity,
+        running,
+      };
+    });
+    expect(overlaySettledOpen.visibility, "reduced motion shows the frame overlay immediately").toBe("visible");
+    expect(overlaySettledOpen.opacity, "reduced motion frame overlay is opaque").toBe("1");
+    expect(overlaySettledOpen.running, "reduced motion has zero running animations").toBe(0);
+
     await expect(page.getByRole("navigation", { name: "Primary navigation" })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
     await expect(page.getByTestId("nav-toggle")).toBeFocused();
+  });
+
+  test("navigation cleanly transfers and clears mobile/desktop geometry across viewport resizes", async ({ page }) => {
+    // 1. Mobile closed -> resize to Desktop closed
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openPlanner(page);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.waitForTimeout(50);
+    const desktopClosed = await page.evaluate(() => {
+      const surface = document.querySelector('[data-test="app-surface"]');
+      const overlay = document.querySelector('[data-test="nav-frame-overlay"]');
+      return {
+        surfaceBorderRadius: surface.style.borderRadius,
+        surfaceOverflow: surface.style.overflow,
+        overlayVisibility: getComputedStyle(overlay).visibility,
+      };
+    });
+    expect(desktopClosed.surfaceBorderRadius, "desktop closed surface has no inline border-radius").toBeFalsy();
+    expect(desktopClosed.surfaceOverflow, "desktop closed surface has no inline overflow").toBeFalsy();
+    expect(desktopClosed.overlayVisibility).toBe("hidden");
+
+    // 2. Mobile open -> resize to Desktop open
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByTestId("nav-toggle").click();
+    await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "open");
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.waitForTimeout(50);
+    const desktopOpen = await page.evaluate(() => {
+      const surface = document.querySelector('[data-test="app-surface"]');
+      const overlay = document.querySelector('[data-test="nav-frame-overlay"]');
+      const oRect = overlay.getBoundingClientRect();
+      return {
+        surfaceBorderRadius: surface.style.borderRadius,
+        surfaceOverflow: surface.style.overflow,
+        overlayRadius: parseFloat(getComputedStyle(overlay).borderRadius),
+        overlayTop: oRect.top,
+        overlayLeft: oRect.left,
+      };
+    });
+    expect(desktopOpen.surfaceBorderRadius, "desktop open surface has no inline border-radius").toBeFalsy();
+    expect(desktopOpen.surfaceOverflow, "desktop open surface has no inline overflow").toBeFalsy();
+    expect(desktopOpen.overlayRadius, "desktop open overlay has 22px radius").toBeCloseTo(22, 1);
+    expect(desktopOpen.overlayTop, "desktop open top inset").toBeCloseTo(24, 1);
+    expect(desktopOpen.overlayLeft, "desktop open left inset").toBeCloseTo(322, 1);
+
+    // 3. Desktop open -> resize back to Mobile open
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForTimeout(50);
+    const mobileOpen = await page.evaluate(() => {
+      const surface = document.querySelector('[data-test="app-surface"]');
+      const overlay = document.querySelector('[data-test="nav-frame-overlay"]');
+      const rail = document.querySelector('[data-test="mobile-calendar-return"]');
+      const oRect = overlay.getBoundingClientRect();
+      const rRect = rail.getBoundingClientRect();
+      return {
+        surfaceBorderRadius: surface.style.borderRadius,
+        railVisibility: getComputedStyle(rail).visibility,
+        railRadius: getComputedStyle(rail).borderRadius,
+        overlayRadius: parseFloat(getComputedStyle(overlay).borderRadius),
+        overlayTop: oRect.top,
+        overlayLeft: oRect.left,
+        railRight: rRect.right,
+      };
+    });
+    expect(mobileOpen.surfaceBorderRadius, "mobile open surface has 16px radius").toBe("16px");
+    expect(mobileOpen.railVisibility).toBe("visible");
+    expect(mobileOpen.railRadius).toBe("16px");
+    expect(mobileOpen.overlayRadius, "mobile open overlay has 16px radius").toBeCloseTo(16, 1);
+    expect(mobileOpen.overlayTop, "mobile open top inset").toBeCloseTo(14, 1);
+    expect(mobileOpen.overlayLeft, "mobile open left inset").toBeCloseTo(346, 1);
+    expect(mobileOpen.railRight, "mobile open rail edge").toBeCloseTo(390, 1);
+
+    // Close and confirm clean settle
+    await page.getByTestId("mobile-calendar-return").click();
+    await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "closed");
   });
 });
