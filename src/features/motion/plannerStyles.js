@@ -76,62 +76,45 @@ export function plannerStyles({ T, preferences }) {
           --nav-clip-right:var(--nav-margin-right);
           --nav-clip-bottom:calc(var(--nav-margin-bottom) + var(--nav-page-y));
           --nav-page-radius:22px;
-          --nav-mask-top:24px;
-          --nav-mask-right:22px;
-          --nav-mask-bottom:24px;
-          --nav-mask-left:322px;
-          --nav-mask-radius:22px;
+          --nav-stage-fill:#17181b;
           --nav-page-duration:520ms;
           --nav-content-duration:260ms;
           --nav-item-stagger:30ms;
           --nav-ease:cubic-bezier(.22,.61,.36,1);
-          position:relative;height:100dvh;overflow:clip;overflow-anchor:none;background:#17181b;
+          position:relative;height:100dvh;overflow:clip;overflow-anchor:none;background:var(--nav-stage-fill);
         }
         .nb-root{height:100%;overflow:clip;overflow-anchor:none}
         .nb-nav-viewport,
         .nb-nav-motion-viewport{
-          position:absolute;inset:0;z-index:2;height:100%;overflow:clip;overflow-anchor:none;clip-path:inset(0 0 0 0 round 0);
-        }
-        .nb-nav-shell[data-nav-state="open"] .nb-nav-viewport,
-        .nb-nav-shell[data-nav-state="open"] .nb-nav-motion-viewport,
-        .nb-nav-shell[data-nav-state="opening"] .nb-nav-viewport,
-        .nb-nav-shell[data-nav-state="opening"] .nb-nav-motion-viewport,
-        .nb-nav-motion-viewport.nb-nav-motion-viewport-open{
-          clip-path:inset(var(--nav-frame-top) var(--nav-frame-right) var(--nav-frame-bottom) var(--nav-frame-left) round var(--nav-page-radius));
+          position:absolute;inset:0;z-index:2;height:100%;overflow:clip;overflow-anchor:none;
         }
         .nb-nav-carrier,
         .nb-nav-motion-carrier{
           position:absolute;inset:0;width:100%;height:100%;transform:translate3d(0,0,0);transform-origin:left center;
         }
-        /* The stage is deliberately un-clipped while a navigation run is
-           active. These shell-coloured walls move with compositor transforms
-           into the open margins so the planner surface keeps one raster
-           instead of a changing clip-path. */
-        .nb-nav-motion-mask{position:absolute;inset:0;z-index:3;pointer-events:none;overflow:visible}
-        .nb-nav-motion-mask>i{position:absolute;display:block;background:#17181b;transform:translate3d(0,0,0)}
-        .nb-nav-motion-mask>[data-nav-mask="top"]{top:0;left:0;right:0;height:var(--nav-mask-top);transform:translate3d(0,calc(-1 * var(--nav-mask-top)),0)}
-        .nb-nav-motion-mask>[data-nav-mask="right"]{top:var(--nav-mask-top);right:0;bottom:var(--nav-mask-bottom);width:var(--nav-mask-right);transform:translate3d(var(--nav-mask-right),0,0)}
-        .nb-nav-motion-mask>[data-nav-mask="bottom"]{left:0;right:0;bottom:0;height:var(--nav-mask-bottom);transform:translate3d(0,var(--nav-mask-bottom),0)}
-        .nb-nav-motion-mask>[data-nav-mask="left"]{top:var(--nav-mask-top);bottom:var(--nav-mask-bottom);left:0;width:var(--nav-mask-left);transform:translate3d(calc(-1 * var(--nav-mask-left)),0,0)}
-        .nb-nav-motion-mask>[data-nav-mask="top-left"],.nb-nav-motion-mask>[data-nav-mask="top-right"],.nb-nav-motion-mask>[data-nav-mask="bottom-left"],.nb-nav-motion-mask>[data-nav-mask="bottom-right"]{width:var(--nav-mask-radius);height:var(--nav-mask-radius)}
-        .nb-nav-motion-mask>[data-nav-mask="top-left"]{left:var(--nav-mask-left);top:var(--nav-mask-top);border-bottom-right-radius:var(--nav-mask-radius);transform-origin:100% 100%;transform:translate3d(calc(-1 * (var(--nav-mask-left) + var(--nav-mask-radius))),calc(-1 * (var(--nav-mask-top) + var(--nav-mask-radius))),0)}
-        .nb-nav-motion-mask>[data-nav-mask="top-right"]{right:var(--nav-mask-right);top:var(--nav-mask-top);border-bottom-left-radius:var(--nav-mask-radius);transform-origin:0 100%;transform:translate3d(calc(var(--nav-mask-right) + var(--nav-mask-radius)),calc(-1 * (var(--nav-mask-top) + var(--nav-mask-radius))),0)}
-        .nb-nav-motion-mask>[data-nav-mask="bottom-left"]{left:var(--nav-mask-left);bottom:var(--nav-mask-bottom);border-top-right-radius:var(--nav-mask-radius);transform-origin:100% 0;transform:translate3d(calc(-1 * (var(--nav-mask-left) + var(--nav-mask-radius))),calc(var(--nav-mask-bottom) + var(--nav-mask-radius)),0)}
-        .nb-nav-motion-mask>[data-nav-mask="bottom-right"]{right:var(--nav-mask-right);bottom:var(--nav-mask-bottom);border-top-left-radius:var(--nav-mask-radius);transform-origin:0 0;transform:translate3d(calc(var(--nav-mask-right) + var(--nav-mask-radius)),calc(var(--nav-mask-bottom) + var(--nav-mask-radius)),0)}
-        /* Desktop travel only. Rounding the corner tile with border-radius paints
-           a filled pie that bites into the card. Punch a circular hole at the
-           interior corner instead so the tile is the outer rounding. Do not
-           "simplify" this back to border-radius. Mobile keeps the original fill. */
-        @media(min-width:640px){
-          .nb-nav-motion-mask>[data-nav-mask="top-left"]{border-bottom-right-radius:0;background:radial-gradient(circle farthest-side at 100% 100%,transparent 0 calc(100% - 0.5px),#17181b 100%)}
-          .nb-nav-motion-mask>[data-nav-mask="top-right"]{border-bottom-left-radius:0;background:radial-gradient(circle farthest-side at 0 100%,transparent 0 calc(100% - 0.5px),#17181b 100%)}
-          .nb-nav-motion-mask>[data-nav-mask="bottom-left"]{border-top-right-radius:0;background:radial-gradient(circle farthest-side at 100% 0,transparent 0 calc(100% - 0.5px),#17181b 100%)}
-          .nb-nav-motion-mask>[data-nav-mask="bottom-right"]{border-top-left-radius:0;background:radial-gradient(circle farthest-side at 0 0,transparent 0 calc(100% - 0.5px),#17181b 100%)}
+        .nb-nav-frame-overlay{
+          position:absolute;
+          z-index:3;
+          pointer-events:none;
+          border-radius:var(--nav-page-radius, 22px);
+          box-shadow:0 0 0 9999px var(--nav-stage-fill, #17181b);
+          top:0px;
+          left:0px;
+          width:100%;
+          height:100%;
+          opacity:0;
+          visibility:hidden;
+        }
+        .nb-nav-shell[data-nav-state="open"] .nb-nav-frame-overlay{
+          top:var(--nav-frame-top, 24px);
+          left:var(--nav-frame-left, 322px);
+          width:calc(100% - var(--nav-frame-left, 322px) - var(--nav-frame-right, 22px));
+          height:calc(100% - var(--nav-frame-top, 24px) - var(--nav-frame-bottom, 24px));
+          opacity:1;
+          visibility:visible;
         }
         .nb-nav-shell[data-nav-state="open"] .nb-nav-carrier,
         .nb-nav-shell[data-nav-state="open"] .nb-nav-motion-carrier,
-        .nb-nav-shell[data-nav-state="opening"] .nb-nav-carrier,
-        .nb-nav-shell[data-nav-state="opening"] .nb-nav-motion-carrier,
         .nb-nav-motion-carrier.nb-nav-motion-carrier-open{
           transform:translate3d(var(--nav-carrier-x),var(--nav-carrier-y),0);
         }

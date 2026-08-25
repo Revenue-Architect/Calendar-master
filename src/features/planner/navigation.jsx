@@ -36,6 +36,7 @@ export function NavigationFrame({
     shellRef,
     viewportRef,
     carrierRef,
+    frameOverlayRef,
     drawerRef,
     toggleRef,
     firstItemRef,
@@ -107,16 +108,12 @@ export function NavigationFrame({
               {children}
             </div>
           </div>
-          <div className="nb-nav-motion-mask" aria-hidden="true">
-            <i data-nav-mask="top" />
-            <i data-nav-mask="right" />
-            <i data-nav-mask="bottom" />
-            <i data-nav-mask="left" />
-            <i data-nav-mask="top-left" />
-            <i data-nav-mask="top-right" />
-            <i data-nav-mask="bottom-left" />
-            <i data-nav-mask="bottom-right" />
-          </div>
+          <div
+            ref={frameOverlayRef}
+            data-test="nav-frame-overlay"
+            className="nb-nav-frame-overlay"
+            aria-hidden="true"
+          />
           <button
             ref={railRef}
             data-test="mobile-calendar-return"

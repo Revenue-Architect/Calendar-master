@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { navMobileMotion, navPageFit, sideWallInsets } from "./navPageFit.js";
+import { navMobileMotion, navPageFit } from "./navPageFit.js";
 
 const MOTION_MS = 520;
 const CLOSED_PHASES = new Set(["closed", "closing"]);
 const NAV_EASE = "cubic-bezier(.22,.61,.36,1)";
-const CORNER_MASKS = new Set(["top-left", "top-right", "bottom-left", "bottom-right"]);
 
 const clamp = (value, min = 0, max = 1) => Math.min(max, Math.max(min, value));
 
@@ -39,14 +38,40 @@ function matrixValue(value) {
   return Number(value.toFixed(3));
 }
 
-function viewportClip(progress, targetFit, desktop) {
+function overlayStyle(progress, targetFit, desktop) {
   const p = clamp(progress);
   if (desktop) {
     const frame = targetFit.frame;
-    return `inset(${matrixValue(frame.top * p)}px ${matrixValue(frame.right * p)}px ${matrixValue(frame.bottom * p)}px ${matrixValue(frame.left * p)}px round ${matrixValue(frame.radius * p)}px)`;
+    const top = frame.top * p;
+    const left = frame.left * p;
+    const right = frame.right * p;
+    const bottom = frame.bottom * p;
+    const radius = frame.radius * p;
+    return {
+      top: `${matrixValue(top)}px`,
+      left: `${matrixValue(left)}px`,
+      width: `calc(100% - ${matrixValue(left + right)}px)`,
+      height: `calc(100% - ${matrixValue(top + bottom)}px)`,
+      borderRadius: `${matrixValue(radius)}px`,
+      opacity: "1",
+      visibility: p > 0 ? "visible" : "hidden",
+    };
   }
   const mobile = navMobileMotion({ progress: p, mobile: targetFit.mobile });
-  return `inset(${matrixValue(mobile.frame.top)}px ${matrixValue(mobile.frame.right)}px ${matrixValue(mobile.frame.bottom)}px ${matrixValue(mobile.frame.left)}px round ${matrixValue(mobile.frame.radius)}px)`;
+  const top = mobile.frame.top;
+  const left = mobile.frame.left;
+  const right = mobile.frame.right;
+  const bottom = mobile.frame.bottom;
+  const radius = 16 * p;
+  return {
+    top: `${matrixValue(top)}px`,
+    left: `${matrixValue(left)}px`,
+    width: `calc(100% - ${matrixValue(left + right)}px)`,
+    height: `calc(100% - ${matrixValue(top + bottom)}px)`,
+    borderRadius: `${matrixValue(radius)}px`,
+    opacity: "1",
+    visibility: p > 0 ? "visible" : "hidden",
+  };
 }
 
 function carrierTransform(progress, targetFit, desktop) {
@@ -57,41 +82,6 @@ function carrierTransform(progress, targetFit, desktop) {
   const x = desktop ? carrier.x * p : carrier.x;
   const y = desktop ? carrier.y * p : carrier.y;
   return `translate3d(${matrixValue(x)}px, ${matrixValue(y)}px, 0)`;
-}
-
-function maskFrame(targetFit, desktop) {
-  if (desktop) return targetFit.frame;
-  return {
-    top: 14,
-    right: 0,
-    bottom: 14,
-    left: Number(targetFit.mobile?.x) || 0,
-    radius: 16,
-  };
-}
-
-function maskTransform(progress, targetFit, desktop, name) {
-  const p = clamp(progress);
-  const frame = maskFrame(targetFit, desktop);
-  const radius = frame.radius;
-  const distance = 1 - p;
-  const transforms = {
-    top: [0, -frame.top * distance],
-    right: [frame.right * distance, 0],
-    bottom: [0, frame.bottom * distance],
-    left: [-frame.left * distance, 0],
-    "top-left": [-(frame.left + radius) * distance, -(frame.top + radius) * distance],
-    "top-right": [(frame.right + radius) * distance, -(frame.top + radius) * distance],
-    "bottom-left": [-(frame.left + radius) * distance, (frame.bottom + radius) * distance],
-    "bottom-right": [(frame.right + radius) * distance, (frame.bottom + radius) * distance],
-  };
-  const [x, y] = transforms[name] || [0, 0];
-  /* A rounded clip's radius is r*p, not the destination radius translated
-     into place. CSS sets each corner's transform origin at its interior-facing
-     corner, so this scale keeps both its arc and its outer-frame position on
-     the same geometry as inset(... round r*p). */
-  const scale = CORNER_MASKS.has(name) ? ` scale(${matrixValue(p)})` : "";
-  return `translate3d(${matrixValue(x)}px, ${matrixValue(y)}px, 0)${scale}`;
 }
 
 function drawerTransform(progress) {
@@ -108,10 +98,6 @@ function labelStyle(progress, index) {
   };
 }
 
-/* WAAPI interpolates the geometry in the browser. Sampling the existing
- * shared ease into a short keyframe list keeps the current normalized clock
- * (including label staggering) without asking React to write visual styles on
- * every frame. The list is authored once per logical run, not per frame. */
 function sampledKeyframes(from, target, styleForProgress) {
   const steps = 24;
   return Array.from({ length: steps + 1 }, (_, index) => {
@@ -155,6 +141,7 @@ export function useNavigationMotion({ reducedMotion = false } = {}) {
   const shellRef = useRef(null);
   const viewportRef = useRef(null);
   const carrierRef = useRef(null);
+  const frameOverlayRef = useRef(null);
   const drawerRef = useRef(null);
   const toggleRef = useRef(null);
   const firstItemRef = useRef(null);
@@ -180,12 +167,6 @@ export function useNavigationMotion({ reducedMotion = false } = {}) {
     shell.style.setProperty("--nav-clip-right", `${targetFit.clipRight}px`);
     shell.style.setProperty("--nav-clip-bottom", `${targetFit.clipBottom}px`);
     shell.style.setProperty("--nav-page-radius", `${targetFit.frame.radius}px`);
-    const mask = maskFrame(targetFit, desktopRef.current);
-    shell.style.setProperty("--nav-mask-top", `${mask.top}px`);
-    shell.style.setProperty("--nav-mask-right", `${mask.right}px`);
-    shell.style.setProperty("--nav-mask-bottom", `${mask.bottom}px`);
-    shell.style.setProperty("--nav-mask-left", `${mask.left}px`);
-    shell.style.setProperty("--nav-mask-radius", `${mask.radius}px`);
   }, []);
 
   const cancelFrame = useCallback(() => {
@@ -203,24 +184,21 @@ export function useNavigationMotion({ reducedMotion = false } = {}) {
   const setPromotion = useCallback((active) => {
     const viewport = viewportRef.current;
     const carrier = carrierRef.current;
+    const overlay = frameOverlayRef.current;
     const drawer = drawerRef.current;
     const rail = railRef.current;
-    const masks = viewport?.querySelectorAll("[data-nav-mask]") || [];
     if (active) {
-      /* The stage has no animated clip-path in the transform-wall design. */
-      viewport?.style.removeProperty("will-change");
-      viewport?.style.setProperty("contain", "layout paint");
       carrier?.style.setProperty("will-change", "transform");
+      overlay?.style.setProperty("will-change", "top, left, width, height, opacity");
       drawer?.style.setProperty("will-change", "transform");
       rail?.style.setProperty("will-change", "transform");
-      masks.forEach((mask) => mask.style.setProperty("will-change", "transform"));
     } else {
       viewport?.style.removeProperty("will-change");
       viewport?.style.removeProperty("contain");
       carrier?.style.removeProperty("will-change");
+      overlay?.style.removeProperty("will-change");
       drawer?.style.removeProperty("will-change");
       rail?.style.removeProperty("will-change");
-      masks.forEach((mask) => mask.style.removeProperty("will-change"));
     }
   }, []);
 
@@ -232,39 +210,55 @@ export function useNavigationMotion({ reducedMotion = false } = {}) {
     const p = clamp(rawProgress);
     const viewport = viewportRef.current;
     const carrier = carrierRef.current;
+    const overlay = frameOverlayRef.current;
     const drawer = drawerRef.current;
     if (!viewport || !carrier || !drawer) return;
 
     viewport.style.transition = "none";
     carrier.style.transition = "none";
     drawer.style.transition = "none";
-    viewport.style.clipPath = active ? "none" : viewportClip(p, targetFit, desktopRef.current);
     carrier.style.transform = carrierTransform(p, targetFit, desktopRef.current);
-    const desktop = desktopRef.current;
-    const liveInsets = desktop ? sideWallInsets(p, maskFrame(targetFit, true)) : null;
-    viewport.querySelectorAll("[data-nav-mask]").forEach((mask) => {
-      /* The transform walls own the frame only during active travel. At either
-         terminal state the viewport clip owns the rounded edge; leaving a
-         corner wall painted over that clip cuts a concave notch into the card. */
-      const name = mask.dataset.navMask;
-      mask.style.visibility = active ? "visible" : "hidden";
-      mask.style.opacity = active ? "1" : "0";
-      mask.style.transform = maskTransform(p, targetFit, desktop, name);
-      if (active && liveInsets && (name === "left" || name === "right")) {
-        mask.style.top = `${liveInsets.top}px`;
-        mask.style.bottom = `${liveInsets.bottom}px`;
+
+    if (overlay) {
+      if (p <= 0 && !active) {
+        overlay.style.visibility = "hidden";
       } else {
-        mask.style.removeProperty("top");
-        mask.style.removeProperty("bottom");
+        const style = overlayStyle(p, targetFit, desktopRef.current);
+        overlay.style.top = style.top;
+        overlay.style.left = style.left;
+        overlay.style.width = style.width;
+        overlay.style.height = style.height;
+        overlay.style.borderRadius = style.borderRadius;
+        overlay.style.opacity = "1";
+        overlay.style.visibility = "visible";
       }
-    });
-    if (!desktopRef.current) {
+    }
+    const surface = carrier.querySelector(".nb-app-surface");
+    if (desktopRef.current) {
+      if (surface) {
+        surface.style.removeProperty("border-radius");
+        surface.style.removeProperty("overflow");
+      }
+    } else {
       const mobile = navMobileMotion({ progress: p, mobile: targetFit.mobile });
       const rail = railRef.current;
+      if (surface) {
+        if (p <= 0 && !active) {
+          surface.style.removeProperty("border-radius");
+        } else {
+          surface.style.borderRadius = `${matrixValue(16 * p)}px`;
+        }
+        surface.style.removeProperty("overflow");
+      }
       if (rail) {
         rail.style.transition = "none";
-        rail.style.visibility = "visible";
+        rail.style.visibility = p <= 0 && !active ? "hidden" : "visible";
         rail.style.transform = `translate3d(${matrixValue(mobile.rail.x)}px, 0, 0) rotate(180deg)`;
+        const top = mobile.frame.top;
+        rail.style.top = `${top}px`;
+        rail.style.bottom = `${top}px`;
+        rail.style.height = `calc(100% - ${top * 2}px)`;
+        rail.style.borderRadius = "16px";
         /* Once more than two pixels are revealed the rail is a real action;
          * below that threshold it is clipped and cannot steal a pointer. */
         rail.style.pointerEvents = mobile.visibleRailWidth > 2 ? "auto" : "none";
@@ -373,15 +367,40 @@ export function useNavigationMotion({ reducedMotion = false } = {}) {
     };
 
     try {
-      /* The viewport remains an un-clipped stage during travel. Static shell
-         walls move into the four margins, so the large planner surface is not
-         repainted for a changing clip path. */
-      const finish = animate(carrier, sampledKeyframes(source, target, (value) => ({
-        transform: carrierTransform(value, targetFit, desktopRef.current),
-      })));
-      animate(drawer, sampledKeyframes(source, target, (value) => ({
-        transform: drawerTransform(value),
-      })));
+      /* Direct 2-keyframe animations allow the compositor to apply the exact
+         --nav-ease cubic-bezier curve over the full duration without the
+         velocity distortion of pre-sliced keyframe interpolation. */
+      const finish = animate(carrier, [
+        { transform: carrierTransform(source, targetFit, desktopRef.current) },
+        { transform: carrierTransform(target, targetFit, desktopRef.current) },
+      ]);
+      const overlay = frameOverlayRef.current;
+      if (overlay) {
+        overlay.style.visibility = "visible";
+        overlay.style.opacity = "1";
+        const startStyle = overlayStyle(source, targetFit, desktopRef.current);
+        const endStyle = overlayStyle(target, targetFit, desktopRef.current);
+        animate(overlay, [
+          {
+            top: startStyle.top,
+            left: startStyle.left,
+            width: startStyle.width,
+            height: startStyle.height,
+            borderRadius: startStyle.borderRadius,
+          },
+          {
+            top: endStyle.top,
+            left: endStyle.left,
+            width: endStyle.width,
+            height: endStyle.height,
+            borderRadius: endStyle.borderRadius,
+          },
+        ]);
+      }
+      animate(drawer, [
+        { transform: drawerTransform(source) },
+        { transform: drawerTransform(target) },
+      ]);
 
       const labels = drawer.querySelectorAll(".nb-nav-brand,.nb-nav-item,.nb-nav-membership");
       labels.forEach((label) => {
@@ -389,30 +408,38 @@ export function useNavigationMotion({ reducedMotion = false } = {}) {
         animate(label, sampledKeyframes(source, target, (value) => labelStyle(value, index)));
       });
 
-      viewport.querySelectorAll("[data-nav-mask]").forEach((mask) => {
-        const name = mask.dataset.navMask;
-        animate(mask, sampledKeyframes(source, target, (value) => {
-          const style = {
-            transform: maskTransform(value, targetFit, desktopRef.current, name),
-          };
-          if (desktopRef.current && (name === "left" || name === "right")) {
-            const insets = sideWallInsets(value, maskFrame(targetFit, true));
-            style.top = `${insets.top}px`;
-            style.bottom = `${insets.bottom}px`;
-          }
-          return style;
-        }));
-      });
-
       if (!desktopRef.current) {
         const rail = railRef.current;
+        const surface = carrier.querySelector(".nb-app-surface");
+        if (surface) {
+          animate(surface, [
+            { borderRadius: `${matrixValue(16 * source)}px` },
+            { borderRadius: `${matrixValue(16 * target)}px` },
+          ]);
+        }
         if (rail) {
           rail.style.visibility = "visible";
           rail.style.pointerEvents = "auto";
-          animate(rail, sampledKeyframes(source, target, (value) => {
-            const mobile = navMobileMotion({ progress: value, mobile: targetFit.mobile });
-            return { transform: `translate3d(${matrixValue(mobile.rail.x)}px, 0, 0) rotate(180deg)` };
-          }));
+          const mobileSource = navMobileMotion({ progress: source, mobile: targetFit.mobile });
+          const mobileTarget = navMobileMotion({ progress: target, mobile: targetFit.mobile });
+          animate(rail, [
+            {
+              transform: `translate3d(${matrixValue(mobileSource.rail.x)}px, 0, 0) rotate(180deg)`,
+              top: `${matrixValue(mobileSource.frame.top)}px`,
+              height: `calc(100% - ${matrixValue(mobileSource.frame.top * 2)}px)`,
+            },
+            {
+              transform: `translate3d(${matrixValue(mobileTarget.rail.x)}px, 0, 0) rotate(180deg)`,
+              top: `${matrixValue(mobileTarget.frame.top)}px`,
+              height: `calc(100% - ${matrixValue(mobileTarget.frame.top * 2)}px)`,
+            },
+          ]);
+        }
+      } else {
+        const surface = carrier.querySelector(".nb-app-surface");
+        if (surface) {
+          surface.style.removeProperty("border-radius");
+          surface.style.removeProperty("overflow");
         }
       }
 
@@ -583,6 +610,7 @@ export function useNavigationMotion({ reducedMotion = false } = {}) {
     shellRef,
     viewportRef,
     carrierRef,
+    frameOverlayRef,
     drawerRef,
     toggleRef,
     firstItemRef,

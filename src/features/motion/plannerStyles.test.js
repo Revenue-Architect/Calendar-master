@@ -13,15 +13,15 @@ function cssFor(themeId) {
 test("the nav stage stays #17181b on every ground", () => {
   for (const themeId of ["obsidian-acid", "cream-terracotta"]) {
     const css = cssFor(themeId);
-    assert.match(css, /\.nb-nav-shell\{[^}]*background:#17181b/, `${themeId} shell`);
     assert.ok(
-      css.includes(".nb-nav-motion-mask>i{position:absolute;display:block;background:#17181b"),
-      `${themeId} walls`,
+      css.includes("--nav-stage-fill:#17181b"),
+      `${themeId} must set --nav-stage-fill:#17181b`,
     );
     assert.ok(
-      css.includes("radial-gradient(circle farthest-side at 0 100%,transparent 0 calc(100% - 0.5px),#17181b 100%)"),
-      `${themeId} right-corner tile`,
+      css.includes("box-shadow:0 0 0 9999px var(--nav-stage-fill, #17181b)"),
+      `${themeId} must use single continuous frame overlay with obsidian stage shadow`,
     );
     assert.equal(css.includes("--nav-frame-fill:"), false, `${themeId} must not theme the stage`);
+    assert.equal(css.includes("--nav-mask-"), false, `${themeId} must not include obsolete mask variables`);
   }
 });
