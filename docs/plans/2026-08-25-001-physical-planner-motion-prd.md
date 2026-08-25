@@ -4,10 +4,10 @@
 **Date:** 2026-08-24  
 **Repository:** `Revenue-Architect/Calendar-master`  
 **Grounding point:** PR #13 head `f8cdc60fc1e0c87c5ffaabae158cec3ce45be98a` was the last reviewed application state before this document was consolidated. Re-ground against current `main` and open PRs before implementation.  
-**Normative behavioral reference:** `docs/reference/physical-planner-motion-lab.html`  
-**Architecture:** `docs/spec/physical-planner-motion-ard.md`  
-**Legacy reconciliation / blast radius:** `docs/spec/physical-planner-motion-reconciliation.md`  
-**Execution plan:** `docs/superpowers/plans/2026-08-24-physical-planner-motion-system.md`
+**Normative behavioral reference:** `docs/plans/2026-08-25-006-physical-planner-motion-visual-reference.html`  
+**Architecture:** `docs/plans/2026-08-25-002-physical-planner-motion-ard.md`  
+**Legacy reconciliation / blast radius:** `docs/plans/2026-08-25-003-physical-planner-motion-reconciliation.md`  
+**Execution plan:** `docs/plans/2026-08-25-004-physical-planner-motion-implementation-plan.md`
 
 ---
 
