@@ -1,6 +1,8 @@
 import { useEffect, useRef } from "react";
 import { ACTION_COMPLETION_LANE, ACTION_ESTIMATE_LANE } from "./timelineTouchTarget.js";
 import ActionProgress from "./ActionProgress.jsx";
+import { useMorphSource } from "../motion/useMorphSource.js";
+import { taskMorphKey } from "../motion/morphKeys.js";
 
 function resizeCueStyle(theme) {
   return {
@@ -47,6 +49,16 @@ export default function TimelineActionCard({
   clickFollowsGesture,
 }) {
   const chipRef = useRef(null);
+  const morphRef = useMorphSource({
+    key: task ? taskMorphKey({ taskId: task.id, view: "timeline" }) : null,
+    kind: "task",
+    meta: { title: task?.title, estimateMinutes: estimate },
+    enabled: !dragging,
+  });
+  const setChipRef = (node) => {
+    chipRef.current = node;
+    morphRef(node);
+  };
   const open = () => {
     if (clickFollowsGesture?.()) return;
     onOpen(task.id);
@@ -121,7 +133,7 @@ export default function TimelineActionCard({
           style={{ background: theme.accent, color: theme.on, borderRadius: cardRadius, fontFamily: mono }}>
           <span className="nb-label">COMPLETE</span>
         </div>
-        <div ref={chipRef} data-task-chip={task.id} data-density={density}
+        <div ref={setChipRef} data-task-chip={task.id} data-density={density}
           className="absolute inset-0"
           style={{
             borderRadius: cardRadius,
