@@ -88,6 +88,12 @@ export default function TimelineActionCard({
     };
   }, [task, onPointerDown, onPointerMove, onPointerUp]);
 
+  const density =
+    height < 36 ? "micro" :
+    height < 48 ? "compact" :
+    height < 60 ? "standard" :
+    "expanded";
+
   return (
     <div className={`nb-timeline-lane absolute overflow-hidden ${dragging || sizing ? "nb-timeline-lane-active" : "nb-hover-tile"}`}
       data-test="timeline-action-lane"
@@ -115,7 +121,7 @@ export default function TimelineActionCard({
           style={{ background: theme.accent, color: theme.on, borderRadius: cardRadius, fontFamily: mono }}>
           <span className="nb-label">COMPLETE</span>
         </div>
-        <div ref={chipRef} data-task-chip={task.id}
+        <div ref={chipRef} data-task-chip={task.id} data-density={density}
           className="absolute inset-0"
           style={{
             borderRadius: cardRadius,
@@ -149,38 +155,66 @@ export default function TimelineActionCard({
             density="compact"
             className="pointer-events-none absolute z-[11]"
             style={{
-              top: 5,
+              top: density === "micro" ? "50%" : 5,
+              transform: density === "micro" ? "translateY(-50%)" : "none",
               right: resizeEligible ? ACTION_ESTIMATE_LANE + 2 : 5,
               width: 18,
               height: 18,
             }}
           />
           <button type="button" onClick={open} onKeyDown={keyOpen}
-            className="nb-tap absolute min-w-0 overflow-hidden text-left"
+            className={`nb-tap nb-action-button absolute min-w-0 overflow-hidden text-left ${hasWorkProgress ? "nb-action-content-has-progress" : ""}`}
             style={{
               top: 0, bottom: 0,
               left: ACTION_COMPLETION_LANE,
               right: resizeEligible ? 48 : 0,
-              paddingRight: hasWorkProgress ? 22 : 0,
-              display: "flex", flexDirection: "column", justifyContent: "flex-start",
+              display: "flex",
+              flexDirection: density === "micro" ? "row" : "column",
+              alignItems: density === "micro" ? "center" : "stretch",
+              justifyContent: density === "compact" ? "center" : density === "micro" ? "flex-start" : "flex-start",
               background: "transparent", borderRadius: 0, touchAction: "pan-y",
             }}>
-            <span className={`flex min-w-0 items-center gap-2 py-1 ${resizeEligible ? "pr-1.5" : "pr-0"}`}>
-              <span className="nb-lead min-w-0 flex-1 truncate" style={{ color: done ? theme.dimText : theme.text }}>{task.title}</span>
-              {subtaskProgress?.total > 0 && (
-                <span data-test="timeline-action-subtask-marker" aria-label={`${subtaskProgress.total} subtask${subtaskProgress.total === 1 ? "" : "s"}`}
-                  style={{ fontFamily: mono, color: theme.dimText }} className="nb-data shrink-0">
-                  ↳ {subtaskProgress.total}
+            {density === "micro" ? (
+              <div className={`flex w-full items-center min-w-0 ${resizeEligible ? "pr-1.5" : "pr-0"}`}>
+                <span className="nb-lead min-w-0 flex-1 truncate" style={{ color: done ? theme.dimText : theme.text, lineHeight: 1.2 }}>
+                  {task.title}
                 </span>
-              )}
-            </span>
-            {block && height >= 40 && (
-              <span style={{ fontFamily: mono, color: theme.dimText }} className="nb-task-time block nb-data truncate pr-1.5">{formatTime(task.planned.startMinute)}</span>
-            )}
-            {subtaskProgress?.total > 0 && block && height >= 54 && (
-              <span data-test="timeline-action-subtasks" style={{ fontFamily: mono, color: theme.dimText }} className="block nb-data truncate pr-1.5">
-                {subtaskProgress.total} SUBTASK{subtaskProgress.total === 1 ? "" : "S"} · {subtaskProgress.done} DONE
-              </span>
+                {subtaskProgress?.total > 0 && (
+                  <span data-test="timeline-action-subtask-marker" aria-label={`${subtaskProgress.total} subtask${subtaskProgress.total === 1 ? "" : "s"}`}
+                    style={{ fontFamily: mono, color: theme.dimText }} className="nb-data shrink-0 ml-1">
+                    ↳ {subtaskProgress.total}
+                  </span>
+                )}
+                {task.planned?.startMinute != null && (
+                  <span style={{ fontFamily: mono, color: theme.dimText, fontSize: 9, lineHeight: 1.1 }} className="nb-task-time nb-data shrink-0 ml-1.5 truncate">
+                    {formatTime(task.planned.startMinute)}
+                  </span>
+                )}
+              </div>
+            ) : (
+              <div className={`flex w-full flex-col min-w-0 ${density === "compact" ? "py-0.5" : "py-1"}`}>
+                <span className={`flex min-w-0 items-center gap-1.5 ${resizeEligible ? "pr-1.5" : "pr-0"}`}>
+                  <span className="nb-lead min-w-0 flex-1 truncate" style={{ color: done ? theme.dimText : theme.text }}>
+                    {task.title}
+                  </span>
+                  {subtaskProgress?.total > 0 && (
+                    <span data-test="timeline-action-subtask-marker" aria-label={`${subtaskProgress.total} subtask${subtaskProgress.total === 1 ? "" : "s"}`}
+                      style={{ fontFamily: mono, color: theme.dimText }} className="nb-data shrink-0">
+                      ↳ {subtaskProgress.total}
+                    </span>
+                  )}
+                </span>
+                {task.planned?.startMinute != null && (
+                  <span style={{ fontFamily: mono, color: theme.dimText, fontSize: density === "compact" ? 9 : undefined }} className="nb-task-time block nb-data truncate pr-1.5">
+                    {formatTime(task.planned.startMinute)}
+                  </span>
+                )}
+                {subtaskProgress?.total > 0 && density === "expanded" && (
+                  <span data-test="timeline-action-subtasks" style={{ fontFamily: mono, color: theme.dimText }} className="block nb-data truncate pr-1.5">
+                    {subtaskProgress.total} SUBTASK{subtaskProgress.total === 1 ? "" : "S"} · {subtaskProgress.done} DONE
+                  </span>
+                )}
+              </div>
             )}
           </button>
           {resizeEligible && (

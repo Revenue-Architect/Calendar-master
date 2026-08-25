@@ -726,11 +726,19 @@ export function plannerStyles({ T, preferences }) {
         /* A shared lane is information in itself. Once a card is narrow, repeat,
            alert, conflict and time badges stop repeating that information and
            yield to the two things the card must preserve: its title and JOIN. */
+        .nb-action-content-has-progress{padding-right:22px}
         @container (max-width:220px){
           .nb-event-secondary{display:none}
           .nb-event-row{column-gap:.375rem}
+          [data-density="micro"] [data-test="timeline-action-subtask-marker"]{display:none}
+          [data-density="micro"] [data-test="timeline-action-progress"]{display:none}
+          [data-density="micro"] .nb-action-content-has-progress{padding-right:0}
         }
-        @container (max-width:160px){
+        @container (max-width:170px){
+          [data-density="micro"] [data-action-estimate]{display:none}
+          [data-density="micro"] .nb-action-button{right:0 !important}
+        }
+        @container (max-width:115px){
           .nb-task-time,.nb-task-duration{display:none}
         }
         /* Down is quick and linear, release overshoots and settles — the difference
