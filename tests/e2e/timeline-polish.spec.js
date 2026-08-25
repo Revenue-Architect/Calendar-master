@@ -113,7 +113,7 @@ test.describe("mobile timeline focus", () => {
     const session = await page.context().newCDPSession(page);
     await dispatchTouch(session, "touchStart", box.x + 90, box.y + 120);
     await dispatchTouch(session, "touchMove", box.x + 90, box.y + 132);
-    await stream.evaluate((node) => { node.scrollTop = 32; node.dispatchEvent(new Event("scroll")); });
+    await stream.evaluate((node) => { node.scrollTop = 100; node.dispatchEvent(new Event("scroll")); });
     await dispatchTouch(session, "touchEnd", box.x + 90, box.y + 120);
     await session.detach();
 
