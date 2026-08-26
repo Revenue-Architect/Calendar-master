@@ -82,6 +82,12 @@ class MockElement {
       borderColor: "",
     };
     this.textContent = "";
+    this.style = {
+      setProperty(name, value) {
+        const camel = String(name).replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+        this[camel] = value;
+      },
+    };
   }
   setAttribute(k, v) {
     this.attributes[k] = String(v);
@@ -203,10 +209,10 @@ globalThis.window = {
   removeEventListener() {},
   getComputedStyle(el) {
     return {
-      borderRadius: el?._paint?.borderRadius || el?.style?.borderRadius || "0px",
-      backgroundColor: el?._paint?.backgroundColor || el?.style?.backgroundColor || "",
-      color: el?._paint?.color || el?.style?.color || "",
-      borderColor: el?._paint?.borderColor || el?.style?.borderColor || "",
+      borderRadius: el?.style?.borderRadius || el?._paint?.borderRadius || "0px",
+      backgroundColor: el?.style?.backgroundColor || el?._paint?.backgroundColor || "",
+      color: el?.style?.color || el?._paint?.color || "",
+      borderColor: el?.style?.borderColor || el?._paint?.borderColor || "",
       fontFamily: "",
       fontSize: "",
       fontWeight: "",
@@ -299,6 +305,39 @@ async function mountSurface(t, { transaction, registry }) {
   };
 }
 
+function readShared(el) {
+  if (!el) return null;
+  const computed = window.getComputedStyle(el);
+  return {
+    text: (el.textContent || "").trim(),
+    rect: { ...el.getBoundingClientRect() },
+    type: el.getAttribute("data-morph-marker") || null,
+    color: computed.color || "",
+    fontFamily: computed.fontFamily || "",
+    fontSize: computed.fontSize || "",
+    fontWeight: computed.fontWeight || "",
+    lineHeight: computed.lineHeight || "",
+  };
+}
+
+function snapshotFromCard(node) {
+  const rect = node.getBoundingClientRect();
+  return {
+    rect: { ...rect },
+    radius: parseFloat(node._paint?.borderRadius) || 0,
+    paint: {
+      background: node._paint?.backgroundColor || "",
+      color: node._paint?.color || "",
+      borderColor: node._paint?.borderColor || "",
+    },
+    shared: {
+      title: readShared(node.querySelector("[data-morph-title]")),
+      meta: readShared(node.querySelector("[data-morph-meta]")),
+      marker: readShared(node.querySelector("[data-morph-marker]")),
+    },
+  };
+}
+
 function registerSource(registry, rects) {
   const node = createCardNode(rects);
   const unregister = registry.registerMorphNode({
@@ -307,6 +346,7 @@ function registerSource(registry, rects) {
     kind: "event",
     role: "source",
     meta: { title: "Design Sync" },
+    getSnapshot: snapshotFromCard,
   });
   return { node, unregister, snapshot: registry.snapshotMorphNode(KEY, "source") };
 }
@@ -428,6 +468,11 @@ test("shared title, meta, and marker start at source shared rects", async (t) =>
   assertRectEqual(title.getBoundingClientRect(), SOURCE_A_TITLE, "overlay title");
   assertRectEqual(meta.getBoundingClientRect(), SOURCE_A_META, "overlay meta");
   assertRectEqual(marker.getBoundingClientRect(), SOURCE_A_MARKER, "overlay marker");
+  assert.equal(title.textContent, "Design Sync");
+  assert.equal(meta.textContent, "10:00 AM");
+  assert.equal(marker.getAttribute("data-morph-marker"), "progress-ring");
+  assert.ok(!title.style.transform || !String(title.style.transform).includes("scale"));
+  assert.ok(!meta.style.transform || !String(meta.style.transform).includes("scale"));
 });
 
 test("overlay settles to the destination rect once the destination is in the DOM", async (t) => {
