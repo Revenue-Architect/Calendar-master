@@ -1,7 +1,6 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import Planner from "./Planner.jsx";
-import PlannerSurfaceHost from "./features/planner/PlannerSurfaceHost.jsx";
 import { ErrorBoundary } from "./app/ErrorBoundary.jsx";
 import { removeBootShell, showBootstrapFailure } from "./app/bootFallback.js";
 import { markRootCommitted, recordBootstrapFailure, startBootLifecycle } from "./app/bootLifecycle.js";

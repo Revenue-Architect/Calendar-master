@@ -1,5 +1,9 @@
 /**
- * Calendar Master — Physical Planner Motion Tokens
+ * Calendar Master — Physical Planner Motion Tokens (Provisional)
+ *
+ * Provisional timing and easing curves subject to 40th-time evaluation and tuning.
+ * Geometry and corner radii are derived directly from live DOM snapshots rather
+ * than duplicate synthetic tokens.
  *
  * Grounding: docs/plans/2026-08-25-002-physical-planner-motion-ard.md §10
  * Visual Authority: docs/plans/2026-08-25-006-physical-planner-motion-visual-reference.html
@@ -25,12 +29,4 @@ export const MORPH_EASING = Object.freeze({
   RETRACT: "cubic-bezier(0.3, 0, 0.8, 0.15)",
   // Linear for color/opacity fades
   LINEAR: "linear",
-});
-
-export const MORPH_RADII = Object.freeze({
-  CARD_DESKTOP: 8,
-  CARD_MOBILE: 6,
-  SHEET_DESKTOP: 16,
-  SHEET_MOBILE: 20,
-  PILL: 9999,
 });

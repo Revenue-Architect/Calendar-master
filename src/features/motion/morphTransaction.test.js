@@ -98,6 +98,26 @@ test("in-flight interruption reverses opening directly into cancelling state", (
   assert.equal(tx.getState(), MORPH_STATES.IDLE);
 });
 
+test("reduced motion follows same semantic state transitions without skipping steps", () => {
+  const stateChanges = [];
+  const tx = createMorphTransaction({
+    onStateChange: (snap) => stateChanges.push(snap.state),
+  });
+
+  const runId = tx.startOpen({ key: "morph:event:reduced-motion" });
+  tx.settleOpen(runId);
+  tx.startClose({ runId });
+  tx.settleClose(runId);
+
+  assert.deepEqual(stateChanges, [
+    MORPH_STATES.OPENING,
+    MORPH_STATES.OPEN,
+    MORPH_STATES.CLOSING,
+    MORPH_STATES.SETTLED,
+    MORPH_STATES.IDLE,
+  ]);
+});
+
 test("Task 6: transition matrix rejects illegal state transitions", () => {
   const tx = createMorphTransaction();
 
@@ -142,7 +162,7 @@ test("Task 6: stale callbacks from older run IDs are strictly rejected", () => {
   assert.equal(tx.getState(), MORPH_STATES.OPENING, "State must remain OPENING for run 2");
 });
 
-test("Task 7: Final IDLE cleanup order ensures onStateChange receives null transaction data on IDLE", () => {
+test("Task 7: Final IDLE notification represents a clean idle transaction without stale data", () => {
   let finalIdleSnapshot = null;
   let settledSnapshot = null;
 
@@ -175,11 +195,13 @@ test("Task 7: Final IDLE cleanup order ensures onStateChange receives null trans
   assert.ok(settledSnapshot.sourceSnapshot);
   assert.ok(settledSnapshot.targetSnapshot);
 
-  // In IDLE state, all fields MUST be clean nulls (Task 7 fix)
-  assert.ok(finalIdleSnapshot);
-  assert.equal(finalIdleSnapshot.state, MORPH_STATES.IDLE);
-  assert.equal(finalIdleSnapshot.key, null, "currentKey must be null on IDLE");
-  assert.equal(finalIdleSnapshot.sourceSnapshot, null, "sourceSnapshot must be null on IDLE");
-  assert.equal(finalIdleSnapshot.targetSnapshot, null, "targetSnapshot must be null on IDLE");
-  assert.equal(finalIdleSnapshot.inFlightProgress, 0, "inFlightProgress must be 0 on IDLE");
+  // In IDLE state, all fields MUST be clean nulls/zero (Task 7 fix)
+  assert.deepEqual(finalIdleSnapshot, {
+    state: MORPH_STATES.IDLE,
+    runId,
+    key: null,
+    sourceSnapshot: null,
+    targetSnapshot: null,
+    inFlightProgress: 0,
+  });
 });
