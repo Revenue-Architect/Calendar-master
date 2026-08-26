@@ -147,10 +147,16 @@ export function createMorphTransaction({
   }
 
   function resolveDestination({ target, runId } = {}) {
-    if (runId != null && runId !== currentRunId) return false;
-    const ok = transitionTo(MORPH_STATES.CLOSING, currentRunId);
-    if (ok && target) targetSnapshot = target;
-    return ok;
+    if (runId != null && runId !== currentRunId) {
+      return false;
+    }
+    if (!canTransitionTo(MORPH_STATES.CLOSING)) {
+      return false;
+    }
+    if (target) {
+      targetSnapshot = target;
+    }
+    return transitionTo(MORPH_STATES.CLOSING, currentRunId);
   }
 
   function fallbackDestination({ runId } = {}) {
@@ -159,18 +165,25 @@ export function createMorphTransaction({
   }
 
   function startClose({ target, runId } = {}) {
-    if (runId != null && runId !== currentRunId) return false;
-
-    if (state === MORPH_STATES.OPENING || state === MORPH_STATES.MEASURING) {
-      // In-flight reversal — validate transition first, then apply side effects
-      const ok = transitionTo(MORPH_STATES.CANCELLING, currentRunId);
-      if (ok && target) targetSnapshot = target;
-      return ok;
+    if (runId != null && runId !== currentRunId) {
+      return false;
     }
-    // Validate transition to CLOSING before mutating
-    const ok = transitionTo(MORPH_STATES.CLOSING, currentRunId);
-    if (ok && target) targetSnapshot = target;
-    return ok;
+
+    const nextState =
+      state === MORPH_STATES.OPENING ||
+      state === MORPH_STATES.MEASURING
+        ? MORPH_STATES.CANCELLING
+        : MORPH_STATES.CLOSING;
+
+    if (!canTransitionTo(nextState)) {
+      return false;
+    }
+
+    if (target) {
+      targetSnapshot = target;
+    }
+
+    return transitionTo(nextState, currentRunId);
   }
 
   function settleClose(runId) {

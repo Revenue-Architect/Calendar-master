@@ -268,3 +268,77 @@ test("Issue 1: OPEN + resolveDestination(target) must not mutate targetSnapshot 
   assert.equal(tx2.getSnapshot().targetSnapshot, null, "targetSnapshot must not be mutated on rejected transition");
   assert.equal(tx2.getState(), MORPH_STATES.OPENING, "State must remain OPENING");
 });
+
+test("CLOSING notification includes target snapshot atomically", () => {
+  let closing;
+
+  const tx = createMorphTransaction({
+    onStateChange(snapshot) {
+      if (snapshot.state === MORPH_STATES.CLOSING) {
+        closing = { ...snapshot };
+      }
+    },
+  });
+
+  const run = tx.startOpen({ key: "event" });
+  tx.settleOpen(run);
+
+  const target = {
+    rect: { x: 20, y: 30, width: 200, height: 80 },
+  };
+
+  tx.startClose({ runId: run, target });
+
+  assert.ok(closing, "CLOSING notification must be emitted");
+  assert.deepEqual(closing.targetSnapshot, target, "CLOSING onStateChange must receive targetSnapshot synchronously");
+});
+
+test("CANCELLING notification includes target snapshot on in-flight reversal atomically", () => {
+  let cancelling;
+
+  const tx = createMorphTransaction({
+    onStateChange(snapshot) {
+      if (snapshot.state === MORPH_STATES.CANCELLING) {
+        cancelling = { ...snapshot };
+      }
+    },
+  });
+
+  const run = tx.startOpen({ key: "event" });
+  // In OPENING state, reverse mid-flight
+  const target = {
+    rect: { x: 10, y: 15, width: 100, height: 40 },
+  };
+
+  tx.startClose({ runId: run, target });
+
+  assert.ok(cancelling, "CANCELLING notification must be emitted");
+  assert.deepEqual(cancelling.targetSnapshot, target, "CANCELLING onStateChange must receive targetSnapshot synchronously");
+});
+
+test("resolveDestination CLOSING notification includes target snapshot atomically", () => {
+  let closing;
+
+  const tx = createMorphTransaction({
+    onStateChange(snapshot) {
+      if (snapshot.state === MORPH_STATES.CLOSING) {
+        closing = { ...snapshot };
+      }
+    },
+  });
+
+  const run = tx.startOpen({ key: "event" });
+  tx.settleOpen(run);
+  tx.startCommit({ runId: run });
+  tx.waitForDestination({ runId: run });
+
+  const target = {
+    rect: { x: 50, y: 60, width: 150, height: 70 },
+  };
+
+  tx.resolveDestination({ runId: run, target });
+
+  assert.ok(closing, "CLOSING notification must be emitted");
+  assert.deepEqual(closing.targetSnapshot, target, "resolveDestination CLOSING onStateChange must receive targetSnapshot synchronously");
+});
+
