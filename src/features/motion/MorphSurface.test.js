@@ -6,6 +6,7 @@ import { eventMorphKey } from "./morphKeys.js";
 import { MorphSurface } from "./MorphSurface.js";
 import { createMorphRegistry } from "./morphRegistry.js";
 import { createMorphTransaction, MORPH_STATES } from "./morphTransaction.js";
+import { interpolateIdentity } from "./morphInterpolate.js";
 
 /* Phase 4 RED fixture — ARD §8 / plan Task 4.1.
  *
@@ -239,6 +240,53 @@ function wait(ms = 40) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function createMockAnimation(node, keyframes, timing) {
+  let resolve;
+  let reject;
+  const duration = Number(timing?.duration) || 1;
+  const animation = {
+    node,
+    playState: "running",
+    currentTime: 0,
+    keyframes,
+    timing,
+    effect: {
+      getTiming: () => ({ duration }),
+    },
+    cancel() {
+      animation.playState = "idle";
+      reject?.(new Error("cancelled"));
+    },
+    finished: new Promise((res, rej) => {
+      resolve = res;
+      reject = rej;
+    }),
+    finish() {
+      animation.playState = "finished";
+      resolve?.();
+    },
+  };
+  return animation;
+}
+
+function shellTransformFor(from, to) {
+  const fromRect = from.rect;
+  const toRect = to.rect;
+  return `translate3d(${fromRect.left - toRect.left}px, ${fromRect.top - toRect.top}px, 0px) scale(${fromRect.width / toRect.width}, ${fromRect.height / toRect.height})`;
+}
+
+function layerTranslateFor(from, to) {
+  return `translate3d(${from.rect.left - to.rect.left}px, ${from.rect.top - to.rect.top}px, 0px)`;
+}
+
+function animationLabel(node) {
+  if (node?.getAttribute("data-morph-shell") != null) return "shell";
+  if (node?.getAttribute("data-morph-title") != null) return "title";
+  if (node?.getAttribute("data-morph-meta") != null) return "meta";
+  if (node?.getAttribute("data-morph-marker") != null) return "marker";
+  return null;
+}
+
 function createShared(tag, attr, value, rect, text) {
   const el = new MockElement(tag);
   el.setAttribute(attr, value);
@@ -314,6 +362,7 @@ async function mountSurface(t, { transaction, registry }) {
   paint();
   await wait();
   return {
+    root,
     container,
     paint: async () => {
       paint();
@@ -747,6 +796,98 @@ test("pre-existing source opacity restores exactly after IDLE", async (t) => {
   assert.equal(node.style.opacity, "0.6");
 });
 
+test("WAAPI animates the shell and each shared layer to its endpoint without scaling shared objects", async (t) => {
+  const previous = MockElement.prototype.animate;
+  const calls = [];
+  MockElement.prototype.animate = function animate(keyframes, timing) {
+    const animation = createMockAnimation(this, keyframes, timing);
+    calls.push(animation);
+    return animation;
+  };
+  t.after(() => {
+    if (previous) MockElement.prototype.animate = previous;
+    else delete MockElement.prototype.animate;
+  });
+
+  const registry = createMorphRegistry();
+  const { snapshot: sourceSnapshot } = registerSource(registry, {
+    rect: SOURCE_A,
+    titleRect: SOURCE_A_TITLE,
+    metaRect: SOURCE_A_META,
+    markerRect: SOURCE_A_MARKER,
+  });
+  const { snapshot: destinationSnapshot } = registerDestination(registry);
+  const transaction = createMorphTransaction();
+  const { container, paint } = await mountSurface(t, { transaction, registry });
+  const runId = transaction.startOpen({ key: KEY, source: sourceSnapshot });
+  await paint();
+
+  const openingCalls = calls.slice(-4);
+  const shell = openingCalls.find((animation) => animationLabel(animation.node) === "shell");
+  assert.ok(shell, "shell WAAPI animation missing");
+  assert.equal(shell.keyframes[0].left, undefined);
+  assert.equal(shell.keyframes[0].top, undefined);
+  assert.equal(shell.keyframes[0].width, undefined);
+  assert.equal(shell.keyframes[0].height, undefined);
+  assert.match(shell.keyframes[0].transform, /^translate3d\(.+\) scale\(.+\)$/);
+  assert.equal(shell.keyframes[1].transform, "translate3d(0px, 0px, 0px) scale(1, 1)");
+
+  for (const key of ["title", "meta", "marker"]) {
+    const animation = openingCalls.find((candidate) => animationLabel(candidate.node) === key);
+    assert.ok(animation, `${key} WAAPI animation missing`);
+    assert.equal(
+      animation.keyframes[0].transform,
+      layerTranslateFor(sourceSnapshot.shared[key], destinationSnapshot.shared[key]),
+      `${key} starts at source translation`,
+    );
+    assert.equal(animation.keyframes[1].transform, "translate3d(0px, 0px, 0px)", `${key} reaches destination translation`);
+    assert.equal(animation.keyframes[0].width, `${sourceSnapshot.shared[key].rect.width}px`);
+    assert.equal(animation.keyframes[0].height, `${sourceSnapshot.shared[key].rect.height}px`);
+    assert.equal(animation.keyframes[1].width, `${destinationSnapshot.shared[key].rect.width}px`);
+    assert.equal(animation.keyframes[1].height, `${destinationSnapshot.shared[key].rect.height}px`);
+    assert.ok(!String(animation.keyframes[0].transform).includes("scale"), `${key} must not scale`);
+    assert.ok(!String(animation.keyframes[1].transform).includes("scale"), `${key} must not scale`);
+  }
+
+  shell.finish();
+  await wait(20);
+  await paint();
+  assert.equal(transaction.getState(), MORPH_STATES.OPEN);
+  const overlay = requireOverlay(container, "settled overlay missing");
+  assertRectEqual(overlay.querySelector("[data-morph-title]")?.getBoundingClientRect(), DEST_TITLE, "settled title endpoint");
+  assertRectEqual(overlay.querySelector("[data-morph-meta]")?.getBoundingClientRect(), DEST_META, "settled meta endpoint");
+  assertRectEqual(overlay.querySelector("[data-morph-marker]")?.getBoundingClientRect(), DEST_MARKER, "settled marker endpoint");
+});
+
+test("unmounting during OPENING restores the source opacity", async (t) => {
+  const previous = MockElement.prototype.animate;
+  MockElement.prototype.animate = function animate(keyframes, timing) {
+    return createMockAnimation(this, keyframes, timing);
+  };
+  t.after(() => {
+    if (previous) MockElement.prototype.animate = previous;
+    else delete MockElement.prototype.animate;
+  });
+
+  const registry = createMorphRegistry();
+  const { node, snapshot } = registerSource(registry, {
+    rect: SOURCE_A,
+    titleRect: SOURCE_A_TITLE,
+    metaRect: SOURCE_A_META,
+    markerRect: SOURCE_A_MARKER,
+  });
+  node.style.opacity = "0.6";
+  const transaction = createMorphTransaction();
+  const mounted = await mountSurface(t, { transaction, registry });
+  transaction.startOpen({ key: KEY, source: snapshot });
+  await mounted.paint();
+  assert.equal(node.style.opacity, "0");
+
+  mounted.root.unmount();
+  await wait();
+  assert.equal(node.style.opacity, "0.6");
+});
+
 test("closing uses the same geometry model reversed toward the host target", async (t) => {
   const registry = createMorphRegistry();
   const { snapshot } = registerSource(registry, {
@@ -768,49 +909,68 @@ test("closing uses the same geometry model reversed toward the host target", asy
   assertRectEqual(overlay.getBoundingClientRect(), MID, "close t=.5 is dest→source midpoint");
 });
 
-test("CANCELLING at 20% and 75% uses current opening progress as start", async (t) => {
-  const registry = createMorphRegistry();
-  const { snapshot } = registerSource(registry, {
-    rect: SOURCE_A,
-    titleRect: SOURCE_A_TITLE,
-    metaRect: SOURCE_A_META,
-    markerRect: SOURCE_A_MARKER,
+test("CANCELLING samples the active WAAPI frame at 20%, 50%, and 75% without setProgress", async (t) => {
+  const previous = MockElement.prototype.animate;
+  const calls = [];
+  MockElement.prototype.animate = function animate(keyframes, timing) {
+    const animation = createMockAnimation(this, keyframes, timing);
+    calls.push(animation);
+    return animation;
+  };
+  t.after(() => {
+    if (previous) MockElement.prototype.animate = previous;
+    else delete MockElement.prototype.animate;
   });
-  registerDestination(registry);
 
-  for (const { progress, expected } of [
-    { progress: 0.2, expected: OPEN_20 },
-    { progress: 0.75, expected: OPEN_75 },
-  ]) {
+  for (const progress of [0.2, 0.5, 0.75]) {
+    const registry = createMorphRegistry();
+    const { snapshot: sourceSnapshot } = registerSource(registry, {
+      rect: SOURCE_A,
+      titleRect: SOURCE_A_TITLE,
+      metaRect: SOURCE_A_META,
+      markerRect: SOURCE_A_MARKER,
+    });
+    const { snapshot: destinationSnapshot } = registerDestination(registry);
     const transaction = createMorphTransaction();
-    const { container, paint } = await mountSurface(t, { transaction, registry });
-    const runId = transaction.startOpen({ key: KEY, source: snapshot });
-    transaction.setProgress(progress, runId);
+    const { paint } = await mountSurface(t, { transaction, registry });
+    const runId = transaction.startOpen({ key: KEY, source: sourceSnapshot });
     await paint();
-    assert.equal(transaction.startClose({ target: snapshot, runId }), true);
+
+    const openingShell = calls.slice(-4).find((animation) => animationLabel(animation.node) === "shell");
+    assert.ok(openingShell, `opening shell animation missing at ${progress}`);
+    openingShell.currentTime = openingShell.timing.duration * progress;
+
+    let setProgressCalls = 0;
+    const originalSetProgress = transaction.setProgress;
+    transaction.setProgress = (...args) => {
+      setProgressCalls += 1;
+      return originalSetProgress(...args);
+    };
+
+    assert.equal(transaction.startClose({ target: sourceSnapshot, runId }), true);
     assert.equal(transaction.getState(), MORPH_STATES.CANCELLING);
     await paint();
-    assertRectEqual(requireOverlay(container, "cancel origin missing").getBoundingClientRect(), expected, `cancel from ${progress}`);
-  }
-});
+    assert.equal(setProgressCalls, 0, "the interruption boundary must not synchronize through setProgress");
 
-test("CANCELLING at 50% matches the opening midpoint", async (t) => {
-  const registry = createMorphRegistry();
-  const { snapshot } = registerSource(registry, {
-    rect: SOURCE_A,
-    titleRect: SOURCE_A_TITLE,
-    metaRect: SOURCE_A_META,
-    markerRect: SOURCE_A_MARKER,
-  });
-  registerDestination(registry);
-  const transaction = createMorphTransaction();
-  const { container, paint } = await mountSurface(t, { transaction, registry });
-  const runId = transaction.startOpen({ key: KEY, source: snapshot });
-  transaction.setProgress(0.5, runId);
-  await paint();
-  transaction.startClose({ target: snapshot, runId });
-  await paint();
-  assertRectEqual(requireOverlay(container, "cancel 50 missing").getBoundingClientRect(), MID, "cancel from 50%");
+    const cancellingShell = calls.slice(-4).find((animation) => animationLabel(animation.node) === "shell");
+    assert.ok(cancellingShell, `cancelling shell animation missing at ${progress}`);
+    const actualOpeningFrame = interpolateIdentity(sourceSnapshot, destinationSnapshot, progress);
+    assert.equal(
+      cancellingShell.keyframes[0].transform,
+      shellTransformFor(actualOpeningFrame, sourceSnapshot),
+      `cancelling keyframe must start at the actual ${progress} visual frame`,
+    );
+    assert.notEqual(
+      cancellingShell.keyframes[0].transform,
+      shellTransformFor(sourceSnapshot, sourceSnapshot),
+      `cancelling at ${progress} must not snap to the source`,
+    );
+    assert.notEqual(
+      cancellingShell.keyframes[0].transform,
+      shellTransformFor(destinationSnapshot, sourceSnapshot),
+      `cancelling at ${progress} must not snap to the destination`,
+    );
+  }
 });
 
 test("CANCELLING does not snap to a changed close target", async (t) => {
@@ -919,4 +1079,3 @@ test("rapid close then reopen renders the new opening origin", async (t) => {
   await paint();
   assertRectEqual(requireOverlay(container, "reopen overlay missing").getBoundingClientRect(), SOURCE_A, "reopen origin");
 });
-
