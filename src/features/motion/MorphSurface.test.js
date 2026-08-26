@@ -515,7 +515,7 @@ test("overlay settles to the destination rect once the destination is in the DOM
   assert.ok(destSnapshot);
 });
 
-test("close returns to remounted source B, not stale source A", async (t) => {
+test("closing renders the host-supplied latest semantic source target", async (t) => {
   const registry = createMorphRegistry();
   const sourceA = registerSource(registry, {
     rect: SOURCE_A,
@@ -559,7 +559,7 @@ test("close returns to remounted source B, not stale source A", async (t) => {
   assert.equal(overlayRoot(container), null, "IDLE must unmount the overlay");
 });
 
-test("unavailable source closes to the last-valid semantic snapshot, never activeElement", async (t) => {
+test("closing renders the host-supplied last-valid fallback and never uses activeElement", async (t) => {
   const registry = createMorphRegistry();
   const sourceA = registerSource(registry, {
     rect: SOURCE_A,

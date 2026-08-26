@@ -52,6 +52,9 @@ function resolveIdentity(transactionSnapshot, registry) {
       || null
     );
   }
+  if (state === "closing" || state === "cancelling") {
+    return transactionSnapshot.targetSnapshot || null;
+  }
   return null;
 }
 
