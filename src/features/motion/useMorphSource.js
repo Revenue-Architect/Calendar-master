@@ -2,7 +2,14 @@
  * Calendar Master — Morph Source & Destination Hooks
  *
  * Provides lightweight, zero-overhead React hooks to register DOM nodes
- * with MorphRegistry. Does not touch pointer/touch event handlers.
+ * with MorphRegistry.
+ *
+ * Guarantees:
+ * - Registration-only (zero pointer handlers, zero focus/click mutations).
+ * - Stable callback ref across renders.
+ * - In-place metadata updates without unregister/re-register churn.
+ * - Zero measuring during regular renders (measurement occurs at transaction boundaries).
+ * - React 19 StrictMode resilience.
  *
  * Grounding: docs/plans/2026-08-25-002-physical-planner-motion-ard.md §6
  */
@@ -12,71 +19,113 @@ import { morphRegistry } from "./morphRegistry.js";
 
 /**
  * Registers a DOM node as a physical morph source.
- *
- * @param {Object} options
- * @param {string} options.key - Unique semantic morph key (e.g. from morphKeys.js)
- * @param {string} [options.kind="event"] - "event" | "task" | "note" | "slot" | "control"
- * @param {Object} [options.meta] - Semantic metadata (title, startMinute, color, etc.)
- * @param {boolean} [options.enabled=true] - Whether registration is active
- * @param {Function} [options.getSnapshot] - Custom geometry extractor
- * @returns {Function} ref callback to attach to the source DOM element
  */
 export function useMorphSource({
   key,
   kind = "event",
   meta,
+  shared,
   enabled = true,
   getSnapshot,
 } = {}) {
   const nodeRef = useRef(null);
   const cleanupRef = useRef(null);
+  const registeredKeyRef = useRef(null);
 
-  const register = useCallback((node) => {
+  // Keep latest mutable inputs in refs to prevent dependency churn
+  const keyRef = useRef(key);
+  keyRef.current = key;
+  const kindRef = useRef(kind);
+  kindRef.current = kind;
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
+  const metaRef = useRef(meta);
+  metaRef.current = meta;
+  const sharedRef = useRef(shared);
+  sharedRef.current = shared;
+  const getSnapshotRef = useRef(getSnapshot);
+  getSnapshotRef.current = getSnapshot;
+
+  // Stable callback ref
+  const setRef = useCallback((node) => {
+    if (nodeRef.current === node) return;
+
     if (cleanupRef.current) {
       cleanupRef.current();
       cleanupRef.current = null;
+      registeredKeyRef.current = null;
     }
 
     nodeRef.current = node;
 
-    if (node && key && enabled) {
+    if (node && keyRef.current && enabledRef.current) {
+      registeredKeyRef.current = keyRef.current;
       cleanupRef.current = morphRegistry.registerMorphNode({
-        key,
+        key: keyRef.current,
         node,
-        kind,
+        kind: kindRef.current,
         role: "source",
-        meta,
-        getSnapshot,
+        meta: metaRef.current,
+        shared: sharedRef.current,
+        getSnapshot: getSnapshotRef.current,
       });
     }
-  }, [key, kind, meta, enabled, getSnapshot]);
+  }, []);
 
-  // Handle updates to key/meta/enabled while node is mounted
+  // Update registry when identity (key / enabled / kind) or metadata changes
   useEffect(() => {
-    if (nodeRef.current && key && enabled) {
-      if (cleanupRef.current) cleanupRef.current();
-      cleanupRef.current = morphRegistry.registerMorphNode({
-        key,
-        node: nodeRef.current,
-        kind,
-        role: "source",
-        meta,
-        getSnapshot,
-      });
-    } else if (cleanupRef.current) {
-      cleanupRef.current();
-      cleanupRef.current = null;
+    const activeNode = nodeRef.current;
+    if (!activeNode || !enabled || !key) {
+      if (cleanupRef.current) {
+        cleanupRef.current();
+        cleanupRef.current = null;
+        registeredKeyRef.current = null;
+      }
+      return;
     }
 
-    return () => {
+    // If key changed or registration was missing, perform clean re-registration
+    if (registeredKeyRef.current !== key || !cleanupRef.current) {
       if (cleanupRef.current) {
         cleanupRef.current();
         cleanupRef.current = null;
       }
-    };
-  }, [key, kind, meta, enabled, getSnapshot]);
+      registeredKeyRef.current = key;
+      cleanupRef.current = morphRegistry.registerMorphNode({
+        key,
+        node: activeNode,
+        kind,
+        role: "source",
+        meta,
+        shared,
+        getSnapshot,
+      });
+    } else {
+      // In-place update without dropping the live node or triggering unregister
+      morphRegistry.registerMorphNode({
+        key,
+        node: activeNode,
+        kind,
+        role: "source",
+        meta,
+        shared,
+        getSnapshot,
+      });
+    }
+  }, [key, enabled, kind, meta, shared, getSnapshot]);
 
-  return register;
+  // Clean unmount
+  useEffect(() => {
+    return () => {
+      if (cleanupRef.current) {
+        cleanupRef.current();
+        cleanupRef.current = null;
+        registeredKeyRef.current = null;
+      }
+    };
+  }, []);
+
+  return setRef;
 }
 
 /**
@@ -86,52 +135,100 @@ export function useMorphDestination({
   key,
   kind = "event",
   meta,
+  shared,
   enabled = true,
+  getSnapshot,
 } = {}) {
   const nodeRef = useRef(null);
   const cleanupRef = useRef(null);
+  const registeredKeyRef = useRef(null);
 
-  const register = useCallback((node) => {
+  const keyRef = useRef(key);
+  keyRef.current = key;
+  const kindRef = useRef(kind);
+  kindRef.current = kind;
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
+  const metaRef = useRef(meta);
+  metaRef.current = meta;
+  const sharedRef = useRef(shared);
+  sharedRef.current = shared;
+  const getSnapshotRef = useRef(getSnapshot);
+  getSnapshotRef.current = getSnapshot;
+
+  const setRef = useCallback((node) => {
+    if (nodeRef.current === node) return;
+
     if (cleanupRef.current) {
       cleanupRef.current();
       cleanupRef.current = null;
+      registeredKeyRef.current = null;
     }
 
     nodeRef.current = node;
 
-    if (node && key && enabled) {
+    if (node && keyRef.current && enabledRef.current) {
+      registeredKeyRef.current = keyRef.current;
       cleanupRef.current = morphRegistry.registerMorphNode({
-        key,
+        key: keyRef.current,
         node,
-        kind,
+        kind: kindRef.current,
         role: "destination",
-        meta,
+        meta: metaRef.current,
+        shared: sharedRef.current,
+        getSnapshot: getSnapshotRef.current,
       });
     }
-  }, [key, kind, meta, enabled]);
+  }, []);
 
   useEffect(() => {
-    if (nodeRef.current && key && enabled) {
-      if (cleanupRef.current) cleanupRef.current();
-      cleanupRef.current = morphRegistry.registerMorphNode({
-        key,
-        node: nodeRef.current,
-        kind,
-        role: "destination",
-        meta,
-      });
-    } else if (cleanupRef.current) {
-      cleanupRef.current();
-      cleanupRef.current = null;
+    const activeNode = nodeRef.current;
+    if (!activeNode || !enabled || !key) {
+      if (cleanupRef.current) {
+        cleanupRef.current();
+        cleanupRef.current = null;
+        registeredKeyRef.current = null;
+      }
+      return;
     }
 
-    return () => {
+    if (registeredKeyRef.current !== key || !cleanupRef.current) {
       if (cleanupRef.current) {
         cleanupRef.current();
         cleanupRef.current = null;
       }
-    };
-  }, [key, kind, meta, enabled]);
+      registeredKeyRef.current = key;
+      cleanupRef.current = morphRegistry.registerMorphNode({
+        key,
+        node: activeNode,
+        kind,
+        role: "destination",
+        meta,
+        shared,
+        getSnapshot,
+      });
+    } else {
+      morphRegistry.registerMorphNode({
+        key,
+        node: activeNode,
+        kind,
+        role: "destination",
+        meta,
+        shared,
+        getSnapshot,
+      });
+    }
+  }, [key, enabled, kind, meta, shared, getSnapshot]);
 
-  return register;
+  useEffect(() => {
+    return () => {
+      if (cleanupRef.current) {
+        cleanupRef.current();
+        cleanupRef.current = null;
+        registeredKeyRef.current = null;
+      }
+    };
+  }, []);
+
+  return setRef;
 }

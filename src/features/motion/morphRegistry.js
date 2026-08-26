@@ -9,102 +9,116 @@
  * Grounding: docs/plans/2026-08-25-002-physical-planner-motion-ard.md §6
  */
 
-function extractSharedElements(node, explicitShared = {}) {
+function isElementConnected(el) {
+  if (!el) return false;
+  if (typeof el.isConnected === "boolean") return el.isConnected;
+  if (typeof document !== "undefined" && document.body) {
+    return document.body.contains(el);
+  }
+  return true;
+}
+
+function resolveElement(target, rootNode, defaultSelector) {
+  if (target === undefined) {
+    if (defaultSelector && rootNode && typeof rootNode.querySelector === "function") {
+      return rootNode.querySelector(defaultSelector);
+    }
+    return null;
+  }
+  if (!target) return null;
+
+  // React ref object
+  if (typeof target === "object" && "current" in target) {
+    return target.current || null;
+  }
+  // Selector string
+  if (typeof target === "string" && rootNode && typeof rootNode.querySelector === "function") {
+    return rootNode.querySelector(target);
+  }
+  // Direct DOM or mock node
+  if (typeof target === "object" && typeof target.getBoundingClientRect === "function") {
+    return target;
+  }
+  return null;
+}
+
+function extractElementSnapshot(el, fallbackText = "") {
+  if (!el || !isElementConnected(el)) return null;
+  const rect = el.getBoundingClientRect();
+  const text = el.textContent?.trim() || fallbackText || "";
+  let style = null;
+  if (typeof window !== "undefined" && typeof window.getComputedStyle === "function") {
+    const computed = window.getComputedStyle(el);
+    style = {
+      color: computed.color || "",
+      fontFamily: computed.fontFamily || "",
+      fontSize: computed.fontSize || "",
+      fontWeight: computed.fontWeight || "",
+      lineHeight: computed.lineHeight || "",
+    };
+  }
+  return {
+    text,
+    rect: {
+      x: rect.x,
+      y: rect.y,
+      top: rect.top,
+      left: rect.left,
+      right: rect.right,
+      bottom: rect.bottom,
+      width: rect.width,
+      height: rect.height,
+    },
+    style,
+    color: style?.color || "",
+    fontFamily: style?.fontFamily || "",
+    fontSize: style?.fontSize || "",
+    fontWeight: style?.fontWeight || "",
+    lineHeight: style?.lineHeight || "",
+  };
+}
+
+function extractSharedElements(rootNode, explicitShared = {}) {
   const shared = {
-    title: explicitShared.title || null,
-    meta: explicitShared.meta || null,
-    marker: explicitShared.marker || null,
+    title: null,
+    meta: null,
+    marker: null,
   };
 
-  if (!node || typeof node.querySelector !== "function") {
-    return shared;
-  }
-
-  // 1. Shared Title extraction (if not explicitly provided)
-  if (!shared.title) {
-    const titleEl = node.querySelector(".nb-lead, [data-morph-title]");
-    if (titleEl && typeof titleEl.getBoundingClientRect === "function") {
-      const rect = titleEl.getBoundingClientRect();
-      const text = titleEl.textContent?.trim() || "";
-      let style = null;
-      if (typeof window !== "undefined" && typeof window.getComputedStyle === "function") {
-        const computed = window.getComputedStyle(titleEl);
-        style = {
-          fontSize: computed.fontSize,
-          fontWeight: computed.fontWeight,
-          lineHeight: computed.lineHeight,
-          color: computed.color,
-        };
-      }
-      shared.title = {
-        text,
-        rect: {
-          x: rect.x,
-          y: rect.y,
-          top: rect.top,
-          left: rect.left,
-          right: rect.right,
-          bottom: rect.bottom,
-          width: rect.width,
-          height: rect.height,
-        },
-        style,
-      };
-    }
+  // 1. Shared Title extraction
+  const titleTarget = explicitShared.title;
+  const titleEl = resolveElement(titleTarget, rootNode, ".nb-lead, [data-morph-title]");
+  if (titleEl) {
+    shared.title = extractElementSnapshot(titleEl);
   }
 
   // 2. Shared Meta/Time extraction
-  if (!shared.meta) {
-    const metaEl = node.querySelector(".nb-task-time, .nb-event-time, [data-morph-meta]");
-    if (metaEl && typeof metaEl.getBoundingClientRect === "function") {
-      const rect = metaEl.getBoundingClientRect();
-      const text = metaEl.textContent?.trim() || "";
-      let style = null;
-      if (typeof window !== "undefined" && typeof window.getComputedStyle === "function") {
-        const computed = window.getComputedStyle(metaEl);
-        style = {
-          fontSize: computed.fontSize,
-          color: computed.color,
-        };
-      }
-      shared.meta = {
-        text,
-        rect: {
-          x: rect.x,
-          y: rect.y,
-          top: rect.top,
-          left: rect.left,
-          right: rect.right,
-          bottom: rect.bottom,
-          width: rect.width,
-          height: rect.height,
-        },
-        style,
-      };
-    }
+  const metaTarget = explicitShared.meta;
+  const metaEl = resolveElement(metaTarget, rootNode, ".nb-task-time, .nb-event-time, [data-morph-meta]");
+  if (metaEl) {
+    shared.meta = extractElementSnapshot(metaEl);
   }
 
   // 3. Shared Marker/Progress extraction
-  if (!shared.marker) {
-    const markerEl = node.querySelector('[data-test="timeline-action-progress"], [data-morph-marker]');
-    if (markerEl && typeof markerEl.getBoundingClientRect === "function") {
-      const rect = markerEl.getBoundingClientRect();
-      const type = markerEl.getAttribute?.("data-morph-marker") || "progress-ring";
-      shared.marker = {
-        type,
-        rect: {
-          x: rect.x,
-          y: rect.y,
-          top: rect.top,
-          left: rect.left,
-          right: rect.right,
-          bottom: rect.bottom,
-          width: rect.width,
-          height: rect.height,
-        },
-        style: null,
-      };
-    }
+  const markerTarget = explicitShared.marker;
+  const markerEl = resolveElement(markerTarget, rootNode, '[data-test="timeline-action-progress"], [data-morph-marker]');
+  if (markerEl && isElementConnected(markerEl)) {
+    const rect = markerEl.getBoundingClientRect();
+    const type = markerEl.getAttribute?.("data-morph-marker") || "progress-ring";
+    shared.marker = {
+      type,
+      rect: {
+        x: rect.x,
+        y: rect.y,
+        top: rect.top,
+        left: rect.left,
+        right: rect.right,
+        bottom: rect.bottom,
+        width: rect.width,
+        height: rect.height,
+      },
+      style: null,
+    };
   }
 
   return shared;
@@ -192,7 +206,7 @@ export function createMorphRegistry() {
     if (!rec || !rec[role]) return null;
 
     const node = rec[role].node;
-    if (typeof document !== "undefined" && !document.body.contains(node)) {
+    if (!isElementConnected(node)) {
       return null;
     }
     return node;
@@ -206,7 +220,7 @@ export function createMorphRegistry() {
     const entry = rec[role];
     const { node, meta, shared: explicitShared, getSnapshot } = entry;
 
-    if (typeof document !== "undefined" && !document.body.contains(node)) {
+    if (!isElementConnected(node)) {
       return null;
     }
 
@@ -220,14 +234,24 @@ export function createMorphRegistry() {
     const rect = node.getBoundingClientRect();
     let borderRadius = 0;
     let backgroundColor = "";
+    let color = "";
+    let borderColor = "";
 
     if (typeof window !== "undefined" && typeof window.getComputedStyle === "function") {
       const computed = window.getComputedStyle(node);
       borderRadius = parseFloat(computed.borderRadius) || 0;
       backgroundColor = computed.backgroundColor || "";
+      color = computed.color || "";
+      borderColor = computed.borderColor || "";
     }
 
+    const viewport = {
+      width: typeof window !== "undefined" && window.innerWidth ? window.innerWidth : 1280,
+      height: typeof window !== "undefined" && window.innerHeight ? window.innerHeight : 800,
+    };
+
     const shared = extractSharedElements(node, explicitShared);
+    const capturedAt = Date.now();
 
     const snapshot = {
       key,
@@ -243,12 +267,20 @@ export function createMorphRegistry() {
         width: rect.width,
         height: rect.height,
       },
+      radius: borderRadius,
       borderRadius,
+      paint: {
+        background: backgroundColor,
+        color,
+        borderColor,
+      },
       backgroundColor,
+      viewport,
       meta: { ...meta },
       shared,
+      capturedAt,
       isConnected: true,
-      timestamp: Date.now(),
+      timestamp: capturedAt,
     };
 
     if (role === "source") {
@@ -267,7 +299,6 @@ export function createMorphRegistry() {
     return role === "source" ? rec.lastSourceSnapshot : rec.lastDestinationSnapshot;
   }
 
-  // Backwards-compatible alias for existing consumers:
   function getMorphSnapshot(key, role = "source") {
     const live = snapshotMorphNode(key, role);
     if (live) return live;
