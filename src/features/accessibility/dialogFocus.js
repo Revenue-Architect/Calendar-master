@@ -1,9 +1,9 @@
 const FOCUSABLE = [
-  "button:not([disabled])",
-  "[href]",
-  "input:not([disabled])",
-  "select:not([disabled])",
-  "textarea:not([disabled])",
+  "button:not([disabled]):not([tabindex='-1'])",
+  "[href]:not([tabindex='-1'])",
+  "input:not([disabled]):not([tabindex='-1'])",
+  "select:not([disabled]):not([tabindex='-1'])",
+  "textarea:not([disabled]):not([tabindex='-1'])",
   "[tabindex]:not([tabindex='-1'])",
 ].join(",");
 
@@ -20,7 +20,85 @@ export function nextDialogFocusIndex(count, currentIndex, shiftKey = false) {
 export function getDialogFocusableElements(root) {
   if (!root?.querySelectorAll) return [];
   return [...root.querySelectorAll(FOCUSABLE)].filter((element) => !element.hidden
-    && element.getAttribute("aria-hidden") !== "true");
+    && element.getAttribute("aria-hidden") !== "true"
+    && element.getAttribute("tabindex") !== "-1");
+}
+
+/* A Sheet is rendered inside the app surface rather than in a document-level
+   portal. The modal boundary is every sibling branch on the scrim's path to
+   the app root: that includes the planner surface, an open navigation drawer,
+   and other app-level controls. Keep one shared ownership record per element
+   so concurrently mounted Sheets cannot restore a background that another
+   Sheet still owns. */
+const inertSiblingOwners = new Map();
+
+export function inertDialogSiblings(root) {
+  if (!root?.parentElement) return () => {};
+  const documentElement = typeof document !== "undefined" ? document.documentElement : null;
+  const siblings = [];
+  const seen = new Set();
+  let branch = root;
+  while (branch?.parentElement && branch.parentElement !== documentElement) {
+    const parent = branch.parentElement;
+    for (const element of [...parent.children].filter((candidate) => candidate !== branch)) {
+      if (seen.has(element)) continue;
+      seen.add(element);
+      siblings.push(element);
+    }
+    branch = parent;
+  }
+
+  const setInert = (element, value) => {
+    if ("inert" in element) element.inert = value;
+    if (value) element.setAttribute?.("inert", "");
+    else element.removeAttribute?.("inert");
+  };
+
+  /* If a later Sheet is already present in the same sibling set, an earlier
+     Sheet may have inerted its root while taking its own snapshot. The later
+     Sheet is the active branch, so release those stale claims before it takes
+     ownership of the surrounding branches. Its cleanup will make the earlier
+     Sheet interactive again when it becomes the topmost remaining Sheet. */
+  const releaseClaimsFor = (element) => {
+    const record = inertSiblingOwners.get(element);
+    if (!record) return;
+    inertSiblingOwners.delete(element);
+    if ("inert" in element) element.inert = record.inert;
+    if (record.hadAttribute) element.setAttribute?.("inert", "");
+    else element.removeAttribute?.("inert");
+  };
+  releaseClaimsFor(root);
+
+  const owner = Symbol("sheet-modal");
+  siblings.forEach((element) => {
+    let record = inertSiblingOwners.get(element);
+    if (!record) {
+      record = {
+        owners: new Set(),
+        inert: Boolean(element.inert),
+        hadAttribute: typeof element.hasAttribute === "function" && element.hasAttribute("inert"),
+      };
+      inertSiblingOwners.set(element, record);
+    }
+    record.owners.add(owner);
+    setInert(element, true);
+  });
+
+  let restored = false;
+  return () => {
+    if (restored) return;
+    restored = true;
+    siblings.forEach((element) => {
+      const record = inertSiblingOwners.get(element);
+      if (!record) return;
+      record.owners.delete(owner);
+      if (record.owners.size > 0) return;
+      inertSiblingOwners.delete(element);
+      if ("inert" in element) element.inert = record.inert;
+      if (record.hadAttribute) element.setAttribute?.("inert", "");
+      else element.removeAttribute?.("inert");
+    });
+  };
 }
 
 /* `preventScroll` is not a nicety here.

@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 import {
   applyScrollSnapshot,
   focusDialogOnOpen,
+  inertDialogSiblings,
   restoreDialogFocus,
   snapshotAncestorScroll,
   trapDialogTab,
@@ -26,6 +27,46 @@ import {
 } from "./morphTiming.js";
 import { CloseIcon } from "../planner/icons.jsx";
 
+const modalStack = [];
+let bodyOverflowBeforeModal = null;
+
+function registerModal(entry) {
+  if (modalStack.length === 0) {
+    bodyOverflowBeforeModal = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+  }
+  modalStack.push(entry);
+  return () => {
+    const index = modalStack.indexOf(entry);
+    if (index === -1) return;
+    modalStack.splice(index, 1);
+    if (modalStack.length === 0) {
+      document.body.style.overflow = bodyOverflowBeforeModal;
+      bodyOverflowBeforeModal = null;
+    }
+  };
+}
+
+function isTopmostModal(entry) {
+  return modalStack.at(-1) === entry;
+}
+
+function restoreSheetFocus(opener, closingPanel) {
+  if (typeof document === "undefined") return false;
+  const remaining = [...document.querySelectorAll('[data-test="sheet"]')]
+    .filter((candidate) => candidate !== closingPanel && candidate.isConnected);
+  const activeSheet = remaining.at(-1);
+  if (activeSheet) {
+    /* A lower Sheet can disappear while a newer Sheet remains open. Its
+       opener is then either gone or behind the active modal; keep focus inside
+       the topmost remaining Sheet instead of briefly returning focus to the
+       background. */
+    if (opener && activeSheet.contains(opener)) return restoreDialogFocus(opener);
+    return focusDialogOnOpen(activeSheet) || activeSheet.contains(document.activeElement);
+  }
+  return restoreDialogFocus(opener);
+}
+
 /* Kept in step with Planner deliberately: this is the copy that runs.
    Planner's own Sheet was the newer of the two by 134 lines -- it had gained
    first-paint height measurement that this file never received -- so the merge
@@ -38,6 +79,12 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
   const dialogRef = useRef(null);
   const contentRef = useRef(null);
   const openerRef = useRef(null);
+  const modalEntryRef = useRef({});
+  /* Capture before React commits descendants such as Composer's autoFocus
+     field. Reading document.activeElement in the layout effect is already too
+     late: the dialog has mounted and the field has claimed focus. */
+  const openerAtRenderRef = useRef(typeof document !== "undefined" ? document.activeElement : null);
+  const focusRestoreFrame = useRef(null);
   /* Capture before child layout effects run. Autofocus inside a sheet that is
      still translated onto its trigger will shove overflow ancestors; the
      snapshot is the page as it was, and the layout effect puts it back. */
@@ -323,19 +370,26 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
   }, [morph, morphSurface?.id]);
 
   useEffect(() => {
-    const h = (e) => e.key === "Escape" && requestClose();
+    const entry = modalEntryRef.current;
+    const h = (e) => {
+      if (e.key === "Escape" && isTopmostModal(entry)) requestClose();
+    };
+    const releaseModal = registerModal(entry);
     window.addEventListener("keydown", h);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
     return () => {
       window.removeEventListener("keydown", h);
-      document.body.style.overflow = prev;
+      releaseModal();
       window.clearTimeout(closeTimer.current);
     };
   }, [requestClose]);
   useLayoutEffect(() => {
-    openerRef.current = document.activeElement;
+    if (focusRestoreFrame.current != null) {
+      window.cancelAnimationFrame(focusRestoreFrame.current);
+      focusRestoreFrame.current = null;
+    }
+    openerRef.current = openerAtRenderRef.current;
     const panel = dialogRef.current;
+    const restoreBackground = inertDialogSiblings(panel?.parentElement);
     /* The pressed control is the origin — and the only one. There used to be a
        fallback to whatever held focus, which sounds harmless and is not: focus
        lands on a view tab, or stays on the last thing clicked, so a sheet opened
@@ -438,7 +492,13 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
       window.cancelAnimationFrame(frame);
       window.clearTimeout(unlock);
       window.removeEventListener("scroll", restorePageScroll, true);
-      restoreDialogFocus(openerRef.current);
+      restoreBackground();
+      const opener = openerRef.current;
+      restoreSheetFocus(opener, panel);
+      focusRestoreFrame.current = window.requestAnimationFrame(() => {
+        focusRestoreFrame.current = null;
+        restoreSheetFocus(opener, panel);
+      });
     };
   }, []);
   return (

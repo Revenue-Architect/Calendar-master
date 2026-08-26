@@ -364,3 +364,213 @@ test.describe("resilience, accessibility, and quality gates", () => {
     expect(figure, `${today} 11:40-12:20 with the clock fixed at 12:00`).toBe("Now");
   });
 });
+
+test.describe("Task 4.3 sheet focus and scroll contract", () => {
+  test("a modal Sheet owns real Tab and Shift+Tab traversal, blocks its background, and restores focus", async ({ page }) => {
+    await openPlanner(page);
+    const appSurface = page.getByTestId("app-surface");
+    const opener = page.getByTestId("new-entry");
+    await opener.focus();
+    await opener.click();
+
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).toBeVisible();
+    expect(await sheet.evaluate((node) => node.contains(document.activeElement)), "entry autofocus must remain inside the modal").toBe(true);
+    const modality = await page.evaluate(() => {
+      const scrim = document.querySelector(".nb-scrim");
+      const siblings = scrim?.parentElement
+        ? [...scrim.parentElement.children].filter((node) => node !== scrim)
+        : [];
+      const backgroundControl = document.querySelector('[data-test="zoom-out"]');
+      backgroundControl?.focus();
+      return {
+        siblingCount: siblings.length,
+        allBackgroundInert: siblings.length > 0 && siblings.every((node) => node.inert),
+        backgroundFocusBlocked: document.activeElement === backgroundControl,
+      };
+    });
+    expect(modality.siblingCount, "the modal must have a real background to protect").toBeGreaterThan(0);
+    expect(modality.allBackgroundInert, "a modal Sheet must inert the planner background").toBe(true);
+    expect(modality.backgroundFocusBlocked, "inert background controls must reject focus").toBe(false);
+
+    const focusables = sheet.locator("button:not([disabled]):not([tabindex='-1']), input:not([disabled]):not([tabindex='-1']), select:not([disabled]):not([tabindex='-1']), textarea:not([disabled]):not([tabindex='-1']), [href]:not([tabindex='-1']), [tabindex]:not([tabindex='-1'])");
+    const count = await focusables.count();
+    expect(count, "the Sheet fixture must have enough controls to exercise wrapping").toBeGreaterThan(2);
+    const first = focusables.first();
+    const second = focusables.nth(1);
+    const last = focusables.nth(count - 1);
+
+    await first.focus();
+    await expect(first).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(second).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(first).toBeFocused();
+    await last.focus();
+    await page.keyboard.press("Tab");
+    await expect(first).toBeFocused();
+
+    await page.keyboard.press("Escape");
+    await expect(sheet).toHaveCount(0, { timeout: 3000 });
+    await expect(opener).toBeFocused();
+    const restored = await appSurface.evaluate((surface) => [...surface.children].every((node) => !node.inert));
+    expect(restored, "closing the modal must restore background interactivity").toBe(true);
+  });
+
+  test("a modal Sheet also blocks an already-open navigation drawer", async ({ page }) => {
+    await openPlanner(page);
+    const nav = page.locator("#planner-navigation");
+    await page.getByTestId("nav-toggle").click();
+    await expect(page.getByTestId("nav-shell")).toHaveAttribute("data-nav-state", "open");
+
+    /* This deliberately opens from the surface while the drawer is open so the
+       modality contract is tested across the navigation/app-surface boundary,
+       not only against the Sheet's immediate siblings. */
+    await page.getByTestId("new-entry").evaluate((node) => node.click());
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).toBeVisible();
+    await expect(nav).toHaveJSProperty("inert", true);
+
+    await page.keyboard.press("Escape");
+    await expect(sheet).toHaveCount(0, { timeout: 3000 });
+    await expect(nav).toHaveJSProperty("inert", false);
+  });
+
+  test("stacked Sheets keep focus, Escape, and body scroll owned by the top modal", async ({ page }) => {
+    await page.goto("/");
+    await page.evaluate(() => { window.localStorage.clear(); });
+    await page.reload();
+    await expect(page.getByTestId("day-stream")).toBeVisible();
+
+    const sheets = page.getByTestId("sheet");
+    const lower = page.locator('[data-test="sheet"][data-sheet-title="Welcome"]');
+    await expect(lower).toBeVisible();
+
+    /* Direct click is used only to construct the simultaneous state: native
+       inert correctly prevents a user click on the background. */
+    await page.getByTestId("new-entry").evaluate((node) => node.click());
+    await expect(sheets).toHaveCount(2);
+    const upper = sheets.last();
+    await expect(upper).toBeVisible();
+    await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("hidden");
+    expect(await upper.evaluate((node) => node.contains(document.activeElement)), "the upper Sheet must own focus").toBe(true);
+
+    /* Remove the lower modal while the upper one remains. Its cleanup must not
+       release the upper focus, background inertness, or body scroll lock. */
+    await lower.getByRole("button", { name: "START EMPTY" }).evaluate((node) => node.click());
+    await expect(lower).toHaveCount(0);
+    await expect(sheets).toHaveCount(1);
+    await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("hidden");
+    expect(await upper.evaluate((node) => node.contains(document.activeElement)), "lower cleanup must leave focus in the upper Sheet").toBe(true);
+
+    await page.keyboard.press("Escape");
+    await expect(sheets).toHaveCount(0, { timeout: 3000 });
+    await expect.poll(() => page.evaluate(() => document.body.style.overflow)).toBe("");
+  });
+
+  test("a Sheet preserves body, document, and timeline scroll through open and close", async ({ page }) => {
+    await openPlanner(page);
+    const stream = page.getByTestId("day-stream");
+    const beforeStream = await stream.evaluate((node) => {
+      node.scrollTop = Math.min(160, Math.max(0, node.scrollHeight - node.clientHeight));
+      return node.scrollTop;
+    });
+    const before = await page.evaluate(() => ({
+      stream: document.querySelector('[data-test="day-stream"]')?.scrollTop ?? 0,
+      page: window.scrollY,
+      document: document.documentElement.scrollTop,
+      body: document.body.scrollTop,
+      overflow: document.body.style.overflow,
+    }));
+
+    await page.getByTestId("new-entry").click();
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).toBeVisible();
+    const during = await page.evaluate(() => ({
+      stream: document.querySelector('[data-test="day-stream"]')?.scrollTop ?? 0,
+      page: window.scrollY,
+      document: document.documentElement.scrollTop,
+      body: document.body.scrollTop,
+      overflow: document.body.style.overflow,
+    }));
+    expect(during.stream, "opening focus must not move the timeline stream").toBe(beforeStream);
+    expect(during.stream).toBe(before.stream);
+    expect(during.page).toBe(before.page);
+    expect(during.document).toBe(before.document);
+    expect(during.body).toBe(before.body);
+    expect(during.overflow, "an open modal must lock body scrolling").toBe("hidden");
+
+    await page.keyboard.press("Escape");
+    await expect(sheet).toHaveCount(0, { timeout: 3000 });
+    const after = await page.evaluate(() => ({
+      stream: document.querySelector('[data-test="day-stream"]')?.scrollTop ?? 0,
+      page: window.scrollY,
+      document: document.documentElement.scrollTop,
+      body: document.body.scrollTop,
+      overflow: document.body.style.overflow,
+    }));
+    expect(after.stream).toBe(before.stream);
+    expect(after.page).toBe(before.page);
+    expect(after.document).toBe(before.document);
+    expect(after.body).toBe(before.body);
+    expect(after.overflow).toBe(before.overflow);
+  });
+
+  test("a disconnected month-peek source keeps its measured fallback origin", async ({ page }) => {
+    const today = keyOf(new Date());
+    const seeded = createEvent(createBlankPlannerState({}), {
+      title: "Disconnected source",
+      cat: "DEEP WORK",
+      alerts: [],
+      calendarId: "calendar-default",
+      timing: {
+        kind: "timed",
+        timeZoneMode: "floating",
+        startLocal: `${today}T09:00`,
+        endLocal: `${today}T09:30`,
+      },
+    }, { id: "evt-disconnected-source" }).state;
+
+    await seedPlanner(page, seeded);
+    await page.getByTestId("zoom-out").click();
+    await page.getByTestId("zoom-out").click();
+    const cell = page.locator(`.nb-cell[data-day="${today}"]`);
+    await expect(cell).toBeVisible();
+    const box = await cell.boundingBox();
+    if (!box) throw new Error("today's month cell is not measurable");
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.waitForTimeout(700);
+    await page.mouse.up();
+
+    const peek = page.getByTestId("sheet");
+    await expect(peek).toBeVisible();
+    const row = peek.getByRole("button", { name: /Disconnected source/ });
+    await row.evaluate((node) => { window.__task43SourceNode = node; });
+    await row.click();
+    await expect.poll(() => page.evaluate(() => Boolean(window.__task43SourceNode?.isConnected))).toBe(false);
+
+    const inspector = page.getByTestId("sheet");
+    await expect(inspector).toHaveAttribute("data-fluid-origin", "trigger");
+    const fallback = await inspector.evaluate((node) => ({
+      x: node.style.getPropertyValue("--fluid-x").trim(),
+      y: node.style.getPropertyValue("--fluid-y").trim(),
+    }));
+    expect(fallback.x, "the disconnected source must retain a measured x origin").not.toBe("");
+    expect(fallback.y, "the disconnected source must retain a measured y origin").not.toBe("");
+  });
+
+  test("reduced motion keeps Sheet focus correct and restores the opener", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await openPlanner(page);
+    const opener = page.getByTestId("new-entry");
+    await opener.click();
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).toBeVisible();
+    expect(await sheet.evaluate((node) => node.contains(document.activeElement)), "reduced motion must still enter the Sheet").toBe(true);
+
+    await page.keyboard.press("Escape");
+    await expect(sheet).toHaveCount(0, { timeout: 3000 });
+    await expect(opener).toBeFocused();
+  });
+});
