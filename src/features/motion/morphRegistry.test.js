@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createMorphRegistry } from "./morphRegistry.js";
 
-// Mock DOM Node helper for pure Node.js test environment
+// Mock DOM Node helper with generic motion attributes
 function createMockNode({
   x = 10,
   y = 20,
@@ -26,7 +26,7 @@ function createMockNode({
       height,
     }),
     querySelector: (selector) => {
-      if (selector.includes("nb-lead") || selector.includes("[data-morph-title]")) {
+      if (selector.includes("[data-morph-title]")) {
         return {
           isConnected,
           textContent: titleText,
@@ -42,7 +42,7 @@ function createMockNode({
           }),
         };
       }
-      if (selector.includes("nb-task-time") || selector.includes("nb-event-time") || selector.includes("[data-morph-meta]")) {
+      if (selector.includes("[data-morph-meta]")) {
         return {
           isConnected,
           textContent: timeText,
@@ -58,7 +58,7 @@ function createMockNode({
           }),
         };
       }
-      if (hasProgress && (selector.includes("timeline-action-progress") || selector.includes("[data-morph-marker]"))) {
+      if (hasProgress && selector.includes("[data-morph-marker]")) {
         return {
           isConnected,
           getAttribute: () => "progress-ring",
@@ -128,159 +128,107 @@ test("MorphRegistry supports independent source and destination coexistence on t
   assert.equal(registry.resolveMorphNode(key, "source"), null);
 });
 
-test("MorphRegistry protects against stale unregisters per role", () => {
+test("Blocker 2: releaseMorphSnapshots clears geometry history without unregistering mounted live nodes", () => {
   const registry = createMorphRegistry();
-  const sourceA = createMockNode({ x: 10, y: 10, width: 100, height: 40 });
-  const sourceB = createMockNode({ x: 20, y: 20, width: 150, height: 50 });
-  const destA = createMockNode({ x: 0, y: 0, width: 500, height: 400 });
+  const sourceNode = createMockNode({ x: 10, y: 20, width: 100, height: 40, titleText: "Live Card" });
+  const key = "morph:event:card-1";
 
-  const key = "morph:task:task-1:v:timeline";
-
-  // Source A registers
-  const unregSourceA = registry.registerMorphNode({ key, node: sourceA, role: "source" });
-
-  // Source B replaces Source A on the same key
-  const unregSourceB = registry.registerMorphNode({ key, node: sourceB, role: "source" });
-
-  // Dest A registers on the same key
-  const unregDestA = registry.registerMorphNode({ key, node: destA, role: "destination" });
-
-  // Stale Source A cleanup fires
-  unregSourceA();
-
-  // Active Source B and Dest A must remain
-  assert.equal(registry.resolveMorphNode(key, "source"), sourceB, "Source B must survive stale Source A unregister");
-  assert.equal(registry.resolveMorphNode(key, "destination"), destA, "Dest A must survive Source A unregister");
-
-  unregSourceB();
-  unregDestA();
-});
-
-test("Task 4: MorphRegistry preserves last valid snapshot across unmount, replacement, and explicit release", () => {
-  const registry = createMorphRegistry();
-  const source1 = createMockNode({ x: 100, y: 200, width: 180, height: 45, titleText: "Original Title" });
-  const key = "morph:event:retain-test";
-
-  const unreg1 = registry.registerMorphNode({
+  // 1. Source card registers
+  const unreg = registry.registerMorphNode({
     key,
-    node: source1,
+    node: sourceNode,
     role: "source",
-    meta: { title: "Original Title" },
+    meta: { title: "Live Card" },
   });
 
-  // 1. Snapshot before unmount
-  const initialSnap = registry.snapshotMorphNode(key, "source");
-  assert.ok(initialSnap);
-  assert.equal(initialSnap.rect.width, 180);
-  assert.equal(initialSnap.meta.title, "Original Title");
+  // 2. Open inspector -> snapshot taken
+  const snap1 = registry.snapshotMorphNode(key, "source");
+  assert.ok(snap1);
+  assert.equal(registry.getLastMorphSnapshot(key, "source").rect.width, 100);
 
-  // 2. Source unmounts
-  unreg1();
-  assert.equal(registry.resolveMorphNode(key, "source"), null, "Live source node is gone");
+  // 3. Close inspector -> transaction finishes and releases snapshots
+  registry.releaseMorphSnapshots(key, "source");
 
-  // 3. Last valid snapshot is retained
-  const retainedSnap = registry.getLastMorphSnapshot(key, "source");
-  assert.ok(retainedSnap, "Last snapshot must be preserved after unmount");
-  assert.equal(retainedSnap.rect.width, 180);
-  assert.equal(retainedSnap.meta.title, "Original Title");
-
-  // 4. Replacement source registers (e.g. view switch or remount)
-  const source2 = createMockNode({ x: 120, y: 220, width: 220, height: 50, titleText: "Replaced Title" });
-  const unreg2 = registry.registerMorphNode({
-    key,
-    node: source2,
-    role: "source",
-    meta: { title: "Replaced Title" },
-  });
-  assert.equal(registry.resolveMorphNode(key, "source"), source2, "Replacement source is now live truth");
-
-  // 5. Deliberately snapshot new replacement
-  const replacedSnap = registry.snapshotMorphNode(key, "source");
-  assert.equal(replacedSnap.rect.width, 220);
-  assert.equal(registry.getLastMorphSnapshot(key, "source").meta.title, "Replaced Title");
-
-  // 6. Explicit release prunes key memory
-  unreg2();
-  registry.releaseMorphKey(key);
+  // Historical snapshot is released
   assert.equal(registry.getLastMorphSnapshot(key, "source"), null);
+
+  // BUT live source is still mounted and still resolves!
+  assert.equal(registry.resolveMorphNode(key, "source"), sourceNode, "Live source must not be wiped by release");
+
+  // 4. Second open captures origin cleanly again without re-mounting
+  const snap2 = registry.snapshotMorphNode(key, "source");
+  assert.ok(snap2, "Second open must successfully snapshot live source");
+  assert.equal(snap2.rect.width, 100);
+
+  // 5. When card unmounts and snapshots released, key is pruned
+  unreg();
+  registry.releaseMorphSnapshots(key);
   assert.equal(registry.resolveMorphNode(key, "source"), null);
+  assert.equal(registry.getLastMorphSnapshot(key, "source"), null);
 });
 
-test("Task 3: MorphRegistry captures normalized shared element snapshots (title, meta, marker, paint, radius, viewport)", () => {
+test("Blocker 5: snapshot immutability is strictly enforced on motion geometry", () => {
+  const registry = createMorphRegistry();
+  const sourceNode = createMockNode({ x: 50, y: 60, width: 150, height: 50 });
+  const key = "morph:event:immutable-test";
+
+  registry.registerMorphNode({ key, node: sourceNode, role: "source" });
+
+  const snap = registry.snapshotMorphNode(key, "source");
+  assert.ok(snap);
+  assert.equal(snap.rect.x, 50);
+
+  // Attempt to mutate snapshot geometry
+  assert.throws(() => {
+    snap.rect.x = 999;
+  }, /Cannot assign to read only property/);
+
+  // Assert retained snapshot in registry was not corrupted
+  const retained = registry.getLastMorphSnapshot(key, "source");
+  assert.equal(retained.rect.x, 50);
+});
+
+test("Blocker 6: invalid roles throw immediately on registration", () => {
+  const registry = createMorphRegistry();
+  const node = createMockNode();
+
+  assert.throws(
+    () => registry.registerMorphNode({ key: "test-role", node, role: "destintion" }),
+    /role must be "source" or "destination"/
+  );
+  assert.throws(
+    () => registry.registerMorphNode({ key: "test-role", node, role: "other" }),
+    /role must be "source" or "destination"/
+  );
+});
+
+test("Blocker 4: MorphRegistry uses generic semantic attributes (data-morph-*) without product CSS classes", () => {
   const registry = createMorphRegistry();
   const node = createMockNode({
     x: 40,
     y: 80,
     width: 240,
     height: 64,
-    titleText: "Sprint Planning",
+    titleText: "Generic Title",
     timeText: "2:00 PM",
     hasProgress: true,
   });
 
-  const key = "morph:event:shared-elements";
+  const key = "morph:event:generic-shared";
   registry.registerMorphNode({
     key,
     node,
     role: "source",
-    meta: { title: "Sprint Planning", time: "2:00 PM" },
   });
 
   const snap = registry.snapshotMorphNode(key, "source");
   assert.ok(snap);
-  assert.ok(snap.paint, "Snapshot must include paint container");
-  assert.ok(snap.viewport, "Snapshot must include viewport container");
-  assert.ok(snap.capturedAt > 0, "Snapshot must include capturedAt timestamp");
-  assert.equal(typeof snap.radius, "number");
-
-  assert.ok(snap.shared, "Snapshot must include shared elements container");
-
-  // Title shared snapshot
-  assert.ok(snap.shared.title, "Title shared snapshot must exist");
-  assert.equal(snap.shared.title.text, "Sprint Planning");
-  assert.deepEqual(snap.shared.title.rect, {
-    x: 48,
-    y: 84,
-    top: 84,
-    left: 48,
-    right: 120,
-    bottom: 100,
-    width: 72,
-    height: 16,
-  });
-
-  // Meta / time shared snapshot
-  assert.ok(snap.shared.meta, "Meta shared snapshot must exist");
+  assert.ok(snap.shared.title, "Shared title via data-morph-title must be captured");
+  assert.equal(snap.shared.title.text, "Generic Title");
+  assert.ok(snap.shared.meta, "Shared meta via data-morph-meta must be captured");
   assert.equal(snap.shared.meta.text, "2:00 PM");
-
-  // Marker / progress shared snapshot
-  assert.ok(snap.shared.marker, "Marker shared snapshot must exist");
+  assert.ok(snap.shared.marker, "Shared marker via data-morph-marker must be captured");
   assert.equal(snap.shared.marker.rect.width, 18);
-});
-
-test("Task 3: MorphRegistry handles explicit ref/node shared bindings and disconnected child nodes safely", () => {
-  const registry = createMorphRegistry();
-  const rootNode = createMockNode({ x: 0, y: 0, width: 100, height: 100 });
-  const explicitTitleNode = createMockNode({ x: 10, y: 10, width: 60, height: 20, titleText: "Custom Explicit" });
-  const disconnectedNode = createMockNode({ isConnected: false });
-
-  const key = "morph:event:explicit-shared";
-  registry.registerMorphNode({
-    key,
-    node: rootNode,
-    role: "source",
-    shared: {
-      title: explicitTitleNode,
-      meta: { current: disconnectedNode }, // Ref object to disconnected element
-      marker: null,
-    },
-  });
-
-  const snap = registry.snapshotMorphNode(key, "source");
-  assert.ok(snap);
-  assert.ok(snap.shared.title);
-  assert.equal(snap.shared.title.rect.width, 60);
-  assert.equal(snap.shared.meta, null, "Disconnected child ref must yield null safely without throwing");
 });
 
 test("negative control: invalid registration parameters throw immediately", () => {

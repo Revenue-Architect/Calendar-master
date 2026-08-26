@@ -3,7 +3,7 @@
  *
  * Coordinates multi-phase spatial transitions (measure, open, in-flight reversal,
  * reconfigure, validate, commit, destination-wait, close, cancel, settle, idle).
- * Enforces transition legality matrix and isolates stale callbacks by run ID.
+ * Enforces transition legality matrix and isolates stale callbacks by run ID and state.
  *
  * Grounding: docs/plans/2026-08-25-002-physical-planner-motion-ard.md §7
  */
@@ -35,6 +35,14 @@ const VALID_TRANSITIONS = Object.freeze({
   [MORPH_STATES.CANCELLING]: [MORPH_STATES.SETTLED],
   [MORPH_STATES.SETTLED]: [MORPH_STATES.IDLE],
 });
+
+const PROGRESS_STATES = Object.freeze(
+  new Set([
+    MORPH_STATES.OPENING,
+    MORPH_STATES.CLOSING,
+    MORPH_STATES.CANCELLING,
+  ])
+);
 
 export function createMorphTransaction({
   onStateChange,
@@ -189,8 +197,10 @@ export function createMorphTransaction({
   }
 
   function setProgress(p, runId) {
-    if (runId != null && runId !== currentRunId) return;
+    if (runId != null && runId !== currentRunId) return false;
+    if (!PROGRESS_STATES.has(state)) return false;
     inFlightProgress = Math.max(0, Math.min(1, p));
+    return true;
   }
 
   function getSnapshot() {

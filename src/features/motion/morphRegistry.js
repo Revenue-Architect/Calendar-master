@@ -3,8 +3,8 @@
  *
  * Role-aware spatial registry for physical morph transitions.
  * Coexists source and destination nodes under the same semantic key,
- * extracts first-class shared element snapshots (title, meta, marker),
- * and retains last-valid snapshots across unmount for graceful reversals.
+ * extracts first-class shared element snapshots (data-morph-title, data-morph-meta, data-morph-marker),
+ * deep-freezes immutable geometry snapshots, and supports non-destructive snapshot releases.
  *
  * Grounding: docs/plans/2026-08-25-002-physical-planner-motion-ard.md §6
  */
@@ -57,9 +57,9 @@ function extractElementSnapshot(el, fallbackText = "") {
       lineHeight: computed.lineHeight || "",
     };
   }
-  return {
+  return Object.freeze({
     text,
-    rect: {
+    rect: Object.freeze({
       x: rect.x,
       y: rect.y,
       top: rect.top,
@@ -68,14 +68,14 @@ function extractElementSnapshot(el, fallbackText = "") {
       bottom: rect.bottom,
       width: rect.width,
       height: rect.height,
-    },
-    style,
+    }),
+    style: style ? Object.freeze({ ...style }) : null,
     color: style?.color || "",
     fontFamily: style?.fontFamily || "",
     fontSize: style?.fontSize || "",
     fontWeight: style?.fontWeight || "",
     lineHeight: style?.lineHeight || "",
-  };
+  });
 }
 
 function extractSharedElements(rootNode, explicitShared = {}) {
@@ -85,29 +85,29 @@ function extractSharedElements(rootNode, explicitShared = {}) {
     marker: null,
   };
 
-  // 1. Shared Title extraction
+  // 1. Shared Title extraction (via explicit ref or generic [data-morph-title])
   const titleTarget = explicitShared.title;
-  const titleEl = resolveElement(titleTarget, rootNode, ".nb-lead, [data-morph-title]");
+  const titleEl = resolveElement(titleTarget, rootNode, "[data-morph-title]");
   if (titleEl) {
     shared.title = extractElementSnapshot(titleEl);
   }
 
-  // 2. Shared Meta/Time extraction
+  // 2. Shared Meta/Time extraction (via explicit ref or generic [data-morph-meta])
   const metaTarget = explicitShared.meta;
-  const metaEl = resolveElement(metaTarget, rootNode, ".nb-task-time, .nb-event-time, [data-morph-meta]");
+  const metaEl = resolveElement(metaTarget, rootNode, "[data-morph-meta]");
   if (metaEl) {
     shared.meta = extractElementSnapshot(metaEl);
   }
 
-  // 3. Shared Marker/Progress extraction
+  // 3. Shared Marker/Progress extraction (via explicit ref or generic [data-morph-marker])
   const markerTarget = explicitShared.marker;
-  const markerEl = resolveElement(markerTarget, rootNode, '[data-test="timeline-action-progress"], [data-morph-marker]');
+  const markerEl = resolveElement(markerTarget, rootNode, "[data-morph-marker]");
   if (markerEl && isElementConnected(markerEl)) {
     const rect = markerEl.getBoundingClientRect();
-    const type = markerEl.getAttribute?.("data-morph-marker") || "progress-ring";
-    shared.marker = {
+    const type = markerEl.getAttribute?.("data-morph-marker") || "marker";
+    shared.marker = Object.freeze({
       type,
-      rect: {
+      rect: Object.freeze({
         x: rect.x,
         y: rect.y,
         top: rect.top,
@@ -116,12 +116,39 @@ function extractSharedElements(rootNode, explicitShared = {}) {
         bottom: rect.bottom,
         width: rect.width,
         height: rect.height,
-      },
+      }),
       style: null,
-    };
+    });
   }
 
-  return shared;
+  return Object.freeze(shared);
+}
+
+function deepFreezeSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") return snapshot;
+  Object.freeze(snapshot);
+  if (snapshot.rect) Object.freeze(snapshot.rect);
+  if (snapshot.paint) Object.freeze(snapshot.paint);
+  if (snapshot.viewport) Object.freeze(snapshot.viewport);
+  if (snapshot.meta) Object.freeze(snapshot.meta);
+  if (snapshot.shared) {
+    Object.freeze(snapshot.shared);
+    if (snapshot.shared.title) {
+      Object.freeze(snapshot.shared.title);
+      if (snapshot.shared.title.rect) Object.freeze(snapshot.shared.title.rect);
+      if (snapshot.shared.title.style) Object.freeze(snapshot.shared.title.style);
+    }
+    if (snapshot.shared.meta) {
+      Object.freeze(snapshot.shared.meta);
+      if (snapshot.shared.meta.rect) Object.freeze(snapshot.shared.meta.rect);
+      if (snapshot.shared.meta.style) Object.freeze(snapshot.shared.meta.style);
+    }
+    if (snapshot.shared.marker) {
+      Object.freeze(snapshot.shared.marker);
+      if (snapshot.shared.marker.rect) Object.freeze(snapshot.shared.marker.rect);
+    }
+  }
+  return snapshot;
 }
 
 export function createMorphRegistry() {
@@ -158,7 +185,7 @@ export function createMorphRegistry() {
       throw new Error("registerMorphNode requires a valid DOM node");
     }
     if (role !== "source" && role !== "destination") {
-      role = "source";
+      throw new Error(`registerMorphNode: role must be "source" or "destination", received "${role}"`);
     }
 
     const rec = getRecord(key, true);
@@ -167,7 +194,7 @@ export function createMorphRegistry() {
       node,
       kind,
       role,
-      meta,
+      meta: { ...meta },
       shared,
       getSnapshot,
       registeredAt: Date.now(),
@@ -194,7 +221,7 @@ export function createMorphRegistry() {
       if (rec.destination && rec.destination.node === node) rec.destination = null;
     }
 
-    // If completely empty of both live and snapshots, we can delete the key
+    // If completely empty of both live and snapshots, prune the map entry
     if (!rec.source && !rec.destination && !rec.lastSourceSnapshot && !rec.lastDestinationSnapshot) {
       records.delete(key);
     }
@@ -225,7 +252,7 @@ export function createMorphRegistry() {
     }
 
     if (typeof getSnapshot === "function") {
-      const snap = getSnapshot(node, meta);
+      const snap = deepFreezeSnapshot(getSnapshot(node, meta));
       if (role === "source") rec.lastSourceSnapshot = snap;
       else rec.lastDestinationSnapshot = snap;
       return snap;
@@ -253,7 +280,7 @@ export function createMorphRegistry() {
     const shared = extractSharedElements(node, explicitShared);
     const capturedAt = Date.now();
 
-    const snapshot = {
+    const snapshot = deepFreezeSnapshot({
       key,
       kind: entry.kind,
       role: entry.role,
@@ -281,7 +308,7 @@ export function createMorphRegistry() {
       capturedAt,
       isConnected: true,
       timestamp: capturedAt,
-    };
+    });
 
     if (role === "source") {
       rec.lastSourceSnapshot = snapshot;
@@ -305,7 +332,40 @@ export function createMorphRegistry() {
     return getLastMorphSnapshot(key, role);
   }
 
+  /**
+   * Releases historical snapshots for a key while preserving live source and destination nodes.
+   * Prunes map entry only when neither live nodes nor snapshots remain.
+   */
+  function releaseMorphSnapshots(key, role) {
+    if (!key) return;
+    const rec = getRecord(key, false);
+    if (!rec) return;
+
+    if (role === "source") {
+      rec.lastSourceSnapshot = null;
+    } else if (role === "destination") {
+      rec.lastDestinationSnapshot = null;
+    } else {
+      rec.lastSourceSnapshot = null;
+      rec.lastDestinationSnapshot = null;
+    }
+
+    if (!rec.source && !rec.destination && !rec.lastSourceSnapshot && !rec.lastDestinationSnapshot) {
+      records.delete(key);
+    }
+  }
+
+  /**
+   * Non-destructive alias for releaseMorphSnapshots (preserves mounted live DOM nodes).
+   */
   function releaseMorphKey(key) {
+    releaseMorphSnapshots(key);
+  }
+
+  /**
+   * Hard administrative deletion of key and all associated nodes and snapshots.
+   */
+  function deleteMorphKey(key) {
     if (!key) return;
     records.delete(key);
   }
@@ -325,7 +385,9 @@ export function createMorphRegistry() {
     snapshotMorphNode,
     getLastMorphSnapshot,
     getMorphSnapshot,
+    releaseMorphSnapshots,
     releaseMorphKey,
+    deleteMorphKey,
     getRegisteredKeys,
     clear,
   };

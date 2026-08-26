@@ -118,6 +118,39 @@ test("reduced motion follows same semantic state transitions without skipping st
   ]);
 });
 
+test("Blocker 1: setProgress is guarded by active progress states and rejects stale callbacks", () => {
+  const tx = createMorphTransaction();
+  const run = tx.startOpen({ key: "progress-test" });
+  assert.equal(tx.getState(), MORPH_STATES.OPENING);
+
+  // In OPENING: setProgress succeeds
+  assert.equal(tx.setProgress(0.45, run), true);
+  assert.equal(tx.getSnapshot().inFlightProgress, 0.45);
+
+  tx.settleOpen(run);
+  assert.equal(tx.getState(), MORPH_STATES.OPEN);
+
+  // In OPEN: setProgress rejected
+  assert.equal(tx.setProgress(0.6, run), false, "OPEN state must reject progress updates");
+
+  tx.startClose({ runId: run });
+  assert.equal(tx.getState(), MORPH_STATES.CLOSING);
+
+  // In CLOSING: setProgress succeeds
+  assert.equal(tx.setProgress(0.8, run), true);
+  assert.equal(tx.getSnapshot().inFlightProgress, 0.8);
+
+  tx.settleClose(run);
+  assert.equal(tx.getState(), MORPH_STATES.IDLE);
+  assert.equal(tx.getSnapshot().inFlightProgress, 0);
+
+  // Stale rAF / WAAPI callback arriving in IDLE
+  const staleResult = tx.setProgress(0.73, run);
+  assert.equal(staleResult, false, "IDLE state must reject setProgress");
+  assert.equal(tx.getSnapshot().inFlightProgress, 0, "IDLE progress must remain 0");
+  assert.equal(tx.getState(), MORPH_STATES.IDLE);
+});
+
 test("Task 6: transition matrix rejects illegal state transitions", () => {
   const tx = createMorphTransaction();
 
@@ -159,6 +192,7 @@ test("Task 6: stale callbacks from older run IDs are strictly rejected", () => {
   assert.equal(tx.settleOpen(run1), false);
   assert.equal(tx.startClose({ runId: run1 }), false);
   assert.equal(tx.settleClose(run1), false);
+  assert.equal(tx.setProgress(0.5, run1), false);
   assert.equal(tx.getState(), MORPH_STATES.OPENING, "State must remain OPENING for run 2");
 });
 

@@ -41,6 +41,10 @@ test("Planner.jsx does not grow", () => {
    a fix applied to it changed nothing until an e2e test caught the mistake.
    Every name below is a module extracted but never wired up. The list may only
    get shorter. */
+/* Note for feat/physical-planner-motion:
+   The following 5 entries track unwired Phase 2 & 3 motion infrastructure.
+   These are explicitly TEMPORARY on this feature branch and must not be merged
+   to main as-is; they will be retired as Phase 4/5 integration lands. */
 const UNWIRED = new Set([
   "features/motion/morphKeys.js",
   "features/motion/morphRegistry.js",
