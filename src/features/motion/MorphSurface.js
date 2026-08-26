@@ -38,16 +38,28 @@ function renderSharedLayer(shared, dataAttr, attrValue) {
   return createElement("div", props, text);
 }
 
-export function MorphSurface({ transactionSnapshot } = {}) {
-  if (transactionSnapshot?.state !== "opening" || !transactionSnapshot?.sourceSnapshot) {
-    return null;
+function resolveIdentity(transactionSnapshot, registry) {
+  const state = transactionSnapshot?.state;
+  if (state === "opening") {
+    return transactionSnapshot.sourceSnapshot || null;
   }
+  if (state === "open") {
+    const key = transactionSnapshot.key;
+    if (!key || !registry) return null;
+    return (
+      registry.snapshotMorphNode?.(key, "destination")
+      || registry.getLastMorphSnapshot?.(key, "destination")
+      || null
+    );
+  }
+  return null;
+}
 
-  const source = transactionSnapshot.sourceSnapshot;
-  const rect = source.rect;
+function renderIdentity(identity) {
+  const rect = identity?.rect;
   if (!rect) return null;
 
-  const shared = source.shared || {};
+  const shared = identity.shared || {};
   const markerType = shared.marker?.type || "marker";
 
   return createElement(
@@ -60,8 +72,8 @@ export function MorphSurface({ transactionSnapshot } = {}) {
         top: `${rect.top}px`,
         width: `${rect.width}px`,
         height: `${rect.height}px`,
-        borderRadius: `${source.radius ?? 0}px`,
-        backgroundColor: source.paint?.background ?? "",
+        borderRadius: `${identity.radius ?? 0}px`,
+        backgroundColor: identity.paint?.background ?? "",
         pointerEvents: "none",
       },
     },
@@ -69,4 +81,8 @@ export function MorphSurface({ transactionSnapshot } = {}) {
     renderSharedLayer(shared.meta, "data-morph-meta"),
     renderSharedLayer(shared.marker, "data-morph-marker", markerType),
   );
+}
+
+export function MorphSurface({ transactionSnapshot, registry } = {}) {
+  return renderIdentity(resolveIdentity(transactionSnapshot, registry));
 }

@@ -367,6 +367,7 @@ function registerDestination(registry) {
     kind: "event",
     role: "destination",
     meta: { title: "Design Sync" },
+    getSnapshot: snapshotFromCard,
   });
   return { node, unregister, snapshot: registry.snapshotMorphNode(KEY, "destination") };
 }
@@ -490,7 +491,8 @@ test("overlay settles to the destination rect once the destination is in the DOM
   await paint();
   const { snapshot: destSnapshot } = registerDestination(registry);
   assert.equal(transaction.settleOpen(runId), true);
-  transaction.setProgress(1, runId);
+  assert.equal(transaction.getState(), MORPH_STATES.OPEN);
+  assert.equal(transaction.setProgress(1, runId), false);
   await paint();
 
   const overlay = requireOverlay(container, "destination geometry not reached");
