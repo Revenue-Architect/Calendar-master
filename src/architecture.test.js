@@ -50,6 +50,7 @@ const UNWIRED = new Set([
   "features/motion/morphRegistry.js",
   "features/motion/morphTokens.js",
   "features/motion/morphTransaction.js",
+  "features/motion/morphInterpolate.js",
   "features/motion/MorphSurface.js",
   "features/motion/useMorphSource.js",
 ]);
