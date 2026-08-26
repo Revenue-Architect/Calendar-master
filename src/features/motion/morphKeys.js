@@ -1,15 +1,25 @@
 /**
  * Calendar Master — Semantic Morph Keys
  *
- * Implements deterministic, collision-free motion identities for physical
- * spatial choreography and object morphing across Day, Week, Actions, and Composer.
+ * Implements deterministic, collision-free, reversible motion identities for
+ * physical spatial choreography and object morphing across Day, Week, Actions,
+ * Composer, Notes, and unfoldable controls.
  *
  * Grounding: docs/plans/2026-08-25-002-physical-planner-motion-ard.md §5
  */
 
-function sanitizeComponent(val) {
+function encodeComponent(val) {
   if (val == null) return "";
-  return String(val).replace(/[:/]/g, "_");
+  return encodeURIComponent(String(val));
+}
+
+function decodeComponent(val) {
+  if (!val) return "";
+  try {
+    return decodeURIComponent(val);
+  } catch {
+    return val;
+  }
 }
 
 /**
@@ -27,10 +37,10 @@ export function eventMorphKey({
   if (!primaryId) {
     throw new Error("eventMorphKey requires occurrenceId or eventId");
   }
-  const cleanId = sanitizeComponent(primaryId);
-  const cleanView = sanitizeComponent(view);
-  const cleanLane = sanitizeComponent(lane);
-  return `morph:event:${cleanId}:v:${cleanView}:l:${cleanLane}`;
+  const encId = encodeComponent(primaryId);
+  const encView = encodeComponent(view);
+  const encLane = encodeComponent(lane);
+  return `morph:event:${encId}:v:${encView}:l:${encLane}`;
 }
 
 /**
@@ -44,10 +54,10 @@ export function taskMorphKey({
   if (!taskId) {
     throw new Error("taskMorphKey requires taskId");
   }
-  const cleanId = sanitizeComponent(taskId);
-  const cleanView = sanitizeComponent(view);
-  const listPart = listId ? `:list:${sanitizeComponent(listId)}` : "";
-  return `morph:task:${cleanId}:v:${cleanView}${listPart}`;
+  const encId = encodeComponent(taskId);
+  const encView = encodeComponent(view);
+  const listPart = listId ? `:list:${encodeComponent(listId)}` : "";
+  return `morph:task:${encId}:v:${encView}${listPart}`;
 }
 
 /**
@@ -60,9 +70,9 @@ export function noteMorphKey({
   if (!noteId) {
     throw new Error("noteMorphKey requires noteId");
   }
-  const cleanId = sanitizeComponent(noteId);
-  const cleanCtx = sanitizeComponent(context);
-  return `morph:note:${cleanId}:ctx:${cleanCtx}`;
+  const encId = encodeComponent(noteId);
+  const encCtx = encodeComponent(context);
+  return `morph:note:${encId}:ctx:${encCtx}`;
 }
 
 /**
@@ -78,11 +88,11 @@ export function slotMorphKey({
   if (!dateKey) {
     throw new Error("slotMorphKey requires dateKey");
   }
-  const cleanView = sanitizeComponent(view);
-  const cleanDate = sanitizeComponent(dateKey);
-  const cleanMin = sanitizeComponent(startMinute);
-  const cleanLane = sanitizeComponent(lane);
-  return `morph:slot:v:${cleanView}:d:${cleanDate}:m:${cleanMin}:l:${cleanLane}`;
+  const encView = encodeComponent(view);
+  const encDate = encodeComponent(dateKey);
+  const encMin = encodeComponent(startMinute);
+  const encLane = encodeComponent(lane);
+  return `morph:slot:v:${encView}:d:${encDate}:m:${encMin}:l:${encLane}`;
 }
 
 /**
@@ -95,25 +105,51 @@ export function controlMorphKey({
   if (!controlId) {
     throw new Error("controlMorphKey requires controlId");
   }
-  const cleanId = sanitizeComponent(controlId);
-  const cleanView = sanitizeComponent(view);
-  return `morph:control:${cleanId}:v:${cleanView}`;
+  const encId = encodeComponent(controlId);
+  const encView = encodeComponent(view);
+  return `morph:control:${encId}:v:${encView}`;
 }
 
 /**
- * Extracts kind and primary ID from a morph key.
+ * Parses and decodes a morph key back into its semantic descriptors.
  */
 export function parseMorphKey(key) {
   if (typeof key !== "string" || !key.startsWith("morph:")) {
     return null;
   }
   const parts = key.split(":");
+  if (parts.length < 3) return null;
+
   const kind = parts[1];
-  return {
+  const descriptor = {
     key,
     kind,
-    rawParts: parts.slice(2),
   };
+
+  if (kind === "slot") {
+    // format: morph:slot:v:<view>:d:<date>:m:<min>:l:<lane>
+    for (let i = 2; i < parts.length; i += 2) {
+      const tag = parts[i];
+      const val = decodeComponent(parts[i + 1]);
+      if (tag === "v") descriptor.view = val;
+      else if (tag === "d") descriptor.dateKey = val;
+      else if (tag === "m") descriptor.startMinute = Number(val);
+      else if (tag === "l") descriptor.lane = val;
+    }
+  } else {
+    // format: morph:<kind>:<id>[:<tag>:<val>...]
+    descriptor.id = decodeComponent(parts[2]);
+    for (let i = 3; i < parts.length; i += 2) {
+      const tag = parts[i];
+      const val = decodeComponent(parts[i + 1]);
+      if (tag === "v") descriptor.view = val;
+      else if (tag === "l") descriptor.lane = val;
+      else if (tag === "ctx") descriptor.context = val;
+      else if (tag === "list") descriptor.listId = val;
+    }
+  }
+
+  return descriptor;
 }
 
 /**
@@ -126,5 +162,14 @@ export function isSameBusinessObject(keyA, keyB) {
   const parsedB = parseMorphKey(keyB);
   if (!parsedA || !parsedB) return false;
   if (parsedA.kind !== parsedB.kind) return false;
-  return parsedA.rawParts[0] === parsedB.rawParts[0];
+
+  if (parsedA.kind === "slot") {
+    return (
+      parsedA.dateKey === parsedB.dateKey &&
+      parsedA.startMinute === parsedB.startMinute &&
+      parsedA.lane === parsedB.lane
+    );
+  }
+
+  return parsedA.id === parsedB.id;
 }

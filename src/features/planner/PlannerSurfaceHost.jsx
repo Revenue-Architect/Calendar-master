@@ -34,7 +34,7 @@ export default function PlannerSurfaceHost({
 
   useEffect(() => {
     if (isOpen && activeKey) {
-      const source = morphRegistry.getMorphSnapshot(activeKey);
+      const source = morphRegistry.getMorphSnapshot(activeKey, "source");
       const runId = txRef.current.startOpen({ key: activeKey, source });
       const timer = setTimeout(() => {
         txRef.current.settleOpen(runId);
@@ -45,6 +45,9 @@ export default function PlannerSurfaceHost({
       txRef.current.startClose({ runId });
       const timer = setTimeout(() => {
         txRef.current.settleClose(runId);
+        if (activeKey) {
+          morphRegistry.releaseMorphKey(activeKey);
+        }
       }, MORPH_TIMING.OBJECT_CLOSE_MS);
       return () => clearTimeout(timer);
     }
