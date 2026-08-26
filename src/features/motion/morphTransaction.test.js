@@ -239,3 +239,32 @@ test("Task 7: Final IDLE notification represents a clean idle transaction withou
     inFlightProgress: 0,
   });
 });
+
+test("Issue 1: IDLE + startClose(target) returns false and targetSnapshot remains null", () => {
+  const tx = createMorphTransaction();
+  assert.equal(tx.getState(), MORPH_STATES.IDLE);
+
+  const result = tx.startClose({ target: { rect: { x: 100, y: 100 } } });
+  assert.equal(result, false, "IDLE → CLOSING must be rejected");
+  assert.equal(tx.getSnapshot().targetSnapshot, null, "targetSnapshot must not be mutated on rejected transition");
+  assert.equal(tx.getState(), MORPH_STATES.IDLE, "State must remain IDLE");
+});
+
+test("Issue 1: OPEN + resolveDestination(target) must not mutate targetSnapshot on illegal transition", () => {
+  const tx = createMorphTransaction();
+  const runId = tx.startOpen({ key: "resolve-test", source: { rect: { x: 0 } } });
+  tx.settleOpen(runId);
+  assert.equal(tx.getState(), MORPH_STATES.OPEN);
+
+  // resolveDestination transitions to CLOSING, which is legal from OPEN...
+  // but let's test from an illegal state: OPENING
+  const tx2 = createMorphTransaction();
+  const runId2 = tx2.startOpen({ key: "illegal-resolve" });
+  assert.equal(tx2.getState(), MORPH_STATES.OPENING);
+
+  // resolveDestination tries CLOSING from OPENING — not in VALID_TRANSITIONS
+  const result = tx2.resolveDestination({ target: { rect: { x: 999 } }, runId: runId2 });
+  assert.equal(result, false, "OPENING → CLOSING must be rejected");
+  assert.equal(tx2.getSnapshot().targetSnapshot, null, "targetSnapshot must not be mutated on rejected transition");
+  assert.equal(tx2.getState(), MORPH_STATES.OPENING, "State must remain OPENING");
+});

@@ -101,8 +101,8 @@ export function useMorphSource({
         getSnapshot,
       });
     } else {
-      // In-place update without dropping the live node or triggering unregister
-      morphRegistry.registerMorphNode({
+      // In-place metadata update without replacing the registry entry
+      morphRegistry.updateMorphNode({
         key,
         node: activeNode,
         kind,
@@ -208,7 +208,8 @@ export function useMorphDestination({
         getSnapshot,
       });
     } else {
-      morphRegistry.registerMorphNode({
+      // In-place metadata update without replacing the registry entry
+      morphRegistry.updateMorphNode({
         key,
         node: activeNode,
         kind,

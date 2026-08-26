@@ -251,3 +251,61 @@ test("negative control: flawed single-entry overwrite model cannot support coexi
   // Naive overwrite loses source reference
   assert.notEqual(naiveRegistry.get(key).node, sourceNode);
 });
+
+test("Issue 3: consistent role validation across all registry APIs", () => {
+  const registry = createMorphRegistry();
+  const node = createMockNode();
+  const key = "role-validation-key";
+
+  registry.registerMorphNode({ key, node, role: "source" });
+  registry.snapshotMorphNode(key, "source");
+
+  // All role-aware APIs must reject invalid role strings with descriptive error
+  const invalidRole = "destintion"; // typo
+  assert.throws(() => registry.getLastMorphSnapshot(key, invalidRole), /role must be "source" or "destination"/);
+  assert.throws(() => registry.snapshotMorphNode(key, invalidRole), /role must be "source" or "destination"/);
+  assert.throws(() => registry.resolveMorphNode(key, invalidRole), /role must be "source" or "destination"/);
+  assert.throws(() => registry.getMorphSnapshot(key, invalidRole), /role must be "source" or "destination"/);
+  assert.throws(() => registry.releaseMorphSnapshots(key, invalidRole), /role must be "source" or "destination"/);
+  assert.throws(() => registry.unregisterMorphNode(key, node, invalidRole), /role must be "source" or "destination"/);
+  assert.throws(() => registry.updateMorphNode({ key, node, role: invalidRole }), /role must be "source" or "destination"/);
+
+  // Valid role operations must succeed
+  assert.ok(registry.getLastMorphSnapshot(key, "source"));
+  assert.equal(registry.getLastMorphSnapshot(key, "destination"), null);
+
+  // undefined role in releaseMorphSnapshots clears both without error
+  registry.releaseMorphSnapshots(key, undefined);
+  assert.equal(registry.getLastMorphSnapshot(key, "source"), null);
+});
+
+test("Issue 4: updateMorphNode updates metadata in place without re-registration churn", () => {
+  const registry = createMorphRegistry();
+  const node = createMockNode({ titleText: "Initial Title" });
+  const key = "update-test-key";
+
+  registry.registerMorphNode({
+    key,
+    node,
+    role: "source",
+    meta: { count: 1 },
+  });
+
+  // Update with matching node and key
+  const updated = registry.updateMorphNode({
+    key,
+    node,
+    role: "source",
+    meta: { count: 2 },
+  });
+  assert.equal(updated, true, "updateMorphNode must return true when entry matches");
+
+  // Snapshot captures updated metadata
+  const snap = registry.snapshotMorphNode(key, "source");
+  assert.equal(snap.meta.count, 2);
+
+  // Mismatched node or non-existent key returns false
+  const differentNode = createMockNode();
+  assert.equal(registry.updateMorphNode({ key, node: differentNode, role: "source", meta: { count: 3 } }), false);
+  assert.equal(registry.updateMorphNode({ key: "missing-key", node, role: "source", meta: { count: 3 } }), false);
+});

@@ -261,52 +261,97 @@ test("Blocker 3: useMorphDestination real React lifecycle and source/destination
   assert.equal(morphRegistry.resolveMorphNode(key, "source"), null);
 });
 
-test("Blocker 3: zero unregister churn on repeated metadata updates while component stays mounted", async () => {
+test("Issue 4: zero unregister churn on repeated metadata updates while component stays mounted", async () => {
   morphRegistry.clear();
 
+  const originalRegister = morphRegistry.registerMorphNode;
+  const originalUpdate = morphRegistry.updateMorphNode;
   const originalUnregister = morphRegistry.unregisterMorphNode;
+
+  let registerCalls = 0;
+  let updateCalls = 0;
   let unregisterCalls = 0;
+
+  morphRegistry.registerMorphNode = function (...args) {
+    registerCalls++;
+    return originalRegister.apply(this, args);
+  };
+  morphRegistry.updateMorphNode = function (...args) {
+    updateCalls++;
+    return originalUpdate.apply(this, args);
+  };
   morphRegistry.unregisterMorphNode = function (...args) {
     unregisterCalls++;
     return originalUnregister.apply(this, args);
   };
 
-  function ChurnTestComponent({ title, count }) {
-    const ref = useMorphSource({
-      key: "morph:task:churn-test",
-      kind: "task",
-      meta: { title, count },
-    });
-    return React.createElement("div", { ref });
+  try {
+    function ChurnTestComponent({ title, count }) {
+      const ref = useMorphSource({
+        key: "morph:task:churn-test",
+        kind: "task",
+        meta: { title, count },
+      });
+      return React.createElement("div", { ref });
+    }
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = ReactDOM.createRoot(container);
+
+    // 1. Initial Mount
+    root.render(React.createElement(ChurnTestComponent, { title: "Title 1", count: 1 }));
+    await wait();
+
+    const registerCallsAfterMount = registerCalls;
+    const updateCallsAfterMount = updateCalls;
+    const unregisterCallsAfterMount = unregisterCalls;
+
+    assert.ok(registerCallsAfterMount >= 1, "Mount must register with registry");
+    assert.equal(unregisterCallsAfterMount, 0, "Mount must not call unregister");
+
+    // 2. 5 successive renders with new inline meta objects
+    for (let i = 2; i <= 6; i++) {
+      root.render(React.createElement(ChurnTestComponent, { title: `Title ${i}`, count: i }));
+      await wait(10);
+    }
+
+    // Verify:
+    // - Zero unregister calls during prop updates
+    // - Zero new register calls during prop updates
+    // - updateMorphNode was called for each rerender
+    assert.equal(
+      unregisterCalls,
+      unregisterCallsAfterMount,
+      "In-place metadata updates must cause zero unregister calls"
+    );
+    assert.equal(
+      registerCalls,
+      registerCallsAfterMount,
+      "In-place metadata updates must not re-register the node"
+    );
+    assert.equal(
+      updateCalls - updateCallsAfterMount,
+      5,
+      "Each rerender must route to updateMorphNode"
+    );
+
+    const finalSnap = morphRegistry.snapshotMorphNode("morph:task:churn-test", "source");
+    assert.equal(finalSnap.meta.title, "Title 6");
+    assert.equal(finalSnap.meta.count, 6);
+
+    // 3. Unmount must cleanly invoke unregisterMorphNode
+    root.unmount();
+    await wait();
+
+    assert.ok(
+      unregisterCalls > unregisterCallsAfterMount,
+      "Unmount must trigger unregisterMorphNode"
+    );
+  } finally {
+    morphRegistry.registerMorphNode = originalRegister;
+    morphRegistry.updateMorphNode = originalUpdate;
+    morphRegistry.unregisterMorphNode = originalUnregister;
   }
-
-  const container = document.createElement("div");
-  document.body.appendChild(container);
-  const root = ReactDOM.createRoot(container);
-
-  // Mount
-  root.render(React.createElement(ChurnTestComponent, { title: "Title 1", count: 1 }));
-  await wait();
-  const unregisterCallsAfterMount = unregisterCalls;
-
-  // 5 successive renders with new inline meta objects
-  for (let i = 2; i <= 6; i++) {
-    root.render(React.createElement(ChurnTestComponent, { title: `Title ${i}`, count: i }));
-    await wait(10);
-  }
-
-  // Verify that during re-renders, unregisterMorphNode was never called (zero churn)
-  assert.equal(
-    unregisterCalls,
-    unregisterCallsAfterMount,
-    "In-place metadata updates must cause zero unregister calls"
-  );
-
-  const finalSnap = morphRegistry.snapshotMorphNode("morph:task:churn-test", "source");
-  assert.equal(finalSnap.meta.title, "Title 6");
-  assert.equal(finalSnap.meta.count, 6);
-
-  root.unmount();
-  await wait();
-  morphRegistry.unregisterMorphNode = originalUnregister;
 });
+

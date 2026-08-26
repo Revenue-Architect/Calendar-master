@@ -151,6 +151,25 @@ function deepFreezeSnapshot(snapshot) {
   return snapshot;
 }
 
+const VALID_ROLES = new Set(["source", "destination"]);
+
+function isValidRole(role) {
+  return VALID_ROLES.has(role);
+}
+
+/**
+ * Validates a role parameter. Throws on invalid strings; returns true for
+ * undefined (meaning "both roles"), false for null/empty.
+ */
+function assertMorphRole(role, apiName) {
+  if (role === undefined) return; // "both" / default behavior
+  if (!isValidRole(role)) {
+    throw new Error(
+      `${apiName}: role must be "source" or "destination", received "${role}"`
+    );
+  }
+}
+
 export function createMorphRegistry() {
   // Map<key, { source: liveEntry | null, destination: liveEntry | null, lastSourceSnapshot: snapshot | null, lastDestinationSnapshot: snapshot | null }>
   const records = new Map();
@@ -184,9 +203,7 @@ export function createMorphRegistry() {
     if (!node || !(node instanceof (typeof HTMLElement !== "undefined" ? HTMLElement : Object))) {
       throw new Error("registerMorphNode requires a valid DOM node");
     }
-    if (role !== "source" && role !== "destination") {
-      throw new Error(`registerMorphNode: role must be "source" or "destination", received "${role}"`);
-    }
+    assertMorphRole(role, "registerMorphNode");
 
     const rec = getRecord(key, true);
     const entry = {
@@ -203,12 +220,34 @@ export function createMorphRegistry() {
     rec[role] = entry;
 
     return () => {
-      unregisterMorphNode(key, node, role);
+      api.unregisterMorphNode(key, node, role);
     };
+  }
+
+  /**
+   * Updates metadata on an existing registration without replacing the entry.
+   * Returns true if the update was applied, false if no matching registration exists.
+   */
+  function updateMorphNode({ key, node, role = "source", kind, meta, shared, getSnapshot }) {
+    if (!key) return false;
+    assertMorphRole(role, "updateMorphNode");
+    const rec = getRecord(key, false);
+    if (!rec || !rec[role]) return false;
+
+    const entry = rec[role];
+    // Only update if the node matches the existing registration
+    if (entry.node !== node) return false;
+
+    if (kind !== undefined) entry.kind = kind;
+    if (meta !== undefined) entry.meta = { ...meta };
+    if (shared !== undefined) entry.shared = shared;
+    if (getSnapshot !== undefined) entry.getSnapshot = getSnapshot;
+    return true;
   }
 
   function unregisterMorphNode(key, node, role) {
     if (!key || !node) return;
+    if (role !== undefined) assertMorphRole(role, "unregisterMorphNode");
     const rec = getRecord(key, false);
     if (!rec) return;
 
@@ -229,6 +268,7 @@ export function createMorphRegistry() {
 
   function resolveMorphNode(key, role = "source") {
     if (!key) return null;
+    assertMorphRole(role, "resolveMorphNode");
     const rec = getRecord(key, false);
     if (!rec || !rec[role]) return null;
 
@@ -241,6 +281,7 @@ export function createMorphRegistry() {
 
   function snapshotMorphNode(key, role = "source") {
     if (!key) return null;
+    assertMorphRole(role, "snapshotMorphNode");
     const rec = getRecord(key, false);
     if (!rec || !rec[role]) return null;
 
@@ -321,12 +362,14 @@ export function createMorphRegistry() {
 
   function getLastMorphSnapshot(key, role = "source") {
     if (!key) return null;
+    assertMorphRole(role, "getLastMorphSnapshot");
     const rec = getRecord(key, false);
     if (!rec) return null;
     return role === "source" ? rec.lastSourceSnapshot : rec.lastDestinationSnapshot;
   }
 
   function getMorphSnapshot(key, role = "source") {
+    assertMorphRole(role, "getMorphSnapshot");
     const live = snapshotMorphNode(key, role);
     if (live) return live;
     return getLastMorphSnapshot(key, role);
@@ -338,6 +381,7 @@ export function createMorphRegistry() {
    */
   function releaseMorphSnapshots(key, role) {
     if (!key) return;
+    if (role !== undefined) assertMorphRole(role, "releaseMorphSnapshots");
     const rec = getRecord(key, false);
     if (!rec) return;
 
@@ -378,8 +422,9 @@ export function createMorphRegistry() {
     records.clear();
   }
 
-  return {
+  const api = {
     registerMorphNode,
+    updateMorphNode,
     unregisterMorphNode,
     resolveMorphNode,
     snapshotMorphNode,
@@ -391,6 +436,8 @@ export function createMorphRegistry() {
     getRegisteredKeys,
     clear,
   };
+
+  return api;
 }
 
 // Global default instance

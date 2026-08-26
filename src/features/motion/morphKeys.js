@@ -25,6 +25,9 @@ function decodeComponent(val) {
 /**
  * Creates a unique motion key for an Event card / occurrence.
  * Differentiates recurring occurrences, views (day vs week), and timeline lanes.
+ *
+ * Uses tagged components so occurrenceId, eventId, and dateKey are never
+ * concatenated raw — each field is individually encoded under its own tag.
  */
 export function eventMorphKey({
   occurrenceId,
@@ -33,14 +36,23 @@ export function eventMorphKey({
   view = "day",
   lane = "timeline",
 } = {}) {
-  const primaryId = occurrenceId || (eventId && dateKey ? `${eventId}@${dateKey}` : eventId);
-  if (!primaryId) {
+  if (!occurrenceId && !eventId) {
     throw new Error("eventMorphKey requires occurrenceId or eventId");
   }
-  const encId = encodeComponent(primaryId);
   const encView = encodeComponent(view);
   const encLane = encodeComponent(lane);
-  return `morph:event:${encId}:v:${encView}:l:${encLane}`;
+
+  if (occurrenceId) {
+    // Tagged occurrence identity: morph:event:occ:<encoded>:v:<view>:l:<lane>
+    return `morph:event:occ:${encodeComponent(occurrenceId)}:v:${encView}:l:${encLane}`;
+  }
+  // Tagged event+date identity: morph:event:id:<encoded eventId>:d:<encoded dateKey>:v:<view>:l:<lane>
+  const encId = encodeComponent(eventId);
+  const encDate = dateKey ? encodeComponent(dateKey) : "";
+  if (encDate) {
+    return `morph:event:id:${encId}:d:${encDate}:v:${encView}:l:${encLane}`;
+  }
+  return `morph:event:id:${encId}:v:${encView}:l:${encLane}`;
 }
 
 /**
@@ -136,8 +148,44 @@ export function parseMorphKey(key) {
       else if (tag === "m") descriptor.startMinute = Number(val);
       else if (tag === "l") descriptor.lane = val;
     }
+  } else if (kind === "event") {
+    // Tagged event formats:
+    //   morph:event:occ:<occurrenceId>:v:<view>:l:<lane>
+    //   morph:event:id:<eventId>:d:<dateKey>:v:<view>:l:<lane>
+    //   morph:event:id:<eventId>:v:<view>:l:<lane>
+    const subTag = parts[2];
+    if (subTag === "occ") {
+      descriptor.occurrenceId = decodeComponent(parts[3]);
+      descriptor.id = descriptor.occurrenceId;
+      for (let i = 4; i < parts.length; i += 2) {
+        const tag = parts[i];
+        const val = decodeComponent(parts[i + 1]);
+        if (tag === "v") descriptor.view = val;
+        else if (tag === "l") descriptor.lane = val;
+      }
+    } else if (subTag === "id") {
+      descriptor.eventId = decodeComponent(parts[3]);
+      descriptor.id = descriptor.eventId;
+      for (let i = 4; i < parts.length; i += 2) {
+        const tag = parts[i];
+        const val = decodeComponent(parts[i + 1]);
+        if (tag === "d") {
+          descriptor.dateKey = val;
+        } else if (tag === "v") descriptor.view = val;
+        else if (tag === "l") descriptor.lane = val;
+      }
+    } else {
+      // Legacy fallback: morph:event:<id>:v:<view>:l:<lane>
+      descriptor.id = decodeComponent(subTag);
+      for (let i = 3; i < parts.length; i += 2) {
+        const tag = parts[i];
+        const val = decodeComponent(parts[i + 1]);
+        if (tag === "v") descriptor.view = val;
+        else if (tag === "l") descriptor.lane = val;
+      }
+    }
   } else {
-    // format: morph:<kind>:<id>[:<tag>:<val>...]
+    // Generic format: morph:<kind>:<id>[:<tag>:<val>...]
     descriptor.id = decodeComponent(parts[2]);
     for (let i = 3; i < parts.length; i += 2) {
       const tag = parts[i];
@@ -168,6 +216,16 @@ export function isSameBusinessObject(keyA, keyB) {
       parsedA.dateKey === parsedB.dateKey &&
       parsedA.startMinute === parsedB.startMinute &&
       parsedA.lane === parsedB.lane
+    );
+  }
+
+  if (parsedA.kind === "event") {
+    if (parsedA.occurrenceId || parsedB.occurrenceId) {
+      return parsedA.occurrenceId === parsedB.occurrenceId;
+    }
+    return (
+      parsedA.eventId === parsedB.eventId &&
+      parsedA.dateKey === parsedB.dateKey
     );
   }
 

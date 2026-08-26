@@ -148,8 +148,9 @@ export function createMorphTransaction({
 
   function resolveDestination({ target, runId } = {}) {
     if (runId != null && runId !== currentRunId) return false;
-    if (target) targetSnapshot = target;
-    return transitionTo(MORPH_STATES.CLOSING, currentRunId);
+    const ok = transitionTo(MORPH_STATES.CLOSING, currentRunId);
+    if (ok && target) targetSnapshot = target;
+    return ok;
   }
 
   function fallbackDestination({ runId } = {}) {
@@ -159,13 +160,17 @@ export function createMorphTransaction({
 
   function startClose({ target, runId } = {}) {
     if (runId != null && runId !== currentRunId) return false;
-    if (target) targetSnapshot = target;
 
     if (state === MORPH_STATES.OPENING || state === MORPH_STATES.MEASURING) {
-      // In-flight reversal
-      return transitionTo(MORPH_STATES.CANCELLING, currentRunId);
+      // In-flight reversal — validate transition first, then apply side effects
+      const ok = transitionTo(MORPH_STATES.CANCELLING, currentRunId);
+      if (ok && target) targetSnapshot = target;
+      return ok;
     }
-    return transitionTo(MORPH_STATES.CLOSING, currentRunId);
+    // Validate transition to CLOSING before mutating
+    const ok = transitionTo(MORPH_STATES.CLOSING, currentRunId);
+    if (ok && target) targetSnapshot = target;
+    return ok;
   }
 
   function settleClose(runId) {
