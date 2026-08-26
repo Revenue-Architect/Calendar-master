@@ -99,14 +99,14 @@ function animationDuration(animation) {
 
 function animationProgress(animation) {
   if (!animation) return null;
+  const computedProgress = animation.effect?.getComputedTiming?.().progress;
+  if (computedProgress != null && Number.isFinite(Number(computedProgress))) {
+    return Math.max(0, Math.min(1, Number(computedProgress)));
+  }
   const duration = animationDuration(animation);
   const currentTime = animation.currentTime;
   if (duration != null && currentTime != null && Number.isFinite(Number(currentTime))) {
     return Math.max(0, Math.min(1, Number(currentTime) / duration));
-  }
-  const computedProgress = animation.effect?.getComputedTiming?.().progress;
-  if (computedProgress != null && Number.isFinite(Number(computedProgress))) {
-    return Math.max(0, Math.min(1, Number(computedProgress)));
   }
   return null;
 }
@@ -366,6 +366,9 @@ export function MorphSurface({ transactionSnapshot, registry, transaction } = {}
       || snap.state === "cancelling";
 
     const liveSource = snap.key ? registry?.resolveMorphNode?.(snap.key, "source") : null;
+    if (liveSource && sourceNodeRef.current && sourceNodeRef.current !== liveSource) {
+      restoreSourcePaint(sourceNodeRef.current);
+    }
     if (liveSource) sourceNodeRef.current = liveSource;
 
     if (morphing && sourceNodeRef.current) suppressSourcePaint(sourceNodeRef.current);

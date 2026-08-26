@@ -240,7 +240,7 @@ function wait(ms = 40) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function createMockAnimation(node, keyframes, timing) {
+function createMockAnimation(node, keyframes, timing, { computedProgress } = {}) {
   let resolve;
   let reject;
   const duration = Number(timing?.duration) || 1;
@@ -248,10 +248,12 @@ function createMockAnimation(node, keyframes, timing) {
     node,
     playState: "running",
     currentTime: 0,
+    computedProgress,
     keyframes,
     timing,
     effect: {
       getTiming: () => ({ duration }),
+      getComputedTiming: () => ({ progress: animation.computedProgress }),
     },
     cancel() {
       animation.playState = "idle";
@@ -541,6 +543,44 @@ test("OPENING suppresses source paint and IDLE restores it without moving the so
   await paint();
   assert.equal(window.getComputedStyle(node).opacity, "1", "source paint restored");
   assertRectEqual(node.getBoundingClientRect(), SOURCE_A, "source layout after IDLE");
+});
+
+test("source paint suppression transfers to a connected replacement source", async (t) => {
+  const registry = createMorphRegistry();
+  const sourceA = registerSource(registry, {
+    rect: SOURCE_A,
+    titleRect: SOURCE_A_TITLE,
+    metaRect: SOURCE_A_META,
+    markerRect: SOURCE_A_MARKER,
+  });
+  sourceA.node.style.opacity = "0.6";
+  const transaction = createMorphTransaction();
+  const { container, paint } = await mountSurface(t, { transaction, registry });
+
+  const runId = transaction.startOpen({ key: KEY, source: sourceA.snapshot });
+  await paint();
+  assert.equal(sourceA.node.style.opacity, "0", "source A is suppressed while opening");
+
+  const sourceB = registerSource(registry, {
+    rect: SOURCE_B,
+    titleRect: SOURCE_B_TITLE,
+    metaRect: SOURCE_B_META,
+    markerRect: SOURCE_B_MARKER,
+  });
+  sourceB.node.style.opacity = "0.8";
+  await paint();
+
+  assert.equal(sourceA.node.style.opacity, "0.6", "source A is restored when ownership transfers");
+  assert.equal(sourceB.node.style.opacity, "0", "source B becomes the suppressed live source");
+
+  transaction.settleOpen(runId);
+  transaction.startClose({ target: sourceB.snapshot, runId });
+  transaction.settleClose(runId);
+  await paint();
+
+  assert.equal(sourceA.node.style.opacity, "0.6", "source A remains restored");
+  assert.equal(sourceB.node.style.opacity, "0.8", "source B is restored on IDLE");
+  assert.equal(overlayRoot(container), null, "overlay is removed after close");
 });
 
 test("shared title, meta, and marker start at source shared rects", async (t) => {
@@ -922,7 +962,11 @@ test("CANCELLING samples the active WAAPI frame at 20%, 50%, and 75% without set
     else delete MockElement.prototype.animate;
   });
 
-  for (const progress of [0.2, 0.5, 0.75]) {
+  for (const { timelineProgress, visualProgress } of [
+    { timelineProgress: 0.2, visualProgress: 0.31 },
+    { timelineProgress: 0.5, visualProgress: 0.82 },
+    { timelineProgress: 0.75, visualProgress: 0.91 },
+  ]) {
     const registry = createMorphRegistry();
     const { snapshot: sourceSnapshot } = registerSource(registry, {
       rect: SOURCE_A,
@@ -937,8 +981,9 @@ test("CANCELLING samples the active WAAPI frame at 20%, 50%, and 75% without set
     await paint();
 
     const openingShell = calls.slice(-4).find((animation) => animationLabel(animation.node) === "shell");
-    assert.ok(openingShell, `opening shell animation missing at ${progress}`);
-    openingShell.currentTime = openingShell.timing.duration * progress;
+    assert.ok(openingShell, `opening shell animation missing at ${timelineProgress}`);
+    openingShell.currentTime = openingShell.timing.duration * timelineProgress;
+    openingShell.computedProgress = visualProgress;
 
     let setProgressCalls = 0;
     const originalSetProgress = transaction.setProgress;
@@ -953,22 +998,27 @@ test("CANCELLING samples the active WAAPI frame at 20%, 50%, and 75% without set
     assert.equal(setProgressCalls, 0, "the interruption boundary must not synchronize through setProgress");
 
     const cancellingShell = calls.slice(-4).find((animation) => animationLabel(animation.node) === "shell");
-    assert.ok(cancellingShell, `cancelling shell animation missing at ${progress}`);
-    const actualOpeningFrame = interpolateIdentity(sourceSnapshot, destinationSnapshot, progress);
+    assert.ok(cancellingShell, `cancelling shell animation missing at ${timelineProgress}`);
+    const actualOpeningFrame = interpolateIdentity(sourceSnapshot, destinationSnapshot, visualProgress);
     assert.equal(
       cancellingShell.keyframes[0].transform,
       shellTransformFor(actualOpeningFrame, sourceSnapshot),
-      `cancelling keyframe must start at the actual ${progress} visual frame`,
+      `cancelling keyframe must start at the actual ${visualProgress} visual frame`,
+    );
+    assert.notEqual(
+      cancellingShell.keyframes[0].transform,
+      shellTransformFor(interpolateIdentity(sourceSnapshot, destinationSnapshot, timelineProgress), sourceSnapshot),
+      `cancelling keyframe must not use the ${timelineProgress} timeline frame when easing reports ${visualProgress}`,
     );
     assert.notEqual(
       cancellingShell.keyframes[0].transform,
       shellTransformFor(sourceSnapshot, sourceSnapshot),
-      `cancelling at ${progress} must not snap to the source`,
+      `cancelling at ${timelineProgress} must not snap to the source`,
     );
     assert.notEqual(
       cancellingShell.keyframes[0].transform,
       shellTransformFor(destinationSnapshot, sourceSnapshot),
-      `cancelling at ${progress} must not snap to the destination`,
+      `cancelling at ${timelineProgress} must not snap to the destination`,
     );
   }
 });
