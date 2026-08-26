@@ -45,6 +45,14 @@ const DEST = box(24, 40, 360, 480);
 const DEST_TITLE = box(48, 64, 200, 28);
 const DEST_META = box(280, 70, 80, 16);
 const DEST_MARKER = box(348, 68, 20, 20);
+const DEST_RADIUS = 20;
+const MID = box(36, 80, 260, 266);
+const MID_RADIUS = 16;
+const TITLE_MID = box(52, 96, 144, 22);
+const META_MID = box(214, 100, 64, 14);
+const MARKER_MID = box(266, 97, 18, 18);
+const OPEN_20 = box(43.2, 104, 200, 137.6);
+const OPEN_75 = box(30, 60, 310, 373);
 
 const DECOY = box(999, 8, 40, 24);
 
@@ -86,6 +94,10 @@ class MockElement {
       setProperty(name, value) {
         const camel = String(name).replace(/-([a-z])/g, (_, c) => c.toUpperCase());
         this[camel] = value;
+      },
+      removeProperty(name) {
+        const camel = String(name).replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+        delete this[camel];
       },
     };
   }
@@ -213,6 +225,7 @@ globalThis.window = {
       backgroundColor: el?.style?.backgroundColor || el?._paint?.backgroundColor || "",
       color: el?.style?.color || el?._paint?.color || "",
       borderColor: el?.style?.borderColor || el?._paint?.borderColor || "",
+      opacity: el?.style?.opacity || "1",
       fontFamily: "",
       fontSize: "",
       fontWeight: "",
@@ -263,7 +276,11 @@ function createCardNode({
 function assertRectEqual(actual, expected, label) {
   assert.ok(actual, `${label} rect is missing`);
   for (const key of ["x", "y", "width", "height", "left", "top", "right", "bottom"]) {
-    assert.equal(actual[key], expected[key], `${label} ${key}`);
+    const got = actual[key];
+    const want = expected[key];
+    if (got === want) continue;
+    if (typeof got === "number" && typeof want === "number" && Math.abs(got - want) < 1e-6) continue;
+    assert.equal(got, want, `${label} ${key}`);
   }
 }
 
@@ -446,6 +463,37 @@ test("source getBoundingClientRect is unchanged while the morph overlay is open"
   assertRectEqual(node.getBoundingClientRect(), before, "source before vs during");
 });
 
+test("OPENING suppresses source paint and IDLE restores it without moving the source box", async (t) => {
+  const registry = createMorphRegistry();
+  const { node, snapshot } = registerSource(registry, {
+    rect: SOURCE_A,
+    titleRect: SOURCE_A_TITLE,
+    metaRect: SOURCE_A_META,
+    markerRect: SOURCE_A_MARKER,
+  });
+  const transaction = createMorphTransaction();
+  const { paint } = await mountSurface(t, { transaction, registry });
+
+  const runId = transaction.startOpen({ key: KEY, source: snapshot });
+  await paint();
+
+  assertRectEqual(node.getBoundingClientRect(), SOURCE_A, "source layout while paint suppressed");
+  assert.equal(window.getComputedStyle(node).opacity, "0", "source paint suppressed");
+
+  transaction.settleOpen(runId);
+  await paint();
+  assert.equal(window.getComputedStyle(node).opacity, "0", "source paint stays suppressed in OPEN");
+  assertRectEqual(node.getBoundingClientRect(), SOURCE_A, "source layout in OPEN");
+
+  transaction.startClose({ target: snapshot, runId });
+  await paint();
+  assert.equal(window.getComputedStyle(node).opacity, "0", "source paint stays suppressed in CLOSING");
+  transaction.settleClose(runId);
+  await paint();
+  assert.equal(window.getComputedStyle(node).opacity, "1", "source paint restored");
+  assertRectEqual(node.getBoundingClientRect(), SOURCE_A, "source layout after IDLE");
+});
+
 test("shared title, meta, and marker start at source shared rects", async (t) => {
   const registry = createMorphRegistry();
   const { snapshot } = registerSource(registry, {
@@ -624,3 +672,251 @@ test("negative control: overlay origin turns red when source is offset +8px from
     "offset overlay title",
   );
 });
+
+test("OPENING at t=0.5 interpolates shell and shared layers without scale", async (t) => {
+  const registry = createMorphRegistry();
+  const { snapshot } = registerSource(registry, {
+    rect: SOURCE_A,
+    titleRect: SOURCE_A_TITLE,
+    metaRect: SOURCE_A_META,
+    markerRect: SOURCE_A_MARKER,
+  });
+  registerDestination(registry);
+  const transaction = createMorphTransaction();
+  const { container, paint } = await mountSurface(t, { transaction, registry });
+  const runId = transaction.startOpen({ key: KEY, source: snapshot });
+  assert.equal(transaction.setProgress(0.5, runId), true);
+  await paint();
+
+  const overlay = requireOverlay(container, "overlay not found");
+  assertRectEqual(overlay.getBoundingClientRect(), MID, "shell t=.5");
+  assert.equal(parseFloat(window.getComputedStyle(overlay).borderRadius), MID_RADIUS);
+  assertRectEqual(overlay.querySelector("[data-morph-title]")?.getBoundingClientRect(), TITLE_MID, "title t=.5");
+  assertRectEqual(overlay.querySelector("[data-morph-meta]")?.getBoundingClientRect(), META_MID, "meta t=.5");
+  assertRectEqual(overlay.querySelector("[data-morph-marker]")?.getBoundingClientRect(), MARKER_MID, "marker t=.5");
+  assert.equal(overlay.querySelector("[data-morph-title]").textContent, "Design Sync");
+  const title = overlay.querySelector("[data-morph-title]");
+  assert.ok(!title.style.transform || !String(title.style.transform).includes("scale"));
+  const destOnly = overlay.querySelector("[data-morph-destination-content]");
+  assert.ok(destOnly, "destination-only layer exists");
+  assert.equal(destOnly.style.opacity, "0");
+});
+
+test("destination-only content is available at settled OPEN", async (t) => {
+  const registry = createMorphRegistry();
+  const { snapshot } = registerSource(registry, {
+    rect: SOURCE_A,
+    titleRect: SOURCE_A_TITLE,
+    metaRect: SOURCE_A_META,
+    markerRect: SOURCE_A_MARKER,
+  });
+  const transaction = createMorphTransaction();
+  const { container, paint } = await mountSurface(t, { transaction, registry });
+  const runId = transaction.startOpen({ key: KEY, source: snapshot });
+  registerDestination(registry);
+  transaction.settleOpen(runId);
+  await paint();
+
+  const overlay = requireOverlay(container, "destination geometry not reached");
+  const destOnly = overlay.querySelector("[data-morph-destination-content]");
+  assert.ok(destOnly);
+  assert.equal(destOnly.style.opacity, "1");
+  assert.equal(destOnly.textContent, "destination-only content");
+  assertRectEqual(destOnly.getBoundingClientRect(), DEST, "destination-only box");
+  assert.ok(!overlay.style.transform || !String(overlay.style.transform).includes("scale"));
+});
+
+test("pre-existing source opacity restores exactly after IDLE", async (t) => {
+  const registry = createMorphRegistry();
+  const { node, snapshot } = registerSource(registry, {
+    rect: SOURCE_A,
+    titleRect: SOURCE_A_TITLE,
+    metaRect: SOURCE_A_META,
+    markerRect: SOURCE_A_MARKER,
+  });
+  node.style.opacity = "0.6";
+  const transaction = createMorphTransaction();
+  const { paint } = await mountSurface(t, { transaction, registry });
+  const runId = transaction.startOpen({ key: KEY, source: snapshot });
+  await paint();
+  assert.equal(node.style.opacity, "0");
+  transaction.settleOpen(runId);
+  transaction.startClose({ target: snapshot, runId });
+  transaction.settleClose(runId);
+  await paint();
+  assert.equal(node.style.opacity, "0.6");
+});
+
+test("closing uses the same geometry model reversed toward the host target", async (t) => {
+  const registry = createMorphRegistry();
+  const { snapshot } = registerSource(registry, {
+    rect: SOURCE_A,
+    titleRect: SOURCE_A_TITLE,
+    metaRect: SOURCE_A_META,
+    markerRect: SOURCE_A_MARKER,
+  });
+  registerDestination(registry);
+  const transaction = createMorphTransaction();
+  const { container, paint } = await mountSurface(t, { transaction, registry });
+  const runId = transaction.startOpen({ key: KEY, source: snapshot });
+  transaction.settleOpen(runId);
+  transaction.startClose({ target: snapshot, runId });
+  assert.equal(transaction.setProgress(0.5, runId), true);
+  await paint();
+
+  const overlay = requireOverlay(container, "close midpoint missing");
+  assertRectEqual(overlay.getBoundingClientRect(), MID, "close t=.5 is dest→source midpoint");
+});
+
+test("CANCELLING at 20% and 75% uses current opening progress as start", async (t) => {
+  const registry = createMorphRegistry();
+  const { snapshot } = registerSource(registry, {
+    rect: SOURCE_A,
+    titleRect: SOURCE_A_TITLE,
+    metaRect: SOURCE_A_META,
+    markerRect: SOURCE_A_MARKER,
+  });
+  registerDestination(registry);
+
+  for (const { progress, expected } of [
+    { progress: 0.2, expected: OPEN_20 },
+    { progress: 0.75, expected: OPEN_75 },
+  ]) {
+    const transaction = createMorphTransaction();
+    const { container, paint } = await mountSurface(t, { transaction, registry });
+    const runId = transaction.startOpen({ key: KEY, source: snapshot });
+    transaction.setProgress(progress, runId);
+    await paint();
+    assert.equal(transaction.startClose({ target: snapshot, runId }), true);
+    assert.equal(transaction.getState(), MORPH_STATES.CANCELLING);
+    await paint();
+    assertRectEqual(requireOverlay(container, "cancel origin missing").getBoundingClientRect(), expected, `cancel from ${progress}`);
+  }
+});
+
+test("CANCELLING at 50% matches the opening midpoint", async (t) => {
+  const registry = createMorphRegistry();
+  const { snapshot } = registerSource(registry, {
+    rect: SOURCE_A,
+    titleRect: SOURCE_A_TITLE,
+    metaRect: SOURCE_A_META,
+    markerRect: SOURCE_A_MARKER,
+  });
+  registerDestination(registry);
+  const transaction = createMorphTransaction();
+  const { container, paint } = await mountSurface(t, { transaction, registry });
+  const runId = transaction.startOpen({ key: KEY, source: snapshot });
+  transaction.setProgress(0.5, runId);
+  await paint();
+  transaction.startClose({ target: snapshot, runId });
+  await paint();
+  assertRectEqual(requireOverlay(container, "cancel 50 missing").getBoundingClientRect(), MID, "cancel from 50%");
+});
+
+test("CANCELLING does not snap to a changed close target", async (t) => {
+  const registry = createMorphRegistry();
+  const sourceA = registerSource(registry, {
+    rect: SOURCE_A,
+    titleRect: SOURCE_A_TITLE,
+    metaRect: SOURCE_A_META,
+    markerRect: SOURCE_A_MARKER,
+  });
+  registerDestination(registry);
+  const transaction = createMorphTransaction();
+  const { container, paint } = await mountSurface(t, { transaction, registry });
+  const runId = transaction.startOpen({ key: KEY, source: sourceA.snapshot });
+  transaction.setProgress(0.5, runId);
+  await paint();
+  sourceA.unregister();
+  const sourceB = registerSource(registry, {
+    rect: SOURCE_B,
+    titleRect: SOURCE_B_TITLE,
+    metaRect: SOURCE_B_META,
+    markerRect: SOURCE_B_MARKER,
+  });
+  transaction.startClose({ target: registry.snapshotMorphNode(KEY, "source"), runId });
+  await paint();
+  const overlay = requireOverlay(container, "cancel origin missing");
+  assertRectEqual(overlay.getBoundingClientRect(), MID, "cancel starts at opening progress");
+  assert.notEqual(overlay.getBoundingClientRect().x, SOURCE_B.x);
+  assert.ok(sourceB.node.isConnected);
+});
+
+test("stale WAAPI completion from an old run does not settle a newer run", async (t) => {
+  const previous = MockElement.prototype.animate;
+  const calls = [];
+  MockElement.prototype.animate = function animate(keyframes, timing) {
+    let resolve;
+    let reject;
+    const animation = {
+      playState: "running",
+      keyframes,
+      timing,
+      cancel() {
+        animation.playState = "idle";
+        reject?.(new Error("cancelled"));
+      },
+      finished: new Promise((res, rej) => {
+        resolve = res;
+        reject = rej;
+      }),
+      finish() {
+        animation.playState = "finished";
+        resolve?.();
+      },
+    };
+    calls.push(animation);
+    return animation;
+  };
+  t.after(() => {
+    if (previous) MockElement.prototype.animate = previous;
+    else delete MockElement.prototype.animate;
+  });
+
+  const registry = createMorphRegistry();
+  const { snapshot } = registerSource(registry, {
+    rect: SOURCE_A,
+    titleRect: SOURCE_A_TITLE,
+    metaRect: SOURCE_A_META,
+    markerRect: SOURCE_A_MARKER,
+  });
+  const transaction = createMorphTransaction();
+  const { paint } = await mountSurface(t, { transaction, registry });
+  transaction.startOpen({ key: KEY, source: snapshot });
+  await paint();
+  const stale = calls[0];
+  assert.ok(stale);
+
+  transaction.startClose({ target: snapshot });
+  transaction.settleClose(transaction.getRunId());
+  const firstRun = transaction.getRunId();
+  transaction.startOpen({ key: KEY, source: snapshot });
+  await paint();
+  const secondRun = transaction.getRunId();
+  assert.notEqual(secondRun, firstRun);
+  stale.finish();
+  await wait(20);
+  assert.equal(transaction.getState(), MORPH_STATES.OPENING);
+  assert.equal(transaction.getRunId(), secondRun);
+});
+
+test("rapid close then reopen renders the new opening origin", async (t) => {
+  const registry = createMorphRegistry();
+  const { snapshot } = registerSource(registry, {
+    rect: SOURCE_A,
+    titleRect: SOURCE_A_TITLE,
+    metaRect: SOURCE_A_META,
+    markerRect: SOURCE_A_MARKER,
+  });
+  const transaction = createMorphTransaction();
+  const { container, paint } = await mountSurface(t, { transaction, registry });
+  let runId = transaction.startOpen({ key: KEY, source: snapshot });
+  await paint();
+  transaction.startClose({ target: snapshot, runId });
+  transaction.settleClose(runId);
+  await paint();
+  runId = transaction.startOpen({ key: KEY, source: snapshot });
+  await paint();
+  assertRectEqual(requireOverlay(container, "reopen overlay missing").getBoundingClientRect(), SOURCE_A, "reopen origin");
+});
+
