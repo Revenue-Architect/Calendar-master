@@ -105,8 +105,14 @@ function extractSharedElements(rootNode, explicitShared = {}) {
   if (markerEl && isElementConnected(markerEl)) {
     const rect = markerEl.getBoundingClientRect();
     const type = markerEl.getAttribute?.("data-morph-marker") || "marker";
+    let color = markerEl.style?.backgroundColor || markerEl.style?.background || "";
+    if (!color && typeof window !== "undefined" && typeof window.getComputedStyle === "function") {
+      const computed = window.getComputedStyle(markerEl);
+      color = computed.backgroundColor || computed.color || "";
+    }
     shared.marker = Object.freeze({
       type,
+      color,
       rect: Object.freeze({
         x: rect.x,
         y: rect.y,

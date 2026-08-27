@@ -3,12 +3,14 @@ import { MORPH_EASING, MORPH_TIMING } from "./morphTokens.js";
 import {
   interpolateIdentity,
   interpolateSharedLayer,
-  isDestinationContentRevealed,
   restoreSourcePaint,
   suppressSourcePaint,
 } from "./morphInterpolate.js";
 
 const SHARED_LAYERS = ["title", "meta", "marker"];
+/* The visual carrier belongs above the neutral Sheet scrim while it is moving.
+   Keeping this one semantic layer avoids scattered z-index exceptions. */
+const MORPH_OVERLAY_Z_INDEX = 60;
 
 function viewportBox(rect) {
   if (!rect) return null;
@@ -35,6 +37,10 @@ function sharedTypeStyle(shared, rect = shared?.rect) {
   if (fontSize) style.fontSize = fontSize;
   if (fontWeight) style.fontWeight = fontWeight;
   if (lineHeight) style.lineHeight = lineHeight;
+  if (shared.type === "marker" || (!shared.text && rect && rect.width <= 20 && rect.height <= 20)) {
+    style.borderRadius = "9999px";
+    if (color) style.backgroundColor = color;
+  }
   return style;
 }
 
@@ -243,19 +249,33 @@ function sharedStyleForAnimation(from, to, textSource) {
 }
 
 function shellKeyframe(identity, base) {
+  const fromRect = identity.rect;
+  const toRect = base.rect;
+  const scaleX = toRect?.width ? fromRect.width / toRect.width : 1;
+  const scaleY = toRect?.height ? fromRect.height / toRect.height : 1;
+  const r = identity.radius ?? 0;
+  const rx = scaleX > 0 ? r / scaleX : r;
+  const ry = scaleY > 0 ? r / scaleY : r;
   return {
     transform: shellTransform(identity, base),
-    borderRadius: `${identity.radius ?? 0}px`,
+    borderRadius: `${rx}px / ${ry}px`,
     backgroundColor: identity.paint?.background ?? "",
   };
 }
 
 function sharedKeyframe(identity, base) {
+  const isMarker = identity.type === "marker" || (!identity.text && identity.rect?.width <= 20 && identity.rect?.height <= 20);
+  const color = identity.color || identity.style?.color || "";
   return {
     transform: layerTransform(identity, base),
     width: `${identity.rect.width}px`,
     height: `${identity.rect.height}px`,
-    color: identity.color || identity.style?.color || "",
+    fontSize: identity.fontSize || identity.style?.fontSize || undefined,
+    fontWeight: identity.fontWeight || identity.style?.fontWeight || undefined,
+    lineHeight: identity.lineHeight || identity.style?.lineHeight || undefined,
+    color,
+    backgroundColor: isMarker ? color : undefined,
+    borderRadius: isMarker ? "9999px" : undefined,
   };
 }
 
@@ -336,7 +356,7 @@ function cancelAnimationRecord(record) {
   }
 }
 
-export function MorphSurface({ transactionSnapshot, registry, transaction } = {}) {
+export function MorphSurface({ transactionSnapshot, registry, transaction, hideAtRest = false } = {}) {
   const overlayRef = useRef(null);
   const shellRef = useRef(null);
   const sourceNodeRef = useRef(null);
@@ -351,12 +371,6 @@ export function MorphSurface({ transactionSnapshot, registry, transaction } = {}
   const plan = animationPlan(transactionSnapshot, registry, interruptFromRef, animationRef);
   const composited = supportsCompositedAnimation() && Boolean(plan?.from?.rect && plan?.to?.rect);
   const dest = destFromRegistry(registry, transactionSnapshot?.key);
-  const revealDestination = isDestinationContentRevealed({
-    progress: frame?.progress ?? transactionSnapshot?.inFlightProgress ?? 0,
-    state,
-    fromRect: transactionSnapshot?.sourceSnapshot?.rect,
-    toRect: dest?.rect,
-  });
 
   useLayoutEffect(() => {
     const snap = transactionSnapshot || {};
@@ -416,7 +430,9 @@ export function MorphSurface({ transactionSnapshot, registry, transaction } = {}
     animationRef.current = null;
   }, []);
 
-  if (!frame?.rect) return null;
+  /* At rest the real Inspector is the single destination. Retaining only source
+     paint suppression in this state prevents a duplicate card behind its form. */
+  if (!frame?.rect || (hideAtRest && state === "open")) return null;
 
   const shared = frame.shared || {};
   const markerType = shared.marker?.type || "marker";
@@ -426,6 +442,7 @@ export function MorphSurface({ transactionSnapshot, registry, transaction } = {}
     overflow: "visible",
     borderRadius: composited ? "0px" : `${frame.radius ?? 0}px`,
     backgroundColor: composited ? "transparent" : frame.paint?.background ?? "",
+    zIndex: MORPH_OVERLAY_Z_INDEX,
   };
   const shellStyle = composited
     ? shellStyleForAnimation(plan.from, plan.to)
@@ -454,6 +471,7 @@ export function MorphSurface({ transactionSnapshot, registry, transaction } = {}
     {
       ref: overlayRef,
       "data-morph-overlay": "",
+      "aria-hidden": "true",
       style: overlayStyle,
     },
     createElement("div", {
@@ -464,15 +482,18 @@ export function MorphSurface({ transactionSnapshot, registry, transaction } = {}
     renderLayer("title", "data-morph-title"),
     renderLayer("meta", "data-morph-meta"),
     renderLayer("marker", "data-morph-marker", markerType),
+    /* This remains a geometry-only staging marker for generic MorphSurface
+       diagnostics. Event Inspector content is the real Sheet DOM, not a copied
+       overlay string, and remains hidden until its shell has arrived. */
     destBox
       ? createElement("div", {
         "data-morph-destination-content": "",
         style: {
           ...destBox,
-          opacity: revealDestination ? "1" : "0",
-          visibility: revealDestination ? "visible" : "hidden",
+          opacity: "0",
+          visibility: "hidden",
         },
-      }, "destination-only content")
+      })
       : null,
   );
 }

@@ -791,7 +791,7 @@ test("OPENING at t=0.5 interpolates shell and shared layers without scale", asyn
   assert.equal(destOnly.style.opacity, "0");
 });
 
-test("destination-only content is available at settled OPEN", async (t) => {
+test("destination stage is geometry-only at settled OPEN", async (t) => {
   const registry = createMorphRegistry();
   const { snapshot } = registerSource(registry, {
     rect: SOURCE_A,
@@ -809,8 +809,9 @@ test("destination-only content is available at settled OPEN", async (t) => {
   const overlay = requireOverlay(container, "destination geometry not reached");
   const destOnly = overlay.querySelector("[data-morph-destination-content]");
   assert.ok(destOnly);
-  assert.equal(destOnly.style.opacity, "1");
-  assert.equal(destOnly.textContent, "destination-only content");
+  assert.equal(destOnly.style.opacity, "0");
+  assert.equal(destOnly.style.visibility, "hidden");
+  assert.equal(destOnly.textContent, "");
   assertRectEqual(destOnly.getBoundingClientRect(), DEST, "destination-only box");
   assert.ok(!overlay.style.transform || !String(overlay.style.transform).includes("scale"));
 });

@@ -9,7 +9,9 @@ export default function DayAllDayEventRow({ T, surface, event, dateKey, span, in
   return (
     <EventMorphSource event={event} dateKey={dateKey} view="day" lane="allday">
       <RowWithJoin T={T} surface={surface} link={event.link} title={event.title}
-        padding="px-2.5 py-2" onOpen={() => onOpen(event)}>
+        padding="px-2.5 py-2" onOpen={(interactionEvent) => onOpen(event, {
+          keyboard: interactionEvent?.detail === 0,
+        })}>
         <span data-morph-marker className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: catColor(event.cat) }} />
         <span data-morph-title className="nb-lead truncate flex-1">{event.title}</span>
         {span > 1 && <span data-morph-meta style={{ fontFamily: MONO, color: T.dimText }} className="nb-data shrink-0">{index}/{span}</span>}

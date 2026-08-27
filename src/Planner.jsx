@@ -4069,7 +4069,7 @@ export default function Planner() {
                     timelineScrollSessionRef.current.end();
                   }}
                   onOpenDay={(k) => { beep("tick"); if (k !== dateKey) jumpTo(k); setZoom("day"); }}
-                  onOpenEvent={(event, morphOrigin) => openDeferredEventInspector(event, morphOrigin, { dateKey, onNavigate: jumpTo })}
+                  onOpenEvent={(event, morphOrigin, options) => openDeferredEventInspector(event, morphOrigin, { dateKey, onNavigate: jumpTo, instant: options?.keyboard })}
                   onOpenTask={(id, key) => { beep("click"); if (key !== dateKey) jumpTo(key); setTimeout(() => setInspect({ kind: "task", id }), key !== dateKey ? 80 : 0); }}
                   onSlotPick={(s) => { beep("click"); if (s.date !== dateKey) jumpTo(s.date); setComposer({ kind: "event", date: s.date, start: s.start, dur: s.dur }); }}
                   onMoveEvent={moveEventTo} beep={beep} buzz={buzz}
@@ -4203,7 +4203,7 @@ export default function Planner() {
                     /* Hide the source while Inspector wears its rect; otherwise the morph
                        reads as a panel arriving over a duplicate card. */
                     return (
-                      <div key={e.id} data-event-id={e.id} className={`nb-timeline-lane absolute ${held ? "nb-timeline-lane-active" : "nb-hover-tile"}`} style={{ visibility: inspect?.kind === "event" && inspect.id === e.id ? "hidden" : undefined, top: top + 2, height: h, left: `${(e.lane / e.cols) * 100}%`, width: `calc(${100 / e.cols}% - 6px)`, zIndex: held ? 20 : 1, opacity: held && gesture.overDay ? 0.35 : 1, pointerEvents: "auto" }}>
+                      <div key={e.id} data-event-id={e.id} className={`nb-timeline-lane absolute ${held ? "nb-timeline-lane-active" : "nb-hover-tile"}`} style={{ top: top + 2, height: h, left: `${(e.lane / e.cols) * 100}%`, width: `calc(${100 / e.cols}% - 6px)`, zIndex: held ? 20 : 1, opacity: held && gesture.overDay ? 0.35 : 1, pointerEvents: "auto" }}>
                         <EventMorphSource event={e} dateKey={e.date ?? dateKey} view="day" lane="timeline">
                           <div role="button" tabIndex={0} aria-label={e.title}
                           onPointerDown={(ev) => eventDown(ev, e)} onPointerUp={(ev) => eventUp(ev, e)}
@@ -4213,7 +4213,7 @@ export default function Planner() {
                             if (clickFollowsGesture()) return;
                             disarmHold();
                             tappedRef.current = false;
-                            openDayTimelineEvent(e);
+                            openDayTimelineEvent(e, { keyboard: true });
                           }}
                           onContextMenu={(ev) => ev.preventDefault()}
                           className="relative w-full h-full overflow-hidden"

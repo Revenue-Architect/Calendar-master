@@ -660,6 +660,26 @@ export function plannerStyles({ T, preferences }) {
         .nb-scrim.nb-fluid-closing{animation:nbscrimout 240ms ease forwards}
         .nb-scrim.nb-fluid-closing:has(> .nb-fluid[data-fluid-origin="notch"]){animation:nbscrimout var(--nb-morph-close,${MORPH_CLOSE_MS}ms) ease forwards}
         @keyframes nbscrimout{0%,25%{opacity:1}100%{opacity:0}}
+        .nb-object-scrim{animation:nbobjectscrim 280ms cubic-bezier(.22,1,.36,1) forwards;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
+        @keyframes nbobjectscrim{0%,30%{opacity:0}100%{opacity:1}}
+        .nb-object-scrim.nb-fluid-closing{animation:nbobjectscrimout 240ms ease forwards}
+        @keyframes nbobjectscrimout{0%{opacity:1}70%,100%{opacity:0}}
+        [data-event-inspector-surface="morph"][data-morph-presentation="opening"] .nb-notch-body{
+          animation:nbinspectorreveal 280ms cubic-bezier(.22,1,.36,1) both;
+        }
+        @keyframes nbinspectorreveal{
+          0%,35%{opacity:0;transform:translateY(8px)}
+          70%{opacity:.8;transform:translateY(2px)}
+          100%{opacity:1;transform:none}
+        }
+        [data-event-inspector-surface="morph"][data-morph-presentation="closing"] .nb-notch-body,
+        [data-event-inspector-surface="morph"][data-morph-presentation="cancelling"] .nb-notch-body{
+          animation:nbinspectorfadeout 240ms ease both;
+        }
+        @keyframes nbinspectorfadeout{
+          0%{opacity:1;transform:none}
+          35%,100%{opacity:0;transform:translateY(-6px)}
+        }
         .nb-sheet-h{transition:height 320ms cubic-bezier(.2,.8,.25,1)}
         .nb-edit-actions{transition:width 360ms cubic-bezier(.23,1,.32,1),background-color 260ms ease,box-shadow 260ms ease}
         .nb-edit-liquid{transition:left 360ms cubic-bezier(.23,1,.32,1)}

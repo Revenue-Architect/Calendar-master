@@ -25,6 +25,7 @@ import { CARD_R, CATS, REPEATS, catColor } from "./constants.js";
 import { fmtDay, plannedLabel } from "./dateLabels.js";
 import Reveal from "../motion/Reveal.jsx";
 import Sheet from "../motion/Sheet.jsx";
+import EventInspectorSurface from "./EventInspectorSurface.jsx";
 import { MONO, SERIF } from "../../design/typography.js";
 import { createMotivationLedger } from "../../domains/gamification/index.js";
 import { uid } from "../../shared/ids.js";
@@ -132,6 +133,9 @@ function makeMotionDescriptor({ composer, inspect, inspectRecord, noteEdit, peek
     };
   }
   if (inspectRecord && inspect?.kind === "event") {
+    /* Keyboard activation is intentionally semantic, not spatial. It reaches
+       the same Inspector without borrowing geometry from the focused card. */
+    if (inspect.motion === "instant") return null;
     const id = inspectRecord.id || inspect.id;
     if (id) {
       const origin = inspect.morphOrigin;
@@ -143,18 +147,7 @@ function makeMotionDescriptor({ composer, inspect, inspectRecord, noteEdit, peek
           meta: { surface: "inspector", id, dateKey: origin.dateKey, view: origin.view, lane: origin.lane },
         };
       }
-      const fallback = createEventMorphOrigin(inspectRecord, {
-        dateKey,
-        view: "day",
-        lane: "timeline",
-      });
-      if (!fallback) return null;
-      return {
-        target: "inspector",
-        kind: "event",
-        key: fallback.key,
-        meta: { surface: "inspector", id, dateKey },
-      };
+      return null;
     }
   }
   if (inspectRecord && inspect?.kind === "task") {
@@ -336,6 +329,12 @@ export default function PlannerSurfaceHost(props) {
     [composer, inspect, inspectRecord, noteEdit, peekDay, dateKey],
   );
   const motionKey = motion?.key || null;
+  const isEventInspector = inspect?.kind === "event" && motion?.target === "inspector" && motion?.kind === "event";
+  const hasEventMorphSource = isEventInspector && Boolean(
+    morphRegistry.resolveMorphNode?.(motionKey, "source")
+    || morphRegistry.getLastMorphSnapshot?.(motionKey, "source"),
+  );
+  const usesPhysicalEventInspector = Boolean(isEventInspector && hasEventMorphSource);
   const destinationRef = useMorphDestination({
     key: motionKey,
     kind: motion?.kind || "event",
@@ -347,6 +346,8 @@ export default function PlannerSurfaceHost(props) {
     closeSnapshotReleaseRef.current = createMorphCloseSnapshotRelease({ registry: morphRegistry });
   }
   const transactionRef = useRef(null);
+  const eventMorphCloseRef = useRef(null);
+  const eventMorphCloseTimerRef = useRef(null);
   const [transactionSnapshot, setTransactionSnapshot] = useState(() => ({
     state: MORPH_STATES.IDLE,
     runId: 0,
@@ -359,11 +360,50 @@ export default function PlannerSurfaceHost(props) {
     transactionRef.current = createMorphTransaction({
       onStateChange: (snapshot) => {
         closeSnapshotReleaseRef.current.onTransactionStateChange(snapshot);
+        const pendingClose = eventMorphCloseRef.current;
+        if (pendingClose && snapshot.runId > pendingClose.runId) {
+          window.clearTimeout(eventMorphCloseTimerRef.current);
+          eventMorphCloseTimerRef.current = null;
+          eventMorphCloseRef.current = null;
+        } else if (pendingClose
+          && snapshot.state === MORPH_STATES.IDLE
+          && snapshot.runId === pendingClose.runId) {
+          window.clearTimeout(eventMorphCloseTimerRef.current);
+          eventMorphCloseTimerRef.current = null;
+          eventMorphCloseRef.current = null;
+          pendingClose.complete();
+        }
         setTransactionSnapshot(snapshot);
       },
     });
   }
   const transaction = transactionRef.current;
+
+  useEffect(() => () => {
+    window.clearTimeout(eventMorphCloseTimerRef.current);
+  }, []);
+
+  const closePhysicalEventInspector = () => {
+    const current = transaction.getSnapshot();
+    if (!isMorphActive(current.state) || eventMorphCloseRef.current?.runId === current.runId) {
+      if (current.state === MORPH_STATES.IDLE) setInspect(null);
+      return;
+    }
+    if (!startCloseWithLatestSource({ transaction, snapshot: current, registry: morphRegistry })) {
+      setInspect(null);
+      return;
+    }
+    closeSnapshotReleaseRef.current.trackClose({ key: current.key, runId: current.runId });
+    eventMorphCloseRef.current = {
+      runId: current.runId,
+      complete: () => setInspect(null),
+    };
+    window.clearTimeout(eventMorphCloseTimerRef.current);
+    eventMorphCloseTimerRef.current = window.setTimeout(
+      () => transaction.settleClose(current.runId),
+      MORPH_TIMING.OBJECT_CLOSE_MS + 80,
+    );
+  };
 
   useEffect(() => {
     let timer = null;
@@ -410,6 +450,7 @@ export default function PlannerSurfaceHost(props) {
     fromRect: transactionSnapshot.sourceSnapshot?.rect,
     toRect: destinationSnapshot?.rect,
   });
+  const InspectorSurface = inspect?.kind === "event" ? EventInspectorSurface : Sheet;
 
   return (
     <>
@@ -486,7 +527,11 @@ export default function PlannerSurfaceHost(props) {
 
       {/* ══ INSPECTOR ══ */}
       {inspectRecord && (
-        <Sheet T={T} destinationRef={motion?.target === "inspector" ? destinationRef : null} title={inspectSheetTitle}
+        <InspectorSurface T={T} destinationRef={usesPhysicalEventInspector ? destinationRef : null} title={inspectSheetTitle}
+          physical={usesPhysicalEventInspector}
+          instant={inspect?.motion === "instant"}
+          motionState={usesPhysicalEventInspector ? transactionSnapshot.state : null}
+          onMorphClose={usesPhysicalEventInspector ? closePhysicalEventInspector : null}
           closeSignal={sheetCloseSignals.inspect}
           headerAction={(
             <FluidEditActions T={T} editing={detailEditing} dirty={hasDetailDraft(draft)}
@@ -740,14 +785,20 @@ export default function PlannerSurfaceHost(props) {
           {/* Header reads as a title card: what, when, which day — centred, with the
               detail rows below it. Every line of it is the field itself (§4.6). */}
           <div className="text-center pt-1 pb-4">
-            <InlineText T={T} value={inspectDraft.title} ariaLabel="Event title"
-              onCommit={(title) => editEntry({ title })}
-              onBeginEdit={beginDetailEdit}
-              className="text-2xl font-bold tracking-tight leading-tight" style={{ textAlign: "center" }} />
-            {inspectDraft.allDay ? (
-              <p className="text-base font-semibold mt-1.5">All day</p>
-            ) : (
-              <div className="flex items-center justify-center gap-1.5 mt-1.5">
+            <div className="flex items-center justify-center gap-2">
+              <span data-morph-marker aria-hidden="true" className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: catColor(inspectDraft.cat) }} />
+              <span data-morph-title className="min-w-0">
+                <InlineText T={T} value={inspectDraft.title} ariaLabel="Event title"
+                  onCommit={(title) => editEntry({ title })}
+                  onBeginEdit={beginDetailEdit}
+                  className="text-2xl font-bold tracking-tight leading-tight" style={{ textAlign: "center" }} />
+              </span>
+            </div>
+            <div data-morph-meta>
+              {inspectDraft.allDay ? (
+                <p className="text-base font-semibold mt-1.5">All day</p>
+              ) : (
+                <div className="flex items-center justify-center gap-1.5 mt-1.5">
                 <InlineStamp T={T} dark={dark} type="time" ariaLabel="Starts" value={hhmm(inspectDraft.start)}
                   display={tm(inspectDraft.start)} onCommit={(v) => v && editEntry({ start: fromHhmm(v) })} onBeginEdit={() => openInspectField("start")}
                   className="text-base font-semibold" />
@@ -759,8 +810,9 @@ export default function PlannerSurfaceHost(props) {
                     const end = fromHhmm(v);
                     editEntry({ dur: durationFromClockRange(inspectDraft.start, end) });
                   }} onBeginEdit={() => openInspectField("duration")} className="text-base font-semibold" />
-              </div>
-            )}
+                </div>
+              )}
+            </div>
             <InlineStamp T={T} dark={dark} type="date" ariaLabel="Day"
               value={splitId(inspect.id).date || inspectDraft.date || dateKey}
               display={fmtDay(splitId(inspect.id).date || inspectDraft.date || dateKey)}
@@ -919,7 +971,7 @@ export default function PlannerSurfaceHost(props) {
             </button>
             <button onClick={() => removeItem(inspect.kind, inspect.id)} style={{ fontFamily: MONO, color: NOW_RED, border: `1px solid ${T.line}` }} className="nb-tap nb-hover-danger w-full py-3 mt-2 nb-label">DELETE</button>
           </>}
-        </Sheet>
+        </InspectorSurface>
       )}
 
       {discardAsk && (
@@ -1337,6 +1389,7 @@ export default function PlannerSurfaceHost(props) {
         transactionSnapshot={transactionSnapshot}
         registry={morphRegistry}
         transaction={transaction}
+        hideAtRest={usesPhysicalEventInspector}
       />
     </>
   );

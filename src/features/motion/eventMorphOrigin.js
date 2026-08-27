@@ -34,13 +34,16 @@ export function createEventMorphOrigin(event, {
 
 /** Creates a click/tap handler without coupling timeline gesture ownership to motion. */
 export function createEventInspectorOpener({ beep, setInspect, dateKey, view, lane }) {
-  return (event) => {
+  return (event, { keyboard = false } = {}) => {
     if (!event?.id) return;
     beep("click");
     setInspect({
       kind: "event",
       id: event.id,
       morphOrigin: createEventMorphOrigin(event, { dateKey: event.date ?? dateKey, view, lane }),
+      /* A key opens the same Inspector but must not invent a spatial origin.
+         The pointer gesture remains the only authority for physical travel. */
+      motion: keyboard ? "instant" : undefined,
     });
   };
 }
@@ -60,7 +63,7 @@ export function useDeferredEventInspector({ beep, setInspect }) {
 
   useEffect(() => cancelPendingEventOpen, [cancelPendingEventOpen]);
 
-  const openDeferredEventInspector = useCallback((event, origin, { dateKey, onNavigate }) => {
+  const openDeferredEventInspector = useCallback((event, origin, { dateKey, onNavigate, instant = false }) => {
     if (!event?.id) return;
     cancelPendingEventOpen();
     const targetDate = origin?.dateKey ?? event.date ?? dateKey;
@@ -75,7 +78,12 @@ export function useDeferredEventInspector({ beep, setInspect }) {
     timerRef.current = setTimeout(() => {
       if (request !== requestRef.current) return;
       timerRef.current = null;
-      setInspect({ kind: "event", id: event.id, morphOrigin: resolvedOrigin });
+      setInspect({
+        kind: "event",
+        id: event.id,
+        morphOrigin: resolvedOrigin,
+        motion: instant ? "instant" : undefined,
+      });
     }, targetDate !== dateKey ? 80 : 0);
   }, [beep, cancelPendingEventOpen, setInspect]);
 

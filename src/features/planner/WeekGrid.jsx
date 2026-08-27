@@ -421,7 +421,7 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
     e.preventDefault();
     disarm();
     tapRef.current = false;
-    onOpenEvent(event, morphOrigin);
+    onOpenEvent(event, morphOrigin, { keyboard: true });
   };
 
   useEffect(() => () => {
@@ -469,7 +469,9 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
                   return (
                     <div key={e.segmentId ?? e.id} className="relative overflow-hidden" style={{ background: surface, borderRadius: 6 }}>
                       <EventMorphSource origin={morphOrigin}>
-                        <button data-test="week-allday-event" data-event-id={e.id} onClick={() => onOpenEvent(e, morphOrigin)} className="nb-tap flex w-full items-center gap-1 py-0.5 text-left overflow-hidden"
+                        <button data-test="week-allday-event" data-event-id={e.id} onClick={(interactionEvent) => onOpenEvent(e, morphOrigin, {
+                          keyboard: interactionEvent.detail === 0,
+                        })} className="nb-tap flex w-full items-center gap-1 py-0.5 text-left overflow-hidden"
                           style={{ paddingLeft: 6, paddingRight: href ? 20 : 6 }}>
                           <span data-morph-marker className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: catColor(e.cat) }} />
                           <span data-morph-title className="font-semibold truncate" style={{ fontSize: 10 }}>{e.title}</span>

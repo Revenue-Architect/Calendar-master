@@ -133,6 +133,58 @@ test.describe("Event semantic morph sources", () => {
     }).toBeLessThan(.02);
   });
 
+  test("a pointer-opened Event uses its live Inspector as the morph destination", async ({ page }) => {
+    await openPlanner(page);
+    await quickAdd(page, "Physical Event destination today 10am 60m");
+
+    const source = page.locator('[data-event-id]').filter({ hasText: "Physical Event destination" }).locator('[data-morph-key]');
+    await source.scrollIntoViewIfNeeded();
+    const sourceRect = await source.boundingBox();
+    await source.click();
+
+    const sheet = page.getByTestId("sheet");
+    const frameZero = await page.locator("[data-morph-overlay]").evaluate((overlay) => {
+      const shell = overlay.querySelector("[data-morph-shell]");
+      const title = overlay.querySelector("[data-morph-title]");
+      const animation = shell?.getAnimations().find((candidate) => (
+        Number(candidate.effect?.getTiming?.().duration) > 0
+      ));
+      animation?.pause();
+      if (animation) animation.currentTime = 0;
+      const shellRect = shell?.getBoundingClientRect();
+      const titleTransform = getComputedStyle(title).transform;
+      const matrix = new DOMMatrixReadOnly(titleTransform === "none" ? "matrix(1, 0, 0, 1, 0, 0)" : titleTransform);
+      return {
+        shellRect: shellRect && { left: shellRect.left, top: shellRect.top, width: shellRect.width, height: shellRect.height },
+        titleTransform,
+        titleScaleX: matrix.a,
+        titleScaleY: matrix.d,
+        animationCount: shell?.getAnimations().length ?? 0,
+        animationDuration: Number(animation?.effect?.getTiming?.().duration),
+      };
+    });
+    await expect(sheet).toHaveAttribute("data-event-inspector-surface", "morph");
+    await expect(sheet).toHaveAttribute("data-morph-presentation", "opening");
+    await expect(sheet).toHaveCSS("visibility", "hidden");
+    await expect(sheet.locator("[data-morph-title]")).toHaveCount(1);
+    await expect(sheet.locator("[data-morph-meta]")).toHaveCount(1);
+    await expect(sheet.locator("[data-morph-marker]")).toHaveCount(1);
+    expect(frameZero.shellRect).not.toBeNull();
+    expect(frameZero.animationCount, "the compositor shell must expose its running WAAPI animation").toBeGreaterThan(0);
+    expect(frameZero.animationDuration).toBeGreaterThan(0);
+    expect(Math.abs(frameZero.shellRect.left - sourceRect.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(frameZero.shellRect.top - sourceRect.y)).toBeLessThanOrEqual(1);
+    expect(Math.abs(frameZero.shellRect.width - sourceRect.width)).toBeLessThanOrEqual(1);
+    expect(Math.abs(frameZero.shellRect.height - sourceRect.height)).toBeLessThanOrEqual(1);
+    expect(frameZero.titleScaleX, "shared title must translate at 1x, never inherit the shell scale").toBeCloseTo(1);
+    expect(frameZero.titleScaleY, "shared title must translate at 1x, never inherit the shell scale").toBeCloseTo(1);
+
+    await page.keyboard.press("Escape");
+    await expect(sheet).toHaveAttribute("data-morph-presentation", /^(closing|cancelling)$/);
+    await expect(sheet).toHaveCSS("visibility", "hidden");
+    await expect(sheet).toHaveCount(0, { timeout: 3000 });
+  });
+
   test("Week keyboard activation opens exactly one Inspector without reviving pointer ownership", async ({ page }) => {
     await openPlanner(page);
     await quickAdd(page, "Keyboard source today 10am 60m");
@@ -142,14 +194,15 @@ test.describe("Event semantic morph sources", () => {
     await card.focus();
     await page.keyboard.press("Enter");
     await expect(page.getByTestId("sheet")).toHaveCount(1);
-    await expect(page.locator("[data-morph-overlay]")).toHaveCount(1);
+    await expect(page.locator("[data-morph-overlay]")).toHaveCount(0);
+    await expect(page.getByTestId("sheet")).toHaveAttribute("data-event-inspector-surface", "instant");
     await page.keyboard.press("Escape");
     await expect(page.getByTestId("sheet")).toHaveCount(0);
 
     await card.focus();
     await page.keyboard.press("Space");
     await expect(page.getByTestId("sheet")).toHaveCount(1);
-    await expect(page.locator("[data-morph-overlay]")).toHaveCount(1);
+    await expect(page.locator("[data-morph-overlay]")).toHaveCount(0);
   });
 
   test("a delayed Week open is cancelled by Escape and superseded by the latest Event", async ({ page }) => {
@@ -1229,7 +1282,7 @@ test.describe("sheet exits", () => {
   test("a detail sheet leaves along the path it arrived on", async ({ page }) => {
     await openPlanner(page);
     await page.keyboard.press("ControlOrMeta+k");
-    await page.getByTestId("palette-input").fill("Standup today 10am 30m");
+    await page.getByTestId("palette-input").fill("Standup");
     await page.getByTestId("palette-quick-add").click();
     await page.waitForTimeout(500);
 
@@ -1467,7 +1520,7 @@ test.describe("the shape a sheet grows from", () => {
   test("the same is true of an ordinary sheet, not just the notch", async ({ page }) => {
     await openPlanner(page);
     await page.keyboard.press("ControlOrMeta+k");
-    await page.getByTestId("palette-input").fill("Standup today 10am 30m");
+    await page.getByTestId("palette-input").fill("Standup");
     await page.getByTestId("palette-quick-add").click();
     await page.waitForTimeout(500);
 
@@ -1476,7 +1529,7 @@ test.describe("the shape a sheet grows from", () => {
        compared the sheet's travel against a box a few pixels off centre from the
        one it was actually computed from. The assertion was reading the wrong
        rectangle, not catching a wrong translation. */
-    const card = page.locator("[data-event-id]").filter({ hasText: "Standup" }).first();
+    const card = page.getByRole("button", { name: /Standup/ }).first();
     /* Brought into view before it is measured, because `click()` would do it
        afterwards: the timeline is a scroll container, and a card measured where
        it sits and then clicked where the click scrolled it to compares two

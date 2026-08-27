@@ -71,7 +71,7 @@ function restoreSheetFocus(opener, closingPanel) {
    Planner's own Sheet was the newer of the two by 134 lines -- it had gained
    first-paint height measurement that this file never received -- so the merge
    went in that direction. Reversing it would have silently reverted that fix. */
-export default function Sheet({ T, onClose, title, children, headerAction = null, beforeClose = null, morph = "auto", morphSurface = null, closeSignal = null, destinationRef = null }) {
+export default function Sheet({ T, onClose, title, children, headerAction = null, beforeClose = null, morph = "auto", morphSurface = null, closeSignal = null, destinationRef = null, presentation = "sheet", presentationState = null, onMorphClose = null, eventInspectorSurface = null }) {
   /* Ignore a backdrop dismissal that arrives in the same tap that opened the sheet.
      Belt and braces alongside preventDefault at the source: any future path that
      opens a sheet from a touch inherits the protection. */
@@ -99,6 +99,8 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
   const openedRef = useRef(false);
   const onCloseRef = useRef(onClose);
   const beforeCloseRef = useRef(beforeClose);
+  const presentationRef = useRef(presentation);
+  const onMorphCloseRef = useRef(onMorphClose);
   const [closing, setClosing] = useState(false);
   const [sheetHeight, setSheetHeight] = useState(null);
   const [heightReady, setHeightReady] = useState(false);
@@ -122,12 +124,22 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
   const lastSheetHeight = useRef(null);
   useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
   useEffect(() => { beforeCloseRef.current = beforeClose; }, [beforeClose]);
+  useEffect(() => { presentationRef.current = presentation; }, [presentation]);
+  useEffect(() => { onMorphCloseRef.current = onMorphClose; }, [onMorphClose]);
   const requestClose = useCallback(() => {
     if (closingRef.current) return;
     if (beforeCloseRef.current && beforeCloseRef.current() === false) return;
+    /* An Event object morph owns its visual close through MorphSurface. The
+       destination remains mounted while the overlay contracts, so the usual
+       Sheet exit must not start a competing panel animation. */
+    if (presentationRef.current === "event-morph") {
+      onMorphCloseRef.current?.();
+      return;
+    }
     const panel = dialogRef.current;
     const reduced = typeof window !== "undefined" && (
       window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+      || presentationRef.current === "instant"
       || (panel && window.getComputedStyle(panel).animationName === "none")
     );
     let closeDuration = morphRef.current === "notch" ? MORPH_CLOSE_MS : 300;
@@ -396,13 +408,15 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
        from the keyboard grew out of a button that had nothing to do with it. A
        press is the only evidence that a particular control opened this; with no
        press, the sheet arrives on its own terms. */
-    if (panel && morphRef.current === "none") {
+    const isObjectMorphDestination = presentationRef.current === "event-morph";
+    const isInstantSurface = presentationRef.current === "instant";
+    if (panel && (morphRef.current === "none" || isInstantSurface) && !isObjectMorphDestination) {
       /* Search is a command palette. It is opened from the keyboard and the
          header hundreds of times a day, so it must not travel and it must not
          borrow a nearby control as an origin. */
       panel.dataset.fluidOrigin = "none";
     }
-    const triggerRect = morphRef.current === "none" ? null : recentFluidTriggerRect();
+    const triggerRect = isObjectMorphDestination || isInstantSurface || morphRef.current === "none" ? null : recentFluidTriggerRect();
     if (panel && triggerRect) {
       /* Measure the panel as it will finally be, not as the entry animation has
          already made it.
@@ -473,7 +487,7 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
         panel.style.setProperty("--fluid-target-radius", "24px");
       }
     }
-    const frame = window.requestAnimationFrame(() => {
+    const frame = isObjectMorphDestination || isInstantSurface ? null : window.requestAnimationFrame(() => {
       focusDialogOnOpen(dialogRef.current);
       applyScrollSnapshot(pageScrollRef.current);
     });
@@ -489,7 +503,7 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
        the bounce. The height transition waits until the shape has finished
        arriving. */
     return () => {
-      window.cancelAnimationFrame(frame);
+      if (frame != null) window.cancelAnimationFrame(frame);
       window.clearTimeout(unlock);
       window.removeEventListener("scroll", restorePageScroll, true);
       restoreBackground();
@@ -501,15 +515,48 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
       });
     };
   }, []);
+  useLayoutEffect(() => {
+    const shouldFocusAfterPresentation = presentation === "instant"
+      || (presentation === "event-morph" && presentationState === "open");
+    if (!shouldFocusAfterPresentation) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      focusDialogOnOpen(dialogRef.current);
+      applyScrollSnapshot(pageScrollRef.current);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [presentation, presentationState]);
+
+  const objectMorphDestination = presentation === "event-morph";
+  const morphDestinationVisible = !objectMorphDestination || presentationState === "open";
+  const morphDestinationClosing = objectMorphDestination
+    && (presentationState === "closing" || presentationState === "cancelling" || presentationState === "settled");
   return (
-    <div className={`nb-scrim ${closing ? "nb-fluid-closing" : ""} fixed inset-0 z-50 flex items-end sm:items-center justify-center`} style={{ background: "rgba(0,0,0,0.72)" }} onClick={guardedClose}>
+    <div className={`${objectMorphDestination ? "nb-object-scrim" : "nb-scrim"} ${closing || morphDestinationClosing ? "nb-fluid-closing" : ""} fixed inset-0 z-50 flex items-end sm:items-center justify-center`} style={{
+      background: "rgba(0,0,0,0.72)",
+      pointerEvents: objectMorphDestination && presentationState === "opening" ? "none" : undefined,
+    }} onClick={guardedClose}>
       <div ref={(node) => {
         dialogRef.current = node;
         if (typeof destinationRef === "function") destinationRef(node);
         else if (destinationRef) destinationRef.current = node;
       }} role="dialog" aria-modal="true" aria-labelledby={titleId.current} data-test="sheet" data-sheet-title={title || "Details"} data-morph-source={morphSurface?.id} data-morph-stage={morphStage}
+        data-event-inspector-surface={eventInspectorSurface || undefined}
+        data-morph-presentation={objectMorphDestination ? presentationState : undefined}
         onKeyDown={(event) => trapDialogTab(event, dialogRef.current)} onClick={(e) => e.stopPropagation()}
-        className={`nb-fluid nb-sheet-scroll ${heightReady ? "nb-sheet-h" : ""} ${closing ? "nb-fluid-closing" : ""} relative w-full sm:max-w-md overflow-y-auto nb-s`} style={{ backgroundColor: morph === "notch" && morphSurface && morphStage === "closing" ? morphSurface.background : T.card, color: T.text, maxHeight: "88svh", height: sheetHeight == null ? "auto" : sheetHeight, "--morph-accent": morph === "notch" && morphSurface ? morphSurface.background : "transparent", "--morph-card": T.card }}>
+        className={`nb-fluid ${objectMorphDestination ? "nb-object-destination" : ""} nb-sheet-scroll ${heightReady ? "nb-sheet-h" : ""} ${closing || morphDestinationClosing ? "nb-fluid-closing" : ""} relative w-full sm:max-w-md overflow-y-auto nb-s`} style={{
+          backgroundColor: objectMorphDestination && presentationState === "opening" ? "transparent" : (morph === "notch" && morphSurface && morphStage === "closing" ? morphSurface.background : T.card),
+          boxShadow: objectMorphDestination && presentationState === "opening" ? "none" : undefined,
+          color: T.text,
+          maxHeight: "88svh",
+          height: sheetHeight == null ? "auto" : sheetHeight,
+          visibility: objectMorphDestination && !morphDestinationVisible ? "hidden" : "visible",
+          animation: objectMorphDestination || presentation === "instant" ? "none" : undefined,
+          transform: objectMorphDestination || presentation === "instant" ? "none" : undefined,
+          clipPath: objectMorphDestination || presentation === "instant" ? "none" : undefined,
+          pointerEvents: morphDestinationClosing || (objectMorphDestination && presentationState === "opening") ? "none" : undefined,
+          "--morph-accent": morph === "notch" && morphSurface ? morphSurface.background : "transparent",
+          "--morph-card": T.card,
+        }}>
         {morph === "notch" && morphSurface && (
           <div aria-hidden="true" data-test="morph-source-label" className="nb-morph-source-label" style={{
             color: morphSurface.color,
