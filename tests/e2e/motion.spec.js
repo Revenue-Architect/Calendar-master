@@ -1,5 +1,8 @@
 import { expect, test } from "@playwright/test";
-import { openPlanner } from "./helpers.js";
+import { openPlanner, quickAdd, seedPlanner } from "./helpers.js";
+import { createBlankPlannerState } from "../../src/platform/persistence/plannerStateImport.js";
+import { createEvent } from "../../src/domains/calendar/index.js";
+import { addDaysToKey, keyOf } from "../../src/shared/time/dateKey.js";
 
 /* The goo and the notch.
  *
@@ -88,6 +91,182 @@ const readHandoffRestState = async (sheet) => sheet.evaluate((node) => {
     body: read(node.querySelector(".nb-notch-body")),
     cascade,
   };
+});
+
+test.describe("Event semantic morph sources", () => {
+  test("Day and Week cards register their own source keys, morph to Inspector, and restore source paint on close", async ({ page }) => {
+    await openPlanner(page);
+    await quickAdd(page, "Source identity today 10am 60m");
+
+    const sourceOpacity = (locator) => locator.evaluate((node) => Number(getComputedStyle(node).opacity));
+    const dayCard = page.locator('[data-event-id]').filter({ hasText: "Source identity" }).locator('[data-morph-key]');
+    await expect(dayCard).toHaveAttribute("data-morph-key", /:v:day:l:timeline$/);
+    const dayKey = await dayCard.getAttribute("data-morph-key");
+
+    await dayCard.click();
+    await expect(page.locator('[data-morph-overlay]'), "the Day Event must start a real registry-backed morph").toBeVisible();
+    await expect(page.getByTestId("sheet")).toBeVisible();
+    expect(await sourceOpacity(dayCard), "the physical Day card must transfer paint to the overlay").toBe(0);
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("sheet")).toHaveCount(0, { timeout: 3000 });
+    await expect(page.locator("[data-motion-state]")).toHaveAttribute("data-motion-state", "idle");
+    expect(await sourceOpacity(dayCard), "closing must restore the Day card after its source handoff").toBeGreaterThan(0);
+
+    await page.getByTestId("zoom-out").click();
+    await expect(page.getByTestId("week-grid")).toBeVisible();
+    const weekCard = page.getByTestId("week-event").filter({ hasText: "Source identity" });
+    await expect(weekCard).toHaveAttribute("data-morph-key", /:v:week:l:timeline$/);
+    expect(await weekCard.getAttribute("data-morph-key")).not.toBe(dayKey);
+    const weekBaselineOpacity = await sourceOpacity(weekCard);
+
+    await weekCard.click();
+    await expect(page.locator('[data-morph-overlay]'), "the Week Event must use its Week source instead of falling back to a generic Sheet").toBeVisible();
+    await expect(page.getByTestId("sheet")).toBeVisible();
+    await expect.poll(() => sourceOpacity(weekCard), {
+      message: "the physical Week card must transfer paint to the overlay",
+    }).toBeLessThanOrEqual(.01);
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("sheet")).toHaveCount(0, { timeout: 3000 });
+    await expect(page.locator("[data-motion-state]")).toHaveAttribute("data-motion-state", "idle");
+    await expect.poll(async () => Math.abs(await sourceOpacity(weekCard) - weekBaselineOpacity), {
+      message: "closing must restore the live Week source's native resting opacity",
+    }).toBeLessThan(.02);
+  });
+
+  test("Week keyboard activation opens exactly one Inspector without reviving pointer ownership", async ({ page }) => {
+    await openPlanner(page);
+    await quickAdd(page, "Keyboard source today 10am 60m");
+    await page.getByTestId("zoom-out").click();
+    const card = page.getByTestId("week-event").filter({ hasText: "Keyboard source" });
+
+    await card.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("sheet")).toHaveCount(1);
+    await expect(page.locator("[data-morph-overlay]")).toHaveCount(1);
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("sheet")).toHaveCount(0);
+
+    await card.focus();
+    await page.keyboard.press("Space");
+    await expect(page.getByTestId("sheet")).toHaveCount(1);
+    await expect(page.locator("[data-morph-overlay]")).toHaveCount(1);
+  });
+
+  test("a delayed Week open is cancelled by Escape and superseded by the latest Event", async ({ page }) => {
+    const dateKey = keyOf(new Date());
+    const entries = [
+      { id: "evt-pending-alpha", title: "Pending Alpha", date: addDaysToKey(dateKey, -2) },
+      { id: "evt-pending-beta", title: "Pending Beta", date: addDaysToKey(dateKey, 2) },
+    ];
+    let state = createBlankPlannerState({});
+    for (const entry of entries) {
+      ({ state } = createEvent(state, {
+        calendarId: "calendar-default",
+        title: entry.title,
+        category: "PERSONAL",
+        timing: { kind: "timed", timeZoneMode: "floating", startLocal: `${entry.date}T10:00`, endLocal: `${entry.date}T11:00` },
+      }, { id: entry.id }));
+    }
+
+    await seedPlanner(page, state);
+    await page.getByTestId("zoom-out").click();
+    const alpha = page.getByTestId("week-event").filter({ hasText: "Pending Alpha" });
+
+    await alpha.click({ noWaitAfter: true });
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(120);
+    await expect(page.getByTestId("sheet")).toHaveCount(0);
+
+    await page.evaluate(() => {
+      const fireTap = (node) => {
+        const rect = node.getBoundingClientRect();
+        const init = { bubbles: true, button: 0, pointerType: "mouse", clientX: rect.left + 4, clientY: rect.top + 4 };
+        node.dispatchEvent(new PointerEvent("pointerdown", init));
+        node.dispatchEvent(new PointerEvent("pointerup", init));
+      };
+      const alphaNode = [...document.querySelectorAll('[data-test="week-event"]')]
+        .find((node) => node.textContent.includes("Pending Alpha"));
+      const betaNode = [...document.querySelectorAll('[data-test="week-event"]')]
+        .find((node) => node.textContent.includes("Pending Beta"));
+      fireTap(alphaNode);
+      fireTap(betaNode);
+    });
+    const sheet = page.getByTestId("sheet");
+    const title = sheet.getByLabel("Event title");
+    await expect(title).toHaveValue("Pending Beta");
+    await page.waitForTimeout(120);
+    await expect(sheet).toHaveCount(1);
+    await expect(title).not.toHaveValue("Pending Alpha");
+  });
+
+  test("each recurring Week segment owns a dated source key and returns to the card that opened Inspector", async ({ page }) => {
+    const startDate = addDaysToKey(keyOf(new Date()), -30);
+    const { state } = createEvent(createBlankPlannerState({}), {
+      calendarId: "calendar-default",
+      title: "Dated recurring source",
+      category: "DEEP WORK",
+      timing: {
+        kind: "timed", timeZoneMode: "floating",
+        startLocal: `${startDate}T10:00`, endLocal: `${startDate}T10:30`,
+      },
+      recurrence: { frequency: "daily", interval: 1, weekStart: 0, missingDatePolicy: "skip" },
+    }, { id: "evt-dated-recurring-source" });
+
+    await seedPlanner(page, state);
+    await page.getByTestId("zoom-out").click();
+    const cards = page.getByTestId("week-event").filter({ hasText: "Dated recurring source" });
+    await expect(cards).toHaveCount(7);
+    const keys = await cards.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-morph-key")));
+    expect(new Set(keys).size, "each rendered recurring segment must own its registry slot").toBe(7);
+    expect(keys.every((key) => /:occ:.*:d:\d{4}-\d{2}-\d{2}:v:week:l:timeline$/.test(key))).toBe(true);
+
+    const source = cards.first();
+    const sibling = cards.nth(1);
+    const sourceOpacity = () => source.evaluate((node) => Number(getComputedStyle(node).opacity));
+    const siblingOpacity = () => sibling.evaluate((node) => Number(getComputedStyle(node).opacity));
+    const baselineOpacity = await sourceOpacity();
+    const siblingBaselineOpacity = await siblingOpacity();
+    await source.click();
+    await expect(page.locator("[data-morph-overlay]")).toBeVisible();
+    await expect.poll(sourceOpacity, { message: "the selected recurring segment must transfer paint to the overlay" }).toBeLessThanOrEqual(.01);
+    await expect.poll(async () => Math.abs(await siblingOpacity() - siblingBaselineOpacity), {
+      message: "a sibling occurrence must remain painted while the selected semantic source morphs",
+    }).toBeLessThan(.02);
+    await page.keyboard.press("Escape");
+    await expect(page.locator("[data-motion-state]")).toHaveAttribute("data-motion-state", "idle");
+    await expect.poll(async () => Math.abs(await sourceOpacity() - baselineOpacity), {
+      message: "closing must restore the exact recurring Week segment that opened Inspector",
+      timeout: 3000,
+    }).toBeLessThan(.02);
+  });
+
+  test("Day and Week all-day Event controls register their own physical sources", async ({ page }) => {
+    const dateKey = keyOf(new Date());
+    const { state } = createEvent(createBlankPlannerState({}), {
+      calendarId: "calendar-default",
+      title: "All-day source identity",
+      category: "PERSONAL",
+      timing: {
+        kind: "all-day",
+        startDate: dateKey,
+        endDateExclusive: addDaysToKey(dateKey, 1),
+      },
+    }, { id: "evt-all-day-source" });
+
+    await seedPlanner(page, state);
+    const dayCard = page.locator("[data-morph-key]").filter({ hasText: "All-day source identity" });
+    await expect(dayCard).toHaveAttribute("data-morph-key", /:v:day:l:allday$/);
+    await dayCard.click();
+    await expect(page.locator("[data-morph-overlay]")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("sheet")).toHaveCount(0);
+
+    await page.getByTestId("zoom-out").click();
+    const weekCard = page.getByTestId("week-allday-event").filter({ hasText: "All-day source identity" });
+    await expect(weekCard).toHaveAttribute("data-morph-key", /:v:week:l:allday$/);
+    await weekCard.click();
+    await expect(page.locator("[data-morph-overlay]")).toBeVisible();
+  });
 });
 
 test.describe("the liquid pill", () => {

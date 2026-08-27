@@ -31,7 +31,8 @@ import { uid } from "../../shared/ids.js";
 import { dur } from "../../shared/time/duration.js";
 import { fmtTime, fromHhmm, hhmm } from "../../shared/time/clockFormat.js";
 import { NOW_RED, THEMES } from "../../design/themes.js";
-import { controlMorphKey, eventMorphKey, noteMorphKey, slotMorphKey, taskMorphKey } from "../motion/morphKeys.js";
+import { controlMorphKey, noteMorphKey, slotMorphKey, taskMorphKey } from "../motion/morphKeys.js";
+import { createEventMorphOrigin } from "../motion/eventMorphOrigin.js";
 import { morphRegistry } from "../motion/morphRegistry.js";
 import {
   createMorphCloseSnapshotRelease,
@@ -133,10 +134,25 @@ function makeMotionDescriptor({ composer, inspect, inspectRecord, noteEdit, peek
   if (inspectRecord && inspect?.kind === "event") {
     const id = inspectRecord.id || inspect.id;
     if (id) {
+      const origin = inspect.morphOrigin;
+      if (origin?.key && origin.eventId === id) {
+        return {
+          target: "inspector",
+          kind: "event",
+          key: origin.key,
+          meta: { surface: "inspector", id, dateKey: origin.dateKey, view: origin.view, lane: origin.lane },
+        };
+      }
+      const fallback = createEventMorphOrigin(inspectRecord, {
+        dateKey,
+        view: "day",
+        lane: "timeline",
+      });
+      if (!fallback) return null;
       return {
         target: "inspector",
         kind: "event",
-        key: eventMorphKey({ eventId: id, dateKey, view: "day", lane: "timeline" }),
+        key: fallback.key,
         meta: { surface: "inspector", id, dateKey },
       };
     }

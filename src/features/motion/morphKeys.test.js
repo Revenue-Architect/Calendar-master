@@ -66,6 +66,16 @@ test("parseMorphKey and isSameBusinessObject correctly correlate render sources 
   assert.ok(!isSameBusinessObject(dayKey, otherKey), "Different occurrences must not match");
 });
 
+test("keeps segmented recurring occurrence sources distinct while preserving business identity", () => {
+  const monday = eventMorphKey({ occurrenceId: "occ-multiday", dateKey: "2026-08-24", view: "week" });
+  const tuesday = eventMorphKey({ occurrenceId: "occ-multiday", dateKey: "2026-08-25", view: "week" });
+
+  assert.notEqual(monday, tuesday, "separate Week source nodes must not overwrite one registry slot");
+  assert.equal(parseMorphKey(monday).dateKey, "2026-08-24");
+  assert.equal(parseMorphKey(tuesday).dateKey, "2026-08-25");
+  assert.ok(isSameBusinessObject(monday, tuesday), "segments remain the same recurring business occurrence");
+});
+
 test("reversible component encoding prevents collision between colons, slashes, and underscores", () => {
   const keyColon = eventMorphKey({ occurrenceId: "a:b" });
   const keyUnderscore = eventMorphKey({ occurrenceId: "a_b" });

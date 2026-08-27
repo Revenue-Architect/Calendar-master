@@ -43,8 +43,12 @@ export function eventMorphKey({
   const encLane = encodeComponent(lane);
 
   if (occurrenceId) {
-    // Tagged occurrence identity: morph:event:occ:<encoded>:v:<view>:l:<lane>
-    return `morph:event:occ:${encodeComponent(occurrenceId)}:v:${encView}:l:${encLane}`;
+    // A recurring occurrence can be segmented across several rendered dates in
+    // Week view. Keep its business identity while giving each source node its
+    // own exact registration key.
+    const encDate = dateKey ? encodeComponent(dateKey) : "";
+    const datePart = encDate ? `:d:${encDate}` : "";
+    return `morph:event:occ:${encodeComponent(occurrenceId)}${datePart}:v:${encView}:l:${encLane}`;
   }
   // Tagged event+date identity: morph:event:id:<encoded eventId>:d:<encoded dateKey>:v:<view>:l:<lane>
   const encId = encodeComponent(eventId);
@@ -150,6 +154,7 @@ export function parseMorphKey(key) {
     }
   } else if (kind === "event") {
     // Tagged event formats:
+    //   morph:event:occ:<occurrenceId>:d:<dateKey>:v:<view>:l:<lane>
     //   morph:event:occ:<occurrenceId>:v:<view>:l:<lane>
     //   morph:event:id:<eventId>:d:<dateKey>:v:<view>:l:<lane>
     //   morph:event:id:<eventId>:v:<view>:l:<lane>
@@ -160,7 +165,8 @@ export function parseMorphKey(key) {
       for (let i = 4; i < parts.length; i += 2) {
         const tag = parts[i];
         const val = decodeComponent(parts[i + 1]);
-        if (tag === "v") descriptor.view = val;
+        if (tag === "d") descriptor.dateKey = val;
+        else if (tag === "v") descriptor.view = val;
         else if (tag === "l") descriptor.lane = val;
       }
     } else if (subTag === "id") {

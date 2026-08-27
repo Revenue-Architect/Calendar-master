@@ -36,7 +36,7 @@ import useEdgeFade from "./features/planner/useEdgeFade.js";
 import { busyFractionForDay, busyFractionsForRange, monthDensitiesForRange, projectDayPeek, projectPlannerWeek } from "./features/planner/weekProjection.js";
 import { applyDetailDraft, buildDetailEntryPayload, buildTaskWritePatch, durationFromClockRange, hasDetailDraft } from "./features/planner/detailDraft.js";
 import { BellIcon, CalendarIcon, CheckIcon, ChevronIcon, ExternalLinkIcon, ListIcon, MoreIcon, RepeatIcon, WarningIcon } from "./features/planner/icons.jsx";
-import { RowWithJoin } from "./features/planner/rows.jsx";
+import DayAllDayEventRow from "./features/planner/DayAllDayEventRow.jsx";
 import PillNav from "./features/planner/PillNav.jsx";
 import { Agenda } from "./features/planner/Agenda.jsx";
 import { WeekGrid } from "./features/planner/WeekGrid.jsx";
@@ -52,6 +52,8 @@ import { HAPTIC_PATTERNS, triggerDeviceHaptic } from "./features/feedback/haptic
 import { VIEW_SLIDE_MS } from "./features/motion/morphTiming.js";
 import { installFluidTriggerListeners } from "./features/motion/fluidTrigger.js";
 import { navPageFit } from "./features/motion/navPageFit.js";
+import EventMorphSource from "./features/motion/EventMorphSource.jsx";
+import { createEventInspectorOpener, useDeferredEventInspector } from "./features/motion/eventMorphOrigin.js";
 import PlannerSurfaceHost from "./features/planner/PlannerSurfaceHost.jsx";
 import { plannerStyles } from "./features/motion/plannerStyles.js";
 import { DISPLAY, MONO } from "./design/typography.js";
@@ -811,6 +813,7 @@ export default function Planner() {
     };
   }, [preferences]);
   const beep = useSynth(preferences?.feedback.sound ?? true);
+  const { cancelPendingEventOpen, openDeferredEventInspector } = useDeferredEventInspector({ beep, setInspect });
   const buzz = useCallback((pattern) => {
     if (preferences?.feedback.haptics) triggerDeviceHaptic(pattern);
   }, [preferences]);
@@ -1347,6 +1350,7 @@ export default function Planner() {
 
   /* ─── day turning ─── */
   const goDay = useCallback((n) => {
+    cancelPendingEventOpen();
     beep("page");
     setTurn({ dir: n, k: uid() });
     setDateKey((k) => {
@@ -1354,10 +1358,11 @@ export default function Planner() {
       ensureRibbonDateVisible(next);
       return next;
     });
-  }, [beep, ensureRibbonDateVisible]);
+  }, [beep, cancelPendingEventOpen, ensureRibbonDateVisible]);
   const jumpTo = (k) => {
     /* Guard the entry point rather than every caller: a bad key used to reach
        parseKey and take the whole screen down with it. */
+    cancelPendingEventOpen();
     if (!isDateKey(k) || k === dateKey) return;
     beep("page");
     setTurn({ dir: k > dateKey ? 1 : -1, k: uid() });
@@ -1435,6 +1440,7 @@ export default function Planner() {
   useEffect(() => {
     const h = (e) => {
       if (e.target && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
+      if (e.key === "Escape") cancelPendingEventOpen();
       /* Every modal counts. Leaving the newer sheets off this list let shortcuts act
          on the page behind them — arrow keys turned days while the first-run choice
          was still up. */
@@ -1478,7 +1484,7 @@ export default function Planner() {
     /* `zoom` is in here because the handler closes over `zoomIn`/`zoomOut`, which
        read it — without it, `[` and `]` would step from whatever zoom the page
        had when the listener was last attached. */
-  }, [dateKey, inspect, composer, settings, noteEdit, noteHistory, notebook, search, scopeAsk, goDay, todayKey, nowMin, dayTasks, undo, firstRun, confirmComplete, dependencyPicker, listPicker, pendingImport, peekDay, shortcuts, planAsk, viewMode, zoom]);
+  }, [dateKey, inspect, composer, settings, noteEdit, noteHistory, notebook, search, scopeAsk, goDay, todayKey, nowMin, dayTasks, undo, firstRun, confirmComplete, dependencyPicker, listPicker, pendingImport, peekDay, shortcuts, planAsk, viewMode, zoom, cancelPendingEventOpen]);
 
   /* ─── writes (series-aware) ─── */
   const flash = (label, payload) => {
@@ -2724,6 +2730,7 @@ export default function Planner() {
       setComposer({ kind: "event", start: startSlot(minutesAt(e.clientY)), dur: 60 });
     }
   };
+  const openDayTimelineEvent = createEventInspectorOpener({ beep, setInspect, dateKey, view: "day", lane: "timeline" });
   const eventDown = (e, ev) => {
     if (e.pointerType === "touch") return;
     if (e.target.closest?.("a[href], [data-join]")) return;
@@ -2760,14 +2767,13 @@ export default function Planner() {
         abortGesture();
         tappedRef.current = false;
         e.stopPropagation();
-        beep("click");
-        setInspect({ kind: "event", id: ev.id });
+        openDayTimelineEvent(ev);
         return;
       }
       finishGesture(e.clientX, e.clientY);
       return;
     }
-    if (tappedRef.current) { tappedRef.current = false; e.stopPropagation(); beep("click"); setInspect({ kind: "event", id: ev.id }); }
+    if (tappedRef.current) { tappedRef.current = false; e.stopPropagation(); openDayTimelineEvent(ev); }
   };
   const taskDown = (e, task) => {
     if (e.pointerType === "touch" || e.button === 2 || task?.planned?.startMinute == null) return;
@@ -3101,7 +3107,7 @@ export default function Planner() {
       if (p && !p.held && !p.cancelled) {
         interactionRef.current = cancelArmedInteraction(interactionRef.current);
         if (e.cancelable) e.preventDefault();
-        if (p.ev) { beep("click"); setInspect({ kind: "event", id: p.ev.id }); }
+        if (p.ev) openDayTimelineEvent(p.ev);
         else if (p.chipId) { beep("click"); setInspect({ kind: "task", id: p.chipId }); }
         else { beep("click"); setComposer({ kind: "event", start: startSlot(p.startMin), dur: 60 }); }
       }
@@ -4063,7 +4069,7 @@ export default function Planner() {
                     timelineScrollSessionRef.current.end();
                   }}
                   onOpenDay={(k) => { beep("tick"); if (k !== dateKey) jumpTo(k); setZoom("day"); }}
-                  onOpenEvent={(id, key) => { beep("click"); if (key !== dateKey) jumpTo(key); setTimeout(() => setInspect({ kind: "event", id }), key !== dateKey ? 80 : 0); }}
+                  onOpenEvent={(event, morphOrigin) => openDeferredEventInspector(event, morphOrigin, { dateKey, onNavigate: jumpTo })}
                   onOpenTask={(id, key) => { beep("click"); if (key !== dateKey) jumpTo(key); setTimeout(() => setInspect({ kind: "task", id }), key !== dateKey ? 80 : 0); }}
                   onSlotPick={(s) => { beep("click"); if (s.date !== dateKey) jumpTo(s.date); setComposer({ kind: "event", date: s.date, start: s.start, dur: s.dur }); }}
                   onMoveEvent={moveEventTo} beep={beep} buzz={buzz}
@@ -4074,16 +4080,9 @@ export default function Planner() {
             <div style={{ background: T.card, borderTopLeftRadius: 16, borderTopRightRadius: 16, borderBottom: `1px solid ${T.line}` }} className="px-3 pt-3 pb-2 flex flex-col gap-1.5">
               {allDay.length > 0 && <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-label">ALL DAY</span>}
               {allDay.map((e) => {
-                const span = e.endDate ? diffDays(e.endDate, e.date) + 1 : 1;
-                const idx = diffDays(dateKey, e.date) + 1;
+                const span = e.endDate ? diffDays(e.endDate, e.date) + 1 : 1; const idx = diffDays(dateKey, e.date) + 1;
                 return (
-                  <RowWithJoin key={e.id} T={T} surface={surface} link={e.link} title={e.title}
-                    padding="px-2.5 py-2"
-                    onOpen={() => { beep("click"); setInspect({ kind: "event", id: e.id }); }}>
-                    <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: catColor(e.cat) }} />
-                    <span className="nb-lead truncate flex-1">{e.title}</span>
-                    {span > 1 && <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-data shrink-0">{idx}/{span}</span>}
-                  </RowWithJoin>
+                  <DayAllDayEventRow key={e.id} T={T} surface={surface} event={e} dateKey={dateKey} span={span} index={idx} onOpen={createEventInspectorOpener({ beep, setInspect, dateKey, view: "day", lane: "allday" })} />
                 );
               })}
               <TimelineAnyTimeShelf
@@ -4201,22 +4200,20 @@ export default function Planner() {
                        over 51px, so a smaller card must remain one line rather than
                        making the range appear underneath the title. */
                     const hasRoomForLinkedTime = !joinUrl || h >= 52;
-                    /* The card hides while the editor is wearing it. The sheet grows out
-                       of this card's rect, so leaving the card in place put two copies of
-                       one thing on screen at once and the morph read as a panel arriving
-                       over the card rather than the card becoming the panel. NEW has
-                       always done this with its own trigger; the editor never did, which
-                       is most of why it felt disconnected. */
+                    /* Hide the source while Inspector wears its rect; otherwise the morph
+                       reads as a panel arriving over a duplicate card. */
                     return (
                       <div key={e.id} data-event-id={e.id} className={`nb-timeline-lane absolute ${held ? "nb-timeline-lane-active" : "nb-hover-tile"}`} style={{ visibility: inspect?.kind === "event" && inspect.id === e.id ? "hidden" : undefined, top: top + 2, height: h, left: `${(e.lane / e.cols) * 100}%`, width: `calc(${100 / e.cols}% - 6px)`, zIndex: held ? 20 : 1, opacity: held && gesture.overDay ? 0.35 : 1, pointerEvents: "auto" }}>
-                        <div role="button" tabIndex={0} aria-label={e.title}
+                        <EventMorphSource event={e} dateKey={e.date ?? dateKey} view="day" lane="timeline">
+                          <div role="button" tabIndex={0} aria-label={e.title}
                           onPointerDown={(ev) => eventDown(ev, e)} onPointerUp={(ev) => eventUp(ev, e)}
                           onKeyDown={(ev) => {
                             if (ev.key !== "Enter" && ev.key !== " ") return;
                             ev.preventDefault();
                             if (clickFollowsGesture()) return;
-                            beep("click");
-                            setInspect({ kind: "event", id: e.id });
+                            disarmHold();
+                            tappedRef.current = false;
+                            openDayTimelineEvent(e);
                           }}
                           onContextMenu={(ev) => ev.preventDefault()}
                           className="relative w-full h-full overflow-hidden"
@@ -4245,8 +4242,8 @@ export default function Planner() {
                             <div className={`nb-event-row flex items-center gap-2 ${h < 28 ? "h-full" : ""}`}>
                               {/* the category dot is the card's only colour, so it stays
                                   legible at 22px height where a left rail would vanish */}
-                              <span className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: held ? T.accent : catColor(e.cat) }} />
-                              <span title={e.title} className="nb-lead min-w-0 truncate flex-1">{e.title}</span>
+                              <span data-morph-marker="category" className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: held ? T.accent : catColor(e.cat) }} />
+                              <span data-morph-title title={e.title} className="nb-lead min-w-0 truncate flex-1">{e.title}</span>
                               {conflictIds.has(e.id) && <span title="Overlaps another event" style={{ color: NOW_RED }} className="nb-event-secondary shrink-0"><WarningIcon /></span>}
                               {e.repeat && <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-event-secondary shrink-0"><RepeatIcon /></span>}
                               {e.alerts && e.alerts.length > 0 && (
@@ -4254,10 +4251,10 @@ export default function Planner() {
                               )}
                               {live && <span style={{ fontFamily: MONO, background: T.accent, color: T.on, borderRadius: 4 }} className="nb-event-secondary shrink-0 px-1 nb-data">{Math.round(pct)}%</span>}
                               {held && <span style={{ fontFamily: MONO, background: T.accent, color: T.on, borderRadius: 4 }} className="shrink-0 px-1 nb-data">{gesture.overDay ? fmtDay(gesture.overDay) : tm(e.start)}</span>}
-                              {!held && !live && !joinUrl && h < 38 && <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-event-secondary nb-event-short-time nb-data min-w-0 truncate shrink-0">{tm(e.start)} → {tm(e.start + e.dur)}</span>}
+                              {!held && !live && !joinUrl && h < 38 && <span data-morph-meta style={{ fontFamily: MONO, color: T.dimText }} className="nb-event-secondary nb-event-short-time nb-data min-w-0 truncate shrink-0">{tm(e.start)} → {tm(e.start + e.dur)}</span>}
                             </div>
                             {h >= 38 && hasRoomForLinkedTime && (
-                              <span style={{ fontFamily: MONO, color: T.dimText }} className="block nb-data truncate mt-0.5 pl-4">
+                              <span data-morph-meta style={{ fontFamily: MONO, color: T.dimText }} className="block nb-data truncate mt-0.5 pl-4">
                                 {tm(e.start)} → {tm(e.start + e.dur)}
                               </span>
                             )}
@@ -4273,7 +4270,8 @@ export default function Planner() {
                               predictable at every duration. The asymmetric 8/12px
                               edges leave the readable middle as the move surface. */}
                           <TimelineEventResizeControls event={e} theme={T} onPointerDown={resizeDown} />
-                        </div>
+                          </div>
+                        </EventMorphSource>
                         {joinUrl && (
                           <a href={joinUrl} target="_blank" rel="noopener noreferrer" draggable={false} data-join={e.id}
                             onPointerDownCapture={(ev) => ev.stopPropagation()}

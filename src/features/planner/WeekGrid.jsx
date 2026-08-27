@@ -17,6 +17,8 @@ import { CARD_R, DAY_H, HOUR_H, LIFT_MS, WD, catColor } from "./constants.js";
 import { fmtDay } from "./dateLabels.js";
 import { ExternalLinkIcon } from "./icons.jsx";
 import { normalizeMeetingLink } from "./meetingLink.js";
+import EventMorphSource from "../motion/EventMorphSource.jsx";
+import { createEventMorphOrigin } from "../motion/eventMorphOrigin.js";
 import {
   EMPTY_SPACE_LIFT_MS,
   gestureChangedAnything,
@@ -288,6 +290,7 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
     const touchEnd = () => { if (dragRef.current) { disarm(); endDrag(); } };
     const touchCancel = () => {
       disarm();
+      tapRef.current = false;
       dragRef.current = null;
       setDrag(null);
     };
@@ -332,10 +335,10 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
     e.preventDefault();
     updateDrag(e.touches[0].clientX, e.touches[0].clientY);
   };
-  const touchEnd = (e, event, day) => {
+  const touchEnd = (e, event, morphOrigin) => {
     disarm();
     if (dragRef.current) { endDrag(); return; }
-    if (tapRef.current) { tapRef.current = false; e.preventDefault(); onOpenEvent(event.id, day); }
+    if (tapRef.current) { tapRef.current = false; e.preventDefault(); onOpenEvent(event, morphOrigin); }
   };
 
   /* A press that moves before it lifts was never a press. Without this the hold
@@ -391,7 +394,7 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
     /* Mouse/pen cards are movement-only. Touch uses touchStart()'s separate
        LIFT_MS timer so vertical scrolling cannot be stolen by a card. */
   };
-  const pointerUp = (e, event, day) => {
+  const pointerUp = (e, event, morphOrigin) => {
     if (e.pointerType === "touch") return;
     disarm();
     if (dragRef.current) {
@@ -405,13 +408,20 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
         setDrag(null);
         tapRef.current = false;
         e.stopPropagation();
-        onOpenEvent(event.id, day);
+        onOpenEvent(event, morphOrigin);
         return;
       }
       endDrag();
       return;
     }
-    if (tapRef.current) { tapRef.current = false; e.stopPropagation(); onOpenEvent(event.id, day); }
+    if (tapRef.current) { tapRef.current = false; e.stopPropagation(); onOpenEvent(event, morphOrigin); }
+  };
+  const openEventFromKeyboard = (e, event, morphOrigin) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    disarm();
+    tapRef.current = false;
+    onOpenEvent(event, morphOrigin);
   };
 
   useEffect(() => () => {
@@ -455,13 +465,16 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
               <div key={day.key} className="flex-1 min-w-0 px-0.5 py-1 flex flex-col gap-0.5" style={{ borderLeft: `1px solid ${hourRule}` }}>
                 {day.allDay.map((e) => {
                   const href = normalizeMeetingLink(e.link);
+                  const morphOrigin = createEventMorphOrigin(e, { dateKey: day.key, view: "week", lane: "allday" });
                   return (
                     <div key={e.segmentId ?? e.id} className="relative overflow-hidden" style={{ background: surface, borderRadius: 6 }}>
-                      <button onClick={() => onOpenEvent(e.id, day.key)} className="nb-tap flex w-full items-center gap-1 py-0.5 text-left overflow-hidden"
-                        style={{ paddingLeft: 6, paddingRight: href ? 20 : 6 }}>
-                        <span className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: catColor(e.cat) }} />
-                        <span className="font-semibold truncate" style={{ fontSize: 10 }}>{e.title}</span>
-                      </button>
+                      <EventMorphSource origin={morphOrigin}>
+                        <button data-test="week-allday-event" data-event-id={e.id} onClick={() => onOpenEvent(e, morphOrigin)} className="nb-tap flex w-full items-center gap-1 py-0.5 text-left overflow-hidden"
+                          style={{ paddingLeft: 6, paddingRight: href ? 20 : 6 }}>
+                          <span data-morph-marker className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: catColor(e.cat) }} />
+                          <span data-morph-title className="font-semibold truncate" style={{ fontSize: 10 }}>{e.title}</span>
+                        </button>
+                      </EventMorphSource>
                       {href && (
                         <a href={href} target="_blank" rel="noopener noreferrer" draggable={false} data-join={e.id}
                           onPointerDown={(ev) => ev.stopPropagation()}
@@ -558,23 +571,26 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
                     const h = Math.max(16, (e.dur / 1440) * DAY_H) - 2;
                     const past = !e.lifted && (day.key < todayKey || (isToday && nowMin >= e.start + e.dur));
                     const href = normalizeMeetingLink(e.link);
+                    const morphOrigin = createEventMorphOrigin(e, { dateKey: day.key, view: "week", lane: "timeline" });
                     return (
                       <div key={e.segmentId ?? `${e.id}-${e.start}`} className="absolute" style={{
                         top: top + 1, height: h,
                         left: `calc(${(e.lane / e.cols) * 100}% + 2px)`, width: `calc(${100 / e.cols}% - 4px)`,
                         zIndex: e.lifted ? 8 : 2,
                       }}>
-                      <button
-                        data-test="week-event" data-event-id={e.id}
-                        onPointerDown={(ev) => pointerDown(ev, e, day.key)}
-                        onPointerUp={(ev) => pointerUp(ev, e, day.key)}
-                        onTouchStart={(ev) => touchStart(ev, e, day.key)}
-                        onTouchMove={(ev) => { ev.stopPropagation(); touchMove(ev); }}
-                        onTouchEnd={(ev) => { ev.stopPropagation(); touchEnd(ev, e, day.key); }}
-                        onTouchCancel={(ev) => { ev.stopPropagation(); disarm(); dragRef.current = null; setDrag(null); }}
-                        onClick={(ev) => ev.stopPropagation()}
-                        className="nb-hover-tile absolute inset-y-0 left-0 text-left overflow-hidden"
-                        style={{
+                      <EventMorphSource origin={morphOrigin}>
+                        <button
+                          data-test="week-event" data-event-id={e.id}
+                          onPointerDown={(ev) => pointerDown(ev, e, day.key)}
+                          onPointerUp={(ev) => pointerUp(ev, e, morphOrigin)}
+                          onTouchStart={(ev) => touchStart(ev, e, day.key)}
+                          onTouchMove={(ev) => { ev.stopPropagation(); touchMove(ev); }}
+                          onTouchEnd={(ev) => { ev.stopPropagation(); touchEnd(ev, e, morphOrigin); }}
+                          onTouchCancel={(ev) => { ev.stopPropagation(); disarm(); tapRef.current = false; dragRef.current = null; setDrag(null); }}
+                          onKeyDown={(ev) => openEventFromKeyboard(ev, e, morphOrigin)}
+                          onClick={(ev) => ev.stopPropagation()}
+                          className="nb-hover-tile absolute inset-y-0 left-0 text-left overflow-hidden"
+                          style={{
                           /* Week columns are ~45px on a phone. A 50px JOIN lane
                              left a 6px title. Keep an icon-sized hit target and
                              give the name the rest of the card. */
@@ -591,18 +607,19 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
                           boxShadow: e.lifted
                             ? `0 8px 24px rgba(0,0,0,0.32), inset 0 0 0 1.5px ${T.accent}`
                             : past ? `inset 0 0 0 1px ${T.line}` : "none",
-                        }}>
+                          }}>
                         {/* Sharing the column halves the width, and at half a
                             week-column there is only room for one thing to be
                             legible. Keeping the dot and the time turned a title
                             into "R…" over "10:…" — two truncations that say
                             nothing where one whole word would have. */}
-                        <span className={`flex flex-1 items-center gap-1 overflow-hidden ${e.cols > 1 || href ? "px-1" : "px-1.5"} pt-0.5 min-w-0`}>
-                          {e.cols === 1 && !href && <span className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: catColor(e.cat) }} />}
-                          <span className="min-w-0 flex-1 font-semibold leading-tight truncate" style={{ fontSize: 10 }}>{e.title}</span>
-                        </span>
-                        {(e.lifted || (h >= 30 && e.cols === 1)) && <span className="block truncate tracking-widest" style={{ fontFamily: MONO, color: e.lifted ? T.accent : T.dim, fontSize: 9, paddingLeft: e.lifted && e.cols > 1 ? 4 : (href ? 4 : 15) }}>{fmtTime(e.start, clock)}</span>}
-                      </button>
+                          <span className={`flex flex-1 items-center gap-1 overflow-hidden ${e.cols > 1 || href ? "px-1" : "px-1.5"} pt-0.5 min-w-0`}>
+                            {e.cols === 1 && !href && <span data-morph-marker className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: catColor(e.cat) }} />}
+                            <span data-morph-title className="min-w-0 flex-1 font-semibold leading-tight truncate" style={{ fontSize: 10 }}>{e.title}</span>
+                          </span>
+                          {(e.lifted || (h >= 30 && e.cols === 1)) && <span data-morph-meta className="block truncate tracking-widest" style={{ fontFamily: MONO, color: e.lifted ? T.accent : T.dim, fontSize: 9, paddingLeft: e.lifted && e.cols > 1 ? 4 : (href ? 4 : 15) }}>{fmtTime(e.start, clock)}</span>}
+                        </button>
+                      </EventMorphSource>
                       {href && (
                         <a href={href} target="_blank" rel="noopener noreferrer" draggable={false} data-join={e.id}
                           onPointerDown={(ev) => ev.stopPropagation()}

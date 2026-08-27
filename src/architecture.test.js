@@ -20,7 +20,7 @@ const SRC = fileURLToPath(new URL(".", import.meta.url));
    copied code out and never deleted the original. The file then grew to 9,615
    during a refactor meant to shrink it. A ratchet turns that from something you
    have to notice into something CI notices for you. */
-const PLANNER_CEILING = 4518; // split("\n").length after import cleanup and host extraction
+const PLANNER_CEILING = 4516; // split("\n").length after source-handling extraction
 
 test("Planner.jsx does not grow", () => {
   const lines = readFileSync(join(SRC, "Planner.jsx"), "utf8").split("\n").length;

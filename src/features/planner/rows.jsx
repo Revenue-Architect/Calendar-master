@@ -25,11 +25,11 @@ import { rowSpan } from "./editorRowSpan.js";
  * button reserve a guessed width; on a 360px phone that left an ordinary title
  * only ~85px while the time was centred through both text lines. */
 
-function RowWithJoin({ T, surface, link, title, onOpen, className = "", padding = "px-3 py-2.5", style = {}, children }) {
+const RowWithJoin = React.forwardRef(function RowWithJoin({ T, surface, link, title, onOpen, className = "", padding = "px-3 py-2.5", style = {}, children, ...buttonProps }, ref) {
   const href = normalizeMeetingLink(link);
   return (
     <div className={`nb-hover-tile grid items-stretch ${href ? "grid-cols-[minmax(0,1fr)_auto]" : "grid-cols-1"}`} style={{ background: surface, borderRadius: CARD_R, boxShadow: "var(--e1)", ...style }}>
-      <button onClick={onOpen} className={`nb-tap nb-hover-control min-w-0 w-full flex items-center gap-2.5 text-left ${padding} ${className}`}
+      <button ref={ref} onClick={onOpen} {...buttonProps} className={`nb-tap nb-hover-control min-w-0 w-full flex items-center gap-2.5 text-left ${padding} ${className}`}
         style={{ background: "transparent", borderRadius: CARD_R }}>
         {children}
       </button>
@@ -42,7 +42,7 @@ function RowWithJoin({ T, surface, link, title, onOpen, className = "", padding 
       )}
     </div>
   );
-}
+});
 
 /* A row inside a grouped attribute card: value on the left, its icon on the right,
    matching how the reference groups the facts that govern a task. */
