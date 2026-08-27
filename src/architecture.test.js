@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SRC = fileURLToPath(new URL(".", import.meta.url));
@@ -20,7 +20,7 @@ const SRC = fileURLToPath(new URL(".", import.meta.url));
    copied code out and never deleted the original. The file then grew to 9,615
    during a refactor meant to shrink it. A ratchet turns that from something you
    have to notice into something CI notices for you. */
-const PLANNER_CEILING = 5531; // split("\n").length, so one more than `wc -l`
+const PLANNER_CEILING = 4518; // split("\n").length after import cleanup and host extraction
 
 test("Planner.jsx does not grow", () => {
   const lines = readFileSync(join(SRC, "Planner.jsx"), "utf8").split("\n").length;
@@ -45,15 +45,7 @@ test("Planner.jsx does not grow", () => {
    The following entries track unwired Phase 2–4 motion infrastructure.
    These are explicitly TEMPORARY on this feature branch and must not be merged
    to main as-is; they will be retired as Phase 4/5 integration lands. */
-const UNWIRED = new Set([
-  "features/motion/morphKeys.js",
-  "features/motion/morphRegistry.js",
-  "features/motion/morphTokens.js",
-  "features/motion/morphTransaction.js",
-  "features/motion/morphInterpolate.js",
-  "features/motion/MorphSurface.js",
-  "features/motion/useMorphSource.js",
-]);
+const UNWIRED = new Set([]);
 
 function sourceFiles(dir) {
   const out = [];
@@ -68,24 +60,56 @@ function sourceFiles(dir) {
 
 test("every module under src/features is imported by something outside its own folder", () => {
   const all = sourceFiles(SRC);
-  const corpus = all.map((file) => ({ file, text: readFileSync(file, "utf8") }));
+  const files = new Set(all);
+  const importers = new Map();
+  const addImporter = (target, importer) => {
+    if (!target) return;
+    if (!importers.has(target)) importers.set(target, new Set());
+    importers.get(target).add(importer);
+  };
+  const resolveSourceImport = (importer, specifier) => {
+    if (!specifier.startsWith(".")) return null;
+    const base = join(dirname(importer), specifier);
+    const candidates = [
+      base,
+      `${base}.js`,
+      `${base}.jsx`,
+      join(base, "index.js"),
+      join(base, "index.jsx"),
+    ];
+    return candidates.find((candidate) => files.has(candidate)) || null;
+  };
+  for (const importer of all) {
+    const text = readFileSync(importer, "utf8");
+    const specifiers = [
+      ...text.matchAll(/^\s*import\b[\s\S]*?\bfrom\s+["']([^"']+)["'];?/gm),
+      ...text.matchAll(/^\s*import\s*["']([^"']+)["'];?/gm),
+    ];
+    for (const match of specifiers) addImporter(resolveSourceImport(importer, match[1]), importer);
+  }
+
+  /* A same-folder import is valid when it is part of a live composition cluster
+     reached from outside that folder. PlannerSurfaceHost intentionally owns
+     several same-folder surfaces, and ActionsPanel owns the card cluster. The
+     recursive walk keeps the old dead-cluster protection while recognising
+     those real composition boundaries. */
+  const hasExternalImporter = (target, folder, seen) => {
+    if (seen.has(target)) return false;
+    seen.add(target);
+    for (const importer of importers.get(target) || []) {
+      const importerRel = relative(SRC, importer).replaceAll("\\", "/");
+      if (!importerRel.startsWith(`${folder}/`)) return true;
+      if (hasExternalImporter(importer, folder, seen)) return true;
+    }
+    return false;
+  };
 
   const orphans = [];
   for (const file of all) {
     const rel = relative(SRC, file).replaceAll("\\", "/");
     if (!rel.startsWith("features/")) continue;
     const folder = rel.slice(0, rel.lastIndexOf("/"));
-    const stem = rel.slice(rel.lastIndexOf("/") + 1).replace(/\.jsx?$/, "");
-
-    /* An importer outside this module's own folder. Same-folder imports do not
-       count: a cluster of files importing each other while nothing reaches the
-       cluster is still dead. Matched on the import statement, not any mention,
-       so a comment naming the path is not mistaken for a wiring. */
-    const wired = corpus.some(({ file: other, text }) => {
-      const otherRel = relative(SRC, other).replaceAll("\\", "/");
-      if (otherRel === rel || otherRel.startsWith(`${folder}/`)) return false;
-      return new RegExp(`^\\s*import[^;]*["'][^"']*/${stem}(\\.jsx?)?["']`, "m").test(text);
-    });
+    const wired = hasExternalImporter(file, folder, new Set());
     if (!wired) orphans.push(rel);
   }
 

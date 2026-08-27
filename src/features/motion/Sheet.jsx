@@ -71,7 +71,7 @@ function restoreSheetFocus(opener, closingPanel) {
    Planner's own Sheet was the newer of the two by 134 lines -- it had gained
    first-paint height measurement that this file never received -- so the merge
    went in that direction. Reversing it would have silently reverted that fix. */
-export default function Sheet({ T, onClose, title, children, headerAction = null, beforeClose = null, morph = "auto", morphSurface = null, closeSignal = null }) {
+export default function Sheet({ T, onClose, title, children, headerAction = null, beforeClose = null, morph = "auto", morphSurface = null, closeSignal = null, destinationRef = null }) {
   /* Ignore a backdrop dismissal that arrives in the same tap that opened the sheet.
      Belt and braces alongside preventDefault at the source: any future path that
      opens a sheet from a touch inherits the protection. */
@@ -503,7 +503,11 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
   }, []);
   return (
     <div className={`nb-scrim ${closing ? "nb-fluid-closing" : ""} fixed inset-0 z-50 flex items-end sm:items-center justify-center`} style={{ background: "rgba(0,0,0,0.72)" }} onClick={guardedClose}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId.current} data-test="sheet" data-sheet-title={title || "Details"} data-morph-source={morphSurface?.id} data-morph-stage={morphStage}
+      <div ref={(node) => {
+        dialogRef.current = node;
+        if (typeof destinationRef === "function") destinationRef(node);
+        else if (destinationRef) destinationRef.current = node;
+      }} role="dialog" aria-modal="true" aria-labelledby={titleId.current} data-test="sheet" data-sheet-title={title || "Details"} data-morph-source={morphSurface?.id} data-morph-stage={morphStage}
         onKeyDown={(event) => trapDialogTab(event, dialogRef.current)} onClick={(e) => e.stopPropagation()}
         className={`nb-fluid nb-sheet-scroll ${heightReady ? "nb-sheet-h" : ""} ${closing ? "nb-fluid-closing" : ""} relative w-full sm:max-w-md overflow-y-auto nb-s`} style={{ backgroundColor: morph === "notch" && morphSurface && morphStage === "closing" ? morphSurface.background : T.card, color: T.text, maxHeight: "88svh", height: sheetHeight == null ? "auto" : sheetHeight, "--morph-accent": morph === "notch" && morphSurface ? morphSurface.background : "transparent", "--morph-card": T.card }}>
         {morph === "notch" && morphSurface && (
