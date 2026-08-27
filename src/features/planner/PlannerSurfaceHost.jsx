@@ -33,6 +33,7 @@ import { fmtTime, fromHhmm, hhmm } from "../../shared/time/clockFormat.js";
 import { NOW_RED, THEMES } from "../../design/themes.js";
 import { controlMorphKey, eventMorphKey, noteMorphKey, slotMorphKey, taskMorphKey } from "../motion/morphKeys.js";
 import { morphRegistry } from "../motion/morphRegistry.js";
+import { startCloseWithLatestSource } from "../motion/closeActiveMorph.js";
 import { isDestinationContentRevealed } from "../motion/morphInterpolate.js";
 import { MorphSurface } from "../motion/MorphSurface.js";
 import { MORPH_STATES, createMorphTransaction } from "../motion/morphTransaction.js";
@@ -343,7 +344,7 @@ export default function PlannerSurfaceHost(props) {
     if (!motionKey) {
       if (isMorphActive(current.state)) {
         const runId = current.runId;
-        if (transaction.startClose({ target: current.sourceSnapshot, runId })) {
+        if (startCloseWithLatestSource({ transaction, snapshot: current, registry: morphRegistry })) {
           timer = window.setTimeout(() => transaction.settleClose(runId), MORPH_TIMING.OBJECT_CLOSE_MS);
         }
       }
@@ -352,7 +353,7 @@ export default function PlannerSurfaceHost(props) {
 
     if (current.key && current.key !== motionKey && isMorphActive(current.state)) {
       const runId = current.runId;
-      transaction.startClose({ target: current.sourceSnapshot, runId });
+      startCloseWithLatestSource({ transaction, snapshot: current, registry: morphRegistry });
       transaction.settleClose(runId);
     }
 

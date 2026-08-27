@@ -253,11 +253,18 @@ export function createMorphRegistry() {
 
     if (role) {
       if (rec[role] && rec[role].node === node) {
+        snapshotMorphNode(key, role);
         rec[role] = null;
       }
     } else {
-      if (rec.source && rec.source.node === node) rec.source = null;
-      if (rec.destination && rec.destination.node === node) rec.destination = null;
+      if (rec.source && rec.source.node === node) {
+        snapshotMorphNode(key, "source");
+        rec.source = null;
+      }
+      if (rec.destination && rec.destination.node === node) {
+        snapshotMorphNode(key, "destination");
+        rec.destination = null;
+      }
     }
 
     // If completely empty of both live and snapshots, prune the map entry

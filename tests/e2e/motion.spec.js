@@ -740,6 +740,10 @@ test.describe("the notch morph", () => {
     await page.keyboard.press("Escape");
     await expect(sheet).toHaveCount(0, { timeout: 3000 });
 
+    /* Freeze only the freshly mounted handoff channels. This samples the
+     * zero-time source frame deterministically rather than racing the first
+     * compositor frame after the reopen click. */
+    await page.addStyleTag({ content: ".nb-fluid[data-fluid-origin='notch'] .nb-morph-source-label,.nb-fluid[data-fluid-origin='notch'] .nb-notch-body{animation-play-state:paused!important}" });
     await trigger.click();
     const reopened = page.getByTestId("sheet");
     await expect(reopened).toHaveAttribute("data-fluid-origin", "notch");
