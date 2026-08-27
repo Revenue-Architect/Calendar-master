@@ -253,16 +253,19 @@ export function createMorphRegistry() {
 
     if (role) {
       if (rec[role] && rec[role].node === node) {
-        snapshotMorphNode(key, role);
+        const hasSemanticHistory = role === "source"
+          ? Boolean(rec.lastSourceSnapshot)
+          : Boolean(rec.lastDestinationSnapshot);
+        if (hasSemanticHistory) snapshotMorphNode(key, role);
         rec[role] = null;
       }
     } else {
       if (rec.source && rec.source.node === node) {
-        snapshotMorphNode(key, "source");
+        if (rec.lastSourceSnapshot) snapshotMorphNode(key, "source");
         rec.source = null;
       }
       if (rec.destination && rec.destination.node === node) {
-        snapshotMorphNode(key, "destination");
+        if (rec.lastDestinationSnapshot) snapshotMorphNode(key, "destination");
         rec.destination = null;
       }
     }

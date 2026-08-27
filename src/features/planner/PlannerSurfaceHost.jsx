@@ -33,7 +33,10 @@ import { fmtTime, fromHhmm, hhmm } from "../../shared/time/clockFormat.js";
 import { NOW_RED, THEMES } from "../../design/themes.js";
 import { controlMorphKey, eventMorphKey, noteMorphKey, slotMorphKey, taskMorphKey } from "../motion/morphKeys.js";
 import { morphRegistry } from "../motion/morphRegistry.js";
-import { startCloseWithLatestSource } from "../motion/closeActiveMorph.js";
+import {
+  createMorphCloseSnapshotRelease,
+  startCloseWithLatestSource,
+} from "../motion/closeActiveMorph.js";
 import { isDestinationContentRevealed } from "../motion/morphInterpolate.js";
 import { MorphSurface } from "../motion/MorphSurface.js";
 import { MORPH_STATES, createMorphTransaction } from "../motion/morphTransaction.js";
@@ -323,6 +326,10 @@ export default function PlannerSurfaceHost(props) {
     meta: motion?.meta,
     enabled: Boolean(motionKey),
   });
+  const closeSnapshotReleaseRef = useRef(null);
+  if (!closeSnapshotReleaseRef.current) {
+    closeSnapshotReleaseRef.current = createMorphCloseSnapshotRelease({ registry: morphRegistry });
+  }
   const transactionRef = useRef(null);
   const [transactionSnapshot, setTransactionSnapshot] = useState(() => ({
     state: MORPH_STATES.IDLE,
@@ -333,7 +340,12 @@ export default function PlannerSurfaceHost(props) {
     inFlightProgress: 0,
   }));
   if (!transactionRef.current) {
-    transactionRef.current = createMorphTransaction({ onStateChange: setTransactionSnapshot });
+    transactionRef.current = createMorphTransaction({
+      onStateChange: (snapshot) => {
+        closeSnapshotReleaseRef.current.onTransactionStateChange(snapshot);
+        setTransactionSnapshot(snapshot);
+      },
+    });
   }
   const transaction = transactionRef.current;
 
@@ -345,6 +357,7 @@ export default function PlannerSurfaceHost(props) {
       if (isMorphActive(current.state)) {
         const runId = current.runId;
         if (startCloseWithLatestSource({ transaction, snapshot: current, registry: morphRegistry })) {
+          closeSnapshotReleaseRef.current.trackClose({ key: current.key, runId });
           timer = window.setTimeout(() => transaction.settleClose(runId), MORPH_TIMING.OBJECT_CLOSE_MS);
         }
       }
@@ -353,7 +366,9 @@ export default function PlannerSurfaceHost(props) {
 
     if (current.key && current.key !== motionKey && isMorphActive(current.state)) {
       const runId = current.runId;
-      startCloseWithLatestSource({ transaction, snapshot: current, registry: morphRegistry });
+      if (startCloseWithLatestSource({ transaction, snapshot: current, registry: morphRegistry })) {
+        closeSnapshotReleaseRef.current.trackClose({ key: current.key, runId });
+      }
       transaction.settleClose(runId);
     }
 

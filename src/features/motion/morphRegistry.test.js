@@ -167,6 +167,51 @@ test("Blocker 2: releaseMorphSnapshots clears geometry history without unregiste
   assert.equal(registry.getLastMorphSnapshot(key, "source"), null);
 });
 
+test("unregistering an unused source prunes its registry key", () => {
+  const registry = createMorphRegistry();
+  const key = "morph:event:unused-source";
+  const unregister = registry.registerMorphNode({
+    key,
+    node: createMockNode(),
+    role: "source",
+  });
+
+  unregister();
+
+  assert.deepEqual(registry.getRegisteredKeys(), []);
+});
+
+test("unused transient source registrations do not accumulate retained keys", () => {
+  const registry = createMorphRegistry();
+
+  for (let index = 0; index < 1000; index += 1) {
+    const unregister = registry.registerMorphNode({
+      key: `morph:event:transient-${index}`,
+      node: createMockNode({ y: index }),
+      role: "source",
+    });
+    unregister();
+  }
+
+  assert.deepEqual(registry.getRegisteredKeys(), []);
+});
+
+test("unregister refreshes existing semantic history with the latest remounted source", () => {
+  const registry = createMorphRegistry();
+  const key = "morph:event:remounted-history";
+  const sourceA = createMockNode({ y: 120 });
+  const unregisterA = registry.registerMorphNode({ key, node: sourceA, role: "source" });
+
+  registry.snapshotMorphNode(key, "source");
+  unregisterA();
+
+  const sourceB = createMockNode({ y: 216 });
+  const unregisterB = registry.registerMorphNode({ key, node: sourceB, role: "source" });
+  unregisterB();
+
+  assert.equal(registry.getLastMorphSnapshot(key, "source").rect.y, 216);
+});
+
 test("Blocker 5: snapshot immutability is strictly enforced on motion geometry", () => {
   const registry = createMorphRegistry();
   const sourceNode = createMockNode({ x: 50, y: 60, width: 150, height: 50 });
