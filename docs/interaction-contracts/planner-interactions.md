@@ -92,3 +92,71 @@ active user scroll session.
 
 Week Action move, resize, and swipe are deferred. Week Action cards must not
 advertise those gestures.
+
+---
+
+## Rev D physical-presentation contract
+
+The normal pointer/touch physical grammar is defined by:
+
+- `docs/plans/2026-08-25-006-physical-planner-motion-visual-reference.html`
+- `docs/plans/2026-08-27-007-physical-planner-motion-extended-visual-reference.html`
+- the Rev D PRD/ARD.
+
+Motion begins only after the existing gesture classifier has resolved Tap. The
+registry, visual carrier, and Presentation Lens are never gesture owners.
+
+### Logical vs presentation geometry
+
+A physical expansion may visually make room around an object while the geometry
+that owns interaction semantics stays unchanged.
+
+Logical/interaction geometry owns date/minute mapping, Event/Action source
+bounds used by drag/resize, overlap/lane packing, drag/resize origin, list/order
+identity, and persisted values.
+
+Presentation geometry may temporarily grow the visible object and transform
+visible hour rules/cards/rows below it. Presentation displacement is not a write,
+not a scroll, and not a second gesture owner.
+
+### Source ownership
+
+A source-anchored overlay/lens must not add a wrapper that intercepts pointer
+ownership. It must not alter source gesture handlers or use transformed visual
+bounds as drag/resize truth.
+
+Pointer/touch Event, Action, Note, Month Peek and creation paths must visually
+remain anchored to their semantic source. Keyboard source-less paths remain
+instant and do not activate Presentation Lens travel.
+
+### Expanded fields
+
+Opening Repeat/Calendar/alerts/etc. may increase the current expanded object's
+presentation height. The parent/lens may follow that height, but logical source
+geometry remains unchanged. Options must not clip and collapsed options must
+leave the tab order.
+
+### Cancel/close
+
+`pointercancel` / `touchcancel` additionally clear any transaction-owned physical
+carrier and Presentation Lens displacement.
+
+Closing an expanded object resolves the latest semantic source and restores
+focus there when possible. Never use unrelated current focus as geometry.
+
+### Semantic modality
+
+A visually embedded expanded object may retain inert/focus/scroll protections
+when semantics require them. No visible modal scrim is required merely because
+those protections are active.
+
+### Required negative controls
+
+For each critical migrated path, deliberately prove tests fail when:
+
+- a wrapper steals source pointer ownership;
+- Presentation Lens mutates logical source geometry;
+- lens displacement survives cancel/close;
+- keyboard activation borrows a spatial source;
+- recurring sibling suppression occurs;
+- expanded field options remain tabbable after collapse.

@@ -1,1108 +1,488 @@
 # Calendar Master — Physical Planner Motion System ARD
 
-**Status:** Canonical proposed architecture requirements  
-**Date:** 2026-08-24  
-**Behavioral authority:** `docs/plans/2026-08-25-006-physical-planner-motion-visual-reference.html`  
+**Status:** Canonical architecture requirements — Rev D  
+**Original behavioral authority:** `docs/plans/2026-08-25-006-physical-planner-motion-visual-reference.html`  
+**Extended behavioral examples:** `docs/plans/2026-08-27-007-physical-planner-motion-extended-visual-reference.html`  
 **Product authority:** `docs/plans/2026-08-25-001-physical-planner-motion-prd.md`  
 **Evidence / blast radius:** `docs/plans/2026-08-25-003-physical-planner-motion-reconciliation.md`  
-**Execution:** `docs/plans/2026-08-25-004-physical-planner-motion-implementation-plan.md`
+**Execution:** `docs/plans/2026-08-25-004-physical-planner-motion-implementation-plan.md`  
+**Rev D decision date:** 2026-08-27
 
 ---
 
 # 1. Architecture decision
 
-> **Rev C grounding (2026-08-25):** Re-grounded against current `main` `a8cf905b878e913256dc3e3518d133c2583cb443`
-> and the docs-only branch `feat/sheet-presentation-physicality`, which is two commits ahead of that main.
-> The branch contains Claude's 387-line plan, 7,840-line session log, raw JSONL session, and capture scripts; it
-> contains no product-code implementation. Current code has moved beyond some assumptions in that plan:
-> `anchoredFluidMorphFromRects()` and 25/50/75% interrupted Composer reversal tests already exist, and the
-> current Planner architecture ceiling is 5531 (split-line count). Re-verify all counts at execution time.
+Calendar Master stops treating `Sheet` as the universal product-surface abstraction.
 
-Calendar Master will stop treating `Sheet` as the universal product-surface abstraction.
+Rev D adds one critical architectural distinction:
 
-The motion layer will instead expose semantic primitives:
+> **Logical/interaction geometry remains authoritative and frozen during physical expansion; presentation geometry may temporarily yield so the visible result matches the source-anchored reference.**
+
+This resolves the false choice between unsafe literal timeline reflow and visually detached centered modals.
+
+The motion layer may expose:
 
 - `MorphSurface`
 - `ComposerSurface`
 - `MorphControl`
 - `SlideSurface`
 - `NeutralDialogSurface`
+- `PresentationLens` / `TimelineLens` (name may vary; boundary may not)
 - `MorphRegistry`
 - semantic motion keys
 - transaction/state-machine utilities
 - shared geometry/timing tokens
 
-Legacy `Sheet.jsx` remains during migration.
-
-It is not deleted until all call sites have been deliberately classified.
+Legacy `Sheet.jsx` may remain internally during migration for hardened accessibility/scroll behavior, but it must not dictate a generic visual destination for persistent objects.
 
 ---
 
-# 2. Repository realities that constrain the design
+# 2. Frozen logical geometry invariant
 
-At the reviewed application state:
+For Event/Action/slot sources, domain and gesture truth may not change merely because an object is visually expanded.
 
-- React 19 / ReactDOM 19
-- Vite
-- Playwright
-- custom CSS/WAAPI motion
-- no required Framer Motion runtime
-- no required shadcn/Base UI runtime
-- `Planner.jsx` protected by an architecture ratchet
-- significant motion logic already extracted under `src/features/motion`
-- gesture ownership explicitly documented
-- existing Inspector/Composer logic carries domain-facing behavior
-- current Sheet carries focus, scroll, source-geometry, close and reduced-motion responsibilities
+Examples that remain unchanged during an Event expansion:
 
-This is therefore a **surface-runtime migration**, not a form/domain rewrite.
+- Event date;
+- start minute;
+- duration;
+- lane/column assignment;
+- overlap packing;
+- source layout rect used by drag/resize;
+- drag origin;
+- resize origin;
+- recurrence identity;
+- persistence state.
 
----
+Presentation may visually displace hour rules, later cards, list rows, or neighboring decoration without mutating these values.
 
-# 3. Existing responsibilities that must not be lost
-
-The current Sheet/system has accumulated hard-earned behavior.
-
-An implementer must inventory and preserve:
-
-1. dialog semantics;
-2. focus capture;
-3. focus trap;
-4. focus restoration;
-5. ancestor scroll snapshot;
-6. ancestor scroll restoration;
-7. body overflow locking;
-8. source geometry;
-9. source border radius/material;
-10. reverse close;
-11. in-flight interruption;
-12. content handoff timing;
-13. height cap;
-14. ResizeObserver behavior;
-15. software-keyboard protection;
-16. reduced-motion mode;
-17. dirty-close veto / `beforeClose`;
-18. scrim;
-19. sticky header;
-20. internal scroll affordance.
-
-Do not “replace Sheet” by only re-implementing its opening animation.
+A presentation transform is not a domain update.
 
 ---
 
-# 4. Proposed source tree
+# 3. Three identities
 
-```text
-src/features/motion/
-  MorphSurface.jsx
-  ComposerSurface.jsx
-  MorphControl.jsx
-  SlideSurface.jsx
-  NeutralDialogSurface.jsx
+Never conflate:
 
-  morphKeys.js
-  morphKeys.test.js
-  morphRegistry.js
-  morphRegistry.test.js
-  morphGeometry.js
-  morphGeometry.test.js
-  morphTransaction.js
-  morphTransaction.test.js
-  motionTokens.js
+- **business identity** — Event/Task/Note;
+- **render identity** — occurrence + view + lane/date projection;
+- **motion identity** — concrete semantic source/destination for this transaction.
 
-  useMorphSource.js
-  useMorphDestination.js
-
-  # legacy during migration
-  Sheet.jsx
-  fluidGeometry.js
-  fluidTrigger.js
-  morphTiming.js
-
-src/features/planner/
-  PlannerSurfaceHost.jsx
-  EventInspectorSurface.jsx
-  ActionInspectorSurface.jsx
-  PlannerComposerSurface.jsx
-  NoteEditorSurface.jsx
-```
-
-Names may vary. Boundaries may not.
+Never use array index, current focus, or “last clicked rectangle” as identity.
 
 ---
 
-# 5. Three identities
+# 4. MorphRegistry
 
-Do not conflate:
+Registry requirements remain:
 
-### Business identity
+- live source/destination registration;
+- exact-node unregister;
+- stale unregister protection;
+- immutable last-valid snapshots;
+- Strict Mode tolerance;
+- source/destination roles;
+- shared title/meta/marker snapshots;
+- no continuous observer per card;
+- measurement at transaction boundaries unless a proven flow requires otherwise.
 
-Example: Event ID / Task ID / Note ID.
+Close source order:
 
-### Render identity
+1. latest live semantic source;
+2. last valid semantic source snapshot;
+3. deliberate neutral fallback.
 
-Example: recurring Event occurrence in Day vs Week.
-
-### Motion identity
-
-The concrete visual source/destination for a transaction.
-
-Examples:
-
-```js
-eventMorphKey({ occurrenceId, view: "day", lane: "timeline" })
-eventMorphKey({ occurrenceId, view: "week", dayKey })
-taskMorphKey({ taskId, view: "actions" })
-noteMorphKey({ noteId, context: "notebook" })
-slotMorphKey({ view: "day", dateKey, startMinute })
-```
-
-Never use array index or current focus as motion identity.
+Never `activeElement` geometry.
 
 ---
 
-# 6. MorphRegistry
+# 5. Presentation Lens
 
-The legacy “most recently pressed rectangle” model is not enough for the new behavior.
+`PresentationLens` is the Rev D safety primitive that allows reference-faithful visible yielding without rewriting the calendar layout engine.
 
-The registry must resolve semantic objects.
-
-Conceptual API:
-
-```js
-registerMorphNode({
-  key,
-  node,
-  kind,
-  role,
-  shared,
-});
-
-unregisterMorphNode(key, node);
-
-resolveMorphNode(key);
-
-snapshotMorphNode(key);
-```
-
-Snapshot:
+Conceptual input:
 
 ```js
 {
-  key,
-  rect,
-  radius,
-  paint,
-  viewport,
-  shared: {
-    title,
-    meta,
-    marker,
-  },
-  capturedAt,
+  ownerKey,
+  sourceRect,
+  sourceVisualHeight,
+  expandedVisualHeight,
+  axis: "block",
+  scope,
 }
 ```
 
-Requirements:
+Conceptual displacement:
 
-- live node resolution;
-- immutable last-valid snapshot;
-- stale-node-safe unregister;
-- Strict Mode safe;
-- no continuous geometry observers on every record;
-- shared child slots optional;
-- measurement only on transaction boundaries unless a specific flow proves otherwise.
-
----
-
-# 7. Why production should not literally expand a timeline card in-flow
-
-The visual reference expands a card in-place because that is the clearest behavioral demonstration.
-
-Production Day/Week timelines are geometry-sensitive.
-
-In-flow expansion risks:
-
-- moving hour rows;
-- changing overlap/lane packing;
-- changing resize handle locations;
-- changing scrollHeight;
-- perturbing drag math;
-- making source geometry change while opening.
-
-Therefore production should use **overlay shared-object continuity**.
-
----
-
-# 8. Object Morph renderer
-
-Recommended structure:
-
-```text
-source record
-   ↓ snapshot
-source layout box remains
-source paint suppressed
-   ↓
-isolated MorphSurface overlay
-   ├─ ShellLayer
-   ├─ SharedTitleLayer
-   ├─ SharedMetaLayer
-   ├─ SharedMarkerLayer
-   └─ DestinationContentLayer
+```js
+const extra = Math.max(0, expandedVisualHeight - sourceVisualHeight + spacing);
 ```
 
-### Open
+Presentation-owned elements visually below the source may receive a transform derived from `extra`.
+
+The lens must not mutate the values used for:
+
+- time mapping;
+- overlap/lane calculation;
+- drag/resize hit-testing;
+- record start/end;
+- persisted layout/order.
+
+The lens is temporary, transaction-owned, reversible, and cleared on settle/cancel/unmount.
+
+---
+
+# 6. Lens scope
+
+Lens scope is explicit, not “transform everything after this DOM node.”
+
+Examples:
+
+- Day timeline: hour rules/decorations and visible record presentation below the source;
+- Week: the relevant visual column/lane presentation, with careful cross-column behavior;
+- Actions: visual rows below the Action;
+- Notes: visual list/card neighbors;
+- Month: neighboring cell presentation if needed;
+- inline fields: content below the field within its current expanded object.
+
+Gesture owners and source nodes themselves remain stable.
+
+No wrapper may intercept pointer ownership just to implement the lens.
+
+---
+
+# 7. Object Morph renderer — Rev D
+
+Recommended model:
+
+```text
+semantic source node
+    ↓ snapshot
+logical source layout remains frozen
+source paint suppressed only after carrier exists
+    ↓
+source-anchored visual carrier
+    ├─ ShellLayer
+    ├─ SharedTitleLayer
+    ├─ SharedMetaLayer
+    ├─ SharedMarkerLayer
+    └─ real destination-only content
+    ↓
+PresentationLens visually yields surrounding presentation
+```
+
+Open:
 
 1. gesture classifier returns Tap;
-2. capture source snapshot;
-3. leave source layout box intact;
+2. capture semantic source;
+3. establish carrier at exact source geometry;
 4. suppress source paint;
-5. mount overlay at source geometry;
-6. move/grow shell to destination;
-7. move shared title/time/marker at 1x visual scale;
-8. reveal destination-only content;
-9. transfer modality/focus.
+5. grow carrier from the source anchor — do not default to viewport center;
+6. grow Presentation Lens displacement with carrier height;
+7. shared title/time/marker remain identifiable and visually 1x where scaling would distort them;
+8. reveal destination-only content after enough space exists;
+9. transfer focus/semantics when the destination is usable.
 
-### Close
-
-1. resolve semantic source again;
-2. if found, capture latest geometry;
-3. reverse shell/shared slots;
-4. restore source paint;
-5. unmount overlay;
-6. restore focus.
-
-This produces the demo's “same object” perception without destabilizing the timeline.
+Close is the semantic reverse and re-resolves latest source geometry first.
 
 ---
 
-# 9. Do not scale a live form
+# 8. Do not literally reflow calendar truth
 
-Full-container `scale()` is not the primary mechanism.
+The original reference uses real in-flow expansion because it is a behavioral demonstration.
 
-Reasons:
+Production must reproduce that **visual result**, but may not naïvely change core timeline layout if doing so changes:
 
-- text distorts;
-- border widths distort;
-- controls magnify;
-- hit regions become harder to reason about;
-- it reads as zoom.
+- hour mapping;
+- overlap packing;
+- drag math;
+- resize handles;
+- logical scroll positions used by gesture code;
+- source geometry during the transaction.
 
-Shell geometry may use transform-based interpolation.
+The correct conclusion is not “therefore fly to a centered Sheet.”
 
-Shared title/meta/marker should remain visually 1x.
-
-Destination-only form content should arrive after space exists.
+The correct conclusion is “freeze logical geometry and create a visually indistinguishable presentation expansion.”
 
 ---
 
-# 10. Material continuity
+# 9. Content-driven expanded size
 
-Legacy shared-layout work already established an important principle:
+Persistent-object surfaces are content-driven.
 
-**Geometry alone is not enough.**
+Do not lock Event/Action/Note expanded forms to a fixed modal height that clips internal controls.
 
-If a card becomes a destination surface but destination paint appears immediately, it can still read as two objects.
+When Repeat/Calendar/alerts/etc. unfold:
 
-Morph snapshots should capture source paint where feasible:
+- measure at a controlled boundary or observe the single expanded surface;
+- update carrier presentation height;
+- update lens displacement;
+- keep logical source geometry unchanged;
+- avoid nested scroll until viewport constraints genuinely require it.
 
-- background/material;
-- accent marker;
+No per-card global ResizeObserver network.
+
+---
+
+# 10. Live form rule
+
+Do not scale a live form as the primary explanation.
+
+Shell geometry may use transform interpolation. Shared identity may be rendered in dedicated layers. Real form content arrives at true scale after enough space exists.
+
+No text magnification, warped borders, or scaled hit targets.
+
+---
+
+# 11. Material continuity
+
+Capture source material where feasible:
+
+- background;
 - radius;
+- marker/accent;
 - key text color.
 
-The surface can transition to destination material as it establishes the new state.
-
-Close must reverse material coherently where doing so does not create a distracting flash.
+Destination material evolves from the source rather than replacing it in the first frame.
 
 ---
 
-# 11. ComposerSurface is a transaction, not a dialog
+# 12. ComposerSurface
 
-Composer has:
+Composer is a transaction, not a dialog.
 
-1. origin;
-2. draft;
-3. commit destination OR cancel origin.
+Day/Week pointer creation uses exact slot/sized-draft geometry. The Composer visually grows there, can use a Presentation Lens, and on save resolves into the committed Event. Cancel reverses to the exact source with zero write.
 
-Conceptual state:
+Never delay the domain write until animation completion.
 
-```text
-idle
-→ measuring
-→ opening
-→ editing
-→ validating
-→ committing
-→ destination-wait
-→ settling
-→ done
-```
-
-Cancel:
-
-```text
-editing → cancelling → origin → done
-```
-
-The motion state machine does not determine persistence validity.
+Keyboard origin remains null/instant.
 
 ---
 
-# 12. Commit handshake
+# 13. MorphControl
 
-Critical rule:
-
-> **Never delay the domain write until animation completes.**
-
-Recommended sequence:
-
-```js
-const result = commitDraft(payload); // existing domain semantics
-
-const destinationKey = result.motionKey ?? deriveMotionKey(result);
-beginDestinationWait(destinationKey);
-```
-
-Then:
-
-1. React/domain state commits;
-2. record renders;
-3. destination registers;
-4. Composer resolves into destination;
-5. visual transaction settles.
-
-Destination wait is bounded.
-
-If destination is filtered/unmounted:
-
-- use last valid semantic destination snapshot if available;
-- otherwise neutral settle;
-- never fabricate a destination.
-
----
-
-# 13. Creation origin types
-
-```js
-{ type: "timeline-slot", sourceKey, dateKey, startMinute }
-{ type: "week-slot", sourceKey, dateKey, startMinute }
-{ type: "global-add", sourceKey }
-{ type: "actions-add", sourceKey }
-{ type: "keyboard", sourceKey: null }
-```
-
-Keyboard origin is intentionally null.
-
----
-
-# 14. MorphControl
-
-Use width/height expansion only for **compact controls** where the surrounding layout can tolerate it.
-
-Good:
+Use local width/height/grid expansion where the control's own layout safely owns it:
 
 - Add;
 - More;
 - Search;
 - Filter;
-- inline Repeat/Calendar/etc.
+- bounded inline fields.
 
-Not good:
-
-- Event → Inspector;
-- Composer;
-- large Notes editor.
-
-Requirements:
-
-- same shell where practical;
-- collapsed content removed from tab order;
-- Escape;
-- outside press if semantics require;
-- reduced-motion mode;
-- no whole-control blur requirement;
-- no large bounce.
+Controls unfold from themselves. Collapsed content leaves the tab order. Parent persistent objects may grow and update their lens when a field expands.
 
 ---
 
-# 15. Reconfigure
+# 14. Reconfigure
 
-Inspector Edit does not create a new surface.
+Inspector Edit does not create another surface.
 
-Existing edit draft state remains the state owner.
-
-Rules:
-
-- no remount;
-- no re-entrance animation;
-- Save/Revert semantics unchanged;
-- one expanded field owner;
-- field morph local to Inspector.
-
-A browser test should assert node identity survives Edit.
+- same open object;
+- no remount where identity contract requires continuity;
+- no re-entrance;
+- Save/Revert unchanged;
+- field morphs local to the object;
+- parent height/lens may update.
 
 ---
 
-# 16. SlideSurface
+# 15. SlideSurface and NeutralDialog
 
-Use only for actual movement:
+`SlideSurface` is for real destination travel: date/view/settings navigation.
 
-- date/page travel;
-- view destination travel;
-- settings/global destination.
+`NeutralDialogSurface` is for true interruptions with no honest object source: destructive confirmation, recovery, auth/permission, system error, import/export confirmation.
 
-Do not rewrite already-correct navigation compositor work merely to standardize component names.
-
-Navigation is a separate motion owner.
+Only Neutral Dialogs get modal visual treatment by default.
 
 ---
 
-# 17. NeutralDialogSurface
+# 16. Scrim / modality separation
 
-Use when no honest object source exists:
+Semantic modality and visual dimming are independent.
 
-- destructive confirmation;
-- recovery;
-- permissions/auth;
-- critical system error;
-- import/export confirmation.
+A persistent object may use:
 
-This is the best candidate for a future Base UI/shadcn-derived primitive.
+- inert background;
+- focus trap;
+- outside-click guard;
+- body/ancestor scroll protections;
 
----
+without a visible scrim.
 
-# 18. Keyboard mode
+Object/Creation/Control morphs do not receive a dark/blurred scrim by default.
 
-Legacy audits verified keyboard new/command surfaces are instant.
-
-Protect that deliberately.
-
-Rules:
-
-- no stale source rectangle;
-- no “last clicked control” morph;
-- no fake origin from activeElement;
-- close instant if current product contract says instant;
-- state/focus correctness remains required.
+No whole-screen blur for normal object expansion.
 
 ---
 
-# 19. Reduced-motion mode
+# 17. Keyboard and reduced motion
 
-Full-motion state machine remains the semantic owner.
+Keyboard:
 
-Renderer changes.
+- instant/source-less where specified;
+- no stale rectangle;
+- no activeElement geometry;
+- no Presentation Lens travel.
 
 Reduced motion:
 
-- skips large travel;
-- may use short cross-fade;
-- never waits on CSS animation to commit state;
-- leaves no source skin;
-- preserves focus/scroll.
-
-Do not globally remove opacity rules without checking reduced-motion overrides.
+- same semantic transaction;
+- skip large travel/lens animation;
+- preserve final state/focus/scroll;
+- never depend on animation completion to make state valid.
 
 ---
 
-# 20. Scrim
+# 18. Focus and scroll
 
-Scrim remains allowed to fade.
+Preserve hardened behavior:
 
-Treat scrim as environmental lighting, not an object.
+- focus capture/restore;
+- real Tab trap where semantics require;
+- inert restoration;
+- ancestor scroll snapshot/restore;
+- body overflow rules;
+- software keyboard protection;
+- dirty-close veto.
 
----
+Opening focus only moves when the expanded destination can receive it.
 
-# 21. Semantic opacity
-
-Do not touch opacity that encodes:
-
-- completed;
-- past;
-- held;
-- disabled;
-- de-emphasis.
-
-Any opacity cleanup must classify state vs arrival first.
+Visual yielding must not masquerade as a logical scroll operation.
 
 ---
 
-# 22. Reveal-without-paint invariant
+# 19. Gesture isolation
 
-Legacy regression history proves visibility must never depend on an animation callback, rAF, or first paint occurring.
+The registry, carrier, and Presentation Lens are not gesture owners.
 
-This is particularly important for:
+Protect Event tap/drag/resize/JOIN, Action complete/swipe/hold/estimate resize, empty-space tap/hold-size/cancel, and Week gesture ownership.
 
-- ribbon;
-- month cells;
-- any load reveal;
-- newly registered morph destinations.
-
-Resting DOM/CSS state must be valid without animation.
-
-Motion is enhancement.
+A no-wrapper/no-pointer-ownership negative control remains mandatory for critical sources.
 
 ---
 
-# 23. Focus
+# 20. Recurrence and source disappearance
 
-Priority on close:
+Recurring motion identity distinguishes occurrence from series/business identity and includes concrete render context.
 
-1. live semantic source;
-2. semantically equivalent replacement;
-3. deliberate view-level fallback.
+Close re-resolves after recurrence edits/remounts.
 
-Never:
+Source fallback:
 
-- disconnected source;
-- hidden source;
-- arbitrary focused control.
-
-On open:
-
-- background becomes inert if truly modal;
-- focus transfer occurs only when destination can receive it;
-- scroll position must remain stable.
-
----
-
-# 24. Scroll
-
-Preserve current protections.
-
-Decide per surface:
-
-- body lock?
-- ancestor freeze?
-- internal surface scroll?
-- source timeline still visible?
-- scroll restoration target?
-
-Assert before/after scrollTop in E2E.
-
----
-
-# 25. Mobile keyboard
-
-Software keyboard is a known geometry hazard.
-
-Do not treat every viewport-height change as a layout-mode change.
-
-Prefer:
-
-- width-sensitive remeasure;
-- stable destination cap;
-- no continuous height chasing while input is focused.
-
-Opening Composer must not visibly jump when keyboard appears.
-
----
-
-# 26. Gesture isolation
-
-The morph registry is not a gesture owner.
-
-Event:
-
-- tap → open;
-- drag → move;
-- resize edge → resize;
-- JOIN → direct.
-
-Action:
-
-- check → complete;
-- swipe remains swipe;
-- hold/drag remains current behavior;
-- estimate resize remains direct.
-
-Empty space:
-
-- tap → standard-duration Composer;
-- hold → sized draft;
-- cancel → no write.
-
----
-
-# 27. Recurrence
-
-A recurring Event's motion identity must distinguish the concrete occurrence from the series/business Event identity where the UI distinguishes them.
-
-An occurrence edit can replace/re-key a rendered source.
-
-Close must re-resolve.
-
----
-
-# 28. Source disappearance
-
-Possible causes:
-
-- view changes;
-- filter;
-- virtualization;
-- recurrence replacement;
-- record deletion;
-- mobile responsive reflow;
-- scroll/unmount;
-- Month Peek close.
-
-Fallback order:
-
-1. latest live source;
+1. latest live semantic source;
 2. last semantic source snapshot;
-3. neutral close.
+3. neutral settle.
 
 Never unrelated source.
 
 ---
 
-# 29. Destination disappearance
+# 21. Destination disappearance
 
-Creation destination may not appear because:
-
-- filter excludes it;
-- selected date changes;
-- sort puts it outside mounted window;
-- domain update fails;
-- projection delays render.
-
-The Composer may not stay forever.
-
-Use bounded destination wait plus explicit fallback.
+Creation destination wait is bounded. If a committed destination is filtered/unmounted/delayed, use an explicit semantic fallback rather than keeping Composer forever or fabricating a target.
 
 ---
 
-# 30. Z-index
+# 22. Z-index and property ownership
 
-Define semantic layers centrally.
+Central semantic order:
 
-Example ordering:
-
-- normal app;
-- dragged record;
-- morph source/destination overlay;
-- modal neutral dialog;
+- normal app presentation;
+- drag/lift presentation;
+- physical-object carrier;
+- Neutral Dialog;
 - toast/system notice.
 
-Do not introduce arbitrary local `z-50` escalation.
+One animation owner per property. No CSS transition and WAAPI fighting the same property. No per-frame React state.
 
 ---
 
-# 31. Animation ownership
+# 23. CSS/layout rule — Rev D
 
-One owner per property.
+The old prohibition on layout-sensitive animation is refined:
 
-Rules:
-
-- no CSS transition and WAAPI writing same property simultaneously;
-- no React state per frame;
-- JS measures at transaction boundaries;
-- CSS/WAAPI interpolate;
-- stale animation completions ignored by run ID;
-- closing can reverse from current rendered state.
+- do not animate core logical calendar layout as the source of truth;
+- presentation-only transforms are allowed and preferred for visual yielding;
+- small contained Control Morph layout expansion is allowed;
+- a single isolated expanded surface may use content-driven height when its logical source remains frozen;
+- do not force large planner reflow to achieve the visual effect.
 
 ---
 
-# 32. Clip-path caveat
+# 24. Planner composition boundary
 
-Do not assume clip-path is free.
+`Planner.jsx` must not grow beyond its ratchet.
 
-Prior navigation work demonstrated browser-owned/composited capability does not guarantee cheap paint on a given subtree.
+Planner supplies state/callbacks. Focused planner/motion modules own:
 
-If clip is used:
+- surface composition;
+- semantic motion descriptor;
+- carrier geometry;
+- Presentation Lens;
+- close targeting;
+- destination handshake.
 
-- keep subtree small;
-- profile target Chromium;
-- profile iOS Safari;
-- use paint flashing where available.
-
-Do not apply a full-screen clip because “the browser composites clip-path.”
-
----
-
-# 33. CSS/layout property rule
-
-Do not animate large layout-sensitive properties in core planner surfaces.
-
-Avoid:
-
-- `left`;
-- `top`;
-- `width`;
-- `height`;
-- margin;
-- padding;
-- grid tracks.
-
-Exception:
-
-small contained MorphControl width/height transitions may be acceptable after measuring because they are local and explicitly product-owned.
+Lower the ratchet whenever extraction shrinks Planner.
 
 ---
 
-# 34. Planner composition boundary
+# 25. Test architecture
 
-`Planner.jsx` must not grow.
+Unit:
 
-Create/extract:
-
-`src/features/planner/PlannerSurfaceHost.jsx`
-
-Responsibilities:
-
-- current Inspector state → Event/Action surface;
-- Composer state → ComposerSurface;
-- Month Peek;
-- Notes surface;
-- close callbacks;
-- commit result → motion destination key.
-
-Planner provides state/callbacks.
-
-Planner does not implement morph geometry.
-
-If extraction shrinks Planner, lower the architecture ceiling.
-
----
-
-# 35. Composer content boundary
-
-Do not rewrite the form/domain logic just to change its container.
-
-Composer should become surface-agnostic.
-
-Protect:
-
-- title;
-- kind;
-- date/time;
-- all-day;
-- duration;
-- recurrence;
-- time zone;
-- category;
-- links;
-- alerts;
-- notes;
-- estimate/due;
-- validation;
-- submit payload.
-
----
-
-# 36. Shadcn/Base UI decision
-
-Core motion migration does not depend on it.
-
-Optional later pilot:
-
-- AlertDialog;
-- Tooltip;
-- menu semantics;
-- Popover semantics.
-
-Do not adopt stock shadcn visual language.
-
-Do not replace MorphSurface or ComposerSurface with shadcn Sheet.
-
----
-
-# 37. Test architecture
-
-## Unit
-
-Cover:
-
-- keys;
-- registry;
-- stale unregister;
+- keys/registry;
+- transaction/run IDs;
 - snapshot fallback;
-- transaction reducer;
-- run IDs;
-- destination wait;
+- lens displacement calculation;
+- dynamic expanded-height propagation;
 - reduced motion;
-- geometry.
+- source/destination geometry.
 
-## Browser
+Browser:
 
-At minimum:
-
-- motion;
-- composer;
-- editor rows;
+- Day/Week/all-day Event;
+- Action;
+- Composer;
+- fields;
+- Notes;
+- Month Peek;
+- controls;
 - accessibility;
-- actions;
 - gesture isolation;
-- notes;
-- timeline;
-- ribbon readiness;
-- navigation regression.
+- navigation regressions.
 
-## Negative control
-
-Every new critical assertion must be seen failing against the exact invariant it claims.
+Negative controls must prove each critical invariant can fail.
 
 Examples:
 
-- remove source registration;
-- neutralize shared title;
+- allow Event destination to center;
+- add visible object scrim;
+- mutate logical Event top when lens opens;
+- stop lens propagation on Repeat expansion;
 - remount Inspector on Edit;
-- bypass real Tab;
-- remove destination registration;
-- null out run-ID guard.
-
-A repeat count is not proof if the test cannot fail.
+- suppress recurring sibling;
+- borrow activeElement as source.
 
 ---
 
-# 38. Visual verification
+# 26. Visual verification
 
-The standalone reference is used for behavioral parity.
+For every migrated surface compare 0/25/50/75/100% and reverse against `006`/`007`.
 
-Compare:
+Required Event perception:
 
-- first frame;
-- ~25%;
-- ~50%;
-- settled open;
-- reverse mid-frame;
-- settled close;
-- creation open;
-- commit settle.
+- source anchor does not change;
+- visible planner remains present;
+- surrounding presentation yields;
+- internal fields do not clip;
+- no modal/center-flight reading;
+- reverse returns exactly.
 
-Measure geometry where possible rather than relying only on screenshots.
-
-Production styling remains Calendar Master styling.
+Production styling remains Calendar Master styling. Behavioral geometry follows the reference.
 
 ---
 
-# 39. Physical device gate
+# 27. Physical device gate
 
-Required:
-
-### Android Chrome
-
-- Event open/close;
-- Event edit;
-- timeline create/save/cancel;
-- Action open/close;
-- Search;
-- Add;
-- keyboard;
-- scroll;
-- interruption;
-- reduced motion.
-
-### iOS Safari
-
-Same.
-
-Observe:
-
-- frame pacing;
-- keyboard reflow;
-- scroll ownership;
-- touch ownership;
-- paint behavior;
-- source continuity.
-
-Headless Chromium is non-regression evidence, not final compositor proof.
-
----
-
-# 40. Architecture principle
-
-> The motion system owns **where an object came from and where it goes**.  
-> It does not own **what the object means, whether a write is valid, or which gesture wins**.
-
----
-
-# Rev C architecture additions from `feat/sheet-presentation-physicality`
-
-## A. Coordinate-space contract
-
-Claude's branch surfaced a critical geometry fact: Sheets currently render inside
-`.nb-nav-carrier.nb-nav-motion-carrier`, which can be transformed. A transformed ancestor becomes the containing
-block for fixed descendants. Therefore a `getBoundingClientRect()` measured in viewport coordinates cannot be
-blindly applied as local fixed coordinates inside that carrier.
-
-The new motion system must have exactly one coordinate-space strategy.
-
-### Preferred strategy: untransformed motion portal
-
-Before building MorphSurface, prototype a dedicated motion host outside transformed planner/navigation carriers.
-
-Requirements:
-
-- source measurements remain viewport/client coordinates;
-- destination measurements remain viewport/client coordinates;
-- the overlay host itself is untransformed;
-- theme tokens/materials are passed explicitly if CSS inheritance is lost;
-- modal inert/focus behavior still targets the real app root;
-- navigation open/close does not change the overlay's coordinate system.
-
-### Fallback strategy: explicit coordinate conversion
-
-If the portal cannot preserve required styling or modality without unacceptable duplication, keep the host in the
-planner tree but add a pure client→host conversion helper. It must account for the host's live transform/rect and be
-covered with nav closed, nav open, mobile and desktop cases.
-
-### Forbidden
-
-- mixing viewport source rects with carrier-local destination coordinates;
-- hard-coding offsets for current nav geometry;
-- fixing drift by adding magic pixels per breakpoint;
-- writing sheet transforms onto the navigation carrier or `.nb-app-surface`.
-
-A preflight experiment chooses one strategy. Do not implement Event/Action morphs before this is resolved.
-
-## B. Surface/viewport ownership
-
-The prior narrow Actions overlap is evidence that spatial ownership is a real product primitive.
-
-Add one small owner service, naming may vary:
-
-```text
-surfaceOwnership / viewportOwnership
-```
-
-It answers at minimum:
-
-- wide vs narrow using the canonical breakpoint contract;
-- which surface owns the narrow viewport's bottom edge;
-- whether a new surface may claim it;
-- what presentation fallback is required when the region is already owned.
-
-The historical raw query `"(max-width: 639.98px)"` existed in multiple places. Re-measure current usage; centralize
-only if doing so does not alter the exact boundary behavior.
-
-For the Physical Planner target, ownership does **not** imply half-sheet Event editing. It prevents two physical
-surfaces from claiming the same space while an Object Morph or Creation Morph is active.
-
-## C. Large-surface frame-zero contract
-
-For Event/Action/Note/Composer large morphs:
-
-1. destination live layout is established at true size;
-2. source geometry is sampled;
-3. visible overlay at transaction t=0 matches the source bounds within subpixel tolerance;
-4. shared title/meta/marker occupy source geometry;
-5. shell/reveal travels toward destination geometry;
-6. destination-only content becomes readable only after physical space exists.
-
-Do not use a full-container scale.
-
-The existing `anchoredFluidMorphFromRects()` is an asset. Reuse or generalize it where its semantics match. Do not
-re-implement its asymmetric clipping math in another component.
-
-## D. Radius choreography
-
-The source radius is identity.
-
-For compact/pill sources, effective radius must be bounded by the source box. Avoid keeping a nominal `999px`
-pill radius throughout most of a large expansion; that creates the circular-portal read.
-
-Acceptance:
-
-- early frames still read as the source;
-- the shell becomes panel/card-like early enough that it never looks like a round portal;
-- close reverses the same radius choreography.
-
-## E. Identity continuity contract
-
-At every sampled frame exactly one of these must be true:
-
-- source identity is visibly dominant;
-- source and destination are in a deliberate shared handoff;
-- destination identity is visibly dominant.
-
-Never allow:
-
-- an identity hole where neither is readable;
-- prolonged double identity where both compete;
-- a hidden original source that remains independently keyboard reachable;
-- an animated clone that is focusable or exposed to accessibility APIs.
-
-## F. Content-timing contract
-
-Destination content is subordinate to shell continuity.
-
-For each large morph:
-
-```text
-last destination-content arrival <= shell/open transaction duration
-```
-
-No content animation may visibly trail after the object has settled.
-
-Current `nb-notch-body`/legacy timing tests are migration evidence, not permanent selectors.
-
-## G. Stage/animation cancellation contract
-
-Current Sheet uses wall-clock stages plus CSS/WAAPI animations, and current tests already cover stalled clocks,
-25/50/75% reversal, backdrop close and reopen.
-
-The new transaction runtime must preserve the behavior while eliminating accidental timer ownership.
-
-On close, reopen, unmount, source loss or destination replacement:
-
-- cancel stale stage timers;
-- cancel stale CSS/WAAPI animations owned by that transaction;
-- ignore stale completion callbacks by run ID;
-- reverse from current rendered geometry when reversible;
-- leave a valid resting state even if no animation frame or animationend occurs.
-
-## H. Mobile software-keyboard contract
-
-Claude proposed `interactive-widget=overlays-content` plus `visualViewport` translation. Treat this as an experiment,
-not an automatic global meta-tag change.
-
-Gate it because changing viewport meta behavior has app-wide blast radius.
-
-Required outcomes regardless of implementation:
-
-- focused field remains above keyboard;
-- sheet/morph layout box does not continuously relayout during keyboard animation;
-- opening keyboard does not restart the morph;
-- closing keyboard returns to the correct resting position;
-- orientation/window-width changes still remeasure;
-- physical iOS Safari and Android Chrome both pass.
-
-Prefer a visualViewport-derived transform correction over height animation when needed.
-
-## I. Performance evidence contract
-
-Historical Claude capture recorded the existing sheet morph as the only tested surface with obvious jank in that
-session (worst frame reported as 50ms with three frames over 33ms). Treat that as historical evidence, not a current
-benchmark.
-
-Before implementation capture current baseline.
-
-The new performance harness should include:
-
-- frame/long-task or trace evidence;
-- animation property inventory;
-- paint diagnostic;
-- first-open and repeated-open measurements;
-- negative control proving the paint/performance assertion can go red;
-- physical device observation.
-
-CDP `LayerTree.layerPainted` may be used as a diagnostic if available, but it is **not** the sole universal definition
-of compositor safety.
-
-## J. Current-code reconciliation
-
-The recovered Claude plan is partially stale on the current branch:
-
-- `anchoredFluidMorphFromRects()` already exists;
-- source radius normalization already exists;
-- current Sheet already uses anchored notch geometry for Composer;
-- current motion tests already cover 25%, 50% and 75% interrupted Composer reversal;
-- current architecture ceiling is 5531, not the older values in earlier handoffs;
-- current tests explicitly assert a transient `blur(1.5px)` in the legacy Composer body handoff.
-
-Therefore the new project must **characterize before replacing**. Do not create duplicate anchored geometry or duplicate
-interruption coverage. When removing/replacing legacy blur or handoff selectors, update tests because the product
-contract changed, not by weakening them.
+Final certification requires Android Chrome and iOS Safari for Event open/edit/fields, creation save/cancel, Action, Search/Add, keyboard, scroll, interruption, and reduced motion.
