@@ -30,7 +30,7 @@ import {
   SHEET_ENTRY_MS,
   VIEW_SLIDE_MS,
 } from "./morphTiming.js";
-import { MORPH_TIMING } from "./morphTokens.js";
+import { MORPH_EASING, MORPH_TIMING } from "./morphTokens.js";
 
 export function plannerStyles({ T, preferences }) {
   return `
@@ -666,52 +666,78 @@ export function plannerStyles({ T, preferences }) {
         /* The Timeline Lens moves only painted layers below an expanded Event.
            Its custom property is written by EventTimelineLens; no Event time,
            lane, row, scroll, or gesture geometry is ever recalculated here. */
-        [data-event-timeline-lens-target]{translate:0 var(--event-timeline-lens-y,0px);transition:translate ${MORPH_TIMING.OBJECT_OPEN_MS}ms cubic-bezier(.22,1,.36,1)}
+        [data-event-timeline-lens-target]{translate:0 var(--event-timeline-lens-y,0px);transition:translate ${MORPH_TIMING.OBJECT_OPEN_MS}ms ${MORPH_EASING.DECELERATE}}
         @media(prefers-reduced-motion:reduce){[data-event-timeline-lens-target]{transition:none}}
         /* The real Inspector stays mounted and source-anchored throughout an
-           Event morph.  Its material and facts arrive in stages, while the
+           Event morph. Its material and facts arrive in stages, while the
            MorphSurface owns the continuous shell/title/time/marker. */
         /* Keep material off the fixed Sheet root: nb-fluid has a legacy
            translate animation, while this carrier must remain exactly on its
            semantic Event source. The inner layer can reveal independently. */
-        .nb-event-morph-material{position:absolute;inset:0;z-index:0;pointer-events:none;border-radius:inherit;background-color:var(--morph-card);box-shadow:var(--e2)}
+        .nb-object-destination,
+        [data-event-inspector-surface="morph"]{
+          border-radius:var(--event-morph-open-radius, 20px)!important;
+          box-shadow:none;
+          border:none;
+          background-color:transparent;
+          max-width:calc(100vw - 32px)!important;
+        }
+        @media(max-width:639px){
+          .nb-object-destination,
+          [data-event-inspector-surface="morph"]{border-radius:var(--event-morph-open-radius, 20px)!important}
+        }
+        [data-event-inspector-surface="morph"][data-morph-presentation="opening"]{
+          animation:nbeventinspectorsurface ${MORPH_TIMING.OBJECT_OPEN_MS}ms ${MORPH_EASING.DECELERATE} both!important;
+        }
+        @keyframes nbeventinspectorsurface{
+          0%,28%{clip-path:inset(var(--event-morph-clip-top,0px) var(--event-morph-clip-right,0px) var(--event-morph-clip-bottom,0px) var(--event-morph-clip-left,0px) round var(--event-morph-source-radius,14px));border-radius:var(--event-morph-source-radius,14px)}
+          100%{clip-path:inset(0 round var(--event-morph-open-radius,20px));border-radius:var(--event-morph-open-radius,20px)}
+        }
+        .nb-event-morph-material{position:absolute;inset:0;z-index:0;box-sizing:border-box;pointer-events:none;border-radius:inherit;background-color:var(--event-morph-source-surface,var(--morph-card));box-shadow:var(--e2),var(--sheen);border:1px solid var(--event-morph-source-border, transparent)}
         [data-event-inspector-surface="morph"][data-morph-presentation="opening"] .nb-event-morph-material{
-          animation:nbeventinspectormaterial ${MORPH_TIMING.OBJECT_OPEN_MS}ms cubic-bezier(.22,1,.36,1) both;
+          animation:nbeventinspectormaterial ${MORPH_TIMING.OBJECT_OPEN_MS}ms ${MORPH_EASING.DECELERATE} both;
         }
         @keyframes nbeventinspectormaterial{
-          0%,26%{background-color:transparent;box-shadow:none}
-          65%,100%{background-color:var(--morph-card);box-shadow:var(--e2)}
+          0%,24%{background-color:var(--event-morph-source-surface, var(--morph-card));border-color:var(--event-morph-source-border, transparent);box-shadow:var(--e1),var(--sheen)}
+          100%{background-color:var(--event-morph-source-surface, var(--morph-card));border-color:var(--event-morph-source-border, transparent);box-shadow:var(--e2),var(--sheen)}
         }
         [data-event-inspector-surface="morph"][data-morph-presentation="opening"] .nb-event-morph-details{
-          animation:nbeventinspectordetails ${MORPH_TIMING.OBJECT_OPEN_MS}ms cubic-bezier(.22,1,.36,1) both;
+          animation:nbeventinspectordetails ${MORPH_TIMING.OBJECT_OPEN_MS}ms ${MORPH_EASING.DECELERATE} both;
         }
         @keyframes nbeventinspectordetails{
-          0%,34%{opacity:0;transform:translateY(8px)}
-          70%{opacity:.9;transform:translateY(2px)}
+          0%,48%{opacity:0;transform:translateY(8px)}
+          82%{opacity:.9;transform:translateY(2px)}
           100%{opacity:1;transform:none}
         }
         [data-event-inspector-surface="morph"][data-morph-presentation="opening"] .nb-event-morph-details :is([data-morph-title],[data-morph-meta],[data-morph-marker]),
         [data-event-inspector-surface="morph"][data-morph-presentation="opening"] .nb-event-morph-chrome{
-          animation:nbeventinspectorshared ${MORPH_TIMING.OBJECT_OPEN_MS}ms cubic-bezier(.22,1,.36,1) both;
+          animation:nbeventinspectorshared ${MORPH_TIMING.OBJECT_OPEN_MS}ms ${MORPH_EASING.DECELERATE} both;
         }
         @keyframes nbeventinspectorshared{
-          0%,72%{opacity:0;transform:translateY(4px)}
+          0%,76%{opacity:0;transform:translateY(4px)}
           100%{opacity:1;transform:none}
         }
         .nb-event-morph-collapse-chevron{display:inline-flex;transform:scaleY(-1);transform-origin:center}
         [data-event-inspector-surface="morph"][data-morph-presentation="opening"] .nb-event-morph-collapse-chevron{
-          animation:nbeventinspectordisclosure ${MORPH_TIMING.OBJECT_OPEN_MS}ms cubic-bezier(.22,1,.36,1) both;
+          animation:nbeventinspectordisclosure ${MORPH_TIMING.OBJECT_OPEN_MS}ms ${MORPH_EASING.DECELERATE} both;
         }
         @keyframes nbeventinspectordisclosure{
-          0%,70%{transform:scaleY(1);opacity:0}
+          0%,74%{transform:scaleY(1);opacity:0}
           100%{transform:scaleY(-1);opacity:1}
         }
         [data-event-inspector-surface="morph"]:is([data-morph-presentation="closing"],[data-morph-presentation="cancelling"]) .nb-event-morph-material {
           animation:nbeventinspectormaterialout ${MORPH_TIMING.OBJECT_CLOSE_MS}ms cubic-bezier(.4,0,.3,1) both;
         }
+        [data-event-inspector-surface="morph"]:is([data-morph-presentation="closing"],[data-morph-presentation="cancelling"]){
+          animation:nbeventinspectorsurfaceout ${MORPH_TIMING.OBJECT_CLOSE_MS}ms ${MORPH_EASING.RELEASE} both!important;
+        }
+        @keyframes nbeventinspectorsurfaceout{
+          0%{clip-path:inset(0 round var(--event-morph-open-radius,20px));border-radius:var(--event-morph-open-radius,20px)}
+          72%,100%{clip-path:inset(var(--event-morph-clip-top,0px) var(--event-morph-clip-right,0px) var(--event-morph-clip-bottom,0px) var(--event-morph-clip-left,0px) round var(--event-morph-source-radius,14px));border-radius:var(--event-morph-source-radius,14px)}
+        }
         @keyframes nbeventinspectormaterialout{
-          0%,18%{background-color:var(--morph-card);box-shadow:var(--e2)}
-          55%,100%{background-color:transparent;box-shadow:none}
+          0%,18%{background-color:var(--event-morph-source-surface, var(--morph-card));border-color:var(--event-morph-source-border, transparent);box-shadow:var(--e2),var(--sheen)}
+          55%,100%{background-color:var(--event-morph-source-surface, var(--morph-card));border-color:var(--event-morph-source-border, transparent);box-shadow:var(--e1),var(--sheen)}
         }
         [data-event-inspector-surface="morph"]:is([data-morph-presentation="closing"],[data-morph-presentation="cancelling"]) .nb-event-morph-details,
         [data-event-inspector-surface="morph"]:is([data-morph-presentation="closing"],[data-morph-presentation="cancelling"]) .nb-event-morph-chrome{

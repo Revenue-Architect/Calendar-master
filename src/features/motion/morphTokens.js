@@ -10,7 +10,11 @@
  */
 
 export const MORPH_TIMING = Object.freeze({
-  OBJECT_OPEN_MS: 280,
+  /* An Event object expansion is read as one persistent material changing
+     shape, not as a transient popover. Four hundred milliseconds leaves room
+     for the source material to hold, the shell to grow, then the Inspector
+     detail to enter without making a repeated planner action feel delayed. */
+  OBJECT_OPEN_MS: 400,
   OBJECT_CLOSE_MS: 240,
   COMPOSER_GROW_MS: 300,
   COMPOSER_CANCEL_MS: 220,
@@ -21,8 +25,9 @@ export const MORPH_TIMING = Object.freeze({
 });
 
 export const MORPH_EASING = Object.freeze({
-  // Swift decelerate for physical object arrival
-  DECELERATE: "cubic-bezier(0.2, 0, 0, 1)",
+  // The reference's balanced, middle-weighted object curve. It responds at
+  // once, spends time in the expansion, and settles without a modal snap.
+  DECELERATE: "cubic-bezier(0.22, 0.61, 0.36, 1)",
   // Responsive linear-to-settle for user release
   RELEASE: "cubic-bezier(0.25, 1, 0.5, 1)",
   // Snappy retract for cancellation

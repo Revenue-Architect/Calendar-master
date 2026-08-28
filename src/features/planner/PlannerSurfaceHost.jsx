@@ -829,25 +829,25 @@ export default function PlannerSurfaceHost(props) {
                 <InlineText T={T} value={inspectDraft.title} ariaLabel="Event title"
                   onCommit={(title) => editEntry({ title })}
                   onBeginEdit={beginDetailEdit}
-                  className="text-2xl font-bold tracking-tight leading-tight" style={{ textAlign: usesPhysicalEventInspector ? "left" : "center" }} />
+                  className={usesPhysicalEventInspector ? "text-[21px] font-bold tracking-tight leading-[1.12]" : "text-2xl font-bold tracking-tight leading-tight"} style={{ textAlign: usesPhysicalEventInspector ? "left" : "center" }} />
               </span>
             </div>
             <div data-morph-meta>
               {inspectDraft.allDay ? (
-                <p className="text-base font-semibold mt-1.5">All day</p>
+                <p className={usesPhysicalEventInspector ? "text-sm font-semibold mt-1" : "text-base font-semibold mt-1.5"}>All day</p>
               ) : (
-                <div className={`flex items-center ${usesPhysicalEventInspector ? "justify-start" : "justify-center"} gap-1.5 mt-1.5`}>
+                <div className={`flex items-center ${usesPhysicalEventInspector ? "justify-start mt-1" : "justify-center mt-1.5"} gap-1.5`}>
                 <InlineStamp T={T} dark={dark} type="time" ariaLabel="Starts" value={hhmm(inspectDraft.start)}
                   display={tm(inspectDraft.start)} onCommit={(v) => v && editEntry({ start: fromHhmm(v) })} onBeginEdit={() => openInspectField("start")}
-                  className="text-base font-semibold" />
-                <span style={{ color: T.dimText }} className="text-base">–</span>
+                  className={usesPhysicalEventInspector ? "text-sm font-semibold" : "text-base font-semibold"} />
+                <span style={{ color: T.dimText }} className={usesPhysicalEventInspector ? "text-sm" : "text-base"}>–</span>
                 <InlineStamp T={T} dark={dark} type="time" ariaLabel="Ends" value={hhmm((inspectDraft.start + inspectDraft.dur) % 1440)}
                   display={tm((inspectDraft.start + inspectDraft.dur) % 1440)}
                   onCommit={(v) => {
                     if (!v) return;
                     const end = fromHhmm(v);
                     editEntry({ dur: durationFromClockRange(inspectDraft.start, end) });
-                  }} onBeginEdit={() => openInspectField("duration")} className="text-base font-semibold" />
+                  }} onBeginEdit={() => openInspectField("duration")} className={usesPhysicalEventInspector ? "text-sm font-semibold" : "text-base font-semibold"} />
                 </div>
               )}
             </div>

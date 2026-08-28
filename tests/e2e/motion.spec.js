@@ -140,6 +140,14 @@ test.describe("Event semantic morph sources", () => {
     const source = page.locator('[data-event-id]').filter({ hasText: "Physical Event destination" }).locator('[data-morph-key]');
     await source.scrollIntoViewIfNeeded();
     const sourceRect = await source.boundingBox();
+    const sourceMaterial = await source.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return {
+        background: style.backgroundColor,
+        border: style.borderColor,
+        radius: style.borderRadius,
+      };
+    });
     const sourceOpacity = () => source.evaluate((node) => Number(getComputedStyle(node).opacity));
     await expect(source.locator("[data-event-morph-disclosure]")).toHaveCount(1);
     await source.click();
@@ -185,6 +193,31 @@ test.describe("Event semantic morph sources", () => {
     });
     expect(openingEnvironment.background, "an Event expansion must not darken the planner").toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
     expect(openingEnvironment.backdropFilter, "an Event expansion must not blur the planner").toBe("none");
+    const openingMaterial = await sheet.evaluate(async (panel) => {
+      const material = panel.querySelector(".nb-event-morph-material");
+      const animation = material?.getAnimations().find((candidate) => (
+        Number(candidate.effect?.getTiming?.().duration) > 0
+      ));
+      animation?.pause();
+      if (animation) animation.currentTime = 0;
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const panelStyle = getComputedStyle(panel);
+      const materialStyle = material ? getComputedStyle(material) : null;
+      const snapshot = {
+        sourceSurface: panelStyle.getPropertyValue("--event-morph-source-surface").trim(),
+        sourceBorder: panelStyle.getPropertyValue("--event-morph-source-border").trim(),
+        sourceRadius: panelStyle.getPropertyValue("--event-morph-source-radius").trim(),
+        visibleSurface: materialStyle?.backgroundColor,
+        visibleBorder: materialStyle?.borderColor,
+      };
+      animation?.play();
+      return snapshot;
+    });
+    expect(openingMaterial.sourceSurface, "the carrier must retain the clicked Event surface token").toBe(sourceMaterial.background);
+    expect(openingMaterial.sourceBorder, "the carrier must retain the clicked Event border token").toBe(sourceMaterial.border);
+    expect(openingMaterial.sourceRadius, "the carrier must retain the clicked Event corner token").toBe(sourceMaterial.radius);
+    expect(openingMaterial.visibleSurface, "the opening carrier must visibly begin as the clicked Event material").toBe(sourceMaterial.background);
+    expect(openingMaterial.visibleBorder, "the opening carrier must visibly retain the clicked Event border").toBe(sourceMaterial.border);
     await expect(sheet.locator("[data-morph-title]")).toHaveCount(1);
     await expect(sheet.locator("[data-morph-meta]")).toHaveCount(1);
     await expect(sheet.locator("[data-morph-marker]")).toHaveCount(1);
@@ -192,13 +225,23 @@ test.describe("Event semantic morph sources", () => {
     await expect.poll(sourceOpacity, { message: "the timeline source must stay suppressed while the physical carrier owns its paint" }).toBeLessThanOrEqual(.01);
     expect(frameZero.shellRect).not.toBeNull();
     expect(frameZero.animationCount, "the compositor shell must expose its running WAAPI animation").toBeGreaterThan(0);
-    expect(frameZero.animationDuration).toBeGreaterThan(0);
+    expect(frameZero.animationDuration, "a physical Event expansion needs room for the material and detail handoff").toBe(400);
     expect(Math.abs(frameZero.shellRect.left - sourceRect.x)).toBeLessThanOrEqual(1);
     expect(Math.abs(frameZero.shellRect.top - sourceRect.y)).toBeLessThanOrEqual(1);
     expect(Math.abs(frameZero.shellRect.width - sourceRect.width)).toBeLessThanOrEqual(1);
     expect(Math.abs(frameZero.shellRect.height - sourceRect.height)).toBeLessThanOrEqual(1);
     expect(frameZero.titleScaleX, "shared title must translate at 1x, never inherit the shell scale").toBeCloseTo(1);
     expect(frameZero.titleScaleY, "shared title must translate at 1x, never inherit the shell scale").toBeCloseTo(1);
+    await expect(sheet).toHaveAttribute("data-morph-presentation", "open");
+    const settledMaterial = await sheet.locator(".nb-event-morph-material").evaluate((node) => {
+      const style = getComputedStyle(node);
+      return {
+        background: style.backgroundColor,
+        border: style.borderColor,
+      };
+    });
+    expect(settledMaterial.background, "the expanded Event must retain its source material instead of falling back to the generic Sheet card").toBe(sourceMaterial.background);
+    expect(settledMaterial.border, "the expanded Event must retain the source card border instead of modal chrome").toBe(sourceMaterial.border);
 
     await page.keyboard.press("Escape");
     await expect(sheet).toHaveAttribute("data-morph-presentation", /^(closing|cancelling)$/);

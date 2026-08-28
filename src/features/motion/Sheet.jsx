@@ -587,6 +587,31 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
     maxHeight: `${contextualGeometry.maxHeight}px`,
     margin: 0,
   };
+  /* The Inspector keeps its final contextual box throughout the presentation,
+     but its painted region begins as the exact source-card rectangle inside
+     that box. This is a visual clip only: it never feeds timeline layout,
+     drag, resize, or scroll geometry. */
+  const sourceMaterialClip = objectMorphDestination && contextualGeometry && objectMorphSource?.rect
+    ? (() => {
+      const sourceLeft = Number(objectMorphSource.rect.left ?? objectMorphSource.rect.x);
+      const sourceTop = Number(objectMorphSource.rect.top ?? objectMorphSource.rect.y);
+      const sourceWidth = Number(objectMorphSource.rect.width);
+      const sourceHeight = Number(objectMorphSource.rect.height);
+      const materialHeight = Math.max(
+        sourceHeight || 0,
+        Math.min(Number(sheetHeight) || contextualGeometry.maxHeight, contextualGeometry.maxHeight),
+      );
+      if (![sourceLeft, sourceTop, sourceWidth, sourceHeight, materialHeight].every(Number.isFinite)) return null;
+      const top = Math.max(0, sourceTop - contextualGeometry.top);
+      const left = Math.max(0, sourceLeft - contextualGeometry.left);
+      return {
+        top,
+        right: Math.max(0, contextualGeometry.width - left - sourceWidth),
+        bottom: Math.max(0, materialHeight - top - sourceHeight),
+        left,
+      };
+    })()
+    : null;
 
   return (
     <div className={`${objectMorphDestination ? "nb-object-scrim" : "nb-scrim"} ${closing || morphDestinationClosing ? "nb-fluid-closing" : ""} fixed inset-0 z-50 flex items-end ${anchoredStyle ? "" : "sm:items-center justify-center"}`} style={{
@@ -601,7 +626,7 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
         data-event-inspector-surface={eventInspectorSurface || undefined}
         data-morph-presentation={objectMorphDestination ? presentationState : undefined}
         onKeyDown={(event) => trapDialogTab(event, dialogRef.current)} onClick={(e) => e.stopPropagation()}
-        className={`nb-fluid ${objectMorphDestination ? "nb-object-destination" : ""} nb-sheet-scroll ${heightReady ? "nb-sheet-h" : ""} ${closing || morphDestinationClosing ? "nb-fluid-closing" : ""} relative w-full sm:max-w-md overflow-y-auto nb-s`} style={{
+        className={`nb-fluid ${objectMorphDestination ? "nb-object-destination" : "sm:max-w-md"} nb-sheet-scroll ${heightReady ? "nb-sheet-h" : ""} ${closing || morphDestinationClosing ? "nb-fluid-closing" : ""} relative w-full overflow-y-auto nb-s`} style={{
           // The physical Event carrier must never inherit nb-fluid's legacy
           // translate animation. Its fixed geometry is the semantic Event
           // source; material reveal happens on the inner presentation layer.
@@ -618,6 +643,14 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
           ...(anchoredStyle || {}),
           "--morph-accent": morph === "notch" && morphSurface ? morphSurface.background : "transparent",
           "--morph-card": T.card,
+          "--event-morph-source-surface": objectMorphDestination ? (objectMorphSource?.paint?.background || objectMorphSource?.backgroundColor || T.card) : undefined,
+          "--event-morph-source-border": objectMorphDestination ? (objectMorphSource?.paint?.borderColor || T.line) : undefined,
+          "--event-morph-source-radius": objectMorphDestination ? `${objectMorphSource?.radius ?? objectMorphSource?.borderRadius ?? 14}px` : undefined,
+          "--event-morph-open-radius": objectMorphDestination ? "20px" : undefined,
+          "--event-morph-clip-top": sourceMaterialClip ? `${sourceMaterialClip.top}px` : undefined,
+          "--event-morph-clip-right": sourceMaterialClip ? `${sourceMaterialClip.right}px` : undefined,
+          "--event-morph-clip-bottom": sourceMaterialClip ? `${sourceMaterialClip.bottom}px` : undefined,
+          "--event-morph-clip-left": sourceMaterialClip ? `${sourceMaterialClip.left}px` : undefined,
         }}>
         {morph === "notch" && morphSurface && (
           <div aria-hidden="true" data-test="morph-source-label" className="nb-morph-source-label" style={{
