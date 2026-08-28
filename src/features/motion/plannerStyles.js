@@ -30,6 +30,7 @@ import {
   SHEET_ENTRY_MS,
   VIEW_SLIDE_MS,
 } from "./morphTiming.js";
+import { MORPH_TIMING } from "./morphTokens.js";
 
 export function plannerStyles({ T, preferences }) {
   return `
@@ -660,26 +661,67 @@ export function plannerStyles({ T, preferences }) {
         .nb-scrim.nb-fluid-closing{animation:nbscrimout 240ms ease forwards}
         .nb-scrim.nb-fluid-closing:has(> .nb-fluid[data-fluid-origin="notch"]){animation:nbscrimout var(--nb-morph-close,${MORPH_CLOSE_MS}ms) ease forwards}
         @keyframes nbscrimout{0%,25%{opacity:1}100%{opacity:0}}
-        .nb-object-scrim{animation:nbobjectscrim 280ms cubic-bezier(.22,1,.36,1) forwards;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
-        @keyframes nbobjectscrim{0%,30%{opacity:0}100%{opacity:1}}
-        .nb-object-scrim.nb-fluid-closing{animation:nbobjectscrimout 240ms ease forwards}
-        @keyframes nbobjectscrimout{0%{opacity:1}70%,100%{opacity:0}}
-        [data-event-inspector-surface="morph"][data-morph-presentation="opening"] .nb-notch-body{
-          animation:nbinspectorreveal 280ms cubic-bezier(.22,1,.36,1) both;
+        .nb-object-scrim{animation:none;background:transparent;backdrop-filter:none;-webkit-backdrop-filter:none}
+        .nb-object-scrim.nb-fluid-closing{animation:none}
+        /* The Timeline Lens moves only painted layers below an expanded Event.
+           Its custom property is written by EventTimelineLens; no Event time,
+           lane, row, scroll, or gesture geometry is ever recalculated here. */
+        [data-event-timeline-lens-target]{translate:0 var(--event-timeline-lens-y,0px);transition:translate ${MORPH_TIMING.OBJECT_OPEN_MS}ms cubic-bezier(.22,1,.36,1)}
+        @media(prefers-reduced-motion:reduce){[data-event-timeline-lens-target]{transition:none}}
+        /* The real Inspector stays mounted and source-anchored throughout an
+           Event morph.  Its material and facts arrive in stages, while the
+           MorphSurface owns the continuous shell/title/time/marker. */
+        /* Keep material off the fixed Sheet root: nb-fluid has a legacy
+           translate animation, while this carrier must remain exactly on its
+           semantic Event source. The inner layer can reveal independently. */
+        .nb-event-morph-material{position:absolute;inset:0;z-index:0;pointer-events:none;border-radius:inherit;background-color:var(--morph-card);box-shadow:var(--e2)}
+        [data-event-inspector-surface="morph"][data-morph-presentation="opening"] .nb-event-morph-material{
+          animation:nbeventinspectormaterial ${MORPH_TIMING.OBJECT_OPEN_MS}ms cubic-bezier(.22,1,.36,1) both;
         }
-        @keyframes nbinspectorreveal{
-          0%,35%{opacity:0;transform:translateY(8px)}
-          70%{opacity:.8;transform:translateY(2px)}
+        @keyframes nbeventinspectormaterial{
+          0%,26%{background-color:transparent;box-shadow:none}
+          65%,100%{background-color:var(--morph-card);box-shadow:var(--e2)}
+        }
+        [data-event-inspector-surface="morph"][data-morph-presentation="opening"] .nb-event-morph-details{
+          animation:nbeventinspectordetails ${MORPH_TIMING.OBJECT_OPEN_MS}ms cubic-bezier(.22,1,.36,1) both;
+        }
+        @keyframes nbeventinspectordetails{
+          0%,34%{opacity:0;transform:translateY(8px)}
+          70%{opacity:.9;transform:translateY(2px)}
           100%{opacity:1;transform:none}
         }
-        [data-event-inspector-surface="morph"][data-morph-presentation="closing"] .nb-notch-body,
-        [data-event-inspector-surface="morph"][data-morph-presentation="cancelling"] .nb-notch-body{
-          animation:nbinspectorfadeout 240ms ease both;
+        [data-event-inspector-surface="morph"][data-morph-presentation="opening"] .nb-event-morph-details :is([data-morph-title],[data-morph-meta],[data-morph-marker]),
+        [data-event-inspector-surface="morph"][data-morph-presentation="opening"] .nb-event-morph-chrome{
+          animation:nbeventinspectorshared ${MORPH_TIMING.OBJECT_OPEN_MS}ms cubic-bezier(.22,1,.36,1) both;
         }
-        @keyframes nbinspectorfadeout{
+        @keyframes nbeventinspectorshared{
+          0%,72%{opacity:0;transform:translateY(4px)}
+          100%{opacity:1;transform:none}
+        }
+        .nb-event-morph-collapse-chevron{display:inline-flex;transform:scaleY(-1);transform-origin:center}
+        [data-event-inspector-surface="morph"][data-morph-presentation="opening"] .nb-event-morph-collapse-chevron{
+          animation:nbeventinspectordisclosure ${MORPH_TIMING.OBJECT_OPEN_MS}ms cubic-bezier(.22,1,.36,1) both;
+        }
+        @keyframes nbeventinspectordisclosure{
+          0%,70%{transform:scaleY(1);opacity:0}
+          100%{transform:scaleY(-1);opacity:1}
+        }
+        [data-event-inspector-surface="morph"]:is([data-morph-presentation="closing"],[data-morph-presentation="cancelling"]) .nb-event-morph-material {
+          animation:nbeventinspectormaterialout ${MORPH_TIMING.OBJECT_CLOSE_MS}ms cubic-bezier(.4,0,.3,1) both;
+        }
+        @keyframes nbeventinspectormaterialout{
+          0%,18%{background-color:var(--morph-card);box-shadow:var(--e2)}
+          55%,100%{background-color:transparent;box-shadow:none}
+        }
+        [data-event-inspector-surface="morph"]:is([data-morph-presentation="closing"],[data-morph-presentation="cancelling"]) .nb-event-morph-details,
+        [data-event-inspector-surface="morph"]:is([data-morph-presentation="closing"],[data-morph-presentation="cancelling"]) .nb-event-morph-chrome{
+          animation:nbeventinspectordetailsout ${MORPH_TIMING.OBJECT_CLOSE_MS}ms cubic-bezier(.4,0,.3,1) both;
+        }
+        @keyframes nbeventinspectordetailsout{
           0%{opacity:1;transform:none}
           35%,100%{opacity:0;transform:translateY(-6px)}
         }
+        @media(prefers-reduced-motion:reduce){.nb-event-morph-collapse-chevron{animation:none!important}}
         .nb-sheet-h{transition:height 320ms cubic-bezier(.2,.8,.25,1)}
         .nb-edit-actions{transition:width 360ms cubic-bezier(.23,1,.32,1),background-color 260ms ease,box-shadow 260ms ease}
         .nb-edit-liquid{transition:left 360ms cubic-bezier(.23,1,.32,1)}

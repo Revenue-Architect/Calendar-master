@@ -4099,11 +4099,10 @@ export default function Planner() {
                 }}
               />
             </div>
-
             <div ref={attachStream} data-test="day-stream" className="nb-s nb-stream overflow-y-auto relative" style={{ background: T.card, borderTopLeftRadius: 0, userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}>
-              <div className="relative" style={{ height: dayHeight }}>
+              <div data-event-timeline-lens-plane className="relative" style={{ height: dayHeight }}>
                 {Array.from({ length: 24 }).map((_, h) => (
-                  <div key={h} className="absolute left-0 right-0 flex items-start pointer-events-none"
+                  <div key={h} data-event-timeline-lens-target="hour" className="absolute left-0 right-0 flex items-start pointer-events-none"
                     style={{ top: h * dayHourHeight, height: dayHourHeight }}>
                     {/* The label owns its gutter: rules and banding start after it, so
                         the times read on clean card instead of sitting across the
@@ -4203,7 +4202,7 @@ export default function Planner() {
                     /* Hide the source while Inspector wears its rect; otherwise the morph
                        reads as a panel arriving over a duplicate card. */
                     return (
-                      <div key={e.id} data-event-id={e.id} className={`nb-timeline-lane absolute ${held ? "nb-timeline-lane-active" : "nb-hover-tile"}`} style={{ top: top + 2, height: h, left: `${(e.lane / e.cols) * 100}%`, width: `calc(${100 / e.cols}% - 6px)`, zIndex: held ? 20 : 1, opacity: held && gesture.overDay ? 0.35 : 1, pointerEvents: "auto" }}>
+                      <div key={e.id} data-event-id={e.id} data-event-timeline-lens-target="event" className={`nb-timeline-lane absolute ${held ? "nb-timeline-lane-active" : "nb-hover-tile"}`} style={{ top: top + 2, height: h, left: `${(e.lane / e.cols) * 100}%`, width: `calc(${100 / e.cols}% - 6px)`, zIndex: held ? 20 : 1, opacity: held && gesture.overDay ? 0.35 : 1, pointerEvents: "auto" }}>
                         <EventMorphSource event={e} dateKey={e.date ?? dateKey} view="day" lane="timeline">
                           <div role="button" tabIndex={0} aria-label={e.title}
                           onPointerDown={(ev) => eventDown(ev, e)} onPointerUp={(ev) => eventUp(ev, e)}
@@ -4244,6 +4243,7 @@ export default function Planner() {
                                   legible at 22px height where a left rail would vanish */}
                               <span data-morph-marker="category" className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: held ? T.accent : catColor(e.cat) }} />
                               <span data-morph-title title={e.title} className="nb-lead min-w-0 truncate flex-1">{e.title}</span>
+                              {!held && <span data-event-morph-disclosure aria-hidden="true" style={{ color: T.dimText }} className="nb-event-secondary shrink-0"><ChevronIcon direction="down" size={10} /></span>}
                               {conflictIds.has(e.id) && <span title="Overlaps another event" style={{ color: NOW_RED }} className="nb-event-secondary shrink-0"><WarningIcon /></span>}
                               {e.repeat && <span style={{ fontFamily: MONO, color: T.dimText }} className="nb-event-secondary shrink-0"><RepeatIcon /></span>}
                               {e.alerts && e.alerts.length > 0 && (

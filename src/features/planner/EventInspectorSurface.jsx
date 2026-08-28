@@ -11,6 +11,7 @@ export default function EventInspectorSurface({
   onMorphClose,
   physical = false,
   instant = false,
+  objectMorphSource = null,
   ...sheetProps
 }) {
   const presentation = physical
@@ -24,6 +25,7 @@ export default function EventInspectorSurface({
       {...sheetProps}
       presentation={presentation}
       presentationState={physical ? motionState : null}
+      objectMorphSource={physical ? objectMorphSource : null}
       onMorphClose={physical ? onMorphClose : null}
       eventInspectorSurface={physical ? "morph" : instant ? "instant" : undefined}
     />

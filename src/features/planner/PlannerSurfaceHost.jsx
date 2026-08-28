@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   getNotebookNotes,
   revisionsFor,
@@ -26,6 +26,7 @@ import { fmtDay, plannedLabel } from "./dateLabels.js";
 import Reveal from "../motion/Reveal.jsx";
 import Sheet from "../motion/Sheet.jsx";
 import EventInspectorSurface from "./EventInspectorSurface.jsx";
+import EventTimelineLens from "./EventTimelineLens.jsx";
 import { MONO, SERIF } from "../../design/typography.js";
 import { createMotivationLedger } from "../../domains/gamification/index.js";
 import { uid } from "../../shared/ids.js";
@@ -324,6 +325,15 @@ export default function PlannerSurfaceHost(props) {
   const repeatLabel = props.repeatLabel;
   const splitId = props.splitId;
 
+  /* An Event disclosure is part of the read surface first: opening Repeat or
+     Alerts must reveal more of the same object, not immediately replace the
+     lower read actions with the editing shell. A choice still enters edit mode
+     when it is actually changed through editEntry. This also lets the physical
+     carrier and its Timeline Lens grow for the disclosure itself. */
+  const toggleEventDisclosure = useCallback((field) => {
+    setInspectField((current) => (current === field ? null : field));
+  }, [setInspectField]);
+
   const motion = useMemo(
     () => makeMotionDescriptor({ composer, inspect, inspectRecord, noteEdit, peekDay, dateKey }),
     [composer, inspect, inspectRecord, noteEdit, peekDay, dateKey],
@@ -335,12 +345,39 @@ export default function PlannerSurfaceHost(props) {
     || morphRegistry.getLastMorphSnapshot?.(motionKey, "source"),
   );
   const usesPhysicalEventInspector = Boolean(isEventInspector && hasEventMorphSource);
+  const [eventMorphSourceSnapshot, setEventMorphSourceSnapshot] = useState(null);
+  useLayoutEffect(() => {
+    if (!usesPhysicalEventInspector || !motionKey) {
+      setEventMorphSourceSnapshot(null);
+      return;
+    }
+    const source = morphRegistry.getMorphSnapshot(motionKey, "source");
+    setEventMorphSourceSnapshot((previous) => {
+      const sameSource = previous?.key === source?.key
+        && previous?.rect?.left === source?.rect?.left
+        && previous?.rect?.top === source?.rect?.top
+        && previous?.rect?.width === source?.rect?.width
+        && previous?.rect?.height === source?.rect?.height;
+      return sameSource ? previous : source;
+    });
+  }, [motionKey, usesPhysicalEventInspector]);
+  /* The destination must never mount at Sheet's centered fallback and then be
+     corrected a frame later.  Hold the visual Inspector until the semantic
+     Event snapshot for this exact transaction exists; its first destination
+     layout is therefore already the contextual source-anchored layout. */
+  const physicalEventInspectorReady = !usesPhysicalEventInspector
+    || (eventMorphSourceSnapshot?.key === motionKey && Boolean(eventMorphSourceSnapshot?.rect));
   const destinationRef = useMorphDestination({
     key: motionKey,
     kind: motion?.kind || "event",
     meta: motion?.meta,
     enabled: Boolean(motionKey),
   });
+  const [eventMorphDestinationNode, setEventMorphDestinationNode] = useState(null);
+  const eventMorphDestinationRef = useCallback((node) => {
+    destinationRef(node);
+    setEventMorphDestinationNode((previous) => (previous === node ? previous : node));
+  }, [destinationRef]);
   const closeSnapshotReleaseRef = useRef(null);
   if (!closeSnapshotReleaseRef.current) {
     closeSnapshotReleaseRef.current = createMorphCloseSnapshotRelease({ registry: morphRegistry });
@@ -526,10 +563,11 @@ export default function PlannerSurfaceHost(props) {
       })()}
 
       {/* ══ INSPECTOR ══ */}
-      {inspectRecord && (
-        <InspectorSurface T={T} destinationRef={usesPhysicalEventInspector ? destinationRef : null} title={inspectSheetTitle}
+      {inspectRecord && physicalEventInspectorReady && (
+        <InspectorSurface T={T} destinationRef={usesPhysicalEventInspector ? eventMorphDestinationRef : null} title={inspectSheetTitle}
           physical={usesPhysicalEventInspector}
           instant={inspect?.motion === "instant"}
+          objectMorphSource={usesPhysicalEventInspector ? eventMorphSourceSnapshot : null}
           motionState={usesPhysicalEventInspector ? transactionSnapshot.state : null}
           onMorphClose={usesPhysicalEventInspector ? closePhysicalEventInspector : null}
           closeSignal={sheetCloseSignals.inspect}
@@ -784,21 +822,21 @@ export default function PlannerSurfaceHost(props) {
           <>
           {/* Header reads as a title card: what, when, which day — centred, with the
               detail rows below it. Every line of it is the field itself (§4.6). */}
-          <div className="text-center pt-1 pb-4">
-            <div className="flex items-center justify-center gap-2">
+          <div className={`${usesPhysicalEventInspector ? "text-left" : "text-center"} pt-1 pb-4`}>
+            <div className={`flex items-center ${usesPhysicalEventInspector ? "justify-start" : "justify-center"} gap-2`}>
               <span data-morph-marker aria-hidden="true" className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: catColor(inspectDraft.cat) }} />
               <span data-morph-title className="min-w-0">
                 <InlineText T={T} value={inspectDraft.title} ariaLabel="Event title"
                   onCommit={(title) => editEntry({ title })}
                   onBeginEdit={beginDetailEdit}
-                  className="text-2xl font-bold tracking-tight leading-tight" style={{ textAlign: "center" }} />
+                  className="text-2xl font-bold tracking-tight leading-tight" style={{ textAlign: usesPhysicalEventInspector ? "left" : "center" }} />
               </span>
             </div>
             <div data-morph-meta>
               {inspectDraft.allDay ? (
                 <p className="text-base font-semibold mt-1.5">All day</p>
               ) : (
-                <div className="flex items-center justify-center gap-1.5 mt-1.5">
+                <div className={`flex items-center ${usesPhysicalEventInspector ? "justify-start" : "justify-center"} gap-1.5 mt-1.5`}>
                 <InlineStamp T={T} dark={dark} type="time" ariaLabel="Starts" value={hhmm(inspectDraft.start)}
                   display={tm(inspectDraft.start)} onCommit={(v) => v && editEntry({ start: fromHhmm(v) })} onBeginEdit={() => openInspectField("start")}
                   className="text-base font-semibold" />
@@ -858,15 +896,13 @@ export default function PlannerSurfaceHost(props) {
           <div data-test="attribute-band" className="flex flex-wrap gap-2 pt-1">
             <InlineChoice T={T} surface={surface} icon="◑" tint={catColor(inspectDraft.cat)} span="half"
               open={inspectField === "category"}
-              onToggle={() => openInspectField(inspectField === "category" ? null : "category")}
-              onBeginEdit={() => openInspectField("category")}
+              onToggle={() => toggleEventDisclosure("category")}
               label={inspectDraft.cat || "—"} value={inspectDraft.cat} dot={catColor}
               options={CATS.map((c) => [c, c])} onPick={(cat) => editEntry({ cat })} />
 
             <InlineChoice T={T} surface={surface} icon={<ClockIcon />} label={inspectDraft.allDay ? "All day" : "At a time"} span="half"
               open={inspectField === "allDay"}
-              onToggle={() => openInspectField(inspectField === "allDay" ? null : "allDay")}
-              onBeginEdit={() => openInspectField("allDay")}
+              onToggle={() => toggleEventDisclosure("allDay")}
               value={inspectDraft.allDay ? "all" : "timed"} options={[["timed", "AT A TIME"], ["all", "ALL DAY"]]}
               onPick={(v) => editEntry({ allDay: v === "all", ...(v === "all" ? {} : { start: inspectDraft.start || 540, dur: inspectDraft.dur || 60 }) })} />
 
@@ -890,8 +926,7 @@ export default function PlannerSurfaceHost(props) {
                 asks. */}
             <InlineChoice T={T} surface={surface} icon={<RepeatIcon />} span="half"
               open={inspectField === "repeat"}
-              onToggle={() => openInspectField(inspectField === "repeat" ? null : "repeat")}
-              onBeginEdit={() => openInspectField("repeat")}
+              onToggle={() => toggleEventDisclosure("repeat")}
               label={inspectDraft.repeat ? repeatLabel(inspectDraft.repeat) : "Does not repeat"}
               value={inspectDraft.repeat?.freq ?? "never"}
               options={REPEATS}
@@ -899,8 +934,7 @@ export default function PlannerSurfaceHost(props) {
 
             <InlineChoice T={T} surface={surface} icon={<BellIcon size={13} />} span="half"
               open={inspectField === "reminder"}
-              onToggle={() => openInspectField(inspectField === "reminder" ? null : "reminder")}
-              onBeginEdit={() => openInspectField("reminder")}
+              onToggle={() => toggleEventDisclosure("reminder")}
               label={(inspectDraft.alerts || []).length
                 ? inspectDraft.alerts.map((a) => (a === 0 ? "When it starts" : `${dur(a)} before`)).join(", ")
                 : "No reminder"}
@@ -1385,6 +1419,13 @@ export default function PlannerSurfaceHost(props) {
         </Sheet>
       )}
 
+      <EventTimelineLens
+        enabled={usesPhysicalEventInspector && eventMorphSourceSnapshot?.key === motionKey}
+        sourceSnapshot={eventMorphSourceSnapshot}
+        surfaceNode={eventMorphDestinationNode}
+        state={transactionSnapshot.state}
+        reducedMotion={typeof window !== "undefined" && Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches)}
+      />
       <MorphSurface
         transactionSnapshot={transactionSnapshot}
         registry={morphRegistry}

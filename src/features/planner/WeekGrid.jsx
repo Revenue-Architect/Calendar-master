@@ -15,7 +15,7 @@ import { startSlot } from "../../shared/time/snap.js";
 
 import { CARD_R, DAY_H, HOUR_H, LIFT_MS, WD, catColor } from "./constants.js";
 import { fmtDay } from "./dateLabels.js";
-import { ExternalLinkIcon } from "./icons.jsx";
+import { ChevronIcon, ExternalLinkIcon } from "./icons.jsx";
 import { normalizeMeetingLink } from "./meetingLink.js";
 import EventMorphSource from "../motion/EventMorphSource.jsx";
 import { createEventMorphOrigin } from "../motion/eventMorphOrigin.js";
@@ -467,7 +467,7 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
                   const href = normalizeMeetingLink(e.link);
                   const morphOrigin = createEventMorphOrigin(e, { dateKey: day.key, view: "week", lane: "allday" });
                   return (
-                    <div key={e.segmentId ?? e.id} className="relative overflow-hidden" style={{ background: surface, borderRadius: 6 }}>
+                    <div key={e.segmentId ?? e.id} data-event-timeline-lens-target="week-all-day-event" className="relative overflow-hidden" style={{ background: surface, borderRadius: 6 }}>
                       <EventMorphSource origin={morphOrigin}>
                         <button data-test="week-allday-event" data-event-id={e.id} onClick={(interactionEvent) => onOpenEvent(e, morphOrigin, {
                           keyboard: interactionEvent.detail === 0,
@@ -475,6 +475,7 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
                           style={{ paddingLeft: 6, paddingRight: href ? 20 : 6 }}>
                           <span data-morph-marker className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: catColor(e.cat) }} />
                           <span data-morph-title className="font-semibold truncate" style={{ fontSize: 10 }}>{e.title}</span>
+                          {!href && <span data-event-morph-disclosure aria-hidden="true" style={{ color: T.dimText }} className="shrink-0"><ChevronIcon direction="down" size={8} /></span>}
                         </button>
                       </EventMorphSource>
                       {href && (
@@ -510,10 +511,10 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
           if (draftPressRef.current && !draftRef.current) cancelDraftPress();
           onTimelineScroll?.(event.currentTarget.scrollTop);
         }} className="nb-s flex-1 min-h-0 overflow-y-auto">
-          <div className="relative flex" style={{ height: DAY_H, userSelect: "none", WebkitUserSelect: "none" }}>
+          <div data-event-timeline-lens-plane className="relative flex" style={{ height: DAY_H, userSelect: "none", WebkitUserSelect: "none" }}>
             <div className="relative w-12 shrink-0">
               {Array.from({ length: 24 }).map((_, h) => h > 0 && (
-                <span key={h} className="absolute right-2 tracking-widest" style={{ top: h * HOUR_H, transform: "translateY(-50%)", fontFamily: MONO, color: T.dimText, fontSize: 9 }}>{fmtHour(h, clock)}</span>
+                <span key={h} data-event-timeline-lens-target="week-hour" className="absolute right-2 tracking-widest" style={{ top: h * HOUR_H, transform: "translateY(-50%)", fontFamily: MONO, color: T.dimText, fontSize: 9 }}>{fmtHour(h, clock)}</span>
               ))}
             </div>
             {week.map((day) => {
@@ -557,7 +558,7 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
                     onSlotPick({ date: day.key, start: startSlot(((e.clientY - rect.top) / DAY_H) * 1440, 30), dur: 60 });
                   }}>
                   {Array.from({ length: 24 }).map((_, h) => (
-                    <div key={h} className="absolute left-0 right-0 pointer-events-none" style={{ top: h * HOUR_H, height: HOUR_H, borderTop: `1px solid ${hourRule}`, background: h % 2 ? hourBand : "transparent" }} />
+                    <div key={h} data-event-timeline-lens-target="week-hour-rule" className="absolute left-0 right-0 pointer-events-none" style={{ top: h * HOUR_H, height: HOUR_H, borderTop: `1px solid ${hourRule}`, background: h % 2 ? hourBand : "transparent" }} />
                   ))}
                   {dayDraft && (
                     <div data-test="week-draft-preview" className="absolute left-0.5 right-0.5 pointer-events-none flex items-center justify-center"
@@ -575,7 +576,7 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
                     const href = normalizeMeetingLink(e.link);
                     const morphOrigin = createEventMorphOrigin(e, { dateKey: day.key, view: "week", lane: "timeline" });
                     return (
-                      <div key={e.segmentId ?? `${e.id}-${e.start}`} className="absolute" style={{
+                      <div key={e.segmentId ?? `${e.id}-${e.start}`} data-event-timeline-lens-target="week-event" className="absolute" style={{
                         top: top + 1, height: h,
                         left: `calc(${(e.lane / e.cols) * 100}% + 2px)`, width: `calc(${100 / e.cols}% - 4px)`,
                         zIndex: e.lifted ? 8 : 2,
@@ -618,6 +619,7 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
                           <span className={`flex flex-1 items-center gap-1 overflow-hidden ${e.cols > 1 || href ? "px-1" : "px-1.5"} pt-0.5 min-w-0`}>
                             {e.cols === 1 && !href && <span data-morph-marker className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: catColor(e.cat) }} />}
                             <span data-morph-title className="min-w-0 flex-1 font-semibold leading-tight truncate" style={{ fontSize: 10 }}>{e.title}</span>
+                            {e.cols === 1 && !href && <span data-event-morph-disclosure aria-hidden="true" style={{ color: T.dimText }} className="shrink-0"><ChevronIcon direction="down" size={8} /></span>}
                           </span>
                           {(e.lifted || (h >= 30 && e.cols === 1)) && <span data-morph-meta className="block truncate tracking-widest" style={{ fontFamily: MONO, color: e.lifted ? T.accent : T.dim, fontSize: 9, paddingLeft: e.lifted && e.cols > 1 ? 4 : (href ? 4 : 15) }}>{fmtTime(e.start, clock)}</span>}
                         </button>
@@ -640,7 +642,7 @@ function WeekGrid({ T, surface, hourRule, hourBand, week, dateKey, todayKey, now
                     );
                   })}
                   {day.tasks.map((t) => (
-                    <button key={t.id} onClick={(ev) => { ev.stopPropagation(); onOpenTask(t.id, day.key); }}
+                    <button key={t.id} data-event-timeline-lens-target="week-action" onClick={(ev) => { ev.stopPropagation(); onOpenTask(t.id, day.key); }}
                       className="absolute left-0.5 right-0.5 text-left overflow-hidden"
                       style={{ top: (t.planned.startMinute / 1440) * DAY_H + 1, height: 16, borderRadius: 6, border: `1px dashed ${T.faint}`, opacity: t.status === "completed" ? 0.4 : 1, zIndex: 3, background: T.card }}>
                       <span className="block px-1 font-semibold truncate" style={{ fontSize: 9, textDecoration: t.status === "completed" ? "line-through" : "none" }}>{t.title}</span>

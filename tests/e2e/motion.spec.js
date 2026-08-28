@@ -140,10 +140,12 @@ test.describe("Event semantic morph sources", () => {
     const source = page.locator('[data-event-id]').filter({ hasText: "Physical Event destination" }).locator('[data-morph-key]');
     await source.scrollIntoViewIfNeeded();
     const sourceRect = await source.boundingBox();
+    const sourceOpacity = () => source.evaluate((node) => Number(getComputedStyle(node).opacity));
+    await expect(source.locator("[data-event-morph-disclosure]")).toHaveCount(1);
     await source.click();
 
     const sheet = page.getByTestId("sheet");
-    const frameZero = await page.locator("[data-morph-overlay]").evaluate((overlay) => {
+    const frameZero = await page.locator("[data-morph-overlay]").evaluate(async (overlay) => {
       const shell = overlay.querySelector("[data-morph-shell]");
       const title = overlay.querySelector("[data-morph-title]");
       const animation = shell?.getAnimations().find((candidate) => (
@@ -151,6 +153,11 @@ test.describe("Event semantic morph sources", () => {
       ));
       animation?.pause();
       if (animation) animation.currentTime = 0;
+      /* WAAPI applies the sampled currentTime at the next style/composite
+         boundary. Reading immediately after assignment can observe the old
+         rendered frame, which would make this first-frame contract depend on
+         scheduler luck rather than the source geometry. */
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const shellRect = shell?.getBoundingClientRect();
       const titleTransform = getComputedStyle(title).transform;
       const matrix = new DOMMatrixReadOnly(titleTransform === "none" ? "matrix(1, 0, 0, 1, 0, 0)" : titleTransform);
@@ -165,10 +172,24 @@ test.describe("Event semantic morph sources", () => {
     });
     await expect(sheet).toHaveAttribute("data-event-inspector-surface", "morph");
     await expect(sheet).toHaveAttribute("data-morph-presentation", "opening");
-    await expect(sheet).toHaveCSS("visibility", "hidden");
+    /* The destination is a real source-anchored layer during the transition.
+       Hiding the whole Inspector until OPEN turns the handoff into a modal pop
+       instead of letting facts emerge inside the expanding Event. */
+    await expect(sheet).toHaveCSS("visibility", "visible");
+    const openingEnvironment = await sheet.evaluate((panel) => {
+      const backdropStyle = panel.parentElement ? getComputedStyle(panel.parentElement) : null;
+      return {
+        background: backdropStyle?.backgroundColor,
+        backdropFilter: backdropStyle?.backdropFilter,
+      };
+    });
+    expect(openingEnvironment.background, "an Event expansion must not darken the planner").toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
+    expect(openingEnvironment.backdropFilter, "an Event expansion must not blur the planner").toBe("none");
     await expect(sheet.locator("[data-morph-title]")).toHaveCount(1);
     await expect(sheet.locator("[data-morph-meta]")).toHaveCount(1);
     await expect(sheet.locator("[data-morph-marker]")).toHaveCount(1);
+    await expect(sheet.getByRole("button", { name: "Collapse event" })).toBeVisible();
+    await expect.poll(sourceOpacity, { message: "the timeline source must stay suppressed while the physical carrier owns its paint" }).toBeLessThanOrEqual(.01);
     expect(frameZero.shellRect).not.toBeNull();
     expect(frameZero.animationCount, "the compositor shell must expose its running WAAPI animation").toBeGreaterThan(0);
     expect(frameZero.animationDuration).toBeGreaterThan(0);
@@ -181,7 +202,183 @@ test.describe("Event semantic morph sources", () => {
 
     await page.keyboard.press("Escape");
     await expect(sheet).toHaveAttribute("data-morph-presentation", /^(closing|cancelling)$/);
-    await expect(sheet).toHaveCSS("visibility", "hidden");
+    await expect(sheet).toHaveCSS("visibility", "visible");
+    expect(await sourceOpacity(), "source paint must not restore until the return carrier has finished closing").toBeLessThanOrEqual(.01);
+    await expect(sheet).toHaveCount(0, { timeout: 3000 });
+    await expect.poll(sourceOpacity).toBeGreaterThan(.1);
+  });
+
+  test("an Event can expand and collapse forty times without leaving a carrier or source paint behind", async ({ page }) => {
+    test.setTimeout(60_000);
+    await openPlanner(page);
+    await quickAdd(page, "Forty Event morph cycles today 10am 60m");
+    const source = page.locator('[data-event-id]').filter({ hasText: "Forty Event morph cycles" }).locator('[data-morph-key]');
+    const sourceOpacity = () => source.evaluate((node) => Number(getComputedStyle(node).opacity));
+
+    for (let cycle = 0; cycle < 40; cycle += 1) {
+      await source.click();
+      const sheet = page.getByTestId("sheet");
+      await expect(sheet, `cycle ${cycle + 1} must finish opening its in-place carrier`).toHaveAttribute("data-morph-presentation", "open");
+      await sheet.getByRole("button", { name: "Collapse event" }).click();
+      await expect(sheet, `cycle ${cycle + 1} must settle the returning carrier`).toHaveCount(0, { timeout: 3000 });
+    }
+
+    await expect(page.locator("[data-morph-overlay]"), "a completed cycle must not strand an overlay").toHaveCount(0);
+    await expect.poll(sourceOpacity, { message: "the source must own its paint again after the fortieth close" }).toBeGreaterThan(.1);
+  });
+
+  test("an expanded Event keeps logical timeline geometry fixed while its visual lens yields below", async ({ page }) => {
+    await openPlanner(page);
+    await quickAdd(page, "Lens source today 9am 60m");
+    await quickAdd(page, "Lens below today 12pm 60m");
+
+    const source = page.locator('[data-event-id]').filter({ hasText: "Lens source" }).locator('[data-morph-key]');
+    const below = page.locator('[data-event-id]').filter({ hasText: "Lens below" });
+    const timeline = page.getByTestId("day-stream");
+    await source.scrollIntoViewIfNeeded();
+    const before = {
+      source: await source.boundingBox(),
+      below: await below.boundingBox(),
+      belowOffsetTop: await below.evaluate((node) => node.offsetTop),
+      scrollHeight: await timeline.evaluate((node) => node.scrollHeight),
+    };
+
+    await source.click();
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).toHaveAttribute("data-morph-presentation", "open");
+    await expect.poll(async () => Number.parseFloat(await below.evaluate((node) => (
+      getComputedStyle(node).getPropertyValue("--event-timeline-lens-y")
+    )))).toBeGreaterThan(0);
+
+    const after = {
+      sheet: await sheet.boundingBox(),
+      source: await source.boundingBox(),
+      below: await below.boundingBox(),
+      belowOffsetTop: await below.evaluate((node) => node.offsetTop),
+      scrollHeight: await timeline.evaluate((node) => node.scrollHeight),
+    };
+    expect(Math.abs(after.sheet.y - after.source.y), "the expanded Event must keep its live semantic source top").toBeLessThanOrEqual(1);
+    expect(after.below.y, "timeline paint below the Event must visibly yield").toBeGreaterThan(before.below.y + 8);
+    expect(after.belowOffsetTop, "the lens must not alter the Event's logical layout top").toBe(before.belowOffsetTop);
+    expect(after.scrollHeight, "the lens must not alter timeline scroll geometry").toBe(before.scrollHeight);
+
+    await page.keyboard.press("Escape");
+    await expect(sheet).toHaveCount(0, { timeout: 3000 });
+    await expect.poll(async () => (await below.boundingBox())?.y).toBeCloseTo(before.below.y, 0);
+  });
+
+  test("a Week Event stays inside the timeline plane while the visual lens leaves logical lanes alone", async ({ page }) => {
+    await openPlanner(page);
+    await quickAdd(page, "Week lens source today 9am 60m");
+    await quickAdd(page, "Week lens below today 12pm 60m");
+    await page.getByTestId("zoom-out").click();
+
+    const source = page.getByTestId("week-event").filter({ hasText: "Week lens source" });
+    const sourceLane = source.locator("xpath=..");
+    const belowLane = page.getByTestId("week-event").filter({ hasText: "Week lens below" }).locator("xpath=..");
+    const plane = page.locator("[data-event-timeline-lens-plane]");
+    const before = {
+      source: await source.boundingBox(),
+      below: await belowLane.boundingBox(),
+      belowOffsetTop: await belowLane.evaluate((node) => node.offsetTop),
+      planeHeight: await plane.evaluate((node) => node.offsetHeight),
+    };
+
+    await source.click();
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).toHaveAttribute("data-morph-presentation", "open");
+    await expect.poll(async () => Number.parseFloat(await belowLane.evaluate((node) => (
+      getComputedStyle(node).getPropertyValue("--event-timeline-lens-y")
+    )))).toBeGreaterThan(0);
+
+    const after = {
+      sheet: await sheet.boundingBox(),
+      source: await source.boundingBox(),
+      below: await belowLane.boundingBox(),
+      belowOffsetTop: await belowLane.evaluate((node) => node.offsetTop),
+      planeHeight: await plane.evaluate((node) => node.offsetHeight),
+      plane: await plane.boundingBox(),
+    };
+    expect(Math.abs(after.sheet.y - after.source.y), "the Week Event must retain its source top").toBeLessThanOrEqual(1);
+    expect(after.sheet.x, "the expanded Event must remain inside the timeline plane").toBeGreaterThanOrEqual(after.plane.x - 1);
+    expect(after.sheet.x + after.sheet.width, "the expanded Event must not cover the Actions rail").toBeLessThanOrEqual(after.plane.x + after.plane.width + 1);
+    expect(after.source.x, "the source card must remain inside its expanded carrier").toBeGreaterThanOrEqual(after.sheet.x - 1);
+    expect(after.source.x + after.source.width, "the source card must remain inside its expanded carrier").toBeLessThanOrEqual(after.sheet.x + after.sheet.width + 1);
+    expect(after.below.y, "Week content below the source must visibly yield").toBeGreaterThan(before.below.y + 8);
+    expect(after.belowOffsetTop, "the Week lens must not alter logical card top").toBe(before.belowOffsetTop);
+    expect(after.planeHeight, "the Week lens must not alter logical timeline height").toBe(before.planeHeight);
+
+    await page.keyboard.press("Escape");
+    await expect(sheet).toHaveCount(0, { timeout: 3000 });
+  });
+
+  test("an Inspector disclosure grows its carrier and visual lens without clipping the Event", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 1600 });
+    await openPlanner(page);
+    await quickAdd(page, "Disclosure lens source today 1am 60m");
+    const timeline = page.getByTestId("day-stream");
+    await timeline.evaluate((node) => { node.scrollTop = 0; });
+
+    const source = page.locator('[data-event-id]').filter({ hasText: "Disclosure lens source" }).locator('[data-morph-key]');
+    const below = page.locator('[data-event-timeline-lens-target="hour"]').nth(4);
+    await source.click();
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).toHaveAttribute("data-morph-presentation", "open");
+    await expect(sheet).toHaveClass(/nb-sheet-h/);
+    /* The initial measurement intentionally settles before height interpolation
+       is armed. Start this disclosure assertion from that resting carrier,
+       rather than treating the opening-size handoff as a field expansion. */
+    await page.waitForTimeout(360);
+    const before = {
+      height: (await sheet.boundingBox()).height,
+      lens: Number.parseFloat(await below.evaluate((node) => getComputedStyle(node).getPropertyValue("--event-timeline-lens-y"))),
+      scrollHeight: await timeline.evaluate((node) => node.scrollHeight),
+    };
+
+    await sheet.getByText("Does not repeat", { exact: true }).click();
+    await expect(sheet.getByText("DAILY", { exact: true })).toBeVisible();
+    await expect.poll(async () => (await sheet.boundingBox()).height).toBeGreaterThan(before.height + 8);
+    await expect.poll(async () => Number.parseFloat(await below.evaluate((node) => (
+      getComputedStyle(node).getPropertyValue("--event-timeline-lens-y")
+    )))).toBeGreaterThan(before.lens + 8);
+    expect(await timeline.evaluate((node) => node.scrollHeight), "disclosure expansion must remain presentation-only").toBe(before.scrollHeight);
+
+    await sheet.getByText("DAILY", { exact: true }).click();
+    await expect(sheet.getByText("DAILY", { exact: true })).toBeHidden();
+    await expect.poll(async () => (await sheet.boundingBox()).height).toBeLessThanOrEqual(before.height + 1);
+    await expect.poll(async () => Number.parseFloat(await below.evaluate((node) => (
+      getComputedStyle(node).getPropertyValue("--event-timeline-lens-y")
+    )))).toBeLessThanOrEqual(before.lens + 1);
+
+    /* Choosing a repeat rule deliberately makes the real Inspector dirty.
+       Revert that local draft before closing so this visual contract leaves no
+       confirmation surface or planner data behind. */
+    await sheet.getByRole("button", { name: "REVERT" }).click();
+    await expect(sheet.getByText("Does not repeat", { exact: true })).toBeVisible();
+
+    /* Alerts are a separate expanding field. Opening and closing it without
+       picking an option must still resize the same physical carrier and lens;
+       this guards against a Repeat-only measurement path. */
+    const alertBaseline = {
+      height: (await sheet.boundingBox()).height,
+      lens: Number.parseFloat(await below.evaluate((node) => (
+        getComputedStyle(node).getPropertyValue("--event-timeline-lens-y")
+      ))),
+    };
+    await sheet.getByText("No reminder", { exact: true }).click();
+    await expect(sheet.getByText("15M", { exact: true })).toBeVisible();
+    await expect.poll(async () => (await sheet.boundingBox()).height).toBeGreaterThan(alertBaseline.height + 8);
+    await expect.poll(async () => Number.parseFloat(await below.evaluate((node) => (
+      getComputedStyle(node).getPropertyValue("--event-timeline-lens-y")
+    )))).toBeGreaterThan(alertBaseline.lens + 8);
+    await sheet.getByText("No reminder", { exact: true }).click();
+    await expect(sheet.getByText("15M", { exact: true })).toBeHidden();
+    await expect.poll(async () => (await sheet.boundingBox()).height).toBeLessThanOrEqual(alertBaseline.height + 1);
+    await expect.poll(async () => Number.parseFloat(await below.evaluate((node) => (
+      getComputedStyle(node).getPropertyValue("--event-timeline-lens-y")
+    )))).toBeLessThanOrEqual(alertBaseline.lens + 1);
+
+    await page.keyboard.press("Escape");
     await expect(sheet).toHaveCount(0, { timeout: 3000 });
   });
 
@@ -207,9 +404,10 @@ test.describe("Event semantic morph sources", () => {
 
   test("a delayed Week open is cancelled by Escape and superseded by the latest Event", async ({ page }) => {
     const dateKey = keyOf(new Date());
+    const weekStart = addDaysToKey(dateKey, -new Date(`${dateKey}T12:00:00`).getDay());
     const entries = [
-      { id: "evt-pending-alpha", title: "Pending Alpha", date: addDaysToKey(dateKey, -2) },
-      { id: "evt-pending-beta", title: "Pending Beta", date: addDaysToKey(dateKey, 2) },
+      { id: "evt-pending-alpha", title: "Pending Alpha", date: addDaysToKey(weekStart, 1) },
+      { id: "evt-pending-beta", title: "Pending Beta", date: addDaysToKey(weekStart, 2) },
     ];
     let state = createBlankPlannerState({});
     for (const entry of entries) {
@@ -293,7 +491,7 @@ test.describe("Event semantic morph sources", () => {
     }).toBeLessThan(.02);
   });
 
-  test("Day and Week all-day Event controls register their own physical sources", async ({ page }) => {
+  test("Day and Week all-day Events expand in place from their physical source rows", async ({ page }) => {
     const dateKey = keyOf(new Date());
     const { state } = createEvent(createBlankPlannerState({}), {
       calendarId: "calendar-default",
@@ -309,16 +507,33 @@ test.describe("Event semantic morph sources", () => {
     await seedPlanner(page, state);
     const dayCard = page.locator("[data-morph-key]").filter({ hasText: "All-day source identity" });
     await expect(dayCard).toHaveAttribute("data-morph-key", /:v:day:l:allday$/);
+    const daySource = await dayCard.boundingBox();
     await dayCard.click();
     await expect(page.locator("[data-morph-overlay]")).toBeVisible();
-    await page.keyboard.press("Escape");
+    const daySheet = page.getByTestId("sheet");
+    await expect(daySheet).toHaveAttribute("data-morph-presentation", "open");
+    const dayDestination = await daySheet.boundingBox();
+    expect(Math.abs(dayDestination.y - daySource.y), "a Day all-day Event must retain its source row").toBeLessThanOrEqual(1);
+    expect(Math.abs(dayDestination.x - daySource.x), "a wide all-day row must not travel horizontally").toBeLessThanOrEqual(1);
+    await daySheet.getByRole("button", { name: "Collapse event" }).click();
     await expect(page.getByTestId("sheet")).toHaveCount(0);
 
     await page.getByTestId("zoom-out").click();
     const weekCard = page.getByTestId("week-allday-event").filter({ hasText: "All-day source identity" });
     await expect(weekCard).toHaveAttribute("data-morph-key", /:v:week:l:allday$/);
+    const weekSource = await weekCard.boundingBox();
+    const weekPlane = page.locator("[data-event-timeline-lens-plane]");
     await weekCard.click();
     await expect(page.locator("[data-morph-overlay]")).toBeVisible();
+    const weekSheet = page.getByTestId("sheet");
+    await expect(weekSheet).toHaveAttribute("data-morph-presentation", "open");
+    const weekDestination = await weekSheet.boundingBox();
+    const weekPlaneBox = await weekPlane.boundingBox();
+    expect(Math.abs(weekDestination.y - weekSource.y), "a Week all-day Event must retain its source row").toBeLessThanOrEqual(1);
+    expect(weekDestination.x, "a Week all-day Event must remain inside the timeline plane").toBeGreaterThanOrEqual(weekPlaneBox.x - 1);
+    expect(weekDestination.x + weekDestination.width, "a Week all-day Event must not cover the Actions rail").toBeLessThanOrEqual(weekPlaneBox.x + weekPlaneBox.width + 1);
+    expect(weekSource.x, "the all-day source must remain inside its expanded carrier").toBeGreaterThanOrEqual(weekDestination.x - 1);
+    expect(weekSource.x + weekSource.width, "the all-day source must remain inside its expanded carrier").toBeLessThanOrEqual(weekDestination.x + weekDestination.width + 1);
   });
 });
 

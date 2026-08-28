@@ -96,6 +96,7 @@ export default function TimelineActionCard({
 
   return (
     <div className={`nb-timeline-lane absolute overflow-hidden ${dragging || sizing ? "nb-timeline-lane-active" : "nb-hover-tile"}`}
+      data-event-timeline-lens-target="action"
       data-test="timeline-action-lane"
       style={{
         top, height, left, width, borderRadius: cardRadius,

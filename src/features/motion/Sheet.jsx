@@ -14,6 +14,7 @@ import {
   fluidMorphFromRects,
 } from "./fluidGeometry.js";
 import { recentFluidTriggerRadius, recentFluidTriggerRect } from "./fluidTrigger.js";
+import { contextualEventInspectorGeometry } from "./contextualEventGeometry.js";
 import { MONO } from "../../design/typography.js";
 import {
   MORPH_CLOSE_MS,
@@ -25,7 +26,7 @@ import {
   MORPH_STAGE_REVEAL,
   SHEET_ENTRY_MS,
 } from "./morphTiming.js";
-import { CloseIcon } from "../planner/icons.jsx";
+import { ChevronIcon, CloseIcon } from "../planner/icons.jsx";
 
 const modalStack = [];
 let bodyOverflowBeforeModal = null;
@@ -71,7 +72,7 @@ function restoreSheetFocus(opener, closingPanel) {
    Planner's own Sheet was the newer of the two by 134 lines -- it had gained
    first-paint height measurement that this file never received -- so the merge
    went in that direction. Reversing it would have silently reverted that fix. */
-export default function Sheet({ T, onClose, title, children, headerAction = null, beforeClose = null, morph = "auto", morphSurface = null, closeSignal = null, destinationRef = null, presentation = "sheet", presentationState = null, onMorphClose = null, eventInspectorSurface = null }) {
+export default function Sheet({ T, onClose, title, children, headerAction = null, beforeClose = null, morph = "auto", morphSurface = null, closeSignal = null, destinationRef = null, presentation = "sheet", presentationState = null, onMorphClose = null, eventInspectorSurface = null, objectMorphSource = null }) {
   /* Ignore a backdrop dismissal that arrives in the same tap that opened the sheet.
      Belt and braces alongside preventDefault at the source: any future path that
      opens a sheet from a touch inherits the protection. */
@@ -319,13 +320,35 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
     if (!content) return undefined;
     /* ResizeObserver can emit several records while an editor unfolds. Collapse
        those records into one read/write per frame and skip identical targets, so
-       React never restarts the same height transition or creates an observer loop. */
+       React never restarts the same height transition or creates an observer loop.
+       A grid-row disclosure is the one case it cannot observe reliably: once the
+       carrier already has an explicit height, the content's own border box can
+       remain unchanged while a child animates from 1fr back to 0fr.  Observe the
+       DOM change and its terminal transition as well, otherwise a closed field
+       leaves a permanently oversized physical Event and Timeline Lens. */
     const scheduleMeasure = () => {
       if (closingRef.current || heightMeasureFrame.current != null) return;
       heightMeasureFrame.current = window.requestAnimationFrame(() => {
         heightMeasureFrame.current = null;
         if (closingRef.current || !content.isConnected) return;
-        const next = Math.min(content.scrollHeight, Math.round(viewportCap.current * .88));
+        /* A fixed-height panel can make its normal-flow content report the
+           current carrier height as scrollHeight after it has expanded once.
+           Read the intrinsic body in a synchronous, paint-free auto-height
+           measurement so a collapsed disclosure is allowed to contract again.
+           The actual React update remains the one animated height write. */
+        const panel = dialogRef.current;
+        const previousInlineHeight = panel?.style.height;
+        const previousInlineTransition = panel?.style.transition;
+        if (panel && previousInlineHeight && previousInlineHeight !== "auto") {
+          panel.style.transition = "none";
+          panel.style.height = "auto";
+        }
+        const intrinsicHeight = content.scrollHeight;
+        if (panel && previousInlineHeight && previousInlineHeight !== "auto") {
+          panel.style.height = previousInlineHeight;
+          panel.style.transition = previousInlineTransition;
+        }
+        const next = Math.min(intrinsicHeight, Math.round(viewportCap.current * .88));
         if (lastSheetHeight.current === next) return;
         lastSheetHeight.current = next;
         setSheetHeight(next);
@@ -338,11 +361,25 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
       scheduleMeasure();
     };
     const observer = typeof ResizeObserver === "function" ? new ResizeObserver(scheduleMeasure) : null;
+    const mutations = typeof MutationObserver === "function" ? new MutationObserver(scheduleMeasure) : null;
+    const onContentTransitionEnd = (event) => {
+      if (event.target instanceof Element && content.contains(event.target)) scheduleMeasure();
+    };
     observer?.observe(content);
+    mutations?.observe(content, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ["class", "style", "hidden", "open", "aria-expanded"],
+    });
+    content.addEventListener("transitionend", onContentTransitionEnd, true);
     window.addEventListener("resize", onResize);
     scheduleMeasure();
     return () => {
       observer?.disconnect();
+      mutations?.disconnect();
+      content.removeEventListener("transitionend", onContentTransitionEnd, true);
       window.removeEventListener("resize", onResize);
       window.cancelAnimationFrame(heightMeasureFrame.current);
       heightMeasureFrame.current = null;
@@ -527,12 +564,33 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
   }, [presentation, presentationState]);
 
   const objectMorphDestination = presentation === "event-morph";
-  const morphDestinationVisible = !objectMorphDestination || presentationState === "open";
   const morphDestinationClosing = objectMorphDestination
     && (presentationState === "closing" || presentationState === "cancelling" || presentationState === "settled");
+
+  const contextBounds = objectMorphDestination && typeof document !== "undefined"
+    ? document.querySelector("[data-event-timeline-lens-plane]")?.getBoundingClientRect()
+    : null;
+  const contextualGeometry = objectMorphDestination && typeof window !== "undefined"
+    ? contextualEventInspectorGeometry(objectMorphSource?.rect, {
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      naturalHeight: sheetHeight,
+      contextBounds,
+    })
+    : null;
+  const anchoredStyle = contextualGeometry && {
+    position: "fixed",
+    left: `${contextualGeometry.left}px`,
+    top: `${contextualGeometry.top}px`,
+    width: `${contextualGeometry.width}px`,
+    maxWidth: "calc(100vw - 32px)",
+    maxHeight: `${contextualGeometry.maxHeight}px`,
+    margin: 0,
+  };
+
   return (
-    <div className={`${objectMorphDestination ? "nb-object-scrim" : "nb-scrim"} ${closing || morphDestinationClosing ? "nb-fluid-closing" : ""} fixed inset-0 z-50 flex items-end sm:items-center justify-center`} style={{
-      background: "rgba(0,0,0,0.72)",
+    <div className={`${objectMorphDestination ? "nb-object-scrim" : "nb-scrim"} ${closing || morphDestinationClosing ? "nb-fluid-closing" : ""} fixed inset-0 z-50 flex items-end ${anchoredStyle ? "" : "sm:items-center justify-center"}`} style={{
+      background: objectMorphDestination ? "transparent" : "rgba(0,0,0,0.72)",
       pointerEvents: objectMorphDestination && presentationState === "opening" ? "none" : undefined,
     }} onClick={guardedClose}>
       <div ref={(node) => {
@@ -544,16 +602,20 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
         data-morph-presentation={objectMorphDestination ? presentationState : undefined}
         onKeyDown={(event) => trapDialogTab(event, dialogRef.current)} onClick={(e) => e.stopPropagation()}
         className={`nb-fluid ${objectMorphDestination ? "nb-object-destination" : ""} nb-sheet-scroll ${heightReady ? "nb-sheet-h" : ""} ${closing || morphDestinationClosing ? "nb-fluid-closing" : ""} relative w-full sm:max-w-md overflow-y-auto nb-s`} style={{
-          backgroundColor: objectMorphDestination && presentationState === "opening" ? "transparent" : (morph === "notch" && morphSurface && morphStage === "closing" ? morphSurface.background : T.card),
-          boxShadow: objectMorphDestination && presentationState === "opening" ? "none" : undefined,
+          // The physical Event carrier must never inherit nb-fluid's legacy
+          // translate animation. Its fixed geometry is the semantic Event
+          // source; material reveal happens on the inner presentation layer.
+          backgroundColor: objectMorphDestination ? "transparent" : (morph === "notch" && morphSurface && morphStage === "closing" ? morphSurface.background : T.card),
+          boxShadow: objectMorphDestination ? undefined : undefined,
           color: T.text,
           maxHeight: "88svh",
           height: sheetHeight == null ? "auto" : sheetHeight,
-          visibility: objectMorphDestination && !morphDestinationVisible ? "hidden" : "visible",
+          visibility: "visible",
           animation: objectMorphDestination || presentation === "instant" ? "none" : undefined,
           transform: objectMorphDestination || presentation === "instant" ? "none" : undefined,
           clipPath: objectMorphDestination || presentation === "instant" ? "none" : undefined,
           pointerEvents: morphDestinationClosing || (objectMorphDestination && presentationState === "opening") ? "none" : undefined,
+          ...(anchoredStyle || {}),
           "--morph-accent": morph === "notch" && morphSurface ? morphSurface.background : "transparent",
           "--morph-card": T.card,
         }}>
@@ -565,17 +627,22 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
             {morphSurface.label}
           </div>
         )}
-        <div ref={contentRef} className="nb-notch-body">
-        <div className="sticky top-0 flex items-center justify-between px-4 sm:px-5 pt-3 pb-2" style={{ background: T.card, zIndex: 3 }}>
-          <span id={titleId.current} style={{ fontFamily: MONO, color: T.dimText }} className="nb-data">{title || "Details"}</span>
+        {objectMorphDestination && <div aria-hidden="true" className="nb-event-morph-material" />}
+        <div ref={contentRef} className="nb-notch-body" style={objectMorphDestination ? { position: "relative", zIndex: 1 } : undefined}>
+        <div className={`${objectMorphDestination ? "nb-event-morph-chrome absolute inset-x-0 top-0" : "sticky top-0"} flex items-center justify-between px-4 sm:px-5 pt-3 pb-2`} style={{ background: objectMorphDestination ? "transparent" : T.card, zIndex: 3 }}>
+          <span id={titleId.current} style={{ fontFamily: MONO, color: T.dimText, opacity: objectMorphDestination ? 0 : 1 }} className="nb-data">{title || "Details"}</span>
           <div className="flex items-center gap-1.5">
             {headerAction}
-            <button onClick={requestClose} aria-label="Close" style={{ color: T.dimText, fontFamily: MONO }} className="nb-tap nb-hover-icon -mr-1 px-2 py-1 text-sm flex items-center justify-center"><CloseIcon /></button>
+            <button onClick={requestClose} aria-label={objectMorphDestination ? "Collapse event" : "Close"} style={{ color: T.dimText, fontFamily: MONO }} className="nb-tap nb-hover-icon -mr-1 px-2 py-1 text-sm flex items-center justify-center">
+              {objectMorphDestination
+                ? <span aria-hidden="true" className="nb-event-morph-collapse-chevron"><ChevronIcon direction="down" /></span>
+                : <CloseIcon />}
+            </button>
           </div>
         </div>
         {/* Padding deeper than the panel's 24px corner radius, so the last row
             ends on straight edge instead of dying into the curve. */}
-        <div className="px-4 sm:px-5" style={{ paddingBottom: 28 }}>{children}</div>
+        <div className={`${objectMorphDestination ? "nb-event-morph-details " : ""}px-4 sm:px-5`} style={{ paddingBottom: 28 }}>{children}</div>
         {/* A sheet capped at 88vh cuts its last row mid-height with no sign that
             there is more. This rides the bottom of the scroll box and fades the
             cut into the panel, so "there is more below" is visible rather than
