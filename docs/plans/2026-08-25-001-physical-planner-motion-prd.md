@@ -1,144 +1,202 @@
 # Calendar Master — Physical Planner Motion System PRD
 
-**Status:** Canonical product specification — Rev D  
-**Original behavioral authority:** `docs/plans/2026-08-25-006-physical-planner-motion-visual-reference.html`  
-**Extended behavioral examples:** `docs/plans/2026-08-27-007-physical-planner-motion-extended-visual-reference.html`  
+**Status:** Canonical proposed product specification  
+**Date:** 2026-08-24  
+**Repository:** `Revenue-Architect/Calendar-master`  
+**Grounding point:** PR #13 head `f8cdc60fc1e0c87c5ffaabae158cec3ce45be98a` was the last reviewed application state before this document was consolidated. Re-ground against current `main` and open PRs before implementation.  
+**Normative behavioral reference:** `docs/plans/2026-08-25-006-physical-planner-motion-visual-reference.html`  
 **Architecture:** `docs/plans/2026-08-25-002-physical-planner-motion-ard.md`  
-**Blast radius / reconciliation:** `docs/plans/2026-08-25-003-physical-planner-motion-reconciliation.md`  
-**Execution:** `docs/plans/2026-08-25-004-physical-planner-motion-implementation-plan.md`  
-**Rev D decision date:** 2026-08-27
+**Legacy reconciliation / blast radius:** `docs/plans/2026-08-25-003-physical-planner-motion-reconciliation.md`  
+**Execution plan:** `docs/plans/2026-08-25-004-physical-planner-motion-implementation-plan.md`
 
 ---
 
 # 1. Executive decision
 
-Calendar Master uses one physical interaction language:
+> **Rev C grounding (2026-08-25):** Re-grounded against current `main` `a8cf905b878e913256dc3e3518d133c2583cb443`
+> and the docs-only branch `feat/sheet-presentation-physicality`, which is two commits ahead of that main.
+> The branch contains Claude's 387-line plan, 7,840-line session log, raw JSONL session, and capture scripts; it
+> contains no product-code implementation. Current code has moved beyond some assumptions in that plan:
+> `anchoredFluidMorphFromRects()` and 25/50/75% interrupted Composer reversal tests already exist, and the
+> current Planner architecture ceiling is 5531 (split-line count). Re-verify all counts at execution time.
+
+Calendar Master will adopt a single physical interaction language:
 
 > **Nothing important appears from nowhere. Objects expand, tools unfold, creation grows from its origin, navigation moves directionally, and editing reconfigures the same object in place.**
 
-Rev D removes an ambiguity discovered during Phase 7. A technically correct FLIP/shared-element animation is not sufficient if the result still reads as a centered modal, popover, dropdown, or detached surface.
+This is not a cosmetic animation pass. It replaces the product's conceptual model of “open a sheet” with a model of **persistent objects and spatially honest transformations**.
 
-For the normal pointer/touch path, the original visual reference is normative for **perceived spatial behavior**, not merely inspiration.
+The interactive visual reference is the behavioral authority for the normal pointer/touch path. If an implementation technically “uses a morph” but does not visually read like the reference, it does not satisfy this PRD.
+
+### The reference specifically establishes
+
+- Event card → Event Inspector as the *same object*.
+- Event Inspector → Event card as the exact semantic reverse.
+- Empty timeline space → Composer → created Event.
+- Composer Cancel → original empty space.
+- Compact `+`, More, Search, Filter and bounded fields unfolding from their controls.
+- Inspector → Edit as an in-place reconfiguration.
+- Directional page/time travel rather than fade-led navigation.
+
+### Two deliberate exceptions
+
+1. **Keyboard-opened surfaces stay instant.** Existing audits verified keyboard `n` / `a` and command-style opens deliberately use no physical travel. Do not invent a fake source from whatever currently has focus.
+2. **Reduced-motion retains the simpler accessible fallback.** Full-motion object travel is removed. Existing cross-fade behavior may remain where it is the product's reduced-motion fallback.
+
+These are not deviations from the design. They are explicit modes.
+
+---
+
+# 2. Product intent
+
+Calendar Master should feel like a notebook/planner made of persistent digital material.
 
 The user should feel:
 
 - “I expanded this Event,” not “a modal opened.”
-- “This Action opened where it lives,” not “a details panel appeared.”
-- “I wrote into this time,” not “a form opened elsewhere.”
-- “This control unfolded,” not “a dropdown spawned.”
-- “I edited this same object,” not “I opened another editor.”
+- “I wrote into this empty time,” not “a form appeared.”
+- “This tool unfolded,” not “a popover spawned.”
+- “I moved to tomorrow,” not “the screen cross-faded.”
+- “I switched this object into edit mode,” not “I opened another editor.”
 
-Production may use isolated overlays, frozen logical geometry, or presentation-only displacement to protect calendar math. Those mechanisms must be visually invisible.
+Physicality comes from:
+
+- source/destination continuity;
+- geometry;
+- direction;
+- layering;
+- reversibility;
+- mass;
+- stable identity;
+- spatial memory.
+
+It does **not** come from literal notebook decoration.
+
+Do not add:
+
+- fake paper textures;
+- page curls;
+- leather;
+- spiral binding;
+- heavy 3D;
+- rubbery overshoot;
+- whole-screen blur.
 
 ---
 
-# 2. Authority and conflict rules
+# 3. Authority and conflict rules
 
-1. `006` is the original normative reference for full-motion pointer/touch behavior.
-2. `007` extends the same grammar to later phases; it supplements but never overrides `006`.
-3. This PRD controls product semantics.
-4. The ARD controls implementation safety.
-5. Existing domain, gesture, accessibility, persistence, and recurrence contracts remain protected.
-6. If architecture and reference appear to conflict, preserve the architecture internally while reproducing the reference visually.
-7. Existing code is migration input, not the visual target.
+For this initiative:
 
-Hard conflict rule:
+1. The accepted ADR generated from this package is the repository architecture authority.
+2. The **visual demo is normative for motion outcome and continuity**.
+3. This PRD is normative for product semantics.
+4. The ARD is normative for implementation boundaries and safety.
+5. Existing interaction/domain/accessibility contracts remain protected unless explicitly amended.
+6. Older motion plans are evidence. They do not override the approved visual behavior.
+7. Existing code is a constraint and migration input, not the visual target.
 
-> If an implementation uses `MorphSurface` but visually reads as a modal/popover where the reference shows an object expanding/unfolding, the implementation fails.
+### Conflict example
+
+If an older plan says “reveal a separate inspector from the card” but the reference visibly shows “the card becomes the inspector,” the new reference wins.
+
+However, an older finding that the current Sheet preserves scroll position, focus, reduced-motion behavior, or mobile keyboard geometry remains a required protection.
 
 ---
 
-# 3. Motion grammar
+# 4. Motion grammar
+
+Every meaningful transition maps to one of these verbs.
 
 | Verb | Meaning | Examples |
 |---|---|---|
 | **Object Morph** | This object became its expanded form. | Event → Inspector, Action → Inspector, Note → Editor, Month day → Day Peek |
-| **Creation Morph** | New material grows from the exact creation origin. | Empty slot → Composer → Event, Add Action → compact Composer |
-| **Control Morph** | The control unfolds into the controls it contains. | `+`, More, Search, Filter, Repeat, Calendar, alerts |
-| **Spatial Slide** | The user moved through planner space. | previous/next date, view travel, OPEN DAY |
-| **Reconfigure** | Same open object, another state. | Inspector → Edit, field → expanded field |
-| **Neutral Dialog** | True interruption with no honest source object. | destructive confirmation, recovery, auth/system prompt |
+| **Creation Morph** | A new object grows from this exact place. | Empty slot → Composer → Event; Add Action → Action Composer |
+| **Control Morph** | This tool unfolded into the controls it contains. | `+`, More, Search, Filter, Repeat, Calendar, alerts |
+| **Spatial Slide** | I moved somewhere else in the planner. | previous/next date, view movement, settings/navigation |
+| **Reconfigure** | Same object, another state. | Inspector → Edit, field → expanded field editor |
+| **Neutral Dialog** | Global/system interruption with no honest object source. | destructive confirmation, recovery, auth/system prompt |
 
-Do not invent another grammar because a generic UI primitive is convenient.
-
----
-
-# 4. Source-anchored physicality
-
-For Object, Creation, and Control morphs on pointer/touch:
-
-- source position remains the dominant spatial anchor;
-- major content does not fly to viewport center unless the reference explicitly does so;
-- the surrounding planner remains visually legible;
-- destination-only content appears inside the material that grew from the source;
-- close is the semantic reverse;
-- fields may grow the parent object further;
-- presentation may visually yield around the expanded object.
-
-A source-anchored object may widen contextually to remain usable, especially in Week or Month, but the user must still be able to identify where it came from at every mid-frame.
+Do not invent a new motion idiom simply because an animation is attractive.
 
 ---
 
-# 5. Presentation Lens product rule
+# 5. Core product rule
 
-Calendar layout and visible physical layout are allowed to diverge temporarily during an expansion.
+> **Opacity may support a transition, but it may not be the primary explanation for where a major surface came from or where it went.**
 
-The product may visually make room around an expanded object while keeping the underlying interaction geometry frozen.
+Exceptions:
 
-Desired perception:
-
-```text
-closed object
-    ↓
-same object grows in place
-    ↓
-visible surrounding content yields
-    ↓
-object contains more controls/content
-```
-
-The user must never see or care that this can be implemented with overlays/transforms rather than real calendar reflow.
+- scrim/background dimming;
+- reduced-motion fallback;
+- semantic dimming such as completed/past/drag-held states;
+- minor secondary-content reveal after the physical shell is established.
 
 ---
 
-# 6. Event → Event Inspector
+# 6. Frequency budget
 
-## 6.1 Trigger ownership
+Motion frequency controls motion budget.
 
-Existing gesture classification remains authoritative. Motion never steals drag, resize, hold, JOIN, direct controls, touch scroll, or post-manipulation click suppression.
+| Frequency | Product budget |
+|---|---|
+| Every keystroke | Instant; no travel |
+| Every page load | ≤200ms and extremely restrained |
+| Many times/day | ~150–280ms |
+| A few times/day | ~260–480ms |
+| Rare/first-run | may be more generous, still restrained |
 
-## 6.2 Open
+The “fortieth-time test” wins. If a motion becomes annoying after repeated use, it is wrong even if it is impressive in isolation.
 
-The Event remains visually anchored to the exact Day/Week/all-day source.
+---
+
+# 7. Event → Event Inspector
+
+## 7.1 Trigger ownership
+
+The current gesture classifier remains authoritative.
+
+A tap may open the Inspector only after it is classified as a tap.
+
+The motion layer must not steal:
+
+- drag;
+- resize;
+- hold;
+- JOIN;
+- direct Event controls;
+- click suppression after manipulation.
+
+## 7.2 Open behavior
+
+The Event must visibly preserve identity.
 
 Continuity targets:
 
-- shell/material;
+- shell;
 - title;
 - time/duration;
 - accent/category marker;
 - source location;
-- corner identity;
-- disclosure affordance.
+- corner/material identity.
 
-Normal pointer/touch Event open must not use a visible centered modal presentation.
+Destination-only content reveals *after* enough physical space exists.
 
-No dark Event scrim. No whole-screen blur. No center flight.
+The user should be able to pause a mid-frame and still identify the exact Event that is becoming the Inspector.
 
-The Event grows downward/outward like `006`. The visible timeline/lane may yield around it through presentation-only displacement.
+## 7.3 Open state
 
-Destination-only content reveals only after enough visible space exists.
+No capabilities may disappear.
 
-## 6.3 Open state
-
-Preserve every current Event capability:
+Protect:
 
 - title;
 - date;
 - start/end;
 - duration;
 - all-day;
-- recurrence and occurrence/series semantics;
+- recurrence;
+- occurrence/series choice;
 - alerts;
 - calendar/category;
 - location;
@@ -146,217 +204,515 @@ Preserve every current Event capability:
 - notes;
 - duplicate;
 - delete;
-- live/ended semantics;
-- validation and dirty-close behavior.
+- current live/ended semantics.
 
-## 6.4 Internal fields
+## 7.4 Inspector → Edit
 
-Repeat, Calendar/category, alerts, duration, and other bounded fields expand from themselves. If a field needs more vertical space, the expanded Event grows and the Presentation Lens displacement grows with it. No clipping.
+Edit uses **Reconfigure**.
 
-## 6.5 Close
+Do not open a second Edit sheet.
 
-Inspector-only content leaves first. Shared Event identity remains, the visible lens collapses, and the Event contracts to the latest live semantic source geometry. Never close to an unrelated focused element.
+The same Inspector changes in place.
 
----
+The Inspector entrance must not replay.
 
-# 7. Event Inspector → Edit
+## 7.5 Close
 
-Edit is **Reconfigure**.
+Close reverses into the latest live geometry for the semantic Event if it exists.
 
-- same expanded Event;
-- same spatial anchor;
-- same connected Inspector node where architecture permits;
-- no second Sheet;
-- no replay of entrance motion;
-- Save/Revert semantics unchanged;
-- object may grow/shrink as edit controls reconfigure.
+If it no longer exists, use the source-fallback rules in the ARD.
+
+Never fly into an unrelated focused element.
 
 ---
 
 # 8. Action → Action Inspector
 
-Use the same source-anchored Object Morph language.
+Use the same Object Morph language.
 
-An Action row/card grows where it lives. Visible rows below may yield through a Presentation Lens while list/order/gesture truth remains unchanged.
+Protect:
 
-Protect complete/reopen, checklist, Add Step, planning, estimate, recurrence, deadline, tags/list/category, blockers/dependencies, notes, delete, parent/subtask navigation, swipe, hold/drag, and estimate resize.
+- complete/reopen;
+- subtasks;
+- checklist;
+- Add Step;
+- planning;
+- estimate;
+- recurrence;
+- deadline;
+- tags/list/category;
+- blockers/dependencies;
+- notes;
+- delete;
+- parent/subtask navigation.
+
+Action-specific direct controls remain directly usable where they are currently intentionally available outside Edit.
 
 ---
 
 # 9. Empty Day timeline space → Composer → Event
 
-The visible time region is the source.
+This is one of the feature's defining flows.
 
-Tap:
+## 9.1 Tap
+
+Existing tap semantics compute the date/start/default duration.
+
+The **visible time region is the source**, not merely a button that opens a separate sheet.
+
+Desired perception:
 
 `empty time → draft material → Composer`
 
-Hold-and-size:
+## 9.2 Hold-and-size
 
-`sized draft rectangle → Composer`
+Existing hold threshold and sizing gesture remain authoritative.
 
-Cancel:
+After the creation gesture produces a sized draft rectangle, that draft geometry becomes the Composer origin.
 
-`Composer → exact empty source`, zero write.
+Do not fall back to the raw pointer coordinate.
 
-Save:
+## 9.3 Cancel
 
-`Composer → newly committed Event`, exactly one domain write.
+Desired perception:
 
-The visible timeline may yield around the Composer while logical date/minute geometry remains unchanged.
+`Composer → empty time`
+
+No persistence write.
+
+## 9.4 Save
+
+Desired perception:
+
+`Composer → newly committed Event`
+
+Required sequence:
+
+1. validate;
+2. perform the existing domain write exactly once;
+3. allow destination Event to render;
+4. resolve its semantic motion key;
+5. visually settle the Composer into that Event;
+6. finish focus transition.
+
+Do not delay persistence until animation completion.
 
 ---
 
 # 10. Week creation
 
-Same semantics as Day. Week owns its own source geometry. Narrow sources may widen contextually, but the Composer must visibly originate from the selected Week slot rather than jumping to a generic panel.
+Same semantics as Day.
+
+The Week grid owns its own geometry.
+
+Do not duplicate Day math inside WeekGrid.
+
+Preserve Week drag/gesture ownership.
 
 ---
 
 # 11. Global Add
 
-Pointer/touch:
+Pointer/touch path:
 
-`+ → EVENT / ACTION / NOTE`
+`+ → EVENT / ACTION / NOTE → Composer`
 
-The `+` physically unfolds. Selecting an option begins the next creation transaction.
+The `+` itself physically unfolds.
 
-Forbidden normal path:
+Selecting an option begins the next creation transaction.
+
+Do not implement:
 
 `button → generic dropdown → generic Sheet`
 
-Keyboard Add remains instant/source-less.
+Keyboard add remains instant and source-less.
 
 ---
 
 # 12. Actions quick capture
 
+Preferred normal path:
+
 `+ Action → compact inline Composer`
 
-Advanced options expand the same object further. Actions remains calendar-context-free.
+Simple title capture should remain fast.
+
+Advanced fields may expand the same object further.
+
+Actions remains calendar-context-free.
+
+Do not reintroduce date ribbon chrome into Actions.
 
 ---
 
 # 13. Notes
 
-Standalone and linked Notes use Object Morph. A Note grows from its current card/list source into its editor. Nearby presentation may yield. Close returns to the current semantic Note source or deliberate fallback.
+Standalone and entity-linked notes use Object Morph.
 
-Protect backlinks, entity context, pin/archive, history/revisions, checklist content, extraction, autosave, and source disappearance.
+Protect:
+
+- note identity;
+- backlinks;
+- entity context;
+- pin/archive;
+- history/revisions;
+- checklist content;
+- extraction;
+- autosave/write semantics.
+
+Close returns to the current semantic Note source when available.
 
 ---
 
-# 14. Month day → Day Peek
+# 14. Month Day → Day Peek
 
-A Month day cell is a real source and grows contextually into Day Peek. It does not fly to a generic centered Sheet.
+The Month day cell is a real source.
 
-Opening an Event inside Day Peek transfers source ownership to that Event. OPEN DAY is Spatial Slide/navigation, not another object morph.
+`Month day → Day Peek`
+
+Opening an Event from Day Peek transfers source ownership to that Event.
+
+OPEN DAY becomes a spatial view transition, not a second object morph.
 
 ---
 
 # 15. Inline fields
 
+Bounded values should edit from themselves.
+
+Candidates:
+
+- Repeat;
+- Calendar;
+- category;
+- alerts;
+- duration;
+- planning state;
+- deadline;
+- list;
+- tags.
+
 Pattern:
 
 `field value → expanded field → resolved value`
 
-Candidates include Repeat, Calendar, category, alerts, duration, planning, deadline, list, and tags.
+At most one inline field owner at a time unless an explicit product decision says otherwise.
 
-Rules:
-
-- field grows from itself;
-- parent grows if needed;
-- content below yields;
-- no clipping;
-- one field owner at a time unless explicitly decided otherwise;
-- collapsed options leave the tab order;
-- Escape restores collapsed state without remounting the parent.
+Collapsed options must not remain in the tab order.
 
 ---
 
-# 16. Search, Filter, More
+# 16. Search
 
-Pointer/header Search unfolds from Search. Keyboard Search is an instant neutral command surface.
+Pointer/header Search:
 
-Secondary Filter and More/contextual commands use Control Morph. Primary Smart Views remain visible.
+`search icon → search field/results`
 
-A destructive confirmation may be a Neutral Dialog; the bounded command menu itself is not.
+Keyboard Search:
 
----
+instant neutral command surface.
 
-# 17. Spatial travel
-
-Day/week/date/view travel uses direction. Forward and backward have opposite spatial directions. Full-view fade is not the primary explanation.
+Do not borrow the last pointer source.
 
 ---
 
-# 18. Scrim rule — Rev D
+# 17. Filters
 
-Scrims remain valid for Neutral Dialogs and genuine modal interruptions.
+Secondary filters may unfold from Filter.
 
-Object Morph, Creation Morph, and Control Morph do **not** receive a visible modal scrim by default.
+Primary Smart Views remain visible and discoverable.
 
-A scrim must never cause a persistent-object transition to read as “a modal opened.”
-
-Whole-screen blur is prohibited for the normal physical-object path.
-
-Semantic modality may still use inert/background interaction blocking without visible dimming.
+Do not hide Smart Views inside a Filter morph.
 
 ---
 
-# 19. Keyboard and reduced motion
+# 18. More/contextual commands
 
-Keyboard hot paths remain instant and source-less. Never borrow `activeElement` or the last pointer source as fake geometry.
+Use Control Morph for bounded commands:
 
-Reduced motion removes large travel/lens displacement animation while preserving final state, focus, scroll, and functionality. A short accessible state change/cross-fade may remain.
+- Duplicate;
+- Move;
+- Delete;
+- contextual actions.
+
+If deletion requires confirmation, confirmation is a Neutral Dialog.
 
 ---
 
-# 20. Accessibility
+# 19. Actions column / restore tab
 
-Preserve or improve:
+Legacy visual audit found the collapsed Actions column already has a visible physical anchor: the `ACTIONS` restore tab.
 
-- real native controls;
+If this interaction is retained in the current product, its motion should read as:
+
+`ACTIONS tab ↔ Actions column`
+
+not a dissolve.
+
+This is subordinate to the current navigation shell. Do not rewrite hamburger/navigation motion as part of this feature.
+
+---
+
+# 20. Agenda/list reveal
+
+Legacy visual audit found agenda cards visually attach to a day rail/spine.
+
+If list-entry motion remains, prefer a restrained reveal from that rail rather than independent per-card fade.
+
+Never replay entry motion on ordinary scroll.
+
+---
+
+# 21. Day/week temporal travel
+
+Use Spatial Slide.
+
+Forward in time and backward in time must have opposite directions.
+
+Selection/state must be correct before the destination is considered settled.
+
+Do not use a full-view fade as the main explanation.
+
+---
+
+# 22. Navigation and settings
+
+Navigation remains a separate spatial owner.
+
+Do not convert navigation to MorphSurface for architectural consistency.
+
+Settings and other true destinations may slide from meaningful edges.
+
+---
+
+# 23. First-run/system surfaces
+
+A surface with no honest physical source must not invent one.
+
+For pointer-less first-run onboarding, use a restrained edge arrival or other explicitly neutral treatment.
+
+Do not morph it from an arbitrary element.
+
+---
+
+# 24. Scrim
+
+Scrim opacity is explicitly allowed.
+
+A scrim is not a physical object. It communicates background de-emphasis.
+
+Do not replace it with a moving dark wipe merely to eliminate opacity.
+
+---
+
+# 25. Semantic opacity
+
+Keep opacity that means state rather than arrival.
+
+Examples:
+
+- completed;
+- past;
+- drag-held;
+- disabled;
+- contextual de-emphasis.
+
+A “remove fades” audit must not destroy state meaning.
+
+---
+
+# 26. Reduced motion
+
+Reduced motion is a separate motion mode.
+
+Requirements:
+
+- remove large geometry travel;
+- no dependency on `animationend`;
+- preserve final state and focus;
+- existing short cross-fade fallback may remain;
+- no hidden source skin after transition;
+- direct press feedback may remain if current accessibility contract permits it.
+
+The full-motion visual demo does not override this exception.
+
+---
+
+# 27. Keyboard motion
+
+Keyboard hot paths remain instant.
+
+Examples:
+
+- keyboard new Event/Action;
+- command surfaces;
+- keyboard view changes where the current product defines instant motion.
+
+This avoids both false spatial causality and repetitive latency.
+
+---
+
+# 28. Accessibility
+
+Must preserve or improve current accessibility.
+
+Required:
+
+- real buttons/inputs remain real controls;
 - visible focus;
-- true focus trap only where semantics require;
-- inert background where required without requiring a visible scrim;
-- Escape;
-- semantic source focus restoration;
-- disconnected-source fallback;
-- collapsed content removed from tab order;
-- touch targets;
-- dirty-close veto;
-- mobile keyboard protections.
+- true focus trap only where modality requires it;
+- inert background for modal expanded objects;
+- Escape closes the current transaction;
+- source focus restoration uses semantic source identity;
+- disconnected/filtered sources use deliberate fallback;
+- collapsed MorphControl content is not tabbable;
+- touch-target rules remain intact;
+- screen-reader labels describe state, not animation.
 
-Visual embedding does not remove accessibility obligations.
-
----
-
-# 21. Performance and frequency
-
-The fortieth-time test wins.
-
-Do not animate the app subtree, scale live forms, continuously measure every card, or drive motion through per-frame React state.
-
-Production may use isolated overlays and compositor transforms to reproduce reference behavior safely.
-
-Physical Android Chrome and iOS Safari remain final gates.
+Tests must use real Tab traversal where Tab behavior is claimed.
 
 ---
 
-# 22. Visual acceptance
+# 29. Performance
 
-For every migrated pointer/touch surface, inspect 0/25/50/75/100% open and reverse.
+Motion quality is correctness.
 
-A human must still identify the exact source object mid-frame.
+Do not:
 
-Reject if it reads as:
+- animate the entire app subtree;
+- scale a full live form;
+- animate timeline layout geometry in-flow;
+- run per-frame React state;
+- continuously measure every card;
+- use a JS read/write loop every rAF;
+- use broad paint-bound clipping without profiling;
+- remeasure on every software-keyboard height change.
 
-- modal opened;
-- popover appeared;
-- dropdown spawned;
-- separate form slid in;
-- source disappeared before continuity existed.
+Prefer:
 
-Accept only when it reads as the corresponding verb in the grammar.
+- boundary measurement;
+- isolated overlay surfaces;
+- compositor-friendly travel;
+- shared-element layers that remain 1x;
+- narrow clip/reveal regions;
+- CSS/WAAPI interpolation.
 
-> **The implementation mechanism may be sophisticated. The visible explanation must remain simple: the thing I touched became more of itself.**
+Physical Android/iOS validation is mandatory before final completion.
+
+---
+
+# 30. Shadcn / Base UI
+
+May be introduced later for commodity accessibility primitives:
+
+- AlertDialog;
+- Tooltip;
+- Dropdown/Menu semantics;
+- Popover semantics;
+- Switch;
+- Checkbox;
+- Select/Combobox.
+
+It is **not** the motion architecture.
+
+Do not replace core Event/Action/Composer surfaces with stock shadcn Sheet.
+
+Desired layering:
+
+`accessible primitive → Calendar Master component → Calendar Master motion`
+
+---
+
+# 31. Explicit non-goals
+
+No changes to:
+
+- Event/task/note domain schemas;
+- recurrence engine;
+- persistence/import/export format;
+- provider sync architecture;
+- drag/resize thresholds;
+- Action calendar-context rules;
+- themes;
+- typography;
+- current navigation compositor unless separately scoped;
+- literal notebook decoration.
+
+---
+
+# 32. Success criteria
+
+The project succeeds when:
+
+1. Event/Action/Note expansion looks like the reference: source object becomes destination.
+2. close visibly returns to the same semantic source.
+3. empty time visibly becomes Composer.
+4. save visibly resolves Composer into the new record.
+5. cancel visibly returns to the origin with zero write.
+6. Edit reconfigures the same Inspector.
+7. field editors unfold in place.
+8. compact tools unfold coherently.
+9. time/view movement is directional.
+10. keyboard paths remain instant.
+11. reduced motion remains correct.
+12. semantic dimming remains correct.
+13. gesture ownership is unchanged.
+14. persistence/domain semantics are unchanged.
+15. Android and iOS device gates pass.
+16. the fortieth repetition still feels fast.
+
+---
+
+# 33. Canonical interaction statement
+
+> **Tap an object → it expands.**  
+> **Tap a tool → it unfolds.**  
+> **Create something → it grows from where it is created.**  
+> **Move somewhere → the page slides.**  
+> **Edit something → it reconfigures in place.**  
+> **Finish → it returns or becomes the committed object.**
+
+---
+
+# Rev C — explicit supersession of Claude's 2026-08-24 half-sheet direction
+
+The recovered `feat/sheet-presentation-physicality` plan proposed:
+
+- create control → Composer morph;
+- Event/Action edit → side/bottom half-sheet;
+- Settings/palette → half-sheet;
+- rect-less creation → half-sheet.
+
+That was a coherent earlier direction, but it is **not the approved target anymore**.
+
+The later approved Physical Planner visual reference supersedes it:
+
+- Event card → **the Event itself becomes the Inspector**.
+- Action card → **the Action itself becomes the Inspector**.
+- empty Day/Week time → **that exact region becomes the Composer**.
+- sized creation draft → **that exact draft becomes the Composer**.
+- Composer Save → **the Composer becomes the committed record**.
+- Edit → **the open object reconfigures in place**.
+- compact tools → **the tool itself unfolds**.
+
+A half-sheet may still be appropriate for a true destination/system surface, but it may not be used as a shortcut
+for Event/Action/Note object morphs or timeline creation. An implementation that ships Claude's half-sheet edit
+behavior instead of the reference behavior fails this PRD even if it is otherwise technically polished.
+
+## What is imported from Claude's work
+
+Claude's branch is authoritative evidence for blast-radius risks, not interaction outcome. The following findings
+are adopted:
+
+- source geometry must match at frame zero;
+- anchor selection comes from geometry, not source IDs;
+- true-size large surfaces should not scale their live contents;
+- no animated blur is required for core physical continuity;
+- source identity may never disappear before destination identity exists;
+- close must reverse from the rendered intermediate state;
+- current Sheet responsibilities around focus, scroll, backdrop, early-close guards and keyboard behavior are load-bearing;
+- narrow viewports need one explicit bottom-edge owner;
+- transformed navigation ancestors create a coordinate-space hazard for fixed overlays;
+- performance assertions need a negative control;
+- visual QA must include multiple desktop/mobile viewports and multiple themes;
+- current create/Sheet behavior has existing tests that intentionally sample intermediate frames and must be migrated deliberately.
