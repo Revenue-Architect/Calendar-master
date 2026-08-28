@@ -181,6 +181,43 @@ state and write nothing. See
 grid are absent there. Returning to Timeline or Agenda restores the selected
 date before paint. Do not keep a hidden ribbon mounted to preserve scroll.
 
+### Rev D — physical planner motion
+
+The old generic “Sheet grows from its trigger” rule is now subordinate to the
+canonical physical planner grammar for persistent objects. Read:
+
+- `docs/plans/2026-08-25-006-physical-planner-motion-visual-reference.html`
+- `docs/plans/2026-08-27-007-physical-planner-motion-extended-visual-reference.html`
+- `docs/plans/2026-08-25-001-physical-planner-motion-prd.md`
+- `docs/plans/2026-08-25-002-physical-planner-motion-ard.md`
+
+Normal pointer/touch Event, Action, Note, Month Peek, Composer, and bounded-control
+interactions must visually use the verb demonstrated by the reference:
+
+> **Objects expand, tools unfold, creation grows from its origin, navigation moves directionally, and editing reconfigures the same object in place.**
+
+For Event/Action/Note and creation, the source remains the dominant visible
+anchor. A centered modal destination, dark object scrim, whole-screen blur, or
+generic popover/dropdown is not an acceptable substitute when the reference
+shows in-place expansion/unfolding.
+
+Production may protect the planner by freezing logical interaction geometry and
+using a **Presentation Lens**: visible hour rules/cards/rows below the expanded
+object can yield through presentation transforms while minute mapping, lane
+packing, drag/resize math, source identity, order, and persistence truth remain
+unchanged. The user should not be able to tell this is an overlay/lens rather
+than literal in-flow expansion.
+
+Internal fields such as Repeat may grow the same expanded object further. The
+parent and its Presentation Lens must follow that height; options must not clip.
+
+Semantic modality and visible dimming are separate. An expanded persistent object
+may still use inert/focus/scroll protections without a visible modal scrim.
+Conventional scrims remain appropriate for true Neutral Dialog interruptions.
+
+Keyboard source-less paths remain instant. Reduced motion removes large travel
+while preserving semantics, focus and scroll.
+
 ---
 
 ## 6. Non-negotiables
@@ -202,6 +239,9 @@ These have tests. Breaking one should turn something red.
    presence.
 5. **The stylesheet and the token map agree.**
 6. **Nothing in the interface is smaller than the smallest step (11 px).**
+7. **Pointer/touch physical Object/Creation/Control morphs stay source-anchored.**
+8. **Presentation Lens displacement never mutates logical calendar/list truth.**
+9. **A physical phase does not PASS solely because geometry/unit tests are green; live parity with `006`/`007` is required.**
 
 ---
 
@@ -235,6 +275,9 @@ mouse can miss a phone being completely unusable — which has happened here.
 - **A test that cannot fail is worse than no test, because it gets counted.**
   Every test added here was run against a deliberately broken build and watched
   go red before it was trusted. Do the same.
+- **Physical morph frame gate.** For migrated physical interactions, compare
+  0/25/50/75/100% and reverse against `006`/`007`; reject a modal/popover reading
+  where the reference shows expansion/unfolding.
 
 ---
 
