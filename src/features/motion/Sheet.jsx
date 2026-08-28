@@ -68,6 +68,22 @@ function restoreSheetFocus(opener, closingPanel) {
   return restoreDialogFocus(opener);
 }
 
+/* The physical Event carrier has an absolute chrome layer, and its Inspector
+   can outgrow the first measured card-sized destination. Scroll height on the
+   chrome wrapper alone can miss a normal-flow child in that state, so measure
+   each direct child's complete extent as well. This determines only the visual
+   carrier/scroller size; timeline layout and gesture coordinates stay untouched. */
+function intrinsicSheetContentHeight(content) {
+  if (!content) return 0;
+  let height = Number(content.scrollHeight) || 0;
+  for (const child of content.children || []) {
+    const top = Number(child.offsetTop) || 0;
+    const childHeight = Math.max(Number(child.scrollHeight) || 0, Number(child.offsetHeight) || 0);
+    height = Math.max(height, top + childHeight);
+  }
+  return height;
+}
+
 /* Kept in step with Planner deliberately: this is the copy that runs.
    Planner's own Sheet was the newer of the two by 134 lines -- it had gained
    first-paint height measurement that this file never received -- so the merge
@@ -256,7 +272,7 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
     /* Establish the final resting box before first paint, but do not animate its
        height yet. The panel's entry animation can then stay entirely on compositor
        properties instead of relaying out sticky/overflow descendants mid-flight. */
-    const next = Math.min(content.scrollHeight, Math.round(viewportCap.current * .88));
+    const next = Math.min(intrinsicSheetContentHeight(content), Math.round(viewportCap.current * .88));
     lastSheetHeight.current = next;
     setSheetHeight(next);
     return () => {
@@ -281,7 +297,7 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
          Otherwise the first observer record becomes a delayed second bounce. */
       const content = contentRef.current;
       if (content?.isConnected) {
-        const next = Math.min(content.scrollHeight, Math.round(viewportCap.current * .88));
+        const next = Math.min(intrinsicSheetContentHeight(content), Math.round(viewportCap.current * .88));
         if (lastSheetHeight.current !== next) {
           lastSheetHeight.current = next;
           setSheetHeight(next);
@@ -343,7 +359,7 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
           panel.style.transition = "none";
           panel.style.height = "auto";
         }
-        const intrinsicHeight = content.scrollHeight;
+        const intrinsicHeight = intrinsicSheetContentHeight(content);
         if (panel && previousInlineHeight && previousInlineHeight !== "auto") {
           panel.style.height = previousInlineHeight;
           panel.style.transition = previousInlineTransition;
@@ -385,6 +401,19 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
       heightMeasureFrame.current = null;
     };
   }, [heightReady]);
+  useLayoutEffect(() => {
+    /* The real destination becomes OPEN after the shell reaches it. Re-check
+       then in case an absolute physical chrome layer made the first source-size
+       sample too small; this keeps long Inspector fields inside the card's own
+       scroll container rather than beneath its material edge. */
+    if (presentation !== "event-morph" || presentationState !== "open") return;
+    const content = contentRef.current;
+    if (!content) return;
+    const next = Math.min(intrinsicSheetContentHeight(content), Math.round(viewportCap.current * .88));
+    if (lastSheetHeight.current === next) return;
+    lastSheetHeight.current = next;
+    setSheetHeight(next);
+  }, [presentation, presentationState, children]);
   useEffect(() => {
     if (morph !== "notch" || !morphSurface) {
       setMorphStage("open");
@@ -626,7 +655,7 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
         data-event-inspector-surface={eventInspectorSurface || undefined}
         data-morph-presentation={objectMorphDestination ? presentationState : undefined}
         onKeyDown={(event) => trapDialogTab(event, dialogRef.current)} onClick={(e) => e.stopPropagation()}
-        className={`nb-fluid ${objectMorphDestination ? "nb-object-destination" : "sm:max-w-md"} nb-sheet-scroll ${heightReady ? "nb-sheet-h" : ""} ${closing || morphDestinationClosing ? "nb-fluid-closing" : ""} relative w-full overflow-y-auto nb-s`} style={{
+        className={`nb-fluid ${objectMorphDestination ? "nb-object-destination overflow-hidden" : "sm:max-w-md overflow-y-auto"} nb-sheet-scroll ${heightReady ? "nb-sheet-h" : ""} ${closing || morphDestinationClosing ? "nb-fluid-closing" : ""} relative w-full nb-s`} style={{
           // The physical Event carrier must never inherit nb-fluid's legacy
           // translate animation. Its fixed geometry is the semantic Event
           // source; material reveal happens on the inner presentation layer.
@@ -661,8 +690,10 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
           </div>
         )}
         {objectMorphDestination && <div aria-hidden="true" className="nb-event-morph-material" />}
-        <div ref={contentRef} className="nb-notch-body" style={objectMorphDestination ? { position: "relative", zIndex: 1 } : undefined}>
-        <div className={`${objectMorphDestination ? "nb-event-morph-chrome absolute inset-x-0 top-0" : "sticky top-0"} flex items-center justify-between px-4 sm:px-5 pt-3 pb-2`} style={{ background: objectMorphDestination ? "transparent" : T.card, zIndex: 3 }}>
+        <div ref={contentRef} data-event-morph-scroll={objectMorphDestination || undefined}
+          className={`nb-notch-body${objectMorphDestination ? " h-full overflow-y-auto overflow-x-clip" : ""}`}
+          style={objectMorphDestination ? { position: "relative", zIndex: 1, overscrollBehavior: "contain" } : undefined}>
+        <div className={`${objectMorphDestination ? "nb-event-morph-chrome absolute inset-x-0 top-0" : "sticky top-0"} flex items-center justify-between px-4 sm:px-5 ${objectMorphDestination ? "pt-4 pb-2" : "pt-3 pb-2"}`} style={{ background: objectMorphDestination ? "transparent" : T.card, zIndex: 3 }}>
           <span id={titleId.current} style={{ fontFamily: MONO, color: T.dimText, opacity: objectMorphDestination ? 0 : 1 }} className="nb-data">{title || "Details"}</span>
           <div className="flex items-center gap-1.5">
             {headerAction}
@@ -675,7 +706,7 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
         </div>
         {/* Padding deeper than the panel's 24px corner radius, so the last row
             ends on straight edge instead of dying into the curve. */}
-        <div className={`${objectMorphDestination ? "nb-event-morph-details " : ""}px-4 sm:px-5`} style={{ paddingBottom: 28 }}>{children}</div>
+        <div className={`${objectMorphDestination ? "nb-event-morph-details " : ""}px-4 sm:px-5`} style={{ paddingBottom: objectMorphDestination ? 44 : 28 }}>{children}</div>
         {/* A sheet capped at 88vh cuts its last row mid-height with no sign that
             there is more. This rides the bottom of the scroll box and fades the
             cut into the panel, so "there is more below" is visible rather than

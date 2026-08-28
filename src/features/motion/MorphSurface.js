@@ -11,6 +11,40 @@ const SHARED_LAYERS = ["title", "meta", "marker"];
 /* The visual carrier belongs above the neutral Sheet scrim while it is moving.
    Keeping this one semantic layer avoids scattered z-index exceptions. */
 const MORPH_OVERLAY_Z_INDEX = 60;
+const savedLinkedJoinPaint = new WeakMap();
+
+/* A direct JOIN control is intentionally a sibling of its timeline Event so it
+   can keep independent pointer ownership. When that Event transfers paint to
+   the physical carrier, transfer this tiny visual sibling too. Matching within
+   the Event's own local container preserves recurring-occurrence isolation. */
+function linkedSourceJoinControls(sourceNode) {
+  const eventNode = sourceNode?.closest?.("[data-event-id]") || sourceNode;
+  const eventId = eventNode?.getAttribute?.("data-event-id");
+  const owner = eventNode?.parentElement || eventNode;
+  if (!eventId || !owner?.querySelectorAll) return [];
+  return [...owner.querySelectorAll("[data-join]")]
+    .filter((node) => node.getAttribute?.("data-join") === eventId);
+}
+
+function suppressLinkedSourceJoinControls(sourceNode) {
+  for (const node of linkedSourceJoinControls(sourceNode)) {
+    if (!savedLinkedJoinPaint.has(node)) {
+      savedLinkedJoinPaint.set(node, { opacity: node.style.opacity, pointerEvents: node.style.pointerEvents });
+    }
+    node.style.opacity = "0";
+    node.style.pointerEvents = "none";
+  }
+}
+
+function restoreLinkedSourceJoinControls(sourceNode) {
+  for (const node of linkedSourceJoinControls(sourceNode)) {
+    const previous = savedLinkedJoinPaint.get(node);
+    if (!previous) continue;
+    savedLinkedJoinPaint.delete(node);
+    node.style.opacity = previous.opacity || "";
+    node.style.pointerEvents = previous.pointerEvents || "";
+  }
+}
 
 function viewportBox(rect) {
   if (!rect) return null;
@@ -313,6 +347,14 @@ function playOverlayAnimation({
   if (!shellAnimation) return null;
 
   const sharedAnimations = {};
+  /* The reference lets the familiar identity arrive before the Event finishes
+     revealing its facts. Font-size is animated as typography—not transform
+     scale—so title glyphs retain their proportions throughout the handoff. */
+  const sharedTiming = {
+    duration: state === "opening" ? MORPH_TIMING.EVENT_SHARED_OPEN_MS : MORPH_TIMING.EVENT_SHARED_CLOSE_MS,
+    easing,
+    fill: "forwards",
+  };
   for (const key of SHARED_LAYERS) {
     const fromLayer = from.shared?.[key];
     const toLayer = to.shared?.[key];
@@ -320,7 +362,7 @@ function playOverlayAnimation({
     const animation = safeAnimate(
       sharedNodes?.[key],
       [sharedKeyframe(fromLayer, toLayer), sharedKeyframe(toLayer, toLayer)],
-      timing,
+      sharedTiming,
     );
     if (animation) {
       animation.finished?.then?.(() => {}, () => {});
@@ -382,12 +424,19 @@ export function MorphSurface({ transactionSnapshot, registry, transaction, hideA
     const liveSource = snap.key ? registry?.resolveMorphNode?.(snap.key, "source") : null;
     if (liveSource && sourceNodeRef.current && sourceNodeRef.current !== liveSource) {
       restoreSourcePaint(sourceNodeRef.current);
+      restoreLinkedSourceJoinControls(sourceNodeRef.current);
     }
     if (liveSource) sourceNodeRef.current = liveSource;
 
-    if (morphing && sourceNodeRef.current) suppressSourcePaint(sourceNodeRef.current);
+    if (morphing && sourceNodeRef.current) {
+      suppressSourcePaint(sourceNodeRef.current);
+      suppressLinkedSourceJoinControls(sourceNodeRef.current);
+    }
     if (snap.state === "idle") {
-      if (sourceNodeRef.current) restoreSourcePaint(sourceNodeRef.current);
+      if (sourceNodeRef.current) {
+        restoreSourcePaint(sourceNodeRef.current);
+        restoreLinkedSourceJoinControls(sourceNodeRef.current);
+      }
       sourceNodeRef.current = null;
     }
 
@@ -425,7 +474,10 @@ export function MorphSurface({ transactionSnapshot, registry, transaction, hideA
 
   useLayoutEffect(() => () => {
     cancelAnimationRecord(animationRef.current);
-    if (sourceNodeRef.current) restoreSourcePaint(sourceNodeRef.current);
+    if (sourceNodeRef.current) {
+      restoreSourcePaint(sourceNodeRef.current);
+      restoreLinkedSourceJoinControls(sourceNodeRef.current);
+    }
     sourceNodeRef.current = null;
     animationRef.current = null;
   }, []);

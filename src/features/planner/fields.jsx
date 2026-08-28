@@ -83,7 +83,7 @@ function InlineAdd({ T, surface, onAdd }) {
 /* §4.6. A title or a line of prose commits when it is left or confirmed, never per
    keystroke: a half-typed title is not a title, and committing one would put it
    through the scope question a character at a time. */
-function InlineText({ T, value, onCommit, placeholder = "Untitled", multiline = false, className = "", style = {}, ariaLabel, editable = true, onBeginEdit = null }) {
+function InlineText({ T, value, onCommit, placeholder = "Untitled", multiline = false, className = "", style = {}, ariaLabel, editable = true, onBeginEdit = null, ...domProps }) {
   const [draft, setDraft] = useState(value ?? "");
   const [live, setLive] = useState(false);
   /* Escape blurs the field, and blur is what commits — so the abandonment has to be
@@ -107,6 +107,7 @@ function InlineText({ T, value, onCommit, placeholder = "Untitled", multiline = 
     if (e.key === "Enter" && !multiline) { e.preventDefault(); e.target.blur(); }
   };
   const shared = {
+    ...domProps,
     value: draft,
     onChange: (e) => setDraft(e.target.value),
     onFocus: (event) => { setLive(true); onBeginEdit?.(event.currentTarget); },
@@ -130,8 +131,8 @@ function InlineText({ T, value, onCommit, placeholder = "Untitled", multiline = 
   if (!editable) {
     const content = value || placeholder;
     return multiline
-      ? <p aria-label={ariaLabel} className={`${className} w-full`} style={{ whiteSpace: "pre-wrap", ...style }}>{content}</p>
-      : <span aria-label={ariaLabel} className={`${className} block w-full`} style={style}>{content}</span>;
+      ? <p {...domProps} aria-label={ariaLabel} className={`${className} w-full`} style={{ whiteSpace: "pre-wrap", ...style }}>{content}</p>
+      : <span {...domProps} aria-label={ariaLabel} className={`${className} block w-full`} style={style}>{content}</span>;
   }
   return multiline
     ? <textarea rows={Math.min(6, Math.max(1, draft.split("\n").length))} {...shared} />

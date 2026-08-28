@@ -822,17 +822,22 @@ export default function PlannerSurfaceHost(props) {
           <>
           {/* Header reads as a title card: what, when, which day — centred, with the
               detail rows below it. Every line of it is the field itself (§4.6). */}
-          <div className={`${usesPhysicalEventInspector ? "text-left" : "text-center"} pt-1 pb-4`}>
+          <div className={usesPhysicalEventInspector ? "text-left pt-5 pb-5" : "text-center pt-1 pb-4"}>
             <div className={`flex items-center ${usesPhysicalEventInspector ? "justify-start" : "justify-center"} gap-2`}>
               <span data-morph-marker aria-hidden="true" className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: catColor(inspectDraft.cat) }} />
-              <span data-morph-title className="min-w-0">
+              <span className="min-w-0">
                 <InlineText T={T} value={inspectDraft.title} ariaLabel="Event title"
                   onCommit={(title) => editEntry({ title })}
                   onBeginEdit={beginDetailEdit}
+                  data-morph-title
                   className={usesPhysicalEventInspector ? "text-[21px] font-bold tracking-tight leading-[1.12]" : "text-2xl font-bold tracking-tight leading-tight"} style={{ textAlign: usesPhysicalEventInspector ? "left" : "center" }} />
               </span>
             </div>
-            <div data-morph-meta>
+            <div
+              data-morph-meta
+              className={usesPhysicalEventInspector ? "text-sm font-semibold" : undefined}
+              style={usesPhysicalEventInspector ? { fontFamily: MONO, color: T.dimText } : undefined}
+            >
               {inspectDraft.allDay ? (
                 <p className={usesPhysicalEventInspector ? "text-sm font-semibold mt-1" : "text-base font-semibold mt-1.5"}>All day</p>
               ) : (

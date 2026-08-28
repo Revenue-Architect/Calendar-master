@@ -9,7 +9,7 @@ import { RowWithJoin } from "./rows.jsx";
 export default function DayAllDayEventRow({ T, surface, event, dateKey, span, index, onOpen }) {
   return (
     <EventMorphSource event={event} dateKey={dateKey} view="day" lane="allday">
-      <RowWithJoin T={T} surface={surface} link={event.link} title={event.title}
+      <RowWithJoin T={T} surface={surface} link={event.link} title={event.title} data-event-id={event.id}
         data-event-timeline-lens-target="all-day-event"
         padding="px-2.5 py-2" onOpen={(interactionEvent) => onOpen(event, {
           keyboard: interactionEvent?.detail === 0,

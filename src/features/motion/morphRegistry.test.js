@@ -9,6 +9,7 @@ function createMockNode({
   width = 120,
   height = 48,
   titleText = "Event Title",
+  titleValue = null,
   timeText = "10:00 AM",
   hasProgress = false,
   isConnected = true,
@@ -30,6 +31,7 @@ function createMockNode({
         return {
           isConnected,
           textContent: titleText,
+          value: titleValue,
           getBoundingClientRect: () => ({
             x: x + 8,
             y: y + 4,
@@ -79,6 +81,16 @@ function createMockNode({
   };
   return node;
 }
+
+test("MorphRegistry captures an editable shared title from its form value", () => {
+  const registry = createMorphRegistry();
+  const key = "morph:event:editable-title:v:day:l:timeline";
+  const node = createMockNode({ titleText: "", titleValue: "Design Sync" });
+  registry.registerMorphNode({ key, node, kind: "event", role: "destination" });
+
+  const snapshot = registry.snapshotMorphNode(key, "destination");
+  assert.equal(snapshot.shared.title.text, "Design Sync");
+});
 
 test("MorphRegistry supports independent source and destination coexistence on the same key", () => {
   const registry = createMorphRegistry();

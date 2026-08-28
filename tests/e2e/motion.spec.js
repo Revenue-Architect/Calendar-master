@@ -172,6 +172,7 @@ test.describe("Event semantic morph sources", () => {
       return {
         shellRect: shellRect && { left: shellRect.left, top: shellRect.top, width: shellRect.width, height: shellRect.height },
         titleTransform,
+        titleText: title?.textContent?.trim(),
         titleScaleX: matrix.a,
         titleScaleY: matrix.d,
         animationCount: shell?.getAnimations().length ?? 0,
@@ -209,6 +210,8 @@ test.describe("Event semantic morph sources", () => {
         sourceRadius: panelStyle.getPropertyValue("--event-morph-source-radius").trim(),
         visibleSurface: materialStyle?.backgroundColor,
         visibleBorder: materialStyle?.borderColor,
+        visibleBorderWidth: materialStyle?.borderWidth,
+        destinationTitleVisibility: getComputedStyle(panel.querySelector(".nb-event-morph-details [data-morph-title]")).visibility,
       };
       animation?.play();
       return snapshot;
@@ -217,7 +220,8 @@ test.describe("Event semantic morph sources", () => {
     expect(openingMaterial.sourceBorder, "the carrier must retain the clicked Event border token").toBe(sourceMaterial.border);
     expect(openingMaterial.sourceRadius, "the carrier must retain the clicked Event corner token").toBe(sourceMaterial.radius);
     expect(openingMaterial.visibleSurface, "the opening carrier must visibly begin as the clicked Event material").toBe(sourceMaterial.background);
-    expect(openingMaterial.visibleBorder, "the opening carrier must visibly retain the clicked Event border").toBe(sourceMaterial.border);
+    expect(openingMaterial.visibleBorderWidth, "the expanded carrier must not extend the timeline card's 1px border across its larger material").toBe("0px");
+    expect(openingMaterial.destinationTitleVisibility, "the destination title must stay out of view while MorphSurface owns the shared title handoff").toBe("hidden");
     await expect(sheet.locator("[data-morph-title]")).toHaveCount(1);
     await expect(sheet.locator("[data-morph-meta]")).toHaveCount(1);
     await expect(sheet.locator("[data-morph-marker]")).toHaveCount(1);
@@ -225,34 +229,183 @@ test.describe("Event semantic morph sources", () => {
     await expect.poll(sourceOpacity, { message: "the timeline source must stay suppressed while the physical carrier owns its paint" }).toBeLessThanOrEqual(.01);
     expect(frameZero.shellRect).not.toBeNull();
     expect(frameZero.animationCount, "the compositor shell must expose its running WAAPI animation").toBeGreaterThan(0);
-    expect(frameZero.animationDuration, "a physical Event expansion needs room for the material and detail handoff").toBe(400);
+    expect(frameZero.animationDuration, "a physical Event expansion needs room for the shared title to land before the facts fully reveal").toBe(390);
+    expect(frameZero.titleText, "the traveling shared title must carry the Event's readable label, including when its destination is an editable input").toBe("Physical Event destination");
     expect(Math.abs(frameZero.shellRect.left - sourceRect.x)).toBeLessThanOrEqual(1);
     expect(Math.abs(frameZero.shellRect.top - sourceRect.y)).toBeLessThanOrEqual(1);
     expect(Math.abs(frameZero.shellRect.width - sourceRect.width)).toBeLessThanOrEqual(1);
     expect(Math.abs(frameZero.shellRect.height - sourceRect.height)).toBeLessThanOrEqual(1);
     expect(frameZero.titleScaleX, "shared title must translate at 1x, never inherit the shell scale").toBeCloseTo(1);
     expect(frameZero.titleScaleY, "shared title must translate at 1x, never inherit the shell scale").toBeCloseTo(1);
+    const titleHandoff = await sheet.evaluate(async (panel) => {
+      const overlay = document.querySelector("[data-morph-overlay]");
+      const travelingTitle = overlay?.querySelector("[data-morph-title]");
+      const destinationTitle = panel.querySelector(".nb-event-morph-details [data-morph-title]");
+      const visibleDestinationTitle = destinationTitle?.matches("input, textarea, [contenteditable='true']")
+        ? destinationTitle
+        : destinationTitle?.querySelector("input, textarea, [contenteditable='true']") || destinationTitle;
+      const animation = travelingTitle?.getAnimations().find((candidate) => (
+        Number(candidate.effect?.getTiming?.().duration) > 0
+      ));
+      animation?.pause();
+      if (animation) animation.currentTime = Number(animation.effect?.getTiming?.().duration);
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const box = (node) => {
+        const rect = node?.getBoundingClientRect();
+        return rect && { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+      };
+      const result = {
+        traveling: {
+          box: box(travelingTitle),
+          fontSize: travelingTitle && getComputedStyle(travelingTitle).fontSize,
+          fontWeight: travelingTitle && getComputedStyle(travelingTitle).fontWeight,
+        },
+        destination: {
+          box: box(visibleDestinationTitle),
+          fontSize: visibleDestinationTitle && getComputedStyle(visibleDestinationTitle).fontSize,
+          fontWeight: visibleDestinationTitle && getComputedStyle(visibleDestinationTitle).fontWeight,
+        },
+      };
+      animation?.play();
+      return result;
+    });
+    expect(titleHandoff.traveling.box).not.toBeNull();
+    expect(titleHandoff.destination.box).not.toBeNull();
+    expect(Math.abs(titleHandoff.traveling.box.left - titleHandoff.destination.box.left), "the overlay title must land on the real Inspector title's left edge").toBeLessThanOrEqual(1);
+    expect(Math.abs(titleHandoff.traveling.box.top - titleHandoff.destination.box.top), "the overlay title must land on the real Inspector title's baseline region").toBeLessThanOrEqual(1);
+    expect(Math.abs(titleHandoff.traveling.box.width - titleHandoff.destination.box.width), "the overlay title must land at the destination width, not snap wider after handoff").toBeLessThanOrEqual(1);
+    expect(titleHandoff.traveling.fontSize, "the traveling title must finish at the real Inspector typography before ownership changes").toBe(titleHandoff.destination.fontSize);
+    expect(titleHandoff.traveling.fontWeight, "the traveling title must finish at the real Inspector weight before ownership changes").toBe(titleHandoff.destination.fontWeight);
+    const timeHandoff = await sheet.evaluate((panel) => {
+      const sharedMeta = panel.querySelector(".nb-event-morph-details [data-morph-meta]");
+      const visibleTime = sharedMeta?.querySelector(".nb-stamp > [aria-hidden='true']") || sharedMeta;
+      const readTypography = (node) => {
+        const style = node && getComputedStyle(node);
+        return {
+          color: style?.color,
+          fontFamily: style?.fontFamily,
+          fontSize: style?.fontSize,
+          fontWeight: style?.fontWeight,
+          lineHeight: style?.lineHeight,
+        };
+      };
+      return {
+        shared: readTypography(sharedMeta),
+        visible: readTypography(visibleTime),
+      };
+    });
+    expect(timeHandoff.shared.color, "the shared time proxy must finish with the same colour as the live timestamp").toBe(timeHandoff.visible.color);
+    expect(timeHandoff.shared.fontFamily, "the shared time proxy must not switch faces when Inspector takes ownership").toBe(timeHandoff.visible.fontFamily);
+    expect(timeHandoff.shared.fontSize, "the shared time proxy must finish at the live timestamp size").toBe(timeHandoff.visible.fontSize);
+    expect(timeHandoff.shared.fontWeight, "the shared time proxy must finish at the live timestamp weight").toBe(timeHandoff.visible.fontWeight);
+    expect(timeHandoff.shared.lineHeight, "the shared time proxy must finish on the live timestamp line box").toBe(timeHandoff.visible.lineHeight);
     await expect(sheet).toHaveAttribute("data-morph-presentation", "open");
     const settledMaterial = await sheet.locator(".nb-event-morph-material").evaluate((node) => {
       const style = getComputedStyle(node);
       return {
         background: style.backgroundColor,
         border: style.borderColor,
+        borderWidth: style.borderWidth,
       };
     });
     expect(settledMaterial.background, "the expanded Event must retain its source material instead of falling back to the generic Sheet card").toBe(sourceMaterial.background);
-    expect(settledMaterial.border, "the expanded Event must retain the source card border instead of modal chrome").toBe(sourceMaterial.border);
+    expect(settledMaterial.borderWidth, "the expanded Event must retain only soft elevation, not a hard modal outline").toBe("0px");
 
     await page.keyboard.press("Escape");
     await expect(sheet).toHaveAttribute("data-morph-presentation", /^(closing|cancelling)$/);
     await expect(sheet).toHaveCSS("visibility", "visible");
+    const closeDuration = await page.locator("[data-morph-overlay]").evaluate((overlay) => {
+      const animation = overlay.querySelector("[data-morph-shell]")?.getAnimations()
+        .find((candidate) => Number(candidate.effect?.getTiming?.().duration) > 0);
+      return {
+        duration: Number(animation?.effect?.getTiming?.().duration),
+        easing: animation?.effect?.getTiming?.().easing,
+        titleText: overlay.querySelector("[data-morph-title]")?.textContent?.trim(),
+      };
+    });
+    expect(closeDuration.duration, "the physical return must use the smoother panel-close duration").toBe(340);
+    expect(closeDuration.easing, "the physical return must ease through its middle rather than eject immediately like a modal dismissal").toBe("cubic-bezier(0.2, 0, 0, 1)");
+    expect(closeDuration.titleText, "the return must keep the Event title visible until it reconnects to the source card").toBe("Physical Event destination");
     expect(await sourceOpacity(), "source paint must not restore until the return carrier has finished closing").toBeLessThanOrEqual(.01);
     await expect(sheet).toHaveCount(0, { timeout: 3000 });
     await expect.poll(sourceOpacity).toBeGreaterThan(.1);
   });
 
+  test("a physical Event keeps its Inspector body inside the carrier material", async ({ page }) => {
+    await openPlanner(page);
+    await quickAdd(page, "Contained physical Event today 10am 60m");
+
+    const source = page.locator('[data-event-id]').filter({ hasText: "Contained physical Event" }).locator('[data-morph-key]');
+    await source.click();
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).toHaveAttribute("data-morph-presentation", "open");
+
+    const deleteControl = sheet.getByRole("button", { name: "DELETE", exact: true });
+    await deleteControl.scrollIntoViewIfNeeded();
+    const containment = await sheet.evaluate((panel) => {
+      const material = panel.querySelector(".nb-event-morph-material");
+      const scrollOwner = panel.querySelector("[data-event-morph-scroll]");
+      const deleteControl = [...panel.querySelectorAll("button")].find((node) => node.textContent?.trim() === "DELETE");
+      const box = material?.getBoundingClientRect();
+      const controlBox = deleteControl?.getBoundingClientRect();
+      const scrollStyle = scrollOwner ? getComputedStyle(scrollOwner) : null;
+      return {
+        scrollOverflowY: scrollStyle?.overflowY,
+        panel: {
+          top: panel.getBoundingClientRect().top,
+          bottom: panel.getBoundingClientRect().bottom,
+          height: panel.getBoundingClientRect().height,
+          scrollTop: scrollOwner?.scrollTop,
+          scrollHeight: scrollOwner?.scrollHeight,
+          clientHeight: scrollOwner?.clientHeight,
+          inlineHeight: panel.style.height,
+        },
+        details: (() => {
+          const details = panel.querySelector(".nb-event-morph-details");
+          const box = details?.getBoundingClientRect();
+          return details && box && { top: box.top, bottom: box.bottom, height: box.height, scrollHeight: details.scrollHeight, offsetTop: details.offsetTop };
+        })(),
+        material: box && { top: box.top, bottom: box.bottom },
+        control: controlBox && { top: controlBox.top, bottom: controlBox.bottom },
+      };
+    });
+    expect(containment.scrollOverflowY, "the expanded Event must own an internal vertical scroller when content exceeds its available visual height").toMatch(/auto|scroll/);
+    expect(containment.material).not.toBeNull();
+    expect(containment.control).not.toBeNull();
+    expect(containment.control.top, "a scrolled Inspector control must not escape above the Event material").toBeGreaterThanOrEqual(containment.material.top - 1);
+    expect(containment.control.bottom, "a scrolled Inspector control must remain inside the Event material's bottom edge").toBeLessThanOrEqual(containment.material.bottom + 1);
+  });
+
+  test("a physical Event suppresses only its own direct timeline JOIN control", async ({ page }) => {
+    const today = keyOf(new Date());
+    const meetingUrl = "https://meet.example.test/physical-morph";
+    const state = createEvent(createBlankPlannerState({}), {
+      calendarId: "calendar-default",
+      title: "Physical linked meeting",
+      category: "PEOPLE",
+      link: meetingUrl,
+      timing: { kind: "timed", timeZoneMode: "floating", startLocal: `${today}T10:00`, endLocal: `${today}T11:00` },
+    }, { id: "evt-physical-linked" }).state;
+    await seedPlanner(page, state);
+
+    const source = page.locator('[data-event-id="evt-physical-linked"] [data-morph-key]');
+    const sourceJoin = page.locator('[data-join="evt-physical-linked"]');
+    await expect(sourceJoin).toBeVisible();
+    await source.click();
+
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).toHaveAttribute("data-event-inspector-surface", "morph");
+    await expect(sourceJoin, "the source-only JOIN lane must not peek beside the expanded Event").toHaveCSS("opacity", "0");
+
+    await page.keyboard.press("Escape");
+    await expect(sheet).toHaveCount(0, { timeout: 3000 });
+    await expect(sourceJoin, "the direct JOIN control must restore when its Event source regains paint").toHaveCSS("opacity", "1");
+  });
+
   test("an Event can expand and collapse forty times without leaving a carrier or source paint behind", async ({ page }) => {
-    test.setTimeout(60_000);
+    // The carrier now uses the reference's longer 440ms expansion beat;
+    // preserve the forty-cycle leak check without racing the test's own wall clock.
+    test.setTimeout(100_000);
     await openPlanner(page);
     await quickAdd(page, "Forty Event morph cycles today 10am 60m");
     const source = page.locator('[data-event-id]').filter({ hasText: "Forty Event morph cycles" }).locator('[data-morph-key]');

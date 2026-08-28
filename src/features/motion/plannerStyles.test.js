@@ -33,20 +33,20 @@ test("the event-morph carrier preserves card material and delays generic details
       `${themeId} must give the expanded Event its own card-scale corner radius`,
     );
     assert.ok(
-      css.includes("0%,24%{background-color:var(--event-morph-source-surface, var(--morph-card));border-color:var(--event-morph-source-border, transparent);box-shadow:var(--e1),var(--sheen)}"),
-      `${themeId} must preserve source-compatible material and elevation during early opening`,
+      css.includes("border:0;border-radius:inherit;background-color:var(--event-morph-source-surface,var(--morph-card));box-shadow:var(--e1),var(--sheen)"),
+      `${themeId} must carry only the normal soft elevation, not a hard expanded-card outline`,
     );
     assert.ok(
-      css.includes("0%,48%{opacity:0;transform:translateY(8px)}"),
-      `${themeId} must delay generic inspector details until container expansion provides room`,
+      css.includes("0%,30%{opacity:0}"),
+      `${themeId} must start inspector facts after the Event shell responds, without translating the destination title a second time`,
     );
     assert.ok(
       css.includes("clip-path:inset(var(--event-morph-clip-top,0px) var(--event-morph-clip-right,0px) var(--event-morph-clip-bottom,0px) var(--event-morph-clip-left,0px) round var(--event-morph-source-radius,14px))"),
       `${themeId} must reveal the carrier from the source-card rectangle rather than exposing a full panel`,
     );
     assert.ok(
-      css.includes("100%{background-color:var(--event-morph-source-surface, var(--morph-card));border-color:var(--event-morph-source-border, transparent);box-shadow:var(--e2),var(--sheen)}"),
-      `${themeId} must retain source Event material after the expansion settles`,
+      css.includes("visibility:hidden"),
+      `${themeId} must reserve shared title ownership for MorphSurface while the carrier is moving`,
     );
   }
 });

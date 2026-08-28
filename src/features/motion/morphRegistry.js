@@ -45,7 +45,12 @@ function resolveElement(target, rootNode, defaultSelector) {
 function extractElementSnapshot(el, fallbackText = "") {
   if (!el || !isElementConnected(el)) return null;
   const rect = el.getBoundingClientRect();
-  const text = el.textContent?.trim() || fallbackText || "";
+  /* An Inspector title is an actual input so editing semantics remain intact.
+     Inputs have no textContent, though, and returning an empty shared snapshot
+     makes the title vanish during the closing handoff. Prefer a form value when
+     present, then use ordinary element text for the timeline/card path. */
+  const inputValue = typeof el.value === "string" ? el.value.trim() : "";
+  const text = inputValue || el.textContent?.trim() || fallbackText || "";
   let style = null;
   if (typeof window !== "undefined" && typeof window.getComputedStyle === "function") {
     const computed = window.getComputedStyle(el);

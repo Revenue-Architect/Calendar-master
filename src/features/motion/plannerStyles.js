@@ -681,11 +681,13 @@ export function plannerStyles({ T, preferences }) {
           border:none;
           background-color:transparent;
           max-width:calc(100vw - 32px)!important;
+          isolation:isolate;
         }
         @media(max-width:639px){
           .nb-object-destination,
           [data-event-inspector-surface="morph"]{border-radius:var(--event-morph-open-radius, 20px)!important}
         }
+        [data-event-morph-scroll]{overflow-x:clip;overflow-y:auto;overscroll-behavior:contain}
         [data-event-inspector-surface="morph"][data-morph-presentation="opening"]{
           animation:nbeventinspectorsurface ${MORPH_TIMING.OBJECT_OPEN_MS}ms ${MORPH_EASING.DECELERATE} both!important;
         }
@@ -693,29 +695,26 @@ export function plannerStyles({ T, preferences }) {
           0%,28%{clip-path:inset(var(--event-morph-clip-top,0px) var(--event-morph-clip-right,0px) var(--event-morph-clip-bottom,0px) var(--event-morph-clip-left,0px) round var(--event-morph-source-radius,14px));border-radius:var(--event-morph-source-radius,14px)}
           100%{clip-path:inset(0 round var(--event-morph-open-radius,20px));border-radius:var(--event-morph-open-radius,20px)}
         }
-        .nb-event-morph-material{position:absolute;inset:0;z-index:0;box-sizing:border-box;pointer-events:none;border-radius:inherit;background-color:var(--event-morph-source-surface,var(--morph-card));box-shadow:var(--e2),var(--sheen);border:1px solid var(--event-morph-source-border, transparent)}
+        .nb-event-morph-material{position:absolute;inset:0;z-index:0;box-sizing:border-box;pointer-events:none;border:0;border-radius:inherit;background-color:var(--event-morph-source-surface,var(--morph-card));box-shadow:var(--e1),var(--sheen)}
         [data-event-inspector-surface="morph"][data-morph-presentation="opening"] .nb-event-morph-material{
           animation:nbeventinspectormaterial ${MORPH_TIMING.OBJECT_OPEN_MS}ms ${MORPH_EASING.DECELERATE} both;
         }
         @keyframes nbeventinspectormaterial{
-          0%,24%{background-color:var(--event-morph-source-surface, var(--morph-card));border-color:var(--event-morph-source-border, transparent);box-shadow:var(--e1),var(--sheen)}
-          100%{background-color:var(--event-morph-source-surface, var(--morph-card));border-color:var(--event-morph-source-border, transparent);box-shadow:var(--e2),var(--sheen)}
+          0%,100%{background-color:var(--event-morph-source-surface, var(--morph-card));border-color:transparent;box-shadow:var(--e1),var(--sheen)}
         }
         [data-event-inspector-surface="morph"][data-morph-presentation="opening"] .nb-event-morph-details{
           animation:nbeventinspectordetails ${MORPH_TIMING.OBJECT_OPEN_MS}ms ${MORPH_EASING.DECELERATE} both;
         }
         @keyframes nbeventinspectordetails{
-          0%,48%{opacity:0;transform:translateY(8px)}
-          82%{opacity:.9;transform:translateY(2px)}
-          100%{opacity:1;transform:none}
+          0%,30%{opacity:0}
+          68%{opacity:.9}
+          100%{opacity:1}
         }
-        [data-event-inspector-surface="morph"][data-morph-presentation="opening"] .nb-event-morph-details :is([data-morph-title],[data-morph-meta],[data-morph-marker]),
-        [data-event-inspector-surface="morph"][data-morph-presentation="opening"] .nb-event-morph-chrome{
-          animation:nbeventinspectorshared ${MORPH_TIMING.OBJECT_OPEN_MS}ms ${MORPH_EASING.DECELERATE} both;
-        }
-        @keyframes nbeventinspectorshared{
-          0%,76%{opacity:0;transform:translateY(4px)}
-          100%{opacity:1;transform:none}
+        /* MorphSurface owns title/meta/marker for the complete handoff. The real
+           Inspector reveals them only after that layer unmounts, avoiding the
+           two text renderers crossing by a few pixels at the end of a morph. */
+        [data-event-inspector-surface="morph"]:is([data-morph-presentation="opening"],[data-morph-presentation="closing"],[data-morph-presentation="cancelling"]) .nb-event-morph-details :is([data-morph-title],[data-morph-meta],[data-morph-marker]){
+          visibility:hidden;
         }
         .nb-event-morph-collapse-chevron{display:inline-flex;transform:scaleY(-1);transform-origin:center}
         [data-event-inspector-surface="morph"][data-morph-presentation="opening"] .nb-event-morph-collapse-chevron{
@@ -726,7 +725,7 @@ export function plannerStyles({ T, preferences }) {
           100%{transform:scaleY(-1);opacity:1}
         }
         [data-event-inspector-surface="morph"]:is([data-morph-presentation="closing"],[data-morph-presentation="cancelling"]) .nb-event-morph-material {
-          animation:nbeventinspectormaterialout ${MORPH_TIMING.OBJECT_CLOSE_MS}ms cubic-bezier(.4,0,.3,1) both;
+          animation:nbeventinspectormaterialout ${MORPH_TIMING.OBJECT_CLOSE_MS}ms ${MORPH_EASING.RELEASE} both;
         }
         [data-event-inspector-surface="morph"]:is([data-morph-presentation="closing"],[data-morph-presentation="cancelling"]){
           animation:nbeventinspectorsurfaceout ${MORPH_TIMING.OBJECT_CLOSE_MS}ms ${MORPH_EASING.RELEASE} both!important;
@@ -736,16 +735,15 @@ export function plannerStyles({ T, preferences }) {
           72%,100%{clip-path:inset(var(--event-morph-clip-top,0px) var(--event-morph-clip-right,0px) var(--event-morph-clip-bottom,0px) var(--event-morph-clip-left,0px) round var(--event-morph-source-radius,14px));border-radius:var(--event-morph-source-radius,14px)}
         }
         @keyframes nbeventinspectormaterialout{
-          0%,18%{background-color:var(--event-morph-source-surface, var(--morph-card));border-color:var(--event-morph-source-border, transparent);box-shadow:var(--e2),var(--sheen)}
-          55%,100%{background-color:var(--event-morph-source-surface, var(--morph-card));border-color:var(--event-morph-source-border, transparent);box-shadow:var(--e1),var(--sheen)}
+          0%,100%{background-color:var(--event-morph-source-surface, var(--morph-card));border-color:transparent;box-shadow:var(--e1),var(--sheen)}
         }
         [data-event-inspector-surface="morph"]:is([data-morph-presentation="closing"],[data-morph-presentation="cancelling"]) .nb-event-morph-details,
         [data-event-inspector-surface="morph"]:is([data-morph-presentation="closing"],[data-morph-presentation="cancelling"]) .nb-event-morph-chrome{
-          animation:nbeventinspectordetailsout ${MORPH_TIMING.OBJECT_CLOSE_MS}ms cubic-bezier(.4,0,.3,1) both;
+          animation:nbeventinspectordetailsout ${MORPH_TIMING.OBJECT_CLOSE_MS}ms ${MORPH_EASING.RELEASE} both;
         }
         @keyframes nbeventinspectordetailsout{
           0%{opacity:1;transform:none}
-          35%,100%{opacity:0;transform:translateY(-6px)}
+          42%,100%{opacity:0;transform:translateY(-4px)}
         }
         @media(prefers-reduced-motion:reduce){.nb-event-morph-collapse-chevron{animation:none!important}}
         .nb-sheet-h{transition:height 320ms cubic-bezier(.2,.8,.25,1)}
