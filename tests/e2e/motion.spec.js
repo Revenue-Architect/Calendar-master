@@ -331,6 +331,39 @@ test.describe("Event semantic morph sources", () => {
     await expect.poll(sourceOpacity).toBeGreaterThan(.1);
   });
 
+  test("an adjacent Event title stays on one uninterrupted line while its card expands", async ({ page }) => {
+    await openPlanner(page);
+    await quickAdd(page, "Adjacent source heading must retain one unbroken line while its physical inspector expands today 2pm 90m");
+    await quickAdd(page, "Adjacent sibling holds the neighbouring timeline lane today 2pm 90m");
+
+    const source = page.locator('[data-event-id]').filter({ hasText: "Adjacent source heading" }).locator('[data-morph-key]');
+    const sourceTitle = source.locator("[data-morph-title]");
+    const sourceLayout = await sourceTitle.evaluate((node) => ({
+      clientWidth: node.clientWidth,
+      scrollWidth: node.scrollWidth,
+    }));
+    expect(sourceLayout.scrollWidth, "the adjacent lane fixture must genuinely constrain the Event title").toBeGreaterThan(sourceLayout.clientWidth);
+
+    await source.click();
+    const overlayFlow = await page.locator("[data-morph-overlay] [data-morph-title]").evaluate((node) => {
+      const style = getComputedStyle(node);
+      return {
+        clientHeight: node.clientHeight,
+        overflowX: style.overflowX,
+        scrollHeight: node.scrollHeight,
+        textOverflow: style.textOverflow,
+        whiteSpace: style.whiteSpace,
+      };
+    });
+    expect(overlayFlow.whiteSpace, "the shared title must retain the source card's one-line text flow").toBe("nowrap");
+    expect(overlayFlow.overflowX, "the shared title must clip rather than reflow during a narrow-lane handoff").toBe("hidden");
+    expect(overlayFlow.textOverflow, "a narrow title must continue to ellipsize while its width grows").toBe("ellipsis");
+    expect(overlayFlow.scrollHeight, "the shared title must never gain a second line mid-motion").toBeLessThanOrEqual(overlayFlow.clientHeight + 1);
+
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("sheet")).toHaveCount(0, { timeout: 3000 });
+  });
+
   test("a physical Event keeps its Inspector body inside the carrier material", async ({ page }) => {
     await openPlanner(page);
     await quickAdd(page, "Contained physical Event today 10am 60m");

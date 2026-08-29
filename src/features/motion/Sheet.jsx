@@ -84,6 +84,36 @@ function intrinsicSheetContentHeight(content) {
   return height;
 }
 
+/* A low Event is deliberately anchored at its real timeline position, so a
+   long Edit form uses this inner scroller instead of moving calendar geometry.
+   Browser/Playwright focus does not reliably choose a fixed, nested scroll
+   owner. Keep the active control in this card's visible material explicitly. */
+function keepFocusedFieldInEventMorphView(content, target) {
+  if (!content || !(target instanceof HTMLElement)) return;
+  if (!target.matches("input, textarea, [contenteditable='true']")) return;
+  const reveal = () => {
+    if (!content.isConnected || !content.contains(target)) return;
+    const ownerRect = content.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const top = ownerRect.top + 12;
+    /* Preserve a small breathing room above the bottom fade so the focused
+       baseline is visible rather than merely technically inside the clip. */
+    const bottom = ownerRect.bottom - 32;
+    const delta = targetRect.top < top
+      ? targetRect.top - top
+      : targetRect.bottom > bottom
+        ? targetRect.bottom - bottom
+        : 0;
+    if (delta) content.scrollTop += delta;
+  };
+  /* A form-mode commit can resize the fixed carrier in the same turn as focus.
+     Reveal now, then once after layout has committed; otherwise that size write
+     can reset the inner scroll and leave the focused control below the fold. */
+  reveal();
+  window.requestAnimationFrame(reveal);
+  window.setTimeout(reveal, 72);
+}
+
 /* Kept in step with Planner deliberately: this is the copy that runs.
    Planner's own Sheet was the newer of the two by 134 lines -- it had gained
    first-paint height measurement that this file never received -- so the merge
@@ -691,6 +721,7 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
         )}
         {objectMorphDestination && <div aria-hidden="true" className="nb-event-morph-material" />}
         <div ref={contentRef} data-event-morph-scroll={objectMorphDestination || undefined}
+          onFocusCapture={objectMorphDestination ? (event) => keepFocusedFieldInEventMorphView(contentRef.current, event.target) : undefined}
           className={`nb-notch-body${objectMorphDestination ? " h-full overflow-y-auto overflow-x-clip" : ""}`}
           style={objectMorphDestination ? { position: "relative", zIndex: 1, overscrollBehavior: "contain" } : undefined}>
         <div className={`${objectMorphDestination ? "nb-event-morph-chrome absolute inset-x-0 top-0" : "sticky top-0"} flex items-center justify-between px-4 sm:px-5 ${objectMorphDestination ? "pt-4 pb-2" : "pt-3 pb-2"}`} style={{ background: objectMorphDestination ? "transparent" : T.card, zIndex: 3 }}>

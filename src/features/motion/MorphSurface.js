@@ -71,9 +71,17 @@ function sharedTypeStyle(shared, rect = shared?.rect) {
   if (fontSize) style.fontSize = fontSize;
   if (fontWeight) style.fontWeight = fontWeight;
   if (lineHeight) style.lineHeight = lineHeight;
-  if (shared.type === "marker" || (!shared.text && rect && rect.width <= 20 && rect.height <= 20)) {
+  const isMarker = shared.type === "marker" || (!shared.text && rect && rect.width <= 20 && rect.height <= 20);
+  if (isMarker) {
     style.borderRadius = "9999px";
     if (color) style.backgroundColor = color;
+  } else {
+    /* Source Event titles are a single truncated line. Preserve that text flow
+       in the fixed shared layer—especially in a split overlap lane—so growing
+       width reveals glyphs instead of reflowing them into a second line. */
+    style.whiteSpace = "nowrap";
+    style.overflow = "hidden";
+    style.textOverflow = "ellipsis";
   }
   return style;
 }
