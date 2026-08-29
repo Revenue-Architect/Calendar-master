@@ -118,7 +118,7 @@ function keepFocusedFieldInEventMorphView(content, target) {
    Planner's own Sheet was the newer of the two by 134 lines -- it had gained
    first-paint height measurement that this file never received -- so the merge
    went in that direction. Reversing it would have silently reverted that fix. */
-export default function Sheet({ T, onClose, title, children, headerAction = null, beforeClose = null, morph = "auto", morphSurface = null, closeSignal = null, destinationRef = null, presentation = "sheet", presentationState = null, onMorphClose = null, eventInspectorSurface = null, objectMorphSource = null }) {
+export default function Sheet({ T, onClose, title, children, headerAction = null, beforeClose = null, morph = "auto", morphSurface = null, closeSignal = null, destinationRef = null, presentation = "sheet", presentationState = null, onMorphClose = null, eventInspectorSurface = null, eventInspectorMode = null, objectMorphSource = null }) {
   /* Ignore a backdrop dismissal that arrives in the same tap that opened the sheet.
      Belt and braces alongside preventDefault at the source: any future path that
      opens a sheet from a touch inherits the protection. */
@@ -683,6 +683,7 @@ export default function Sheet({ T, onClose, title, children, headerAction = null
         else if (destinationRef) destinationRef.current = node;
       }} role="dialog" aria-modal="true" aria-labelledby={titleId.current} data-test="sheet" data-sheet-title={title || "Details"} data-morph-source={morphSurface?.id} data-morph-stage={morphStage}
         data-event-inspector-surface={eventInspectorSurface || undefined}
+        data-event-inspector-mode={eventInspectorMode || undefined}
         data-morph-presentation={objectMorphDestination ? presentationState : undefined}
         onKeyDown={(event) => trapDialogTab(event, dialogRef.current)} onClick={(e) => e.stopPropagation()}
         className={`nb-fluid ${objectMorphDestination ? "nb-object-destination overflow-hidden" : "sm:max-w-md overflow-y-auto"} nb-sheet-scroll ${heightReady ? "nb-sheet-h" : ""} ${closing || morphDestinationClosing ? "nb-fluid-closing" : ""} relative w-full nb-s`} style={{

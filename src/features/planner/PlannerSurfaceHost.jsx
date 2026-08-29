@@ -567,6 +567,7 @@ export default function PlannerSurfaceHost(props) {
         <InspectorSurface T={T} destinationRef={usesPhysicalEventInspector ? eventMorphDestinationRef : null} title={inspectSheetTitle}
           physical={usesPhysicalEventInspector}
           instant={inspect?.motion === "instant"}
+          eventInspectorMode={inspect?.kind === "event" ? (detailEditing ? "edit" : "read") : null}
           objectMorphSource={usesPhysicalEventInspector ? eventMorphSourceSnapshot : null}
           motionState={usesPhysicalEventInspector ? transactionSnapshot.state : null}
           onMorphClose={usesPhysicalEventInspector ? closePhysicalEventInspector : null}

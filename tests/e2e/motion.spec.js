@@ -764,6 +764,61 @@ test.describe("Event semantic morph sources", () => {
     expect(weekSource.x, "the all-day source must remain inside its expanded carrier").toBeGreaterThanOrEqual(weekDestination.x - 1);
     expect(weekSource.x + weekSource.width, "the all-day source must remain inside its expanded carrier").toBeLessThanOrEqual(weekDestination.x + weekDestination.width + 1);
   });
+
+  test("Event Edit reconfigures the expanded surface without remounting its object", async ({ page }) => {
+    await openPlanner(page);
+    await quickAdd(page, "Phase 8 same object today 10am 60m");
+
+    const source = page.locator('[data-event-id]').filter({ hasText: "Phase 8 same object" }).locator('[data-morph-key]');
+    await source.click();
+
+    const sheet = page.getByTestId("sheet");
+    await expect(sheet).toHaveAttribute("data-event-inspector-surface", "morph");
+    await expect(sheet).toHaveAttribute("data-event-inspector-mode", "read");
+    await expect(sheet).toHaveAttribute("data-morph-presentation", "open");
+
+    const before = await sheet.evaluate((node) => {
+      window.__phase8SheetNode = node;
+      window.__phase8OverlayNode = document.querySelector("[data-morph-overlay]");
+      const box = node.getBoundingClientRect();
+      return { left: box.left, top: box.top };
+    });
+
+    await sheet.getByRole("button", { name: "EDIT EVENT" }).click();
+    await expect(sheet).toHaveAttribute("data-event-inspector-mode", "edit");
+    await expect(page.getByTestId("sheet")).toHaveCount(1);
+    await expect(page.locator("[data-motion-state]")).toHaveAttribute("data-motion-state", "open");
+    await expect(sheet).toHaveAttribute("data-morph-presentation", "open");
+    await expect(sheet.getByRole("button", { name: "DONE" })).toBeVisible();
+
+    const duringEdit = await page.evaluate(() => {
+      const sheetNode = document.querySelector('[data-test="sheet"]');
+      const box = sheetNode?.getBoundingClientRect();
+      return {
+        sameSheet: window.__phase8SheetNode === sheetNode,
+        sameOverlay: window.__phase8OverlayNode === document.querySelector("[data-morph-overlay]"),
+        left: box?.left,
+        top: box?.top,
+      };
+    });
+    expect(duringEdit.sameSheet, "Edit must reconfigure the existing Inspector node").toBe(true);
+    expect(duringEdit.sameOverlay, "Edit must not replace the physical Event carrier").toBe(true);
+    expect(Math.abs(duringEdit.left - before.left), "Edit must retain the Event's horizontal anchor").toBeLessThanOrEqual(1);
+    expect(Math.abs(duringEdit.top - before.top), "Edit must retain the Event's spatial anchor").toBeLessThanOrEqual(1);
+
+    const title = sheet.getByRole("textbox", { name: "Event title" });
+    await title.fill("Phase 8 edited title");
+    await title.press("Tab");
+    await expect(sheet.getByRole("button", { name: "REVERT" })).toBeVisible();
+    await sheet.getByRole("button", { name: "REVERT" }).click();
+    await expect(sheet).toHaveAttribute("data-event-inspector-mode", "read");
+    await expect(title).toHaveValue("Phase 8 same object");
+    expect(await page.evaluate(() => window.__phase8SheetNode === document.querySelector('[data-test="sheet"]')))
+      .toBe(true);
+
+    await page.keyboard.press("Escape");
+    await expect(sheet).toHaveCount(0, { timeout: 3000 });
+  });
 });
 
 test.describe("the liquid pill", () => {
